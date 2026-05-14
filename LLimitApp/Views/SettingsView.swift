@@ -240,7 +240,10 @@ struct SettingsView: View {
 
   private func accountSummaryCard(_ account: ProviderAccount) -> some View {
     let status = model.status(for: account.id)
-    let isReady = status?.available == true
+    let failure = accountFailure(for: account.id)
+    let hasData = accountUsage(for: account.id) != nil
+    let isReady = status?.available == true && failure == nil
+    let detail = accountSummaryDetail(status: status, hasData: hasData, failure: failure)
 
     return HStack(spacing: 12) {
       Circle()
@@ -250,9 +253,10 @@ struct SettingsView: View {
       VStack(alignment: .leading, spacing: 3) {
         Text(account.resolvedDisplayName)
           .font(.subheadline.weight(.semibold))
-        Text("\(account.provider.displayName), \(status?.detail ?? "Not checked")")
+        Text("\(account.provider.displayName), \(detail)")
           .font(.caption)
           .foregroundStyle(.secondary)
+          .lineLimit(2)
       }
 
       Spacer()
@@ -273,6 +277,22 @@ struct SettingsView: View {
     }
     .padding(12)
     .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+  }
+
+  private func accountSummaryDetail(
+    status: ProviderAccountStatus?,
+    hasData: Bool,
+    failure: ProviderFailure?
+  ) -> String {
+    if let failure {
+      return "Refresh failed: \(failure.message)"
+    }
+
+    if hasData {
+      return "Data loaded"
+    }
+
+    return status?.detail ?? "Not checked"
   }
 
   private var generalSettingsSection: some View {
@@ -516,7 +536,7 @@ struct SettingsView: View {
 
       if let snapshot = model.snapshot {
         HStack(spacing: 8) {
-          summaryPill(title: "Accounts", value: "\(snapshot.providers.count)", tint: .blue)
+          summaryPill(title: "Loaded", value: "\(snapshot.providers.count)", tint: .blue)
           summaryPill(
             title: "Failures",
             value: "\(snapshot.failures.count)",
@@ -525,7 +545,10 @@ struct SettingsView: View {
         }
 
         if snapshot.providers.isEmpty {
-          Text("No account data in latest snapshot.")
+          Text(snapshot.failures.isEmpty
+            ? "No account data in latest snapshot."
+            : "Latest refresh returned failures only. No account data was loaded."
+          )
             .font(.subheadline)
             .foregroundStyle(.secondary)
         } else {
@@ -562,7 +585,7 @@ struct SettingsView: View {
           Divider()
           VStack(alignment: .leading, spacing: 6) {
             ForEach(Array(snapshot.failures.prefix(3))) { failure in
-              Text("\(failure.provider.displayName): \(failure.message)")
+              Text("\(failureTitle(for: failure)): \(failure.message)")
                 .font(.caption)
                 .foregroundStyle(.orange)
                 .lineLimit(2)
@@ -584,7 +607,7 @@ struct SettingsView: View {
     if let account = model.account(withID: accountID) {
       let providerStyle = model.providerStyle(for: accountID)
       let credentialsAvailable = model.isAccountAvailable(accountID)
-      let dataLoaded = accountUsage(for: accountID) != nil
+      let dataStatus = accountDataStatus(for: accountID)
 
       ScrollView {
         VStack(alignment: .leading, spacing: 0) {
@@ -621,8 +644,8 @@ struct SettingsView: View {
 
           providerStatusRow(
             title: "Data",
-            message: dataLoaded ? "Data loaded" : "No data loaded",
-            isPositive: dataLoaded
+            message: dataStatus.message,
+            isPositive: dataStatus.isPositive
           )
 
           Divider()
@@ -778,6 +801,7 @@ struct SettingsView: View {
           .frame(width: 8, height: 8)
         Text(message)
           .font(.subheadline)
+          .fixedSize(horizontal: false, vertical: true)
       }
       .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -900,8 +924,111 @@ struct SettingsView: View {
     return usage.provider.displayName
   }
 
+  private func failureTitle(for failure: ProviderFailure) -> String {
+    if let account = model.account(withID: failure.accountID) {
+      return account.resolvedDisplayName
+    }
+
+    if let account = soleConfiguredAccount(for: failure.provider), failure.accountID == failure.provider.rawValue {
+      return account.resolvedDisplayName
+    }
+
+    return failure.provider.displayName
+  }
+
+  private func accountDataStatus(for accountID: String) -> (message: String, isPositive: Bool) {
+    guard let account = model.account(withID: accountID) else {
+      return ("Account not found", false)
+    }
+
+    guard let snapshot = model.snapshot else {
+      return ("No snapshot available", false)
+    }
+
+    if accountUsage(for: accountID) != nil {
+      return ("Data loaded", true)
+    }
+
+    if let failure = accountFailure(for: accountID) {
+      return ("Refresh failed: \(failure.message)", false)
+    }
+
+    if !account.isEnabled {
+      return ("Account disabled", false)
+    }
+
+    if !account.hasRequiredCredentials {
+      return ("Credentials incomplete", false)
+    }
+
+    if hasAmbiguousProviderKeyedSnapshotEntry(for: account) {
+      return ("Refresh again to match this account", false)
+    }
+
+    if snapshot.providers.isEmpty && !snapshot.failures.isEmpty {
+      return ("Latest refresh returned failures only", false)
+    }
+
+    return ("No data in latest snapshot", false)
+  }
+
   private func accountUsage(for accountID: String) -> ProviderUsage? {
-    model.snapshot?.providers.first(where: { $0.accountID == accountID })
+    guard let snapshot = model.snapshot else {
+      return nil
+    }
+
+    if let exactMatch = snapshot.providers.first(where: { $0.accountID == accountID }) {
+      return exactMatch
+    }
+
+    guard
+      let account = model.account(withID: accountID),
+      soleConfiguredAccount(for: account.provider) != nil
+    else {
+      return nil
+    }
+
+    return snapshot.providers.first { usage in
+      usage.provider == account.provider && usage.accountID == account.provider.rawValue
+    }
+  }
+
+  private func accountFailure(for accountID: String) -> ProviderFailure? {
+    guard let snapshot = model.snapshot else {
+      return nil
+    }
+
+    if let exactMatch = snapshot.failures.first(where: { $0.accountID == accountID }) {
+      return exactMatch
+    }
+
+    guard
+      let account = model.account(withID: accountID),
+      soleConfiguredAccount(for: account.provider) != nil
+    else {
+      return nil
+    }
+
+    return snapshot.failures.first { failure in
+      failure.provider == account.provider && failure.accountID == account.provider.rawValue
+    }
+  }
+
+  private func soleConfiguredAccount(for provider: QuotaProvider) -> ProviderAccount? {
+    let accounts = model.providerAccounts.filter { $0.provider == provider }
+    return accounts.count == 1 ? accounts[0] : nil
+  }
+
+  private func hasAmbiguousProviderKeyedSnapshotEntry(for account: ProviderAccount) -> Bool {
+    guard soleConfiguredAccount(for: account.provider) == nil, let snapshot = model.snapshot else {
+      return false
+    }
+
+    return snapshot.providers.contains { usage in
+      usage.provider == account.provider && usage.accountID == account.provider.rawValue
+    } || snapshot.failures.contains { failure in
+      failure.provider == account.provider && failure.accountID == account.provider.rawValue
+    }
   }
 
   private func percentText(_ metric: UsageMetric?) -> String {

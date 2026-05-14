@@ -1,0 +1,568 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0076043CC71CC09BFF9DE74A /* LLimitQuotaWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B4155FC0F0418AB20A7F600 /* LLimitQuotaWidget.swift */; };
+		386963A9990480361B221F1C /* SharedConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CA36F027D77628AAB911B4F /* SharedConstants.swift */; };
+		4A4AC618CDAE0C085BE6E421 /* LLimitApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65826397D3D90EF0FE3F1AF8 /* LLimitApp.swift */; };
+		7394D6C4263D47B0C75C0D50 /* SharedConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CA36F027D77628AAB911B4F /* SharedConstants.swift */; };
+		7505D82D6C3A0DA536BCAFEE /* QuotaTimelineProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F7DC2FD8B8B3CB28CBDBA50 /* QuotaTimelineProvider.swift */; };
+		7B4652AC8FCA0CBC5B22B5B9 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 660DB1B9EAE3B8BCD47F312A /* SettingsView.swift */; };
+		9193818D17AE4427EF6CC9D9 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = FF27A37B7897F137AAC76BBB /* Assets.xcassets */; };
+		B80B0455A0F07A7264543919 /* LLimitWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A726AF33B5B22E70FD23B4C2 /* LLimitWidgetExtension.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		BCF52573CAD84156B1B5D45D /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A209FE6A72662BD8F9B150D /* AppModel.swift */; };
+		C603BA56702B204283583CE3 /* QuotaCore in Frameworks */ = {isa = PBXBuildFile; productRef = 6E84F97B9AB96085556C0709 /* QuotaCore */; };
+		CD2849C244BE0DFDA7D3A297 /* QuotaCore in Frameworks */ = {isa = PBXBuildFile; productRef = B7684F158085874850334FB2 /* QuotaCore */; };
+		CE91F7808594D37146B31F6B /* LLimitWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42923ABCF11FECE813FEBB8F /* LLimitWidgetBundle.swift */; };
+		EA5557D6A936ABC4284A9B90 /* WidgetStylePreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68C113B427C1BC19E1FF5B41 /* WidgetStylePreset.swift */; };
+		FC1C8D8802949AC17AA24E39 /* RefreshService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F5E31A2797200183F69625A /* RefreshService.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		15F39FA043A46D69DB8B2108 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B8688EC56E8F06E8F7EB697E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 76CADA028925037A17209261;
+			remoteInfo = LLimitWidgetExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		2375891AED35FC7322EC596A /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				B80B0455A0F07A7264543919 /* LLimitWidgetExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		0F5E31A2797200183F69625A /* RefreshService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RefreshService.swift; sourceTree = "<group>"; };
+		1D80DFE1041003A3DBEC1B17 /* LLimitApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LLimitApp.entitlements; sourceTree = "<group>"; };
+		2CA36F027D77628AAB911B4F /* SharedConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedConstants.swift; sourceTree = "<group>"; };
+		2F7DC2FD8B8B3CB28CBDBA50 /* QuotaTimelineProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaTimelineProvider.swift; sourceTree = "<group>"; };
+		42923ABCF11FECE813FEBB8F /* LLimitWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLimitWidgetBundle.swift; sourceTree = "<group>"; };
+		4A209FE6A72662BD8F9B150D /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		65826397D3D90EF0FE3F1AF8 /* LLimitApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLimitApp.swift; sourceTree = "<group>"; };
+		660DB1B9EAE3B8BCD47F312A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		68C113B427C1BC19E1FF5B41 /* WidgetStylePreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetStylePreset.swift; sourceTree = "<group>"; };
+		8B4155FC0F0418AB20A7F600 /* LLimitQuotaWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLimitQuotaWidget.swift; sourceTree = "<group>"; };
+		A726AF33B5B22E70FD23B4C2 /* LLimitWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LLimitWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		C51630B1379FDA77A0391D81 /* LLimit.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LLimit.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		E99722E7B145406188DBBCC7 /* QuotaCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = QuotaCore; path = Packages/QuotaCore; sourceTree = SOURCE_ROOT; };
+		FF27A37B7897F137AAC76BBB /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		FF4C2112EFC5EBB1917B08D7 /* LLimitWidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LLimitWidgetExtension.entitlements; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		9CB1E2CB5D1D7ACD68FA6559 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CD2849C244BE0DFDA7D3A297 /* QuotaCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DC4BBF5282EF389DD1CFEA4F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C603BA56702B204283583CE3 /* QuotaCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		1A8535194C049687A141AEB4 = {
+			isa = PBXGroup;
+			children = (
+				74340C396F079BDC42E0AC89 /* LLimitApp */,
+				53D603EBAF0D2B2679516E1B /* LLimitWidgetExtension */,
+				45FA16505B0046C65DEA3E6D /* Packages */,
+				A177AE9C6B8CB0D9DE7DCF6F /* Shared */,
+				8ACC0DF73430B0833F5BE7C8 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		45FA16505B0046C65DEA3E6D /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				E99722E7B145406188DBBCC7 /* QuotaCore */,
+			);
+			path = Packages;
+			sourceTree = "<group>";
+		};
+		52F914E8DE30DE6489408458 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				660DB1B9EAE3B8BCD47F312A /* SettingsView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		53D603EBAF0D2B2679516E1B /* LLimitWidgetExtension */ = {
+			isa = PBXGroup;
+			children = (
+				8B4155FC0F0418AB20A7F600 /* LLimitQuotaWidget.swift */,
+				42923ABCF11FECE813FEBB8F /* LLimitWidgetBundle.swift */,
+				FF4C2112EFC5EBB1917B08D7 /* LLimitWidgetExtension.entitlements */,
+				2F7DC2FD8B8B3CB28CBDBA50 /* QuotaTimelineProvider.swift */,
+			);
+			path = LLimitWidgetExtension;
+			sourceTree = "<group>";
+		};
+		74340C396F079BDC42E0AC89 /* LLimitApp */ = {
+			isa = PBXGroup;
+			children = (
+				4A209FE6A72662BD8F9B150D /* AppModel.swift */,
+				FF27A37B7897F137AAC76BBB /* Assets.xcassets */,
+				1D80DFE1041003A3DBEC1B17 /* LLimitApp.entitlements */,
+				65826397D3D90EF0FE3F1AF8 /* LLimitApp.swift */,
+				68C113B427C1BC19E1FF5B41 /* WidgetStylePreset.swift */,
+				AFE05ADAB087FC3F7B7E52D9 /* Services */,
+				52F914E8DE30DE6489408458 /* Views */,
+			);
+			path = LLimitApp;
+			sourceTree = "<group>";
+		};
+		8ACC0DF73430B0833F5BE7C8 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				C51630B1379FDA77A0391D81 /* LLimit.app */,
+				A726AF33B5B22E70FD23B4C2 /* LLimitWidgetExtension.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		A177AE9C6B8CB0D9DE7DCF6F /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				2CA36F027D77628AAB911B4F /* SharedConstants.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		AFE05ADAB087FC3F7B7E52D9 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				0F5E31A2797200183F69625A /* RefreshService.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		14C361B70B917BDCB6A16574 /* LLimitApp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 95ED063A00621776EAED00E2 /* Build configuration list for PBXNativeTarget "LLimitApp" */;
+			buildPhases = (
+				C600398CAC91F962DE399CDF /* Sources */,
+				853B209FEE1FC5CB7F34D576 /* Resources */,
+				DC4BBF5282EF389DD1CFEA4F /* Frameworks */,
+				2375891AED35FC7322EC596A /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				4F170E12AA20143C74C14114 /* PBXTargetDependency */,
+			);
+			name = LLimitApp;
+			packageProductDependencies = (
+				6E84F97B9AB96085556C0709 /* QuotaCore */,
+			);
+			productName = LLimitApp;
+			productReference = C51630B1379FDA77A0391D81 /* LLimit.app */;
+			productType = "com.apple.product-type.application";
+		};
+		76CADA028925037A17209261 /* LLimitWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D869F8D2752D18FD99A45C3D /* Build configuration list for PBXNativeTarget "LLimitWidgetExtension" */;
+			buildPhases = (
+				49A13C62C4CC90130746BE9E /* Sources */,
+				9CB1E2CB5D1D7ACD68FA6559 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = LLimitWidgetExtension;
+			packageProductDependencies = (
+				B7684F158085874850334FB2 /* QuotaCore */,
+			);
+			productName = LLimitWidgetExtension;
+			productReference = A726AF33B5B22E70FD23B4C2 /* LLimitWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		B8688EC56E8F06E8F7EB697E /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					14C361B70B917BDCB6A16574 = {
+						ProvisioningStyle = Automatic;
+					};
+					76CADA028925037A17209261 = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = A7AD89C19EF8CCBA8673B070 /* Build configuration list for PBXProject "LLimit" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 1A8535194C049687A141AEB4;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				DA84857A4CCEB4981D999B55 /* XCLocalSwiftPackageReference "Packages/QuotaCore" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 8ACC0DF73430B0833F5BE7C8 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				14C361B70B917BDCB6A16574 /* LLimitApp */,
+				76CADA028925037A17209261 /* LLimitWidgetExtension */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		853B209FEE1FC5CB7F34D576 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9193818D17AE4427EF6CC9D9 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		49A13C62C4CC90130746BE9E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0076043CC71CC09BFF9DE74A /* LLimitQuotaWidget.swift in Sources */,
+				CE91F7808594D37146B31F6B /* LLimitWidgetBundle.swift in Sources */,
+				7505D82D6C3A0DA536BCAFEE /* QuotaTimelineProvider.swift in Sources */,
+				7394D6C4263D47B0C75C0D50 /* SharedConstants.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C600398CAC91F962DE399CDF /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BCF52573CAD84156B1B5D45D /* AppModel.swift in Sources */,
+				4A4AC618CDAE0C085BE6E421 /* LLimitApp.swift in Sources */,
+				FC1C8D8802949AC17AA24E39 /* RefreshService.swift in Sources */,
+				7B4652AC8FCA0CBC5B22B5B9 /* SettingsView.swift in Sources */,
+				386963A9990480361B221F1C /* SharedConstants.swift in Sources */,
+				EA5557D6A936ABC4284A9B90 /* WidgetStylePreset.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		4F170E12AA20143C74C14114 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 76CADA028925037A17209261 /* LLimitWidgetExtension */;
+			targetProxy = 15F39FA043A46D69DB8B2108 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		0207712B9A94050D29229838 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = LLimitApp/LLimitApp.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 3;
+				DEVELOPMENT_TEAM = 293A48LC7B;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LLimitApp/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.2;
+				PRODUCT_BUNDLE_IDENTIFIER = ch.lkmc.llimit.app;
+				PRODUCT_NAME = LLimit;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.1;
+			};
+			name = Release;
+		};
+		1A5776C570EA3B876A34D93A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		C172D26A94D9B7291FB53294 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		D58178936DA8B2D05B658B66 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = LLimitApp/LLimitApp.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 3;
+				DEVELOPMENT_TEAM = 293A48LC7B;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LLimitApp/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.2;
+				PRODUCT_BUNDLE_IDENTIFIER = ch.lkmc.llimit.app;
+				PRODUCT_NAME = LLimit;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.1;
+			};
+			name = Debug;
+		};
+		E52CB323E2DEC90A0394409D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = LLimitWidgetExtension/LLimitWidgetExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 3;
+				DEVELOPMENT_TEAM = 293A48LC7B;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LLimitWidgetExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.2;
+				PRODUCT_BUNDLE_IDENTIFIER = ch.lkmc.llimit.app.widgetextension;
+				PRODUCT_NAME = LLimitWidgetExtension;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.1;
+			};
+			name = Release;
+		};
+		FDB14F074F739E6A8AE070DA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = LLimitWidgetExtension/LLimitWidgetExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 3;
+				DEVELOPMENT_TEAM = 293A48LC7B;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LLimitWidgetExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.2;
+				PRODUCT_BUNDLE_IDENTIFIER = ch.lkmc.llimit.app.widgetextension;
+				PRODUCT_NAME = LLimitWidgetExtension;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.1;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		95ED063A00621776EAED00E2 /* Build configuration list for PBXNativeTarget "LLimitApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D58178936DA8B2D05B658B66 /* Debug */,
+				0207712B9A94050D29229838 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		A7AD89C19EF8CCBA8673B070 /* Build configuration list for PBXProject "LLimit" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C172D26A94D9B7291FB53294 /* Debug */,
+				1A5776C570EA3B876A34D93A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		D869F8D2752D18FD99A45C3D /* Build configuration list for PBXNativeTarget "LLimitWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FDB14F074F739E6A8AE070DA /* Debug */,
+				E52CB323E2DEC90A0394409D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		DA84857A4CCEB4981D999B55 /* XCLocalSwiftPackageReference "Packages/QuotaCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/QuotaCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		6E84F97B9AB96085556C0709 /* QuotaCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = QuotaCore;
+		};
+		B7684F158085874850334FB2 /* QuotaCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = QuotaCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = B8688EC56E8F06E8F7EB697E /* Project object */;
+}

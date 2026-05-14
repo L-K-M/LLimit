@@ -53,7 +53,8 @@ public extension QuotaProvider {
       return [
         CredentialFieldDescriptor(
           key: CredentialField.openAIAccessToken,
-          label: "Access token"
+          label: "Access token",
+          help: "Use a ChatGPT web session access token. Platform API keys are not accepted by this quota endpoint."
         ),
         CredentialFieldDescriptor(
           key: CredentialField.openAIAccountID,

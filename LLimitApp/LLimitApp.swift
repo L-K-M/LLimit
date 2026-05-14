@@ -3,28 +3,8 @@ import AppKit
 import QuotaCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-  func applicationDidFinishLaunching(_ notification: Notification) {
-    // The settings window should start hidden; users open it from the menu bar.
-    DispatchQueue.main.async {
-      for window in NSApplication.shared.windows where window.canBecomeMain {
-        window.close()
-      }
-    }
-  }
-
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
     false
-  }
-
-  func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-    if !flag {
-      for window in sender.windows where window.canBecomeMain {
-        window.makeKeyAndOrderFront(nil)
-        NSApplication.shared.activate(ignoringOtherApps: true)
-        return true
-      }
-    }
-    return true
   }
 }
 
@@ -34,11 +14,6 @@ struct LLimitApp: App {
   @StateObject private var model = AppModel()
 
   var body: some Scene {
-    Window("LLimit", id: "settings") {
-      SettingsView(model: model)
-        .frame(minWidth: 1020, minHeight: 640)
-    }
-
     MenuBarExtra {
       MenuBarContent(model: model)
     } label: {
@@ -47,6 +22,11 @@ struct LLimitApp: App {
         widgetStyle: model.widgetStyle,
         providerStyleSettings: model.providerStyleSettings
       )
+    }
+
+    Settings {
+      SettingsView(model: model)
+        .frame(minWidth: 1020, minHeight: 640)
     }
   }
 }
@@ -122,8 +102,8 @@ private struct MenuBarIcon: View {
 }
 
 private struct MenuBarContent: View {
-  @Environment(\.openWindow) private var openWindow
   @ObservedObject var model: AppModel
+  @Environment(\.openSettings) private var openSettings
 
   private static let relativeTimeFormatter: RelativeDateTimeFormatter = {
     let formatter = RelativeDateTimeFormatter()
@@ -188,7 +168,7 @@ private struct MenuBarContent: View {
     .disabled(model.isRefreshing)
 
     Button("Open Settings") {
-      openWindow(id: "settings")
+      openSettings()
       NSApplication.shared.activate(ignoringOtherApps: true)
     }
     .keyboardShortcut(",", modifiers: .command)

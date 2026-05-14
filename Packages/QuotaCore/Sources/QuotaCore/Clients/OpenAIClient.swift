@@ -25,8 +25,22 @@ public struct OpenAIClient: QuotaProviderClient {
     let (data, response) = try await httpClient.data(for: request)
     guard (200..<300).contains(response.statusCode) else {
       let body = String(data: data, encoding: .utf8) ?? ""
+      let trimmedBody = body.trimmingCharacters(in: .whitespacesAndNewlines)
       let kind: QuotaErrorKind = response.statusCode == 401 || response.statusCode == 403 ? .auth : .api
-      throw ProviderClientError(kind: kind, message: "OpenAI API error \(response.statusCode): \(body)")
+      if kind == .auth {
+        throw ProviderClientError(
+          kind: kind,
+          message: "OpenAI authentication failed (\(response.statusCode)). Use a valid ChatGPT web access token, not a platform API key.",
+          statusCode: response.statusCode
+        )
+      }
+
+      let bodySuffix = trimmedBody.isEmpty ? "" : ": \(trimmedBody)"
+      throw ProviderClientError(
+        kind: kind,
+        message: "OpenAI API error \(response.statusCode)\(bodySuffix)",
+        statusCode: response.statusCode
+      )
     }
 
     let payload: OpenAIUsageResponse
