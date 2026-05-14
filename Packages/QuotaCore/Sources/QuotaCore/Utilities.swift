@@ -1,0 +1,214 @@
+import Foundation
+
+func clampPercent(_ value: Int) -> Int {
+  max(0, min(100, value))
+}
+
+func percentRemaining(fromUsedPercent usedPercent: Double) -> Int {
+  clampPercent(Int((100.0 - usedPercent).rounded()))
+}
+
+func formatShortDuration(seconds: Int) -> String {
+  let safeSeconds = max(0, seconds)
+  let days = safeSeconds / 86_400
+  let hours = (safeSeconds % 86_400) / 3_600
+  let minutes = (safeSeconds % 3_600) / 60
+
+  var parts: [String] = []
+  if days > 0 { parts.append("\(days)d") }
+  if hours > 0 { parts.append("\(hours)h") }
+  if minutes > 0 || parts.isEmpty { parts.append("\(minutes)m") }
+  return parts.joined(separator: " ")
+}
+
+func formatResetCountdown(to date: Date, now: Date) -> String {
+  let diff = Int(date.timeIntervalSince(now))
+  if diff <= 0 { return "reset" }
+  return formatShortDuration(seconds: diff)
+}
+
+func parseNumeric(_ value: Any?) -> Double? {
+  switch value {
+  case let number as NSNumber:
+    return number.doubleValue
+  case let string as String:
+    let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+
+    let normalized = trimmed.replacingOccurrences(of: ",", with: "")
+    if let direct = Double(normalized) {
+      return direct
+    }
+
+    let pattern = "^-?\\d+(?:\\.\\d+)?"
+    guard
+      let regex = try? NSRegularExpression(pattern: pattern),
+      let match = regex.firstMatch(in: normalized, range: NSRange(location: 0, length: normalized.count)),
+      let range = Range(match.range, in: normalized)
+    else {
+      return nil
+    }
+    return Double(normalized[range])
+  default:
+    return nil
+  }
+}
+
+func firstNumeric(in dictionary: [String: Any], keys: [String]) -> Double? {
+  for key in keys {
+    if let parsed = parseNumeric(dictionary[key]) {
+      return parsed
+    }
+  }
+  return nil
+}
+
+func formatIntLike(_ value: Double?) -> String? {
+  guard let value else { return nil }
+  if value.rounded() == value {
+    return String(Int(value))
+  }
+  return String(format: "%.1f", value)
+}
+
+func formatTokensMillions(_ value: Double?) -> String? {
+  guard let value else { return nil }
+  return String(format: "%.1fM", value / 1_000_000.0)
+}
+
+func parseJSONObject(from data: Data) throws -> [String: Any] {
+  let object = try JSONSerialization.jsonObject(with: data)
+  guard let dictionary = object as? [String: Any] else {
+    throw ProviderClientError(kind: .decoding, message: "Expected top-level JSON object")
+  }
+  return dictionary
+}
+
+func parseISO8601(_ string: String?) -> Date? {
+  guard let string else { return nil }
+  let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+  guard !trimmed.isEmpty else { return nil }
+
+  let withFractional = ISO8601DateFormatter()
+  withFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+  if let date = withFractional.date(from: trimmed) {
+    return date
+  }
+
+  let standard = ISO8601DateFormatter()
+  standard.formatOptions = [.withInternetDateTime]
+  if let date = standard.date(from: trimmed) {
+    return date
+  }
+
+  let calendarDate = DateFormatter()
+  calendarDate.locale = Locale(identifier: "en_US_POSIX")
+  calendarDate.timeZone = TimeZone(secondsFromGMT: 0)
+  calendarDate.dateFormat = "yyyy-MM-dd"
+  return calendarDate.date(from: trimmed)
+}
+
+func parseDateValue(_ value: Any?) -> Date? {
+  switch value {
+  case let date as Date:
+    return date
+  case let number as NSNumber:
+    return dateFromEpochTimestamp(number.doubleValue)
+  case let string as String:
+    let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+
+    if let parsedISO = parseISO8601(trimmed) {
+      return parsedISO
+    }
+
+    guard let numeric = parseStrictNumericString(trimmed) else {
+      return nil
+    }
+
+    return dateFromEpochTimestamp(numeric)
+  default:
+    return nil
+  }
+}
+
+func dateFromEpochTimestamp(_ timestamp: Double) -> Date? {
+  guard timestamp.isFinite else { return nil }
+
+  let magnitude = abs(timestamp)
+  let normalizedSeconds: Double
+
+  switch magnitude {
+  case 1_000_000_000_000_000_000...:
+    normalizedSeconds = timestamp / 1_000_000_000
+  case 1_000_000_000_000_000...:
+    normalizedSeconds = timestamp / 1_000_000
+  case 1_000_000_000_000...:
+    normalizedSeconds = timestamp / 1_000
+  default:
+    normalizedSeconds = timestamp
+  }
+
+  return Date(timeIntervalSince1970: normalizedSeconds)
+}
+
+private func parseStrictNumericString(_ value: String) -> Double? {
+  guard !value.isEmpty else { return nil }
+
+  var hasDecimalPoint = false
+
+  for (index, character) in value.enumerated() {
+    if character == "-" {
+      if index != 0 {
+        return nil
+      }
+      continue
+    }
+
+    if character == "." {
+      if hasDecimalPoint {
+        return nil
+      }
+      hasDecimalPoint = true
+      continue
+    }
+
+    guard character.isNumber else {
+      return nil
+    }
+  }
+
+  if value == "-" || value == "." || value == "-." {
+    return nil
+  }
+
+  return Double(value)
+}
+
+func monthEndDate(year: Int, month: Int) -> Date? {
+  var components = DateComponents()
+  components.year = year
+  components.month = month
+  components.day = 1
+  components.hour = 0
+  components.minute = 0
+  components.second = 0
+
+  let calendar = Calendar(identifier: .gregorian)
+  guard let startOfMonth = calendar.date(from: components) else { return nil }
+
+  var plusOne = DateComponents()
+  plusOne.month = 1
+  return calendar.date(byAdding: plusOne, to: startOfMonth)
+}
+
+func startOfNextMonth(from date: Date) -> Date? {
+  let calendar = Calendar(identifier: .gregorian)
+  let components = calendar.dateComponents([.year, .month], from: date)
+
+  guard let year = components.year, let month = components.month else {
+    return nil
+  }
+
+  return monthEndDate(year: year, month: month)
+}
