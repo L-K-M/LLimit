@@ -14,7 +14,7 @@ targets:
     type: application
     platform: macOS
     sources:
-      - path: MyStatusApp
+      - path: LLimitApp
         excludes:
           - Info.plist
       - path: Shared
@@ -31,12 +31,12 @@ targets:
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: ""
         GENERATE_INFOPLIST_FILE: NO
-        CODE_SIGN_ENTITLEMENTS: MyStatusApp/MyStatusApp.entitlements
+        CODE_SIGN_ENTITLEMENTS: LLimitApp/LLimitApp.entitlements
         MACOSX_DEPLOYMENT_TARGET: 14.0
         CURRENT_PROJECT_VERSION: 3
         MARKETING_VERSION: 0.1.2
     info:
-      path: MyStatusApp/Info.plist
+      path: LLimitApp/Info.plist
       properties:
         CFBundleDevelopmentRegion: $(DEVELOPMENT_LANGUAGE)
         AppGroupIdentifier: $(TeamIdentifierPrefix)group.ch.lkmc.llimit
@@ -55,7 +55,7 @@ targets:
     type: app-extension
     platform: macOS
     sources:
-      - path: MyStatusWidgetExtension
+      - path: LLimitWidgetExtension
         excludes:
           - Info.plist
       - path: Shared
@@ -69,14 +69,14 @@ targets:
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: ""
         GENERATE_INFOPLIST_FILE: NO
-        CODE_SIGN_ENTITLEMENTS: MyStatusWidgetExtension/MyStatusWidgetExtension.entitlements
+        CODE_SIGN_ENTITLEMENTS: LLimitWidgetExtension/LLimitWidgetExtension.entitlements
         APPLICATION_EXTENSION_API_ONLY: YES
         MACOSX_DEPLOYMENT_TARGET: 14.0
         SKIP_INSTALL: YES
         CURRENT_PROJECT_VERSION: 3
         MARKETING_VERSION: 0.1.2
     info:
-      path: MyStatusWidgetExtension/Info.plist
+      path: LLimitWidgetExtension/Info.plist
       properties:
         CFBundleDevelopmentRegion: $(DEVELOPMENT_LANGUAGE)
         AppGroupIdentifier: $(TeamIdentifierPrefix)group.ch.lkmc.llimit
