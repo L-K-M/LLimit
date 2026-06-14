@@ -142,6 +142,17 @@ private enum SampleSnapshotFactory {
       generatedAt: now,
       providers: [
         ProviderUsage(
+          provider: .anthropic,
+          title: "Claude",
+          subtitle: nil,
+          metrics: [
+            UsageMetric(id: "five_hour", label: "5-hour limit", remainingPercent: 64, resetIn: "2h 5m"),
+            UsageMetric(id: "seven_day", label: "Weekly limit", remainingPercent: 48, resetIn: "3d 6h")
+          ],
+          maxUsagePercent: 52,
+          fetchedAt: now
+        ),
+        ProviderUsage(
           provider: .openAI,
           title: "OpenAI",
           subtitle: "plus",

@@ -10,6 +10,7 @@ public struct QuotaCoordinator: Sendable {
   public static func live(httpClient: any HTTPClient = URLSessionHTTPClient()) -> QuotaCoordinator {
     QuotaCoordinator(
       clients: [
+        AnthropicClient(httpClient: httpClient),
         OpenAIClient(httpClient: httpClient),
         ZhipuQuotaClient(
           provider: .zhipu,

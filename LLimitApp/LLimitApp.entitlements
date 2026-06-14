@@ -2,13 +2,18 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>com.apple.security.app-sandbox</key>
-	<true/>
+	<!--
+	  The host app is intentionally NOT sandboxed. It needs to read credential files
+	  that local AI CLIs already wrote (~/.claude, ~/.codex, ~/.config/github-copilot,
+	  ~/.local/share/opencode, ...) and the "Claude Code-credentials" Keychain item.
+	  The App Sandbox would block these reads or force a "Grant File Access" prompt for
+	  every tool. LLimit is distributed directly (not via the Mac App Store), so this is
+	  the right trade-off for a zero-configuration experience. The widget extension stays
+	  sandboxed and only ever reads the shared App Group container.
+	-->
 	<key>com.apple.security.application-groups</key>
 	<array>
 		<string>$(TeamIdentifierPrefix)group.ch.lkmc.llimit</string>
 	</array>
-	<key>com.apple.security.network.client</key>
-	<true/>
 </dict>
 </plist>

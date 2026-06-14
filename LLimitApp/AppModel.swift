@@ -4,6 +4,9 @@ import AppKit
 import WidgetKit
 import ServiceManagement
 import QuotaCore
+#if canImport(Security)
+import Security
+#endif
 
 struct ProviderAccountStatus: Identifiable, Hashable {
   let accountID: String
@@ -28,11 +31,16 @@ final class AppModel: ObservableObject {
   @Published var statusMessage: String = ""
   @Published var isRefreshing = false
   @Published var launchAtLogin = false
+  @Published var discoveryDiagnostics: [String] = []
+  @Published var discoveredCredentials: [DiscoveredCredential] = []
 
   private let settingsStore: SettingsStore
   private let snapshotStore: SnapshotStore
   private let historyStore: QuotaHistoryStore
   private let refreshService: RefreshService
+  /// Persisted per-source preferences (enabled / custom name), keyed by stable source ID.
+  /// Credentials are NEVER persisted — they are re-discovered from local tools on each launch.
+  private var savedPreferences: [String: ProviderAccount] = [:]
   private var cachedAppGroupSettingsStore: SettingsStore?
   private var cachedAppGroupSnapshotStore: SnapshotStore?
   private var cachedAppGroupHistoryStore: QuotaHistoryStore?
@@ -43,15 +51,10 @@ final class AppModel: ObservableObject {
     let appSupportDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
       ?? FileManager.default.temporaryDirectory
     let baseDirectory = appSupportDirectory.appendingPathComponent("LLimit", isDirectory: true)
-    let urls: (settings: URL, snapshot: URL, history: URL) = (
-      baseDirectory.appendingPathComponent(SharedConstants.settingsFileName),
-      baseDirectory.appendingPathComponent(SharedConstants.snapshotFileName),
-      baseDirectory.appendingPathComponent(SharedConstants.historyFileName)
-    )
 
-    let settingsStore = SettingsStore(fileURL: urls.settings)
-    let snapshotStore = SnapshotStore(fileURL: urls.snapshot)
-    let historyStore = QuotaHistoryStore(fileURL: urls.history)
+    let settingsStore = SettingsStore(fileURL: baseDirectory.appendingPathComponent(SharedConstants.settingsFileName))
+    let snapshotStore = SnapshotStore(fileURL: baseDirectory.appendingPathComponent(SharedConstants.snapshotFileName))
+    let historyStore = QuotaHistoryStore(fileURL: baseDirectory.appendingPathComponent(SharedConstants.historyFileName))
 
     self.settingsStore = settingsStore
     self.snapshotStore = snapshotStore
@@ -67,19 +70,21 @@ final class AppModel: ObservableObject {
     }
   }
 
+  // MARK: - Lifecycle
+
   func bootstrap() async {
     guard !hasBootstrapped else { return }
     hasBootstrapped = true
 
-    await loadConfiguration()
+    loadConfiguration()
+    rescanSources(persist: false)
 
     do {
-      snapshot = try loadSnapshotFromPreferredStore()
+      snapshot = try snapshotStore.load()
     } catch {
-      statusMessage = "Could not load snapshot: \(error.localizedDescription)"
+      statusMessage = "Could not load saved snapshot: \(error.localizedDescription)"
     }
 
-    reloadAccountStatuses()
     restartAutoRefreshLoop()
 
     if shouldRefreshOnBootstrap() {
@@ -87,10 +92,10 @@ final class AppModel: ObservableObject {
     }
   }
 
-  func loadConfiguration() async {
+  private func loadConfiguration() {
     let settings: AppSettings
     do {
-      settings = try loadSettingsFromPreferredStore()
+      settings = try settingsStore.load()
     } catch {
       settings = .default
       statusMessage = "Could not load settings. Using defaults."
@@ -100,75 +105,116 @@ final class AppModel: ObservableObject {
     widgetStyle = settings.widgetStyle
     widgetBackgroundSettings = settings.widgetBackgroundSettings
     widgetVisibility = settings.widgetVisibility
-    providerAccounts = settings.accounts
-    providerStyleSettings = Dictionary(
-      uniqueKeysWithValues: providerAccounts.map { account in
-        (account.id, settings.styleOverride(for: account.id))
-      }
-    )
-    reloadAccountStatuses()
+    savedPreferences = Dictionary(uniqueKeysWithValues: settings.accounts.map { ($0.id, $0) })
   }
 
-  func saveConfiguration(showSuccessMessage: Bool = false) {
-    do {
-      let settings = currentSettings()
+  // MARK: - Credential discovery
 
-      try settingsStore.save(settings)
-      let widgetSyncReady = syncSettingsToWidgetStore(settings.redactedCredentials())
-      if widgetSyncReady {
-        reloadWidgetTimelines()
-      }
-      if !widgetSyncReady {
-        statusMessage = "Settings saved locally. Widget sync unavailable."
-      } else if showSuccessMessage {
-        statusMessage = "Configuration saved"
-      }
-    } catch {
-      statusMessage = "Save failed: \(error.localizedDescription)"
+  /// Re-scans local AI tools for credentials and rebuilds the account list, preserving
+  /// the user's enabled/name preferences. This is the "no tokens to paste" core of LLimit.
+  func rescanSources(persist: Bool = true) {
+    let result = discoverCredentials()
+    discoveryDiagnostics = result.diagnostics
+    discoveredCredentials = result.credentials
+
+    providerAccounts = result.credentials.map { discovered in
+      let pref = savedPreferences[discovered.stableID]
+      return ProviderAccount(
+        id: discovered.stableID,
+        provider: discovered.provider,
+        displayName: pref?.displayName ?? discovered.suggestedName,
+        isEnabled: pref?.isEnabled ?? true,
+        credentials: discovered.credentials
+      )
+    }
+
+    reloadAccountStatuses()
+
+    if persist {
+      saveConfiguration()
     }
   }
+
+  private func discoverCredentials() -> CredentialDiscoveryResult {
+    var result = CredentialDiscovery().discover()
+
+    #if canImport(Security)
+    // Claude Code stores its token in the macOS Keychain by default; fall back to it
+    // when no file-based Claude credential was found.
+    if !result.credentials.contains(where: { $0.provider == .anthropic }) {
+      if let token = Self.readClaudeKeychainToken() {
+        result.credentials.append(
+          DiscoveredCredential(
+            stableID: "anthropic:keychain",
+            provider: .anthropic,
+            suggestedName: "Claude",
+            sourceLabel: "Claude Code (macOS Keychain)",
+            credentials: [CredentialField.anthropicAccessToken: token]
+          )
+        )
+        result.diagnostics.append("Claude Code: found OAuth token (macOS Keychain)")
+      } else {
+        result.diagnostics.append("Claude Code: no token found in ~/.claude or Keychain")
+      }
+    }
+    #endif
+
+    return result
+  }
+
+  #if canImport(Security)
+  private static func readClaudeKeychainToken() -> String? {
+    let query: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: "Claude Code-credentials",
+      kSecReturnData as String: true,
+      kSecMatchLimit as String: kSecMatchLimitOne
+    ]
+
+    var item: CFTypeRef?
+    guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+          let data = item as? Data,
+          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    else {
+      return nil
+    }
+
+    let oauth = (object["claudeAiOauth"] as? [String: Any]) ?? object
+    let token = (oauth["accessToken"] as? String) ?? (oauth["access_token"] as? String)
+    let trimmed = token?.trimmingCharacters(in: .whitespacesAndNewlines)
+    return (trimmed?.isEmpty == false) ? trimmed : nil
+  }
+  #endif
+
+  // MARK: - Refresh
 
   func refreshNow() async {
-    guard !isRefreshing else {
-      return
-    }
+    guard !isRefreshing else { return }
 
     isRefreshing = true
     defer { isRefreshing = false }
-
-    reloadAccountStatuses()
 
     let enabledConfigs = runtimeConfigurations().filter { configuration in
       configuration.isEnabled && configuration.provider.hasRequiredCredentials(configuration.credentials)
     }
 
     guard !enabledConfigs.isEmpty else {
-      statusMessage = "No enabled provider accounts with complete credentials configured."
+      statusMessage = "No enabled sources detected. Sign in to a supported AI tool, then Rescan."
       return
     }
 
     do {
       let refreshed = try await refreshService.refresh(configurations: enabledConfigs)
-      do {
-        try historyStore.append(refreshed)
-      } catch {
-        print("[LLimit] Local history append failed: \(error.localizedDescription)")
-      }
+      try? historyStore.append(refreshed)
 
-      let widgetSyncReady = syncSnapshotToWidgetStore(refreshed)
-      let historySyncReady = syncHistoryToWidgetStore(refreshed)
-
-      if widgetSyncReady || historySyncReady {
+      let widgetSynced = syncSnapshotToWidgetStore(refreshed)
+      syncHistoryToWidgetStore(refreshed)
+      if widgetSynced {
         reloadWidgetTimelines()
       }
 
       snapshot = refreshed
-
-      if widgetSyncReady && historySyncReady {
-        statusMessage = "Refreshed \(refreshed.providers.count) account(s), \(refreshed.failures.count) failure(s)"
-      } else {
-        statusMessage = "Refreshed \(refreshed.providers.count) account(s), \(refreshed.failures.count) failure(s). Widget sync partially unavailable."
-      }
+      statusMessage = "Refreshed \(refreshed.providers.count) source(s), \(refreshed.failures.count) failure(s)"
     } catch {
       statusMessage = "Refresh failed: \(error.localizedDescription)"
     }
@@ -178,8 +224,10 @@ final class AppModel: ObservableObject {
     accountStatuses = providerAccounts.map { account in
       let missing = account.missingCredentialLabels
       let detail: String
-      if missing.isEmpty {
-        detail = account.isEnabled ? "Ready" : "Disabled"
+      if !account.isEnabled {
+        detail = "Disabled"
+      } else if missing.isEmpty {
+        detail = "Ready"
       } else {
         detail = "Missing: \(missing.joined(separator: ", "))"
       }
@@ -194,32 +242,7 @@ final class AppModel: ObservableObject {
     }
   }
 
-  @discardableResult
-  func addProviderAccount(provider: QuotaProvider) -> ProviderAccount {
-    let account = ProviderAccount(
-      provider: provider,
-      displayName: nextDisplayName(for: provider),
-      isEnabled: true,
-      credentials: emptyCredentials(for: provider)
-    )
-
-    providerAccounts.append(account)
-    providerStyleSettings[account.id] = ProviderStyleSettings.defaultValue(
-      for: account.id,
-      provider: provider,
-      fallbackStyle: widgetStyle
-    )
-    reloadAccountStatuses()
-    saveConfiguration(showSuccessMessage: true)
-    return account
-  }
-
-  func removeProviderAccount(accountID: String) {
-    providerAccounts.removeAll { $0.id == accountID }
-    providerStyleSettings.removeValue(forKey: accountID)
-    reloadAccountStatuses()
-    saveConfiguration(showSuccessMessage: true)
-  }
+  // MARK: - Account accessors
 
   func account(withID accountID: String) -> ProviderAccount? {
     providerAccounts.first(where: { $0.id == accountID })
@@ -233,45 +256,47 @@ final class AppModel: ObservableObject {
     status(for: accountID)?.available ?? false
   }
 
+  func sourceLabel(for accountID: String) -> String {
+    discoveredCredentials.first(where: { $0.stableID == accountID })?.sourceLabel ?? "Detected source"
+  }
+
+  func accountUsage(for accountID: String) -> ProviderUsage? {
+    snapshot?.providers.first(where: { $0.accountID == accountID })
+  }
+
+  func accountFailure(for accountID: String) -> ProviderFailure? {
+    snapshot?.failures.first(where: { $0.accountID == accountID })
+  }
+
   func accountDisplayNameBinding(for accountID: String) -> Binding<String> {
     Binding(
       get: { self.account(withID: accountID)?.displayName ?? "" },
-      set: { newValue in
-        self.updateAccount(accountID: accountID) { account in
-          account.displayName = newValue
-        }
-      }
+      set: { newValue in self.updateAccount(accountID: accountID) { $0.displayName = newValue } }
     )
   }
 
   func accountEnabledBinding(for accountID: String) -> Binding<Bool> {
     Binding(
       get: { self.account(withID: accountID)?.isEnabled ?? false },
-      set: { newValue in
-        self.updateAccount(accountID: accountID) { account in
-          account.isEnabled = newValue
-        }
-      }
+      set: { newValue in self.updateAccount(accountID: accountID) { $0.isEnabled = newValue } }
     )
   }
 
-  func credentialBinding(for accountID: String, fieldKey: String) -> Binding<String> {
-    Binding(
-      get: { self.account(withID: accountID)?.credentials[fieldKey] ?? "" },
-      set: { newValue in
-        self.updateAccount(accountID: accountID) { account in
-          account.credentials[fieldKey] = newValue
-        }
-      }
-    )
+  private func updateAccount(accountID: String, mutate: (inout ProviderAccount) -> Void) {
+    guard let index = providerAccounts.firstIndex(where: { $0.id == accountID }) else { return }
+    mutate(&providerAccounts[index])
+    // Persist the preference (without credentials).
+    savedPreferences[accountID] = providerAccounts[index].redactedCredentials()
+    reloadAccountStatuses()
+    saveConfiguration()
   }
+
+  // MARK: - Launch at login
 
   func launchAtLoginBinding() -> Binding<Bool> {
     Binding(
       get: { self.launchAtLogin },
-      set: { newValue in
-        self.setLaunchAtLogin(newValue)
-      }
+      set: { newValue in self.setLaunchAtLogin(newValue) }
     )
   }
 
@@ -299,9 +324,9 @@ final class AppModel: ObservableObject {
     )
   }
 
-  func widgetVisibilityBinding(
-    for keyPath: WritableKeyPath<WidgetVisibilitySettings, Bool>
-  ) -> Binding<Bool> {
+  // MARK: - Widget visibility bindings
+
+  func widgetVisibilityBinding(for keyPath: WritableKeyPath<WidgetVisibilitySettings, Bool>) -> Binding<Bool> {
     Binding(
       get: { self.widgetVisibility[keyPath: keyPath] },
       set: { newValue in
@@ -318,47 +343,24 @@ final class AppModel: ObservableObject {
     Binding(
       get: { self.widgetVisibility[keyPath: keyPath] },
       set: { newValue in
-        let clamped = min(max(newValue, range.lowerBound), range.upperBound)
-        self.widgetVisibility[keyPath: keyPath] = clamped
+        self.widgetVisibility[keyPath: keyPath] = min(max(newValue, range.lowerBound), range.upperBound)
         self.saveConfiguration()
       }
     )
   }
 
-  var stylePresets: [WidgetStylePreset] {
-    WidgetStylePreset.all
-  }
+  // MARK: - Style bindings (global)
 
-  var customStylePresetID: String {
-    WidgetStylePreset.customID
-  }
+  var stylePresets: [WidgetStylePreset] { WidgetStylePreset.all }
+  var customStylePresetID: String { WidgetStylePreset.customID }
 
   func widgetStylePresetBinding() -> Binding<String> {
     Binding(
       get: { WidgetStylePreset.id(for: self.widgetStyle) },
       set: { newValue in
-        guard let preset = WidgetStylePreset.preset(withID: newValue) else {
-          return
-        }
-
+        guard let preset = WidgetStylePreset.preset(withID: newValue) else { return }
         self.widgetStyle = preset.style
         self.saveConfiguration()
-      }
-    )
-  }
-
-  func providerStylePresetBinding(for accountID: String) -> Binding<String> {
-    Binding(
-      get: { WidgetStylePreset.id(for: self.providerStyle(for: accountID).style) },
-      set: { newValue in
-        guard let preset = WidgetStylePreset.preset(withID: newValue) else {
-          return
-        }
-
-        self.updateProviderStyle(for: accountID) { style in
-          style.useCustomStyle = true
-          style.style = preset.style
-        }
       }
     )
   }
@@ -384,218 +386,41 @@ final class AppModel: ObservableObject {
     )
   }
 
-  enum WidgetBackgroundTarget {
-    case dashboard
-    case trend
-  }
-
-  func widgetBackgroundOverride(for target: WidgetBackgroundTarget) -> WidgetBackgroundOverride {
-    switch target {
-    case .dashboard:
-      return widgetBackgroundSettings.dashboard
-    case .trend:
-      return widgetBackgroundSettings.trend
-    }
-  }
-
-  func widgetBackgroundOverrideBinding(for target: WidgetBackgroundTarget) -> Binding<Bool> {
+  func widgetRingColorBinding(for role: WidgetRingColorRole, layer: WidgetRingLayer) -> Binding<Color> {
     Binding(
-      get: { self.widgetBackgroundOverride(for: target).useCustomBackground },
+      get: { Self.color(fromHex: self.widgetStyle.ringColors.hexColor(for: role, layer: layer)) },
       set: { newValue in
-        self.updateWidgetBackgroundOverride(for: target) { override in
-          override.useCustomBackground = newValue
-        }
-      }
-    )
-  }
-
-  func widgetBackgroundColorBinding(for target: WidgetBackgroundTarget) -> Binding<Color> {
-    Binding(
-      get: {
-        let override = self.widgetBackgroundOverride(for: target)
-        let resolvedHex = override.backgroundHexColor ?? self.widgetStyle.backgroundHexColor
-        return Self.color(fromHex: resolvedHex)
-      },
-      set: { newValue in
-        self.updateWidgetBackgroundOverride(for: target) { override in
-          override.useCustomBackground = true
-          override.backgroundHexColor = Self.hexColor(from: newValue, allowTransparency: true)
-          override.useTransparentBackground = false
-        }
-      }
-    )
-  }
-
-  func widgetTransparentBackgroundBinding(for target: WidgetBackgroundTarget) -> Binding<Bool> {
-    Binding(
-      get: { self.widgetBackgroundOverride(for: target).useTransparentBackground },
-      set: { newValue in
-        self.updateWidgetBackgroundOverride(for: target) { override in
-          override.useCustomBackground = true
-          override.useTransparentBackground = newValue
-        }
-      }
-    )
-  }
-
-  func widgetRingColorBinding(
-    for role: WidgetRingColorRole,
-    layer: WidgetRingLayer
-  ) -> Binding<Color> {
-    Binding(
-      get: {
-        let hex = self.widgetStyle.ringColors.hexColor(for: role, layer: layer)
-        return Self.color(fromHex: hex)
-      },
-      set: { newValue in
-        guard let hex = Self.hexColor(from: newValue, allowTransparency: false) else {
-          return
-        }
-
+        guard let hex = Self.hexColor(from: newValue, allowTransparency: false) else { return }
         self.widgetStyle.ringColors.setHexColor(hex, for: role, layer: layer)
         self.saveConfiguration()
       }
     )
   }
 
-  func providerStyle(for accountID: String) -> ProviderStyleSettings {
-    providerStyleSettings[accountID]
-      ?? ProviderStyleSettings.defaultValue(
-        for: accountID,
-        provider: account(withID: accountID)?.provider,
-        fallbackStyle: widgetStyle
-      )
-  }
+  // MARK: - Persistence
 
-  func effectiveStyle(for accountID: String) -> WidgetStyleSettings {
-    let providerStyle = providerStyle(for: accountID)
-
-    guard providerStyle.useCustomStyle else {
-      return widgetStyle
+  func saveConfiguration() {
+    let settings = currentSettings()
+    do {
+      try settingsStore.save(settings)
+    } catch {
+      statusMessage = "Save failed: \(error.localizedDescription)"
     }
 
-    return WidgetStyleSettings(
-      backgroundHexColor: providerStyle.style.backgroundHexColor ?? widgetStyle.backgroundHexColor,
-      ringColors: providerStyle.style.ringColors,
-      useTransparentBackground: providerStyle.style.useTransparentBackground
-    )
-  }
-
-  func providerOverrideEnabledBinding(for accountID: String) -> Binding<Bool> {
-    Binding(
-      get: { self.providerStyle(for: accountID).useCustomStyle },
-      set: { newValue in
-        self.updateProviderStyle(for: accountID) { style in
-          style.useCustomStyle = newValue
-          if newValue {
-            style.style = self.widgetStyle
-          }
-        }
-      }
-    )
-  }
-
-  func providerBackgroundColorBinding(for accountID: String) -> Binding<Color> {
-    Binding(
-      get: {
-        let providerStyle = self.providerStyle(for: accountID).style
-        let resolvedHex = providerStyle.backgroundHexColor ?? self.widgetStyle.backgroundHexColor
-        return Self.color(fromHex: resolvedHex)
-      },
-      set: { newValue in
-        self.updateProviderStyle(for: accountID) { style in
-          style.style.backgroundHexColor = Self.hexColor(from: newValue, allowTransparency: true)
-          style.style.useTransparentBackground = false
-        }
-      }
-    )
-  }
-
-  func providerTransparentBackgroundBinding(for accountID: String) -> Binding<Bool> {
-    Binding(
-      get: { self.providerStyle(for: accountID).style.useTransparentBackground },
-      set: { newValue in
-        self.updateProviderStyle(for: accountID) { style in
-          style.style.useTransparentBackground = newValue
-        }
-      }
-    )
-  }
-
-  func providerRingColorBinding(
-    for accountID: String,
-    role: WidgetRingColorRole,
-    layer: WidgetRingLayer
-  ) -> Binding<Color> {
-    Binding(
-      get: {
-        let hex = self.providerStyle(for: accountID).style.ringColors.hexColor(for: role, layer: layer)
-        return Self.color(fromHex: hex)
-      },
-      set: { newValue in
-        guard let hex = Self.hexColor(from: newValue, allowTransparency: false) else {
-          return
-        }
-
-        self.updateProviderStyle(for: accountID) { style in
-          style.style.ringColors.setHexColor(hex, for: role, layer: layer)
-        }
-      }
-    )
-  }
-
-  private func updateAccount(
-    accountID: String,
-    mutate: (inout ProviderAccount) -> Void
-  ) {
-    guard let index = providerAccounts.firstIndex(where: { $0.id == accountID }) else {
-      return
+    if syncSettingsToWidgetStore(settings) {
+      reloadWidgetTimelines()
     }
-
-    mutate(&providerAccounts[index])
-    reloadAccountStatuses()
-    saveConfiguration()
   }
 
-  private func updateProviderStyle(
-    for accountID: String,
-    mutate: (inout ProviderStyleSettings) -> Void
-  ) {
-    var style = providerStyle(for: accountID)
-    style.provider = account(withID: accountID)?.provider
-    mutate(&style)
-    providerStyleSettings[accountID] = style
-    saveConfiguration()
-  }
-
-  private func updateWidgetBackgroundOverride(
-    for target: WidgetBackgroundTarget,
-    mutate: (inout WidgetBackgroundOverride) -> Void
-  ) {
-    switch target {
-    case .dashboard:
-      var override = widgetBackgroundSettings.dashboard
-      mutate(&override)
-      widgetBackgroundSettings.dashboard = override
-    case .trend:
-      var override = widgetBackgroundSettings.trend
-      mutate(&override)
-      widgetBackgroundSettings.trend = override
-    }
-
-    saveConfiguration()
-  }
-
-  private func nextDisplayName(for provider: QuotaProvider) -> String {
-    let existingCount = providerAccounts.filter { $0.provider == provider }.count
-    if existingCount == 0 {
-      return provider.displayName
-    }
-    return "\(provider.displayName) \(existingCount + 1)"
-  }
-
-  private func emptyCredentials(for provider: QuotaProvider) -> [String: String] {
-    Dictionary(uniqueKeysWithValues: provider.credentialFields.map { ($0.key, "") })
+  private func currentSettings() -> AppSettings {
+    AppSettings(
+      refreshIntervalMinutes: refreshIntervalMinutes,
+      accounts: providerAccounts.map { $0.redactedCredentials() },
+      widgetStyle: widgetStyle,
+      widgetBackgroundSettings: widgetBackgroundSettings,
+      providerStyleSettings: [],
+      widgetVisibility: widgetVisibility
+    )
   }
 
   private func runtimeConfigurations() -> [ProviderRuntimeConfiguration] {
@@ -610,206 +435,70 @@ final class AppModel: ObservableObject {
     }
   }
 
-  private func loadSettingsFromPreferredStore() throws -> AppSettings {
-    return try settingsStore.load()
-  }
-
-  private func loadSnapshotFromPreferredStore() throws -> QuotaSnapshot? {
-    return try snapshotStore.load()
-  }
-
-  private func currentSettings() -> AppSettings {
-    AppSettings(
-      refreshIntervalMinutes: refreshIntervalMinutes,
-      accounts: providerAccounts,
-      widgetStyle: widgetStyle,
-      widgetBackgroundSettings: widgetBackgroundSettings,
-      providerStyleSettings: providerAccounts.map { account in
-        providerStyle(for: account.id)
-      },
-      widgetVisibility: widgetVisibility
-    )
-  }
+  // MARK: - Auto refresh loop
 
   private func restartAutoRefreshLoop() {
     autoRefreshTask?.cancel()
-
     autoRefreshTask = Task { [weak self] in
       while !Task.isCancelled {
-        guard let self else {
-          return
-        }
-
-        let intervalNanoseconds = self.autoRefreshIntervalNanoseconds()
+        guard let self else { return }
+        let nanoseconds = UInt64(max(15, self.refreshIntervalMinutes) * 60) * 1_000_000_000
         do {
-          try await Task.sleep(nanoseconds: intervalNanoseconds)
+          try await Task.sleep(nanoseconds: nanoseconds)
         } catch {
           return
         }
-
-        if Task.isCancelled {
-          return
-        }
-
+        if Task.isCancelled { return }
+        // Re-scan in case the user logged into a new tool, then refresh.
+        self.rescanSources(persist: false)
         await self.refreshNow()
       }
     }
   }
 
-  private func autoRefreshIntervalNanoseconds() -> UInt64 {
-    let seconds = UInt64(max(15, refreshIntervalMinutes) * 60)
-    return seconds * 1_000_000_000
-  }
-
   private func shouldRefreshOnBootstrap(now: Date = Date()) -> Bool {
-    guard !providerAccounts.isEmpty else {
-      return false
-    }
-
-    guard let snapshot else {
-      return true
-    }
-
-    let maxAgeSeconds = TimeInterval(max(15, refreshIntervalMinutes) * 60)
-    return now.timeIntervalSince(snapshot.generatedAt) >= maxAgeSeconds
+    guard !providerAccounts.isEmpty else { return false }
+    guard let snapshot else { return true }
+    let maxAge = TimeInterval(max(15, refreshIntervalMinutes) * 60)
+    return now.timeIntervalSince(snapshot.generatedAt) >= maxAge
   }
 
-  private static func color(fromHex hex: String?) -> Color {
-    guard let components = parseHexColor(hex) else {
-      return .clear
-    }
-
-    return Color(
-      red: components.red,
-      green: components.green,
-      blue: components.blue,
-      opacity: components.alpha
-    )
-  }
-
-  private static func hexColor(from color: Color, allowTransparency: Bool) -> String? {
-    guard let components = rgbaComponents(from: color) else {
-      return nil
-    }
-
-    if allowTransparency && components.alpha <= 0.01 {
-      return nil
-    }
-
-    let red = clampColorByte(components.red)
-    let green = clampColorByte(components.green)
-    let blue = clampColorByte(components.blue)
-
-    if allowTransparency {
-      let alpha = clampColorByte(components.alpha)
-      return String(format: "#%02X%02X%02X%02X", red, green, blue, alpha)
-    }
-
-    return String(format: "#%02X%02X%02X", red, green, blue)
-  }
-
-  private static func rgbaComponents(from color: Color) -> (
-    red: Double,
-    green: Double,
-    blue: Double,
-    alpha: Double
-  )? {
-    let nsColor = NSColor(color)
-    guard let converted = nsColor.usingColorSpace(.extendedSRGB) ?? nsColor.usingColorSpace(.sRGB) else {
-      return nil
-    }
-
-    return (
-      red: Double(converted.redComponent),
-      green: Double(converted.greenComponent),
-      blue: Double(converted.blueComponent),
-      alpha: Double(converted.alphaComponent)
-    )
-  }
-
-  private static func parseHexColor(_ value: String?) -> (
-    red: Double,
-    green: Double,
-    blue: Double,
-    alpha: Double
-  )? {
-    guard var raw = value?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
-      return nil
-    }
-
-    if raw.hasPrefix("#") {
-      raw.removeFirst()
-    }
-
-    if raw.count == 3 || raw.count == 4 {
-      raw = raw.map { "\($0)\($0)" }.joined()
-    }
-
-    guard raw.count == 6 || raw.count == 8, let parsed = UInt64(raw, radix: 16) else {
-      return nil
-    }
-
-    if raw.count == 6 {
-      let red = Double((parsed >> 16) & 0xFF) / 255.0
-      let green = Double((parsed >> 8) & 0xFF) / 255.0
-      let blue = Double(parsed & 0xFF) / 255.0
-      return (red: red, green: green, blue: blue, alpha: 1)
-    }
-
-    let red = Double((parsed >> 24) & 0xFF) / 255.0
-    let green = Double((parsed >> 16) & 0xFF) / 255.0
-    let blue = Double((parsed >> 8) & 0xFF) / 255.0
-    let alpha = Double(parsed & 0xFF) / 255.0
-    return (red: red, green: green, blue: blue, alpha: alpha)
-  }
-
-  private static func clampColorByte(_ value: Double) -> Int {
-    Int((max(0, min(1, value)) * 255.0).rounded())
-  }
+  // MARK: - App Group sync
 
   @discardableResult
   private func syncSettingsToWidgetStore(_ settings: AppSettings) -> Bool {
-    for attempt in 1...2 {
-      guard let appGroupStore = appGroupSettingsStore() else {
-        print("[LLimit] Settings sync failed: no App Group settings store available")
-        invalidateAppGroupStores()
-        continue
-      }
-
-      do {
-        try appGroupStore.save(settings)
-        print("[LLimit] Settings synced to widget store successfully")
-        return true
-      } catch {
-        print("[LLimit] Settings sync attempt \(attempt) failed: \(error.localizedDescription)")
-        invalidateAppGroupStores()
-      }
+    guard let store = appGroupSettingsStore() else { return false }
+    do {
+      try store.save(settings)
+      return true
+    } catch {
+      invalidateAppGroupStores()
+      return false
     }
-
-    return false
   }
 
   @discardableResult
   private func syncSnapshotToWidgetStore(_ snapshot: QuotaSnapshot) -> Bool {
-    for attempt in 1...2 {
-      guard let appGroupStore = appGroupSnapshotStore() else {
-        print("[LLimit] Widget sync failed: no App Group store available")
-        invalidateAppGroupStores()
-        continue
-      }
-
-      do {
-        try appGroupStore.save(snapshot)
-        print("[LLimit] Snapshot synced to widget store successfully")
-        print("[LLimit] Debug info:\n\(appGroupStore.debugInfo())")
-        return true
-      } catch {
-        print("[LLimit] Widget sync attempt \(attempt) failed: \(error.localizedDescription)")
-        invalidateAppGroupStores()
-      }
+    guard let store = appGroupSnapshotStore() else { return false }
+    do {
+      try store.save(snapshot)
+      return true
+    } catch {
+      invalidateAppGroupStores()
+      return false
     }
+  }
 
-    return false
+  @discardableResult
+  private func syncHistoryToWidgetStore(_ snapshot: QuotaSnapshot) -> Bool {
+    guard let store = appGroupHistoryStore() else { return false }
+    do {
+      try store.append(snapshot)
+      return true
+    } catch {
+      invalidateAppGroupStores()
+      return false
+    }
   }
 
   private func appGroupSettingsStore() -> SettingsStore? {
@@ -828,27 +517,19 @@ final class AppModel: ObservableObject {
   }
 
   private func resolveAppGroupStoresIfNeeded() {
-    guard
-      cachedAppGroupSettingsStore == nil
-        || cachedAppGroupSnapshotStore == nil
-        || cachedAppGroupHistoryStore == nil
-    else {
-      return
-    }
+    guard cachedAppGroupSettingsStore == nil
+      || cachedAppGroupSnapshotStore == nil
+      || cachedAppGroupHistoryStore == nil
+    else { return }
 
     do {
-      let settingsURL = try SharedPaths.settingsFileURL()
-      let snapshotURL = try SharedPaths.snapshotFileURL()
-      let historyURL = try SharedPaths.historyFileURL()
-      cachedAppGroupSettingsStore = SettingsStore(fileURL: settingsURL)
+      cachedAppGroupSettingsStore = SettingsStore(fileURL: try SharedPaths.settingsFileURL())
       cachedAppGroupSnapshotStore = SnapshotStore(
-        fileURL: snapshotURL,
+        fileURL: try SharedPaths.snapshotFileURL(),
         appGroupIdentifier: SharedConstants.appGroupIdentifier
       )
-      cachedAppGroupHistoryStore = QuotaHistoryStore(fileURL: historyURL)
-      print("[LLimit] App Group container resolved: \(snapshotURL.deletingLastPathComponent().path)")
+      cachedAppGroupHistoryStore = QuotaHistoryStore(fileURL: try SharedPaths.historyFileURL())
     } catch {
-      print("[LLimit] Failed to resolve App Group container: \(error.localizedDescription)")
       invalidateAppGroupStores()
     }
   }
@@ -859,28 +540,65 @@ final class AppModel: ObservableObject {
     cachedAppGroupHistoryStore = nil
   }
 
-  @discardableResult
-  private func syncHistoryToWidgetStore(_ snapshot: QuotaSnapshot) -> Bool {
-    for attempt in 1...2 {
-      guard let appGroupStore = appGroupHistoryStore() else {
-        print("[LLimit] History sync failed: no App Group history store available")
-        invalidateAppGroupStores()
-        continue
-      }
-
-      do {
-        try appGroupStore.append(snapshot)
-        return true
-      } catch {
-        print("[LLimit] History sync attempt \(attempt) failed: \(error.localizedDescription)")
-        invalidateAppGroupStores()
-      }
-    }
-
-    return false
-  }
-
   private func reloadWidgetTimelines() {
     WidgetCenter.shared.reloadAllTimelines()
+  }
+
+  // MARK: - Color helpers
+
+  private static func color(fromHex hex: String?) -> Color {
+    guard let components = parseHexColor(hex) else { return .clear }
+    return Color(red: components.red, green: components.green, blue: components.blue, opacity: components.alpha)
+  }
+
+  private static func hexColor(from color: Color, allowTransparency: Bool) -> String? {
+    guard let components = rgbaComponents(from: color) else { return nil }
+    if allowTransparency && components.alpha <= 0.01 { return nil }
+
+    let red = clampColorByte(components.red)
+    let green = clampColorByte(components.green)
+    let blue = clampColorByte(components.blue)
+
+    if allowTransparency {
+      return String(format: "#%02X%02X%02X%02X", red, green, blue, clampColorByte(components.alpha))
+    }
+    return String(format: "#%02X%02X%02X", red, green, blue)
+  }
+
+  private static func rgbaComponents(from color: Color) -> (red: Double, green: Double, blue: Double, alpha: Double)? {
+    let nsColor = NSColor(color)
+    guard let converted = nsColor.usingColorSpace(.extendedSRGB) ?? nsColor.usingColorSpace(.sRGB) else { return nil }
+    return (
+      red: Double(converted.redComponent),
+      green: Double(converted.greenComponent),
+      blue: Double(converted.blueComponent),
+      alpha: Double(converted.alphaComponent)
+    )
+  }
+
+  private static func parseHexColor(_ value: String?) -> (red: Double, green: Double, blue: Double, alpha: Double)? {
+    guard var raw = value?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return nil }
+    if raw.hasPrefix("#") { raw.removeFirst() }
+    if raw.count == 3 || raw.count == 4 { raw = raw.map { "\($0)\($0)" }.joined() }
+    guard raw.count == 6 || raw.count == 8, let parsed = UInt64(raw, radix: 16) else { return nil }
+
+    if raw.count == 6 {
+      return (
+        red: Double((parsed >> 16) & 0xFF) / 255.0,
+        green: Double((parsed >> 8) & 0xFF) / 255.0,
+        blue: Double(parsed & 0xFF) / 255.0,
+        alpha: 1
+      )
+    }
+    return (
+      red: Double((parsed >> 24) & 0xFF) / 255.0,
+      green: Double((parsed >> 16) & 0xFF) / 255.0,
+      blue: Double((parsed >> 8) & 0xFF) / 255.0,
+      alpha: Double(parsed & 0xFF) / 255.0
+    )
+  }
+
+  private static func clampColorByte(_ value: Double) -> Int {
+    Int((max(0, min(1, value)) * 255.0).rounded())
   }
 }

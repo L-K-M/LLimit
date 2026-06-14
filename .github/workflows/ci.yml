@@ -20,6 +20,9 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
+      - name: Run QuotaCore tests
+        working-directory: Packages/QuotaCore
+        run: swift test
 
       - name: Select Xcode
         uses: maxim-lobanov/setup-xcode@v1
