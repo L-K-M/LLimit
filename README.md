@@ -1,36 +1,45 @@
 # LLimit
 
-**LLimit** is a macOS menu-bar app + desktop widgets that show how much of your
-LLM subscription quota is left — across all the AI coding tools you already use.
+**LLimit** is a self-contained macOS menu-bar app + desktop widgets that track how
+much of your LLM subscription quota is left.
 
-The whole point is **zero configuration**: LLimit reads the credentials that tools
-like Claude Code, Codex, GitHub Copilot and OpenCode *already wrote to disk when
-you logged in*. You never paste a session token or API key.
+You manage your accounts **inside LLimit** — add as many as you like, including
+several accounts for the same provider (e.g. two separate OpenAI accounts), each
+tracked independently. LLimit doesn't depend on any other tool being installed.
 
-## Supported providers & where the credentials come from
+To make setup painless, LLimit can **optionally detect** logins from AI tools you're
+already signed in to (Claude Code, Codex, GitHub Copilot, OpenCode) and import them
+into a new account with one click — so for the common case you never hunt for a
+token. You can always add accounts manually too.
 
-| Provider            | Detected from                                                                 |
-| ------------------- | ----------------------------------------------------------------------------- |
-| **Claude** (Anthropic) | Claude Code — macOS Keychain (`Claude Code-credentials`) or `~/.claude/.credentials.json`, or OpenCode |
-| **OpenAI / ChatGPT**   | Codex CLI (`~/.codex/auth.json`) or OpenCode                                |
-| **GitHub Copilot**     | `~/.config/github-copilot/{hosts,apps}.json`, `~/.copilot/config.json`, or OpenCode |
-| **Zhipu AI**           | OpenCode (`zhipuai-coding-plan`)                                            |
-| **Z.ai**               | OpenCode (`zai-coding-plan`)                                                |
-| **Google (Antigravity)** | OpenCode (`~/.config/opencode/antigravity-accounts.json`)               |
+## Supported providers
 
-Open **Settings → Sources** to see exactly what was detected (and a scan log if
-something is missing). Toggle any source on/off and rename it. If you log into a
-new tool, hit **Rescan**.
+| Provider | Credential it needs | One-click import from |
+| --- | --- | --- |
+| **Claude** (Anthropic) | OAuth access token | Claude Code (Keychain / `~/.claude/.credentials.json`), OpenCode |
+| **OpenAI / ChatGPT** | ChatGPT OAuth access token (+ account id) | Codex CLI (`~/.codex/auth.json`), OpenCode |
+| **GitHub Copilot** | OAuth token, or PAT + username | `~/.config/github-copilot`, `~/.copilot`, OpenCode |
+| **Zhipu AI** | API key | OpenCode (`zhipuai-coding-plan`) |
+| **Z.ai** | API key | OpenCode (`zai-coding-plan`) |
+| **Google (Antigravity)** | Refresh token + project id | OpenCode (`antigravity-accounts.json`) |
 
-> Usage data is fetched directly from each provider's own API using your existing
-> login. Credentials are read at runtime and **never written to LLimit's settings,
-> the widget, logs, or anywhere on disk** — only per-source on/off + name
-> preferences are saved.
+## How accounts work
+
+- **Settings → Accounts** is where you add/rename/enable/remove accounts and enter
+  credentials. Add the same provider multiple times for multiple subscriptions.
+- **Detected on this Mac** (same tab) lists logins LLimit found locally; click
+  **Import** to create a pre-filled account. This is just a shortcut — imported
+  accounts are copied into LLimit and stored locally; the source tool can be removed.
+- Credentials are stored in LLimit's own settings file
+  (`~/Library/Application Support/LLimit/`, mode `600`) and are **redacted before
+  anything is shared with the widget** (the widget only ever sees usage numbers).
+- Each account can have its own widget styling; the menu bar and widgets show all
+  enabled accounts.
 
 ## Requirements
 
 - macOS 14+
-- Xcode 15+
+- Xcode 15+ (only to build; releases run with no Xcode GUI)
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 
 ## Build & run
@@ -43,20 +52,19 @@ open LLimit.xcodeproj
 
 1. Select your Apple Developer **signing team** for both targets (`LLimit` and
    `LLimitWidgetExtension`). The App Group is `$(TeamIdentifierPrefix)group.ch.lkmc.llimit`.
-2. Run the `LLimit` target. It lives in the menu bar (no Dock icon).
-3. Sign in to at least one supported tool, click **Rescan**, then **Refresh now**.
+2. Run the `LLimit` target — it lives in the menu bar (no Dock icon).
+3. Add an account (manually or via **Import**), then **Refresh Now**.
 4. Add the widget from the desktop / Notification Center gallery.
 
-The first time LLimit reads Claude's token from the Keychain, macOS will ask you to
-allow access — click **Always Allow**. (To skip the prompt entirely you can export
-the token to a file once:
+The first time you import Claude from the Keychain, macOS asks you to allow access —
+click **Always Allow**. (To avoid the prompt you can export the token once:
 `security find-generic-password -s "Claude Code-credentials" -w > ~/.claude/.credentials.json`.)
 
 ## Build & release from the command line (no Xcode GUI)
 
 ```bash
 ./scripts/build.sh            # -> dist/LLimit.app + .zip + .dmg (ad-hoc signed)
-./scripts/release.sh 0.2.1    # bump version, tag, push -> GitHub Actions publishes the release
+./scripts/release.sh 0.3.0    # bump version, tag, push -> GitHub Actions publishes the release
 ```
 
 See [`RELEASING.md`](RELEASING.md) for Developer ID signing + notarization and the
@@ -65,18 +73,19 @@ GitHub Release automatically.
 
 ## Why the app isn't sandboxed
 
-To stay configuration-free, the host app must read dotfiles in your home directory
-and the Claude Keychain item. The App Sandbox blocks that (or forces a "grant file
-access" prompt per file). LLimit is distributed directly rather than through the Mac
-App Store, so the host app runs unsandboxed while the **widget extension stays
-sandboxed** and only ever reads the shared App Group container. See
-[`AGENTS.md`](AGENTS.md) for the full architecture.
+The optional import feature reads credential files in your home directory and the
+Claude Keychain item, which the App Sandbox blocks (or forces a "grant access" prompt
+per file). LLimit is distributed directly rather than through the Mac App Store, so
+the host app runs unsandboxed while the **widget extension stays sandboxed** and only
+ever reads the shared App Group container. See [`AGENTS.md`](AGENTS.md) for details.
 
 ## How it works
 
-1. The host app discovers credentials from local AI tools (`QuotaCore.CredentialDiscovery`).
-2. `QuotaCoordinator` fetches usage from each provider's API in parallel.
-3. The result is written as a `QuotaSnapshot` JSON file into the App Group container.
+1. You configure accounts in LLimit (`QuotaCore.ProviderAccount`). `CredentialDiscovery`
+   powers the optional import shortcut.
+2. `QuotaCoordinator` fetches usage from each enabled account's provider API in parallel.
+3. The result is written as a `QuotaSnapshot` JSON file into the App Group container
+   (credentials are never included).
 4. `WidgetCenter.reloadTimelines` nudges the widgets, which read the snapshot and render.
 
 The pure-Swift core (`Packages/QuotaCore`) is covered by unit tests:

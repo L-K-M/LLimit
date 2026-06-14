@@ -2,10 +2,16 @@
 
 ## What this is
 
-**LLimit** is a standalone macOS menu-bar app + WidgetKit widgets that display
-remaining LLM subscription quota across multiple providers. Its defining feature is
-**zero-configuration credential auto-discovery**: it reads credentials that locally
-installed AI tools already wrote, so the user never pastes a token.
+**LLimit** is a self-contained macOS menu-bar app + WidgetKit widgets that display
+remaining LLM subscription quota across multiple providers. **The app owns account
+management**: the user adds/edits/removes accounts inside LLimit, including multiple
+accounts per provider, and credentials are stored by LLimit. It does not depend on
+any other tool at runtime.
+
+`CredentialDiscovery` exists only as an *optional import shortcut* — it can detect a
+login from a locally installed tool (Claude Code, Codex, Copilot, OpenCode) so the
+user can one-click create a pre-filled account instead of pasting a token. Once
+imported, the account is copied into and owned by LLimit.
 
 Providers: Claude (Anthropic), OpenAI/ChatGPT, GitHub Copilot, Zhipu, Z.ai, Google
 (Antigravity).
@@ -25,20 +31,22 @@ Providers: Claude (Anthropic), OpenAI/ChatGPT, GitHub Copilot, Zhipu, Z.ai, Goog
 
 ## Data flow
 
-1. `AppModel.rescanSources()` runs `CredentialDiscovery().discover()` (plus the macOS
-   Keychain for Claude) → `[DiscoveredCredential]`.
-2. Discovered credentials are merged with persisted per-source preferences (enabled /
-   name), keyed by a deterministic `stableID`, into `[ProviderAccount]`.
-3. `QuotaCoordinator` fetches usage from each enabled provider in parallel.
+1. The user manages `[ProviderAccount]` in Settings → Accounts (add/rename/enable/
+   remove, multiple per provider, credentials entered or imported).
+2. `AppModel.scanForDetectedCredentials()` (optional) runs `CredentialDiscovery().discover()`
+   plus the macOS Keychain for Claude → `[DiscoveredCredential]`; `importAccount(from:)`
+   copies one into a new owned account.
+3. `QuotaCoordinator` fetches usage from each enabled account's provider in parallel.
 4. The `QuotaSnapshot` is written to the App Group container; settings + history too.
 5. `WidgetCenter.reloadAllTimelines()` triggers the widgets, which read the snapshot.
 
 ## Hard constraints
 
-- **Never persist or log credentials.** Only `enabled` + display-name preferences are
-  saved (`ProviderAccount.redactedCredentials()`); credentials are re-discovered at
-  runtime each launch.
-- The host app is **not sandboxed** (it must read `~/.claude`, `~/.codex`,
+- Credentials are stored **locally only** in the app's own settings file
+  (`~/Library/Application Support/LLimit/`, mode `600`). Anything written to the App
+  Group / widget store or logs must be redacted via
+  `AppSettings.redactedCredentials()` — the widget never needs credentials.
+- The host app is **not sandboxed** (the import shortcut reads `~/.claude`, `~/.codex`,
   `~/.config/github-copilot`, `~/.local/share/opencode`, and the Keychain). The widget
   extension **stays sandboxed**; it only reads the App Group container.
 - Adding a `QuotaProvider` case is a breaking change for exhaustive `switch`es: update
