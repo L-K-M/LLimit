@@ -46,37 +46,37 @@ while [[ $# -gt 0 ]]; do
 done
 
 command -v xcodebuild >/dev/null 2>&1 || { echo "error: xcodebuild not found (run on macOS)"; exit 1; }
-command -v xcodegen   >/dev/null 2>&1 || { echo "error: xcodegen required: brew install xcodegen"; exit 1; }
 
-# Default the version from project.yml if not supplied.
+# Build the COMMITTED LLimit.xcodeproj as-is — do NOT run `xcodegen generate` here.
+# The committed project is the source of truth (it carries the signing team Xcode set
+# up); regenerating it from project.yml, which leaves DEVELOPMENT_TEAM blank, would
+# wipe that team and break signing. Run scripts/bootstrap.sh by hand only when you
+# deliberately change the project's structure in project.yml.
+
+# Default the version from the committed project (the authoritative source) if not given.
 if [[ -z "$VERSION" ]]; then
-  VERSION="$(awk -F': ' '/MARKETING_VERSION:/{gsub(/[" ]/,"",$2); print $2; exit}' project.yml)"
+  VERSION="$(awk -F'= ' '/MARKETING_VERSION =/{gsub(/[ ;]/,"",$2); print $2; exit}' "$PROJECT/project.pbxproj")"
 fi
 VERSION="${VERSION:-0.0.0}"
 
-echo "==> Generating Xcode project"
-xcodegen generate
-
 # Assemble code-signing settings.
-SIGN_FLAGS=("CODE_SIGN_STYLE=Manual")
 SIGNED=0
 if [[ -n "${CODE_SIGN_IDENTITY:-}" && -n "${DEVELOPMENT_TEAM:-}" ]]; then
   echo "==> Signing with Developer ID: ${CODE_SIGN_IDENTITY}"
-  SIGN_FLAGS+=(
+  SIGN_FLAGS=(
+    "CODE_SIGN_STYLE=Manual"
     "CODE_SIGN_IDENTITY=${CODE_SIGN_IDENTITY}"
     "DEVELOPMENT_TEAM=${DEVELOPMENT_TEAM}"
     "ENABLE_HARDENED_RUNTIME=YES"
   )
   SIGNED=1
 else
-  echo "==> No Developer ID provided — building ad-hoc signed (local use only)"
-  SIGN_FLAGS+=(
-    "CODE_SIGN_IDENTITY=-"
-    "DEVELOPMENT_TEAM="
-    "CODE_SIGNING_REQUIRED=NO"
-    "CODE_SIGNING_ALLOWED=YES"
-    "AD_HOC_CODE_SIGNING_ALLOWED=YES"
-  )
+  echo "==> No Developer ID provided — building unsigned, then ad-hoc signing locally"
+  # Build with signing DISABLED rather than forcing an empty team: the app-group
+  # entitlement ($(TeamIdentifierPrefix)group.ch.lkmc.llimit) makes signing with a
+  # blank team demand a provisioning profile and fail. We ad-hoc sign the finished
+  # bundle below instead — the same recipe .github/workflows/release.yml uses.
+  SIGN_FLAGS=("CODE_SIGNING_ALLOWED=NO")
 fi
 
 echo "==> Building LLimit ${VERSION} (${CONFIGURATION})"
@@ -101,6 +101,14 @@ mkdir -p "$OUTPUT_DIR"
 rm -rf "$OUTPUT_DIR/LLimit.app"
 cp -R "$APP_SRC" "$OUTPUT_DIR/LLimit.app"
 APP="$OUTPUT_DIR/LLimit.app"
+
+# Ad-hoc sign the assembled bundle when not building with a Developer ID (xcodebuild
+# produced it unsigned). --deep signs the embedded widget extension and frameworks
+# too; identity "-" is ad-hoc. Same step as .github/workflows/release.yml.
+if [[ "$SIGNED" -eq 0 ]]; then
+  echo "==> Ad-hoc signing $APP"
+  codesign --force --deep --sign - "$APP"
+fi
 
 # Notarize + staple when requested and possible.
 if [[ "$SIGNED" -eq 1 && -n "${NOTARY_APPLE_ID:-}" && -n "${NOTARY_PASSWORD:-}" ]]; then
