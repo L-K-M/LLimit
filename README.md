@@ -52,6 +52,17 @@ allow access — click **Always Allow**. (To skip the prompt entirely you can ex
 the token to a file once:
 `security find-generic-password -s "Claude Code-credentials" -w > ~/.claude/.credentials.json`.)
 
+## Build & release from the command line (no Xcode GUI)
+
+```bash
+./scripts/build.sh            # -> dist/LLimit.app + .zip + .dmg (ad-hoc signed)
+./scripts/release.sh 0.2.1    # bump version, tag, push -> GitHub Actions publishes the release
+```
+
+See [`RELEASING.md`](RELEASING.md) for Developer ID signing + notarization and the
+GitHub Actions setup. Pushing a `v*` tag builds and attaches the `.zip`/`.dmg` to a
+GitHub Release automatically.
+
 ## Why the app isn't sandboxed
 
 To stay configuration-free, the host app must read dotfiles in your home directory
