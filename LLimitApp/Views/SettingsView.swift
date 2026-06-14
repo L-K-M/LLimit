@@ -133,7 +133,7 @@ struct SettingsView: View {
 
         Text(detail(usage: usage, failure: failure, account: account))
           .font(.caption)
-          .foregroundStyle(failure == nil ? .secondary : .orange)
+          .foregroundStyle(failure == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.orange))
           .lineLimit(2)
       }
 
