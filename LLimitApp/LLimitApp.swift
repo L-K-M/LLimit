@@ -26,7 +26,6 @@ struct LLimitApp: App {
 
     Settings {
       SettingsView(model: model)
-        .frame(minWidth: 1020, minHeight: 640)
     }
   }
 }

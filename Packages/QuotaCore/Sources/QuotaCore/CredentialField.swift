@@ -1,4 +1,6 @@
 public enum CredentialField {
+  public static let anthropicAccessToken = "anthropic.access_token"
+
   public static let openAIAccessToken = "openai.access_token"
   public static let openAIAccountID = "openai.account_id"
 

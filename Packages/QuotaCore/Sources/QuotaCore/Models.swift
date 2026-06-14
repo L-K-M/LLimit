@@ -1,14 +1,17 @@
 import Foundation
 
 public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
+  case anthropic = "anthropic"
   case openAI = "openai"
+  case gitHubCopilot = "github-copilot"
   case zhipu = "zhipu"
   case zai = "zai"
   case googleAntigravity = "google-antigravity"
-  case gitHubCopilot = "github-copilot"
 
   public var displayName: String {
     switch self {
+    case .anthropic:
+      return "Claude"
     case .openAI:
       return "OpenAI"
     case .zhipu:
@@ -49,6 +52,14 @@ public struct CredentialFieldDescriptor: Codable, Hashable, Identifiable, Sendab
 public extension QuotaProvider {
   var credentialFields: [CredentialFieldDescriptor] {
     switch self {
+    case .anthropic:
+      return [
+        CredentialFieldDescriptor(
+          key: CredentialField.anthropicAccessToken,
+          label: "OAuth access token",
+          help: "Auto-detected from Claude Code (Keychain or ~/.claude/.credentials.json)."
+        )
+      ]
     case .openAI:
       return [
         CredentialFieldDescriptor(

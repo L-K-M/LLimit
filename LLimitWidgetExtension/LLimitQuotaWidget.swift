@@ -879,6 +879,8 @@ private func depletionWarnings(for series: [TrendSeries], now: Date) -> [TrendWa
 
 private func compactProviderName(for provider: QuotaProvider) -> String {
   switch provider {
+  case .anthropic:
+    return "Claude"
   case .openAI:
     return "OpenAI"
   case .zhipu:

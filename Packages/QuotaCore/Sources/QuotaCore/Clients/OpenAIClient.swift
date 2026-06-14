@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 public struct OpenAIClient: QuotaProviderClient {
   public let provider: QuotaProvider = .openAI

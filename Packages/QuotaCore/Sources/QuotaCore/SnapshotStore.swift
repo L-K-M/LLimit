@@ -16,12 +16,14 @@ public final class SnapshotStore: @unchecked Sendable {
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
   }
 
+  #if canImport(Darwin)
   public convenience init(appGroupIdentifier: String, fileName: String) {
     let url = FileManager.default.containerURL(
       forSecurityApplicationGroupIdentifier: appGroupIdentifier
     )!.appendingPathComponent(fileName)
     self.init(fileURL: url, appGroupIdentifier: appGroupIdentifier)
   }
+  #endif
 
   public func load() throws -> QuotaSnapshot? {
     guard FileManager.default.fileExists(atPath: fileURL.path) else {
@@ -49,11 +51,15 @@ public final class SnapshotStore: @unchecked Sendable {
       info += "Permissions: \(attrs[.posixPermissions] ?? "unknown")\n"
     }
     if let appGroup = appGroupIdentifier {
+      #if canImport(Darwin)
       if let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup) {
         info += "App Group container accessible: \(containerURL.path)\n"
       } else {
         info += "App Group container NOT accessible\n"
       }
+      #else
+      info += "App Group identifier: \(appGroup)\n"
+      #endif
     }
     return info
   }

@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 public struct GoogleAntigravityClient: QuotaProviderClient {
   public let provider: QuotaProvider = .googleAntigravity
