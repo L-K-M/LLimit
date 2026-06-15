@@ -251,6 +251,22 @@ struct SettingsView: View {
           }
         }
       }
+
+      if !model.discoveryDiagnostics.isEmpty {
+        DisclosureGroup("Scan details") {
+          VStack(alignment: .leading, spacing: 4) {
+            ForEach(model.discoveryDiagnostics.indices, id: \.self) { index in
+              Text(model.discoveryDiagnostics[index])
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+          }
+          .padding(.top, 4)
+        }
+        .font(.subheadline)
+      }
     }
   }
 
@@ -619,6 +635,19 @@ struct SettingsView: View {
 
           settingsRow(title: "Credentials") {
             VStack(alignment: .leading, spacing: 12) {
+              HStack(spacing: 10) {
+                Button {
+                  model.autofillCredentials(forAccountID: accountID)
+                } label: {
+                  Label("Auto-fill from this Mac", systemImage: "sparkles")
+                }
+                .buttonStyle(.bordered)
+
+                Text("Detects a \(account.provider.displayName) login from a local tool.")
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+              }
+
               ForEach(account.provider.credentialFields) { field in
                 credentialField(field, accountID: accountID)
               }

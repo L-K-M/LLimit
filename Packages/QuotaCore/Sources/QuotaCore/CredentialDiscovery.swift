@@ -115,6 +115,9 @@ public struct CredentialDiscovery: Sendable {
     if let accountID = nonEmptyString(tokens["account_id"]) ?? extractOpenAIAccountID(from: access) {
       credentials[CredentialField.openAIAccountID] = accountID
     }
+    if let refresh = nonEmptyString(tokens["refresh_token"]) {
+      credentials[CredentialField.openAIRefreshToken] = refresh
+    }
 
     diagnostics.append("Codex: found ChatGPT token (\(shortPath(url)))")
     return [
@@ -195,6 +198,9 @@ public struct CredentialDiscovery: Sendable {
         var credentials = [CredentialField.openAIAccessToken: access]
         if let accountID = extractOpenAIAccountID(from: access) {
           credentials[CredentialField.openAIAccountID] = accountID
+        }
+        if let refresh = nonEmptyString(openai["refresh"]) {
+          credentials[CredentialField.openAIRefreshToken] = refresh
         }
         results.append(make("openai:opencode", .openAI, "OpenAI (OpenCode)", url, credentials))
       }

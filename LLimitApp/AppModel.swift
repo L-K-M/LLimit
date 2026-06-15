@@ -34,6 +34,9 @@ final class AppModel: ObservableObject {
   /// Credentials detected on this Mac from local AI tools, offered as one-click imports.
   /// This is a convenience only — imported accounts are fully owned and stored by LLimit.
   @Published var detectedCredentials: [DiscoveredCredential] = []
+  /// Human-readable log of the last detection scan, shown in Settings to explain what
+  /// was (or wasn't) found — including the macOS Keychain result for Claude.
+  @Published var discoveryDiagnostics: [String] = []
 
   private let settingsStore: SettingsStore
   private let snapshotStore: SnapshotStore
@@ -142,6 +145,7 @@ final class AppModel: ObservableObject {
     isRefreshing = true
     defer { isRefreshing = false }
 
+    await refreshExpiringChatGPTTokens()
     reloadAccountStatuses()
 
     let enabledConfigs = runtimeConfigurations().filter { configuration in
@@ -237,7 +241,9 @@ final class AppModel: ObservableObject {
 
     #if canImport(Security)
     if !result.credentials.contains(where: { $0.provider == .anthropic }) {
-      if let token = Self.readClaudeKeychainToken() {
+      let keychain = Self.readClaudeKeychainToken()
+      result.diagnostics.append("Claude Code Keychain: \(keychain.diagnostic)")
+      if let token = keychain.token {
         result.credentials.append(
           DiscoveredCredential(
             stableID: "anthropic:keychain",
@@ -252,6 +258,29 @@ final class AppModel: ObservableObject {
     #endif
 
     detectedCredentials = result.credentials
+    discoveryDiagnostics = result.diagnostics
+  }
+
+  /// Fills an existing account's credentials from a login detected on this Mac (the
+  /// per-account "Auto-fill" action). Running this on demand also triggers the macOS
+  /// Keychain prompt for Claude, which a background scan can't surface clearly.
+  @discardableResult
+  func autofillCredentials(forAccountID accountID: String) -> Bool {
+    guard let index = providerAccounts.firstIndex(where: { $0.id == accountID }) else { return false }
+    let provider = providerAccounts[index].provider
+
+    scanForDetectedCredentials()
+
+    guard let match = detectedCredentials.first(where: { $0.provider == provider }) else {
+      statusMessage = "No \(provider.displayName) login detected on this Mac. Sign in to a supported tool, or paste the credentials manually."
+      return false
+    }
+
+    providerAccounts[index].credentials = match.credentials
+    reloadAccountStatuses()
+    saveConfiguration()
+    statusMessage = "Filled “\(providerAccounts[index].resolvedDisplayName)” from \(match.sourceLabel)."
+    return true
   }
 
   /// Creates a new LLimit-owned account pre-filled with a detected credential.
@@ -288,7 +317,7 @@ final class AppModel: ObservableObject {
   }
 
   #if canImport(Security)
-  private static func readClaudeKeychainToken() -> String? {
+  private static func readClaudeKeychainToken() -> (token: String?, diagnostic: String) {
     let query: [String: Any] = [
       kSecClass as String: kSecClassGenericPassword,
       kSecAttrService as String: "Claude Code-credentials",
@@ -297,19 +326,78 @@ final class AppModel: ObservableObject {
     ]
 
     var item: CFTypeRef?
-    guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-          let data = item as? Data,
-          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    let status = SecItemCopyMatching(query as CFDictionary, &item)
+
+    guard status == errSecSuccess else {
+      let message = (SecCopyErrorMessageString(status, nil) as String?) ?? "OSStatus \(status)"
+      let hint: String
+      switch status {
+      case errSecItemNotFound:
+        hint = "no item (sign in to Claude Code, or export to ~/.claude/.credentials.json)"
+      case errSecInteractionNotAllowed:
+        hint = "click Allow on the Keychain prompt"
+      default:
+        hint = message
+      }
+      return (nil, "\(hint) [\(status)]")
+    }
+
+    guard
+      let data = item as? Data,
+      let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     else {
-      return nil
+      return (nil, "item found but not readable JSON")
     }
 
     let oauth = (object["claudeAiOauth"] as? [String: Any]) ?? object
-    let token = (oauth["accessToken"] as? String) ?? (oauth["access_token"] as? String)
-    let trimmed = token?.trimmingCharacters(in: .whitespacesAndNewlines)
-    return (trimmed?.isEmpty == false) ? trimmed : nil
+    let token = ((oauth["accessToken"] as? String) ?? (oauth["access_token"] as? String))?
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+
+    if let token, !token.isEmpty {
+      return (token, "found token")
+    }
+    return (nil, "item found but no access token field")
   }
   #endif
+
+  /// Refreshes ChatGPT/Codex access tokens that are missing or about to expire, using
+  /// the stored refresh token, and persists the rotated tokens. ChatGPT tokens expire
+  /// hourly, so without this an imported OpenAI account 401s after ~an hour.
+  private func refreshExpiringChatGPTTokens() async {
+    // Snapshot ids up front; re-resolve the index by id around the await since the
+    // account list could change while suspended.
+    let openAIAccountIDs = providerAccounts.filter { $0.provider == .openAI }.map(\.id)
+    var didChange = false
+
+    for accountID in openAIAccountIDs {
+      guard let index = providerAccounts.firstIndex(where: { $0.id == accountID }) else { continue }
+
+      let credentials = providerAccounts[index].credentials
+      guard let refreshToken = credentials[CredentialField.openAIRefreshToken], !refreshToken.isEmpty else { continue }
+
+      let access = credentials[CredentialField.openAIAccessToken] ?? ""
+      if !access.isEmpty, !ChatGPTOAuth.isAccessTokenExpired(access) { continue }
+
+      do {
+        let result = try await ChatGPTOAuth.refresh(refreshToken: refreshToken)
+        guard let liveIndex = providerAccounts.firstIndex(where: { $0.id == accountID }) else { continue }
+        providerAccounts[liveIndex].credentials[CredentialField.openAIAccessToken] = result.accessToken
+        if let newRefresh = result.refreshToken {
+          providerAccounts[liveIndex].credentials[CredentialField.openAIRefreshToken] = newRefresh
+        }
+        if let accountID = result.accountID {
+          providerAccounts[liveIndex].credentials[CredentialField.openAIAccountID] = accountID
+        }
+        didChange = true
+      } catch {
+        print("[LLimit] ChatGPT token refresh failed: \(error.localizedDescription)")
+      }
+    }
+
+    if didChange {
+      saveConfiguration()
+    }
+  }
 
   func account(withID accountID: String) -> ProviderAccount? {
     providerAccounts.first(where: { $0.id == accountID })
