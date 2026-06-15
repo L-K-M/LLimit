@@ -27,6 +27,7 @@ struct LLimitApp: App {
     Settings {
       SettingsView(model: model)
     }
+    .windowResizability(.contentMinSize)
   }
 }
 

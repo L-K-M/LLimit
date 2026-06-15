@@ -2,175 +2,208 @@ import SwiftUI
 import QuotaCore
 
 struct SettingsView: View {
-  private enum SettingsTab: Hashable {
-    case accounts
-    case settings
-    case style
+  private enum SettingsItem: Hashable {
+    case overview
+    case general
+    case appearance
+    case addAccount
     case account(String)
   }
 
-  private struct TabDescriptor: Identifiable {
-    let tab: SettingsTab
-    let title: String
-    let accountID: String?
-
-    var id: String {
-      switch tab {
-      case .accounts:
-        return "accounts"
-      case .settings:
-        return "settings"
-      case .style:
-        return "style"
-      case .account(let accountID):
-        return "account:\(accountID)"
-      }
-    }
-  }
-
   @ObservedObject var model: AppModel
-  @State private var selectedTab: SettingsTab = .accounts
+  @State private var selection: SettingsItem? = .overview
   @State private var providerToAdd: QuotaProvider = .openAI
 
   private let refreshIntervalOptions = [15, 30, 45, 60, 90, 120, 180]
   private let settingsLabelWidth: CGFloat = 180
-  private let tabGridColumns = [GridItem(.adaptive(minimum: 120), spacing: 6)]
-
-  private var tabDescriptors: [TabDescriptor] {
-    let fixedTabs: [TabDescriptor] = [
-      TabDescriptor(tab: .accounts, title: "Accounts", accountID: nil),
-      TabDescriptor(tab: .settings, title: "Settings", accountID: nil),
-      TabDescriptor(tab: .style, title: "Style", accountID: nil)
-    ]
-
-    let accountTabs = model.providerAccounts.map { account in
-      TabDescriptor(tab: .account(account.id), title: tabTitle(for: account), accountID: account.id)
-    }
-
-    return fixedTabs + accountTabs
-  }
 
   private var availableRefreshIntervalOptions: [Int] {
     Array(Set(refreshIntervalOptions + [model.refreshIntervalMinutes])).sorted()
   }
 
   var body: some View {
-    VStack(spacing: 0) {
-      tabsHeader
-      currentTabContent
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    HSplitView {
+      sidebar
+        .frame(minWidth: 210, idealWidth: 240, maxWidth: 340, maxHeight: .infinity)
+
+      detail
+        .frame(minWidth: 460, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
+    .frame(minWidth: 720, idealWidth: 960, minHeight: 480, idealHeight: 680)
     .navigationTitle("LLimit")
+    .onAppear {
+      if model.detectedCredentials.isEmpty {
+        model.scanForDetectedCredentials()
+      }
+    }
     .onChange(of: model.providerAccounts.map(\.id)) { _, accountIDs in
-      if case .account(let accountID) = selectedTab, !accountIDs.contains(accountID) {
-        selectedTab = .accounts
+      if case .account(let accountID) = selection, !accountIDs.contains(accountID) {
+        selection = .overview
       }
     }
   }
 
-  private var tabsHeader: some View {
-    ZStack(alignment: .bottom) {
-      Rectangle()
-        .fill(Color.secondary.opacity(0.24))
-        .frame(height: 1)
+  // MARK: - Sidebar
 
-      LazyVGrid(columns: tabGridColumns, spacing: 6) {
-        ForEach(tabDescriptors) { descriptor in
-          tabButton(
-            for: descriptor.tab,
-            title: descriptor.title,
-            accountID: descriptor.accountID
-          )
+  private var sidebar: some View {
+    List(selection: $selection) {
+      Section {
+        Label("Overview", systemImage: "gauge.with.dots.needle.bottom.50percent")
+          .tag(SettingsItem.overview)
+      }
+
+      Section("Accounts") {
+        ForEach(model.providerAccounts) { account in
+          accountSidebarRow(account)
+            .tag(SettingsItem.account(account.id))
         }
+        Label("Add Account…", systemImage: "plus.circle")
+          .tag(SettingsItem.addAccount)
       }
-      .padding(.horizontal, 14)
-      .padding(.top, 10)
-      .padding(.bottom, 0)
+
+      Section("Settings") {
+        Label("General", systemImage: "gearshape")
+          .tag(SettingsItem.general)
+        Label("Appearance", systemImage: "paintpalette")
+          .tag(SettingsItem.appearance)
+      }
     }
-    .background(.regularMaterial)
+    .listStyle(.sidebar)
   }
+
+  private func accountSidebarRow(_ account: ProviderAccount) -> some View {
+    HStack(spacing: 8) {
+      Circle()
+        .fill(accountStatusColor(for: account.id))
+        .frame(width: 8, height: 8)
+
+      VStack(alignment: .leading, spacing: 1) {
+        Text(account.resolvedDisplayName)
+          .lineLimit(1)
+        Text(account.provider.displayName)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+      }
+    }
+    .padding(.vertical, 2)
+  }
+
+  // MARK: - Detail router
 
   @ViewBuilder
-  private var currentTabContent: some View {
-    switch selectedTab {
-    case .accounts:
-      accountsTab
-    case .settings:
-      settingsTab
-    case .style:
-      styleTab
+  private var detail: some View {
+    switch selection ?? .overview {
+    case .overview:
+      overviewDetail
+    case .general:
+      scrollSection { generalSettingsSection }
+    case .appearance:
+      scrollSection { styleSettingsSection }
+    case .addAccount:
+      addAccountDetail
     case .account(let accountID):
       accountTab(for: accountID)
     }
   }
 
-  private func tabButton(
-    for tab: SettingsTab,
-    title: String,
-    accountID: String? = nil
-  ) -> some View {
-    let isSelected = selectedTab == tab
-
-    return Button {
-      selectedTab = tab
-    } label: {
-      HStack(spacing: 6) {
-        if let accountID {
-          Circle()
-            .fill(tabDotColor(for: accountID))
-            .frame(width: 6, height: 6)
-        }
-
-        Text(title)
-          .font(.system(size: 14, weight: .semibold))
-          .lineLimit(1)
-      }
-      .frame(maxWidth: .infinity, alignment: .center)
-      .padding(.horizontal, 10)
-      .padding(.vertical, 9)
-      .frame(minHeight: 36, maxHeight: 36)
-      .contentShape(Rectangle())
-      .background {
-        if isSelected {
-          TopTabFillShape(cornerRadius: 9)
-            .fill(.background)
-        }
-      }
-      .overlay {
-        TopTabBorderShape(cornerRadius: 9)
-          .stroke(
-            isSelected ? Color.secondary.opacity(0.38) : Color.secondary.opacity(0.24),
-            lineWidth: 1
-          )
-      }
-      .overlay(alignment: .bottom) {
-        if isSelected {
-          Rectangle()
-            .fill(.background)
-            .frame(height: 3)
-            .padding(.horizontal, -1)
-            .offset(y: 1)
-        }
-      }
+  private func scrollSection<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+    ScrollView {
+      content()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(24)
     }
-    .buttonStyle(.plain)
-    .foregroundStyle(isSelected ? Color.primary : Color.secondary.opacity(0.92))
   }
 
-  private var accountsTab: some View {
+  // MARK: - Overview
+
+  private var overviewDetail: some View {
     ScrollView {
-      VStack(alignment: .leading, spacing: 28) {
-        accountsSection
-        detectedSourcesSection
-        actionsSection
+      VStack(alignment: .leading, spacing: 18) {
+        HStack {
+          Text("Overview")
+            .font(.title2.weight(.semibold))
+          Spacer()
+          Button {
+            Task { await model.refreshNow() }
+          } label: {
+            if model.isRefreshing {
+              ProgressView().controlSize(.small)
+            } else {
+              Label("Refresh Now", systemImage: "arrow.clockwise")
+            }
+          }
+          .buttonStyle(.borderedProminent)
+          .disabled(model.isRefreshing)
+        }
+
+        if model.providerAccounts.isEmpty {
+          emptyAccountsCard
+        }
+
+        latestSnapshotCard
+
+        if !model.statusMessage.isEmpty {
+          Text(model.statusMessage)
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+        }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
       .padding(24)
     }
-    .onAppear {
-      if model.detectedCredentials.isEmpty {
-        model.scanForDetectedCredentials()
+  }
+
+  private var emptyAccountsCard: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      Text("No accounts yet")
+        .font(.subheadline.weight(.semibold))
+      Text("Use “Add Account…” in the sidebar to add a provider — enter its credentials or import a login detected on this Mac, then Refresh.")
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .padding(14)
+    .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+  }
+
+  // MARK: - Add account
+
+  private var addAccountDetail: some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: 24) {
+        VStack(alignment: .leading, spacing: 12) {
+          Text("Add Account")
+            .font(.title2.weight(.semibold))
+          Text("Add an account manually, or import one detected on this Mac. You can add the same provider more than once to track multiple subscriptions.")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+          HStack(spacing: 10) {
+            Picker("Provider", selection: $providerToAdd) {
+              ForEach(QuotaProvider.allCases, id: \.self) { provider in
+                Text(provider.displayName).tag(provider)
+              }
+            }
+            .pickerStyle(.menu)
+            .frame(minWidth: 220, alignment: .leading)
+
+            Button("Add Account") {
+              let account = model.addProviderAccount(provider: providerToAdd)
+              selection = .account(account.id)
+            }
+            .buttonStyle(.borderedProminent)
+          }
+        }
+
+        Divider()
+
+        detectedSourcesSection
       }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(24)
     }
   }
 
@@ -191,6 +224,7 @@ struct SettingsView: View {
       Text("Optional shortcut: import a login from a tool you're already signed in to (Claude Code, Codex, GitHub Copilot, OpenCode) instead of pasting a token. Imported accounts are copied into and owned by LLimit.")
         .font(.subheadline)
         .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
 
       if model.detectedCredentials.isEmpty {
         Text("Nothing detected yet. Sign in to a supported tool and tap Scan, or add an account manually above.")
@@ -234,7 +268,7 @@ struct SettingsView: View {
       } else {
         Button("Import") {
           let account = model.importAccount(from: detected)
-          selectedTab = .account(account.id)
+          selection = .account(account.id)
         }
         .buttonStyle(.bordered)
       }
@@ -243,137 +277,12 @@ struct SettingsView: View {
     .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
   }
 
-  private var settingsTab: some View {
-    ScrollView {
-      VStack(alignment: .leading, spacing: 28) {
-        generalSettingsSection
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(24)
-    }
-  }
-
-  private var styleTab: some View {
-    ScrollView {
-      VStack(alignment: .leading, spacing: 28) {
-        styleSettingsSection
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(24)
-    }
-  }
-
-  private var accountsSection: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      Text("Provider Accounts")
-        .font(.title3.weight(.semibold))
-
-      Text("Add each LLM quota source manually. You can add multiple accounts for the same provider, such as two separate OpenAI accounts.")
-        .font(.subheadline)
-        .foregroundStyle(.secondary)
-
-      HStack(spacing: 10) {
-        Picker("Provider", selection: $providerToAdd) {
-          ForEach(QuotaProvider.allCases, id: \.self) { provider in
-            Text(provider.displayName).tag(provider)
-          }
-        }
-        .pickerStyle(.menu)
-        .frame(minWidth: 220, alignment: .leading)
-
-        Button("Add Account") {
-          let account = model.addProviderAccount(provider: providerToAdd)
-          selectedTab = .account(account.id)
-        }
-        .buttonStyle(.borderedProminent)
-      }
-
-      if model.providerAccounts.isEmpty {
-        emptyAccountsCard
-      } else {
-        VStack(alignment: .leading, spacing: 10) {
-          ForEach(model.providerAccounts) { account in
-            accountSummaryCard(account)
-          }
-        }
-      }
-    }
-  }
-
-  private var emptyAccountsCard: some View {
-    VStack(alignment: .leading, spacing: 6) {
-      Text("No accounts configured")
-        .font(.subheadline.weight(.semibold))
-      Text("Add a provider account, enter its credentials, then refresh to populate the widget.")
-        .font(.subheadline)
-        .foregroundStyle(.secondary)
-    }
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .padding(14)
-    .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-  }
-
-  private func accountSummaryCard(_ account: ProviderAccount) -> some View {
-    let status = model.status(for: account.id)
-    let failure = accountFailure(for: account.id)
-    let hasData = accountUsage(for: account.id) != nil
-    let isReady = status?.available == true && failure == nil
-    let detail = accountSummaryDetail(status: status, hasData: hasData, failure: failure)
-
-    return HStack(spacing: 12) {
-      Circle()
-        .fill(account.isEnabled ? (isReady ? Color.green : Color.red) : Color.secondary)
-        .frame(width: 9, height: 9)
-
-      VStack(alignment: .leading, spacing: 3) {
-        Text(account.resolvedDisplayName)
-          .font(.subheadline.weight(.semibold))
-        Text("\(account.provider.displayName), \(detail)")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .lineLimit(2)
-      }
-
-      Spacer()
-
-      Toggle("", isOn: model.accountEnabledBinding(for: account.id))
-        .labelsHidden()
-        .toggleStyle(.switch)
-
-      Button("Configure") {
-        selectedTab = .account(account.id)
-      }
-      .buttonStyle(.bordered)
-
-      Button("Remove", role: .destructive) {
-        model.removeProviderAccount(accountID: account.id)
-      }
-      .buttonStyle(.bordered)
-    }
-    .padding(12)
-    .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-  }
-
-  private func accountSummaryDetail(
-    status: ProviderAccountStatus?,
-    hasData: Bool,
-    failure: ProviderFailure?
-  ) -> String {
-    if let failure {
-      return "Refresh failed: \(failure.message)"
-    }
-
-    if hasData {
-      return "Data loaded"
-    }
-
-    return status?.detail ?? "Not checked"
-  }
+  // MARK: - General
 
   private var generalSettingsSection: some View {
     VStack(alignment: .leading, spacing: 12) {
-      Text("General Settings")
-        .font(.title3.weight(.semibold))
+      Text("General")
+        .font(.title2.weight(.semibold))
 
       VStack(spacing: 0) {
         settingsRow(title: "Refresh interval") {
@@ -458,10 +367,12 @@ struct SettingsView: View {
     }
   }
 
+  // MARK: - Appearance
+
   private var styleSettingsSection: some View {
     VStack(alignment: .leading, spacing: 12) {
-      Text("Widget Style")
-        .font(.title3.weight(.semibold))
+      Text("Appearance")
+        .font(.title2.weight(.semibold))
 
       VStack(spacing: 0) {
         settingsRow(title: "Style preset") {
@@ -560,40 +471,7 @@ struct SettingsView: View {
     }
   }
 
-  private var actionsSection: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      Text("Actions")
-        .font(.title3.weight(.semibold))
-
-      HStack(spacing: 10) {
-        Button("Check Account Configuration") {
-          model.reloadAccountStatuses()
-        }
-        .buttonStyle(.bordered)
-
-        Button {
-          Task { await model.refreshNow() }
-        } label: {
-          if model.isRefreshing {
-            ProgressView()
-              .controlSize(.small)
-          } else {
-            Text("Refresh Now")
-          }
-        }
-        .buttonStyle(.borderedProminent)
-        .disabled(model.isRefreshing)
-      }
-
-      latestSnapshotCard
-
-      if !model.statusMessage.isEmpty {
-        Text(model.statusMessage)
-          .font(.subheadline)
-          .foregroundStyle(.secondary)
-      }
-    }
-  }
+  // MARK: - Latest snapshot card
 
   private var latestSnapshotCard: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -628,11 +506,12 @@ struct SettingsView: View {
             .foregroundStyle(.secondary)
         } else {
           VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(snapshot.providers.prefix(5))) { usage in
+            ForEach(snapshot.providers) { usage in
               HStack {
                 Text(shortName(for: usage))
                   .font(.caption.weight(.semibold))
-                  .frame(width: 82, alignment: .leading)
+                  .frame(width: 110, alignment: .leading)
+                  .lineLimit(1)
 
                 if let metric = usage.metrics.first {
                   Text(metric.label)
@@ -659,7 +538,7 @@ struct SettingsView: View {
         if !snapshot.failures.isEmpty {
           Divider()
           VStack(alignment: .leading, spacing: 6) {
-            ForEach(Array(snapshot.failures.prefix(3))) { failure in
+            ForEach(snapshot.failures) { failure in
               Text("\(failureTitle(for: failure)): \(failure.message)")
                 .font(.caption)
                 .foregroundStyle(.orange)
@@ -676,6 +555,8 @@ struct SettingsView: View {
     .padding(14)
     .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
   }
+
+  // MARK: - Account detail
 
   @ViewBuilder
   private func accountTab(for accountID: String) -> some View {
@@ -861,6 +742,8 @@ struct SettingsView: View {
     }
   }
 
+  // MARK: - Shared row helpers
+
   private func providerStatusRow(
     title: String,
     message: String,
@@ -979,17 +862,16 @@ struct SettingsView: View {
     .foregroundStyle(tint)
   }
 
-  private func tabDotColor(for accountID: String) -> Color {
+  // MARK: - Status helpers
+
+  private func accountStatusColor(for accountID: String) -> Color {
     guard let account = model.account(withID: accountID), account.isEnabled else {
       return .secondary
     }
-
+    if accountFailure(for: accountID) != nil {
+      return .orange
+    }
     return model.isAccountAvailable(accountID) ? .green : .red
-  }
-
-  private func tabTitle(for account: ProviderAccount) -> String {
-    let title = account.resolvedDisplayName
-    return title.count <= 16 ? title : String(title.prefix(15)) + "..."
   }
 
   private func shortName(for usage: ProviderUsage) -> String {
@@ -1016,7 +898,7 @@ struct SettingsView: View {
       return ("Account not found", false)
     }
 
-    guard let snapshot = model.snapshot else {
+    guard model.snapshot != nil else {
       return ("No snapshot available", false)
     }
 
@@ -1040,7 +922,7 @@ struct SettingsView: View {
       return ("Refresh again to match this account", false)
     }
 
-    if snapshot.providers.isEmpty && !snapshot.failures.isEmpty {
+    if let snapshot = model.snapshot, snapshot.providers.isEmpty, !snapshot.failures.isEmpty {
       return ("Latest refresh returned failures only", false)
     }
 
@@ -1120,53 +1002,5 @@ struct SettingsView: View {
     }
 
     return "\(remaining)%"
-  }
-}
-
-private struct TopTabFillShape: Shape {
-  var cornerRadius: CGFloat
-
-  func path(in rect: CGRect) -> Path {
-    let radius = max(0, min(cornerRadius, rect.width / 2, rect.height))
-
-    var path = Path()
-    path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
-    path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + radius))
-    path.addQuadCurve(
-      to: CGPoint(x: rect.minX + radius, y: rect.minY),
-      control: CGPoint(x: rect.minX, y: rect.minY)
-    )
-    path.addLine(to: CGPoint(x: rect.maxX - radius, y: rect.minY))
-    path.addQuadCurve(
-      to: CGPoint(x: rect.maxX, y: rect.minY + radius),
-      control: CGPoint(x: rect.maxX, y: rect.minY)
-    )
-    path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-    path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
-    path.closeSubpath()
-    return path
-  }
-}
-
-private struct TopTabBorderShape: Shape {
-  var cornerRadius: CGFloat
-
-  func path(in rect: CGRect) -> Path {
-    let radius = max(0, min(cornerRadius, rect.width / 2, rect.height))
-
-    var path = Path()
-    path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
-    path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + radius))
-    path.addQuadCurve(
-      to: CGPoint(x: rect.minX + radius, y: rect.minY),
-      control: CGPoint(x: rect.minX, y: rect.minY)
-    )
-    path.addLine(to: CGPoint(x: rect.maxX - radius, y: rect.minY))
-    path.addQuadCurve(
-      to: CGPoint(x: rect.maxX, y: rect.minY + radius),
-      control: CGPoint(x: rect.maxX, y: rect.minY)
-    )
-    path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-    return path
   }
 }
