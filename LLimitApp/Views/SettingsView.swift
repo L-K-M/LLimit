@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import QuotaCore
 
 struct SettingsView: View {
@@ -29,7 +30,17 @@ struct SettingsView: View {
       detail
         .frame(minWidth: 460, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
-    .frame(minWidth: 720, idealWidth: 960, minHeight: 480, idealHeight: 680)
+    .frame(
+      minWidth: 720, idealWidth: 960, maxWidth: .infinity,
+      minHeight: 480, idealHeight: 680, maxHeight: .infinity
+    )
+    .background(WindowAccessor { window in
+      // The SwiftUI `Settings` window ships without the resizable style mask and with
+      // its max size pinned to the content size. Force it open so the window can grow.
+      window.styleMask.insert(.resizable)
+      window.minSize = NSSize(width: 720, height: 480)
+      window.maxSize = NSSize(width: .greatestFiniteMagnitude, height: .greatestFiniteMagnitude)
+    })
     .navigationTitle("LLimit")
     .onAppear {
       if model.detectedCredentials.isEmpty {
@@ -1002,5 +1013,25 @@ struct SettingsView: View {
     }
 
     return "\(remaining)%"
+  }
+}
+
+/// Reaches the AppKit `NSWindow` hosting a SwiftUI view so we can adjust window-level
+/// properties SwiftUI doesn't expose (here: making the Settings window resizable).
+private struct WindowAccessor: NSViewRepresentable {
+  let configure: (NSWindow) -> Void
+
+  func makeNSView(context: Context) -> NSView {
+    let view = NSView()
+    DispatchQueue.main.async { [weak view] in
+      if let window = view?.window { configure(window) }
+    }
+    return view
+  }
+
+  func updateNSView(_ nsView: NSView, context: Context) {
+    DispatchQueue.main.async { [weak nsView] in
+      if let window = nsView?.window { configure(window) }
+    }
   }
 }
