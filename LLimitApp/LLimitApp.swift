@@ -14,6 +14,10 @@ struct LLimitApp: App {
   @StateObject private var model = AppModel()
 
   var body: some Scene {
+    // Menu-bar-only app. The settings window is a normal, freely resizable AppKit
+    // NSWindow opened on demand (see SettingsWindowController) rather than the SwiftUI
+    // `Settings` scene, which forces itself non-resizable, or a `Window` scene, which
+    // would auto-open at launch.
     MenuBarExtra {
       MenuBarContent(model: model)
     } label: {
@@ -23,11 +27,34 @@ struct LLimitApp: App {
         providerStyleSettings: model.providerStyleSettings
       )
     }
+  }
+}
 
-    Settings {
-      SettingsView(model: model)
+/// Hosts `SettingsView` in a standard resizable AppKit window, created on first use and
+/// reused thereafter. Avoids the SwiftUI `Settings` scene (non-resizable) entirely.
+@MainActor
+final class SettingsWindowController {
+  static let shared = SettingsWindowController()
+  private var window: NSWindow?
+
+  func show(model: AppModel) {
+    if window == nil {
+      let hosting = NSHostingController(rootView: SettingsView(model: model))
+      hosting.sizingOptions = []
+
+      let window = NSWindow(contentViewController: hosting)
+      window.title = "LLimit"
+      window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+      window.isReleasedWhenClosed = false
+      window.setContentSize(NSSize(width: 960, height: 680))
+      window.contentMinSize = NSSize(width: 720, height: 480)
+      window.setFrameAutosaveName("LLimitSettingsWindow")
+      window.center()
+      self.window = window
     }
-    .windowResizability(.contentMinSize)
+
+    NSApp.activate(ignoringOtherApps: true)
+    window?.makeKeyAndOrderFront(nil)
   }
 }
 
@@ -103,7 +130,6 @@ private struct MenuBarIcon: View {
 
 private struct MenuBarContent: View {
   @ObservedObject var model: AppModel
-  @Environment(\.openSettings) private var openSettings
 
   private static let relativeTimeFormatter: RelativeDateTimeFormatter = {
     let formatter = RelativeDateTimeFormatter()
@@ -168,8 +194,7 @@ private struct MenuBarContent: View {
     .disabled(model.isRefreshing)
 
     Button("Open Settings") {
-      openSettings()
-      NSApplication.shared.activate(ignoringOtherApps: true)
+      SettingsWindowController.shared.show(model: model)
     }
     .keyboardShortcut(",", modifiers: .command)
 
