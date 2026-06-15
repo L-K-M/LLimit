@@ -90,7 +90,6 @@ targets:
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
-          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).LLimitWidgetBundle
 
 schemes:
   LLimitApp:
