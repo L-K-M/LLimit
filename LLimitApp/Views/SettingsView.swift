@@ -39,7 +39,7 @@ struct SettingsView: View {
       // its max size pinned to the content size. Force it open so the window can grow.
       window.styleMask.insert(.resizable)
       window.minSize = NSSize(width: 720, height: 480)
-      window.maxSize = NSSize(width: .greatestFiniteMagnitude, height: .greatestFiniteMagnitude)
+      window.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
     })
     .navigationTitle("LLimit")
     .onAppear {
