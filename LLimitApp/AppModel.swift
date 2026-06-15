@@ -318,45 +318,72 @@ final class AppModel: ObservableObject {
 
   #if canImport(Security)
   private static func readClaudeKeychainToken() -> (token: String?, diagnostic: String) {
-    let query: [String: Any] = [
+    // 1. Enumerate generic-password *attributes* (no data) — this does NOT trigger an
+    //    ACL permission prompt, and lets us find Claude's item even if it's stored
+    //    under a service name other than the documented "Claude Code-credentials"
+    //    (e.g. a newer CLI or the desktop app variant).
+    let listQuery: [String: Any] = [
       kSecClass as String: kSecClassGenericPassword,
-      kSecAttrService as String: "Claude Code-credentials",
-      kSecReturnData as String: true,
-      kSecMatchLimit as String: kSecMatchLimitOne
+      kSecMatchLimit as String: kSecMatchLimitAll,
+      kSecReturnAttributes as String: true
     ]
+    var listResult: CFTypeRef?
+    let listStatus = SecItemCopyMatching(listQuery as CFDictionary, &listResult)
 
-    var item: CFTypeRef?
-    let status = SecItemCopyMatching(query as CFDictionary, &item)
+    var services: [String] = []
+    if listStatus == errSecSuccess, let items = listResult as? [[String: Any]] {
+      services = items.compactMap { $0[kSecAttrService as String] as? String }
+    }
+    let claudeServices = services.filter { $0.lowercased().contains("claude") }
 
-    guard status == errSecSuccess else {
-      let message = (SecCopyErrorMessageString(status, nil) as String?) ?? "OSStatus \(status)"
-      let hint: String
-      switch status {
-      case errSecItemNotFound:
-        hint = "no item (sign in to Claude Code, or export to ~/.claude/.credentials.json)"
-      case errSecInteractionNotAllowed:
-        hint = "click Allow on the Keychain prompt"
-      default:
-        hint = message
+    // Try the documented service first, then any service mentioning "claude".
+    var candidates: [String] = ["Claude Code-credentials"]
+    for service in claudeServices where !candidates.contains(service) {
+      candidates.append(service)
+    }
+
+    for service in candidates {
+      let readQuery: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: service,
+        kSecReturnData as String: true,
+        kSecMatchLimit as String: kSecMatchLimitOne
+      ]
+      var data: CFTypeRef?
+      let status = SecItemCopyMatching(readQuery as CFDictionary, &data)
+
+      if status == errSecSuccess, let payload = data as? Data, let token = claudeToken(fromKeychainData: payload) {
+        return (token, "found token in “\(service)”")
       }
-      return (nil, "\(hint) [\(status)]")
+      if status == errSecInteractionNotAllowed {
+        return (nil, "“\(service)” exists but needs Keychain permission — click Allow, then Scan again [\(status)]")
+      }
     }
 
-    guard
-      let data = item as? Data,
-      let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-    else {
-      return (nil, "item found but not readable JSON")
+    if claudeServices.isEmpty {
+      let summary = services.isEmpty
+        ? "no generic-password items were visible"
+        : "scanned \(services.count) keychain items, none mention ‘claude’"
+      return (nil, "no Claude item in Keychain (\(summary)). Sign in with `claude`, or run: security find-generic-password -s 'Claude Code-credentials' -w > ~/.claude/.credentials.json")
+    }
+    return (nil, "Claude Keychain item(s) found (\(claudeServices.joined(separator: ", "))) but no readable token")
+  }
+
+  /// Claude Code stores JSON (`{ "claudeAiOauth": { "accessToken": ... } }`), but be
+  /// lenient: accept a flat object or a raw token string too.
+  private static func claudeToken(fromKeychainData data: Data) -> String? {
+    if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+      let oauth = (object["claudeAiOauth"] as? [String: Any]) ?? object
+      let token = ((oauth["accessToken"] as? String) ?? (oauth["access_token"] as? String))?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+      return (token?.isEmpty == false) ? token : nil
     }
 
-    let oauth = (object["claudeAiOauth"] as? [String: Any]) ?? object
-    let token = ((oauth["accessToken"] as? String) ?? (oauth["access_token"] as? String))?
-      .trimmingCharacters(in: .whitespacesAndNewlines)
-
-    if let token, !token.isEmpty {
-      return (token, "found token")
+    let raw = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+    if let raw, raw.count > 20, !raw.contains(" ") {
+      return raw
     }
-    return (nil, "item found but no access token field")
+    return nil
   }
   #endif
 
