@@ -5,18 +5,18 @@ set -euo pipefail
 #
 # Usage:
 #   scripts/build.sh [--version X.Y.Z] [--build N] [--configuration Release]
-#                    [--output DIR] [--no-dmg]
+#                    [--output DIR] [--no-dmg] [--adhoc]
 #
-# Signing (all optional, via environment variables):
-#   DEVELOPMENT_TEAM        Apple Developer team id (e.g. ABCDE12345)
-#   CODE_SIGN_IDENTITY      e.g. "Developer ID Application: Your Name (ABCDE12345)"
-#       -> when both are set, a Developer ID-signed, hardened-runtime build is made.
-#       -> otherwise an ad-hoc signed build is produced (runs locally only).
-#
-# Notarization (optional — requires a Developer ID-signed build + these vars):
-#   NOTARY_APPLE_ID         Apple ID email
-#   NOTARY_PASSWORD         app-specific password (https://appleid.apple.com)
-#   NOTARY_TEAM_ID          team id for notarization (defaults to DEVELOPMENT_TEAM)
+# Signing modes (auto-selected):
+#   dev (default)   Local development signing with the team in the committed project.
+#                   Applies the App Group entitlement, so the WIDGET registers and can
+#                   read data. Runs on this Mac only. This is what you want for widgets.
+#   developer-id    Set DEVELOPMENT_TEAM + CODE_SIGN_IDENTITY ("Developer ID
+#                   Application: …") for a hardened-runtime, distributable, notarizable
+#                   build. Add NOTARY_APPLE_ID + NOTARY_PASSWORD (+ NOTARY_TEAM_ID) to
+#                   also notarize and staple.
+#   adhoc           --adhoc (or no team in the project): unsigned + ad-hoc signed. No
+#                   entitlements, so the widget will NOT work — quick smoke test only.
 #
 # Output: dist/LLimit.app, dist/LLimit-<version>.zip, dist/LLimit-<version>.dmg
 
@@ -32,6 +32,7 @@ DERIVED="$ROOT/build"
 VERSION=""
 BUILD_NUMBER=""
 MAKE_DMG=1
+FORCE_ADHOC=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -40,7 +41,8 @@ while [[ $# -gt 0 ]]; do
     --configuration) CONFIGURATION="$2"; shift 2 ;;
     --output) OUTPUT_DIR="$2"; shift 2 ;;
     --no-dmg) MAKE_DMG=0; shift ;;
-    -h|--help) sed -n '3,30p' "$0"; exit 0 ;;
+    --adhoc) FORCE_ADHOC=1; shift ;;
+    -h|--help) sed -n '3,34p' "$0"; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -59,25 +61,54 @@ if [[ -z "$VERSION" ]]; then
 fi
 VERSION="${VERSION:-0.0.0}"
 
-# Assemble code-signing settings.
-SIGNED=0
+# The signing team baked into the committed project (used for local dev signing).
+DEV_TEAM="${DEVELOPMENT_TEAM:-$(awk -F'= ' '/DEVELOPMENT_TEAM = /{gsub(/[ ;]/,"",$2); if ($2 != "") {print $2; exit}}' "$PROJECT/project.pbxproj")}"
+
+# Pick a signing mode:
+#   developer-id  Distribution build (Developer ID + hardened runtime, notarizable).
+#                 Used when CODE_SIGN_IDENTITY + DEVELOPMENT_TEAM are both exported.
+#   dev           Local development signing with the project's Apple Development team.
+#                 IMPORTANT: this applies the app's entitlements (App Group), which is
+#                 what creates the shared container the widget reads AND lets macOS
+#                 register the widget extension. Default when a team is available.
+#   adhoc         Unsigned build, ad-hoc signed afterwards. No entitlements, so the
+#                 WIDGET WILL NOT appear/work — use only for a quick smoke test or on a
+#                 machine without a signing certificate (--adhoc, or no team available).
+MODE="dev"
+SIGN_FLAGS=()
+EXTRA_FLAGS=()
 if [[ -n "${CODE_SIGN_IDENTITY:-}" && -n "${DEVELOPMENT_TEAM:-}" ]]; then
-  echo "==> Signing with Developer ID: ${CODE_SIGN_IDENTITY}"
-  SIGN_FLAGS=(
-    "CODE_SIGN_STYLE=Manual"
-    "CODE_SIGN_IDENTITY=${CODE_SIGN_IDENTITY}"
-    "DEVELOPMENT_TEAM=${DEVELOPMENT_TEAM}"
-    "ENABLE_HARDENED_RUNTIME=YES"
-  )
-  SIGNED=1
-else
-  echo "==> No Developer ID provided — building unsigned, then ad-hoc signing locally"
-  # Build with signing DISABLED rather than forcing an empty team: the app-group
-  # entitlement ($(TeamIdentifierPrefix)group.ch.lkmc.llimit) makes signing with a
-  # blank team demand a provisioning profile and fail. We ad-hoc sign the finished
-  # bundle below instead — the same recipe .github/workflows/release.yml uses.
-  SIGN_FLAGS=("CODE_SIGNING_ALLOWED=NO")
+  MODE="developer-id"
+elif [[ "$FORCE_ADHOC" -eq 1 || -z "$DEV_TEAM" ]]; then
+  MODE="adhoc"
 fi
+
+case "$MODE" in
+  developer-id)
+    echo "==> Signing with Developer ID: ${CODE_SIGN_IDENTITY}"
+    SIGN_FLAGS=(
+      "CODE_SIGN_STYLE=Manual"
+      "CODE_SIGN_IDENTITY=${CODE_SIGN_IDENTITY}"
+      "DEVELOPMENT_TEAM=${DEVELOPMENT_TEAM}"
+      "ENABLE_HARDENED_RUNTIME=YES"
+    )
+    ;;
+  dev)
+    echo "==> Local development signing (team ${DEV_TEAM}) — widget-capable"
+    # Automatic signing with the project's team applies the entitlements (App Group),
+    # so the widget registers and can read data. -allowProvisioningUpdates lets Xcode
+    # create/refresh the App ID + App Group profiles on first run.
+    SIGN_FLAGS=(
+      "CODE_SIGN_STYLE=Automatic"
+      "DEVELOPMENT_TEAM=${DEV_TEAM}"
+    )
+    EXTRA_FLAGS=(-allowProvisioningUpdates)
+    ;;
+  adhoc)
+    echo "==> No team available — building unsigned, then ad-hoc signing (widget will NOT work)"
+    SIGN_FLAGS=("CODE_SIGNING_ALLOWED=NO")
+    ;;
+esac
 
 echo "==> Building LLimit ${VERSION} (${CONFIGURATION})"
 xcodebuild \
@@ -85,6 +116,7 @@ xcodebuild \
   -scheme "$SCHEME" \
   -configuration "$CONFIGURATION" \
   -derivedDataPath "$DERIVED" \
+  ${EXTRA_FLAGS[@]+"${EXTRA_FLAGS[@]}"} \
   MARKETING_VERSION="$VERSION" \
   ${BUILD_NUMBER:+CURRENT_PROJECT_VERSION="$BUILD_NUMBER"} \
   "${SIGN_FLAGS[@]}" \
@@ -102,16 +134,16 @@ rm -rf "$OUTPUT_DIR/LLimit.app"
 cp -R "$APP_SRC" "$OUTPUT_DIR/LLimit.app"
 APP="$OUTPUT_DIR/LLimit.app"
 
-# Ad-hoc sign the assembled bundle when not building with a Developer ID (xcodebuild
-# produced it unsigned). --deep signs the embedded widget extension and frameworks
-# too; identity "-" is ad-hoc. Same step as .github/workflows/release.yml.
-if [[ "$SIGNED" -eq 0 ]]; then
+# Ad-hoc sign the assembled bundle in adhoc mode (xcodebuild produced it unsigned).
+# --deep signs the embedded widget extension and frameworks too; identity "-" is
+# ad-hoc. The dev/developer-id modes are already signed (with entitlements) by xcodebuild.
+if [[ "$MODE" == "adhoc" ]]; then
   echo "==> Ad-hoc signing $APP"
   codesign --force --deep --sign - "$APP"
 fi
 
-# Notarize + staple when requested and possible.
-if [[ "$SIGNED" -eq 1 && -n "${NOTARY_APPLE_ID:-}" && -n "${NOTARY_PASSWORD:-}" ]]; then
+# Notarize + staple when requested and possible (Developer ID builds only).
+if [[ "$MODE" == "developer-id" && -n "${NOTARY_APPLE_ID:-}" && -n "${NOTARY_PASSWORD:-}" ]]; then
   TEAM_ID="${NOTARY_TEAM_ID:-${DEVELOPMENT_TEAM}}"
   echo "==> Notarizing with notarytool (team ${TEAM_ID})"
   NOTARY_ZIP="$OUTPUT_DIR/notarize.zip"
@@ -142,9 +174,18 @@ fi
 echo ""
 echo "Done. Artifacts in $OUTPUT_DIR:"
 ls -1 "$OUTPUT_DIR"
-if [[ "$SIGNED" -eq 0 ]]; then
-  echo ""
-  echo "NOTE: ad-hoc build. macOS Gatekeeper will block it when downloaded."
-  echo "      Run locally with:  xattr -dr com.apple.quarantine '$APP'"
-  echo "      For distribution, set DEVELOPMENT_TEAM + CODE_SIGN_IDENTITY (+ NOTARY_*)."
-fi
+case "$MODE" in
+  dev)
+    echo ""
+    echo "NOTE: locally signed (team ${DEV_TEAM}) with entitlements — widgets work on THIS Mac."
+    echo "      Move it to /Applications and launch once so the widget appears in the gallery:"
+    echo "        cp -R '$APP' /Applications/ && open /Applications/LLimit.app"
+    echo "      Not notarized, so it won't run on other Macs (use a Developer ID build for that)."
+    ;;
+  adhoc)
+    echo ""
+    echo "NOTE: ad-hoc build — NO entitlements, so the widget will not register and the app"
+    echo "      can't read its App Group container. Use a signing team (drop --adhoc) for widgets."
+    echo "      Gatekeeper will block it when downloaded: xattr -dr com.apple.quarantine '$APP'"
+    ;;
+esac
