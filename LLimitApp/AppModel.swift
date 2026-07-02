@@ -46,6 +46,7 @@ final class AppModel: ObservableObject {
   private var cachedAppGroupSnapshotStore: SnapshotStore?
   private var cachedAppGroupHistoryStore: QuotaHistoryStore?
   private var autoRefreshTask: Task<Void, Never>?
+  private var widgetReloadTask: Task<Void, Never>?
   private var hasBootstrapped = false
 
   init() {
@@ -1137,7 +1138,18 @@ final class AppModel: ObservableObject {
     return false
   }
 
+  /// Coalesces widget reloads. `saveConfiguration()` runs on every keystroke in Settings
+  /// (each edit to a name/credential field), and WidgetKit budgets `reloadAllTimelines()`
+  /// aggressively — hammering it during typing gets later, meaningful reloads dropped and
+  /// leaves the widgets stuck on stale data. Debouncing means a burst of edits triggers a
+  /// single reload once the user pauses.
   private func reloadWidgetTimelines() {
-    WidgetCenter.shared.reloadAllTimelines()
+    widgetReloadTask?.cancel()
+    widgetReloadTask = Task { [weak self] in
+      try? await Task.sleep(nanoseconds: 800_000_000)
+      if Task.isCancelled { return }
+      WidgetCenter.shared.reloadAllTimelines()
+      self?.widgetReloadTask = nil
+    }
   }
 }
