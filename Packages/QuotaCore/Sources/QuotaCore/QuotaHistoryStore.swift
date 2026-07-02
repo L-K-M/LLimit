@@ -11,7 +11,9 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     self.decoder = JSONDecoder()
     encoder.dateEncodingStrategy = .iso8601
     decoder.dateDecodingStrategy = .iso8601
-    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    // Compact (not pretty-printed): the widget extension reads this file on every
+    // timeline refresh under a tight memory budget, so keep it as small as possible.
+    encoder.outputFormatting = []
   }
 
   public func load() throws -> [QuotaSnapshot] {
@@ -21,6 +23,21 @@ public final class QuotaHistoryStore: @unchecked Sendable {
 
     let data = try Data(contentsOf: fileURL)
     return try decoder.decode([QuotaSnapshot].self, from: data)
+  }
+
+  /// Loads only the snapshots within the last `days`, capped to the newest `maxEntries`.
+  /// The widget uses this so a large history file can't exhaust the extension's memory
+  /// budget while rendering the (at most 30-day) trend chart.
+  public func loadRecent(days: Int, maxEntries: Int = 3_000, now: Date = Date()) throws -> [QuotaSnapshot] {
+    let cutoff = now.addingTimeInterval(-Double(max(1, days)) * 86_400)
+    let recent = try load()
+      .filter { $0.generatedAt >= cutoff }
+      .sorted { $0.generatedAt < $1.generatedAt }
+
+    if recent.count > max(1, maxEntries) {
+      return Array(recent.suffix(max(1, maxEntries)))
+    }
+    return recent
   }
 
   public func save(_ snapshots: [QuotaSnapshot]) throws {
@@ -37,8 +54,8 @@ public final class QuotaHistoryStore: @unchecked Sendable {
 
   public func append(
     _ snapshot: QuotaSnapshot,
-    keepDays: Int = 120,
-    maxEntries: Int = 6_000
+    keepDays: Int = 45,
+    maxEntries: Int = 3_000
   ) throws {
     var history = try load()
     history.append(snapshot)

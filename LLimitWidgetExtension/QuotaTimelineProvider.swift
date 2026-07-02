@@ -78,7 +78,7 @@ struct QuotaTimelineProvider: TimelineProvider {
   private func makeStoredEntry(now: Date) -> QuotaEntry {
     let settings = loadSettings()
     let snapshot = loadSnapshot()
-    let history = loadHistory(fallbackSnapshot: snapshot)
+    let history = loadHistory(windowDays: max(1, settings.widgetVisibility.trendHistoryDays), fallbackSnapshot: snapshot)
     let refreshInterval = max(15, settings.refreshIntervalMinutes)
     return QuotaEntry(
       date: now,
@@ -111,11 +111,13 @@ struct QuotaTimelineProvider: TimelineProvider {
     }
   }
 
-  private func loadHistory(fallbackSnapshot: QuotaSnapshot?) -> [QuotaSnapshot] {
+  private func loadHistory(windowDays: Int, fallbackSnapshot: QuotaSnapshot?) -> [QuotaSnapshot] {
     do {
       let fileURL = try SharedPaths.historyFileURL()
       let store = QuotaHistoryStore(fileURL: fileURL)
-      let history = try store.load().sorted { $0.generatedAt < $1.generatedAt }
+      // Only keep the trend window (plus a one-day buffer) so a large history file
+      // can't push the widget extension over its memory budget.
+      let history = try store.loadRecent(days: windowDays + 1)
 
       if !history.isEmpty {
         return history
