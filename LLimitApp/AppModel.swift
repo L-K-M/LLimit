@@ -146,6 +146,7 @@ final class AppModel: ObservableObject {
     defer { isRefreshing = false }
 
     await refreshExpiringChatGPTTokens()
+    refreshLiveClaudeTokens()
     reloadAccountStatuses()
 
     let enabledConfigs = runtimeConfigurations().filter { configuration in
@@ -424,6 +425,57 @@ final class AppModel: ObservableObject {
     if didChange {
       saveConfiguration()
     }
+  }
+
+  /// Claude Code refreshes its own OAuth token (in `~/.claude/.credentials.json` and the
+  /// macOS Keychain) roughly every 8 hours. LLimit imports a one-time *copy* of that token,
+  /// so the copy goes stale and every fetch 401s ("Sign in again with Claude Code") within
+  /// hours — even though Claude Code itself keeps working. Before refreshing, re-read the
+  /// user's *live* local Claude token and adopt it for enabled Claude accounts if it changed.
+  ///
+  /// LLimit performs no OAuth exchange of its own here: it simply re-reads a credential the
+  /// user already has locally. To avoid clobbering a hand-entered token, only accounts whose
+  /// stored token is empty or is itself a Claude Code OAuth token (`sk-ant-oat…`) are updated.
+  private func refreshLiveClaudeTokens() {
+    let claudeAccountIDs = providerAccounts
+      .filter { $0.provider == .anthropic && $0.isEnabled }
+      .map(\.id)
+    guard !claudeAccountIDs.isEmpty else { return }
+
+    guard let liveToken = Self.currentLocalClaudeToken(), !liveToken.isEmpty else { return }
+
+    var didChange = false
+    for accountID in claudeAccountIDs {
+      guard let index = providerAccounts.firstIndex(where: { $0.id == accountID }) else { continue }
+      let stored = providerAccounts[index].credentials[CredentialField.anthropicAccessToken] ?? ""
+      let isClaudeCodeToken = stored.isEmpty || stored.hasPrefix("sk-ant-oat")
+      if isClaudeCodeToken, stored != liveToken {
+        providerAccounts[index].credentials[CredentialField.anthropicAccessToken] = liveToken
+        didChange = true
+      }
+    }
+
+    if didChange {
+      saveConfiguration()
+    }
+  }
+
+  /// The freshest Claude access token available locally: file sources first (cheap, no
+  /// Keychain prompt), then the macOS Keychain that Claude Code keeps up to date.
+  private static func currentLocalClaudeToken() -> String? {
+    if let fileToken = CredentialDiscovery().discover().credentials
+      .first(where: { $0.provider == .anthropic })?
+      .credentials[CredentialField.anthropicAccessToken],
+      !fileToken.isEmpty
+    {
+      return fileToken
+    }
+
+    #if canImport(Security)
+    return readClaudeKeychainToken().token
+    #else
+    return nil
+    #endif
   }
 
   func account(withID accountID: String) -> ProviderAccount? {
