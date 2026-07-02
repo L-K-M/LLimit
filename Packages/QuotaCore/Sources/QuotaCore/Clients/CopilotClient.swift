@@ -90,7 +90,7 @@ public struct CopilotClient: QuotaProviderClient {
       $0.sku == "Copilot Premium Request" || $0.sku.localizedCaseInsensitiveContains("Premium")
     }
 
-    let totalUsed = premiumItems.reduce(0) { $0 + $1.grossQuantity }
+    let totalUsed = premiumItems.reduce(0.0) { $0 + $1.grossQuantity }
     let inferredLimit = premiumItems.compactMap(\.limit).max()
     let limit = tier.flatMap { Self.tierLimits[$0] } ?? inferredLimit
 
@@ -98,8 +98,8 @@ public struct CopilotClient: QuotaProviderClient {
     let totalDisplay: String?
 
     if let limit, limit > 0 {
-      let remaining = max(0, limit - totalUsed)
-      remainingPercent = clampPercent(Int((Double(remaining) / Double(limit) * 100.0).rounded()))
+      let remaining = max(0, Double(limit) - totalUsed)
+      remainingPercent = clampPercent(Int((remaining / Double(limit) * 100.0).rounded()))
       totalDisplay = String(limit)
     } else {
       remainingPercent = nil
@@ -112,7 +112,7 @@ public struct CopilotClient: QuotaProviderClient {
       id: "premium",
       label: "Premium requests",
       remainingPercent: remainingPercent,
-      usedDisplay: String(totalUsed),
+      usedDisplay: String(Int(totalUsed.rounded())),
       totalDisplay: totalDisplay,
       resetAt: resetAt,
       resetIn: resetAt.map { formatResetCountdown(to: $0, now: now) }
@@ -256,8 +256,8 @@ public struct CopilotClient: QuotaProviderClient {
       id: id,
       label: label,
       remainingPercent: remainingPercent,
-      usedDisplay: String(used),
-      totalDisplay: String(quota.entitlement),
+      usedDisplay: String(Int(used.rounded())),
+      totalDisplay: String(Int(quota.entitlement.rounded())),
       resetAt: resetAt,
       resetIn: resetIn
     )
@@ -361,8 +361,11 @@ private struct BillingUsageResponse: Decodable {
     let sku: String
     let model: String?
     let unitType: String
-    let grossQuantity: Int
-    let netQuantity: Int
+    // Premium requests bill in fractional multiples (e.g. 0.25x / 0.33x models),
+    // so the GitHub billing API types these as JSON numbers, not integers. Decoding
+    // them as Int throws once any fractional usage has accrued.
+    let grossQuantity: Double
+    let netQuantity: Double
     let limit: Int?
   }
 
@@ -408,14 +411,18 @@ private struct InternalQuotaSnapshots: Decodable {
 }
 
 private struct InternalQuotaDetail: Decodable {
-  let entitlement: Int
-  let overageCount: Int
-  let overagePermitted: Bool
+  // Copilot premium-request accounting is fractional, so quota_remaining / remaining
+  // come back as JSON numbers like 1327.56. These MUST be Double or the whole
+  // copilot_internal/user fetch throws "does not fit in Int" for any active account.
+  let entitlement: Double
   let percentRemaining: Double
-  let quotaID: String
-  let quotaRemaining: Int
-  let remaining: Int
+  let remaining: Double
   let unlimited: Bool
+  // Not used for display; kept optional purely so schema drift can't fail the decode.
+  let overageCount: Double?
+  let overagePermitted: Bool?
+  let quotaID: String?
+  let quotaRemaining: Double?
 
   enum CodingKeys: String, CodingKey {
     case entitlement
