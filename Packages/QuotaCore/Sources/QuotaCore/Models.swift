@@ -1120,7 +1120,7 @@ public struct AppSettings: Codable, Hashable, Sendable {
     refreshIntervalMinutes = (try? container.decodeIfPresent(Int.self, forKey: .refreshIntervalMinutes)) ?? 30
 
     accounts = AppSettings.normalizedAccounts(
-      (try? container.decodeIfPresent([ProviderAccount].self, forKey: .accounts)) ?? []
+      try container.decodeIfPresent([ProviderAccount].self, forKey: .accounts) ?? []
     )
 
     widgetStyle = (try? container.decodeIfPresent(WidgetStyleSettings.self, forKey: .widgetStyle)) ?? .default
