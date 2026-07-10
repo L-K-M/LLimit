@@ -10,10 +10,12 @@ enum SharedConstants {
   static let settingsFileName = "quota-settings.json"
   static let widgetKind = "LLimitWidget"
   static let trendWidgetKind = "ch.lkmc.llimit.widget.trend"
+  static let providerWidgetKind = "ch.lkmc.llimit.widget.provider-quota"
 
   static let allWidgetKinds: [String] = [
     widgetKind,
-    trendWidgetKind
+    trendWidgetKind,
+    providerWidgetKind
   ]
 }
 
