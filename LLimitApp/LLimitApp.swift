@@ -261,11 +261,14 @@ private struct MenuBarContent: View {
   }
 
   private func secondaryLine(for metric: UsageMetric) -> String? {
-    guard let resetIn = metric.resetIn, !resetIn.isEmpty else {
+    guard let resetCountdown = metric.resetCountdown(at: Date()) else {
       return nil
     }
 
-    return "Resets in \(resetIn)"
+    if resetCountdown == "reset" {
+      return "Reset due"
+    }
+    return "Resets in \(resetCountdown)"
   }
 
   private func relativeTimeString(from date: Date) -> String {

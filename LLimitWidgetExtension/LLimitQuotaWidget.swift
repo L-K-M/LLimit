@@ -909,65 +909,11 @@ private func compactProviderName(for usage: ProviderUsage) -> String {
   return compactProviderName(for: usage.provider)
 }
 
-private func resetSummaries(for metrics: [UsageMetric]) -> [String] {
+private func resetSummaries(for metrics: [UsageMetric], at date: Date) -> [String] {
   metrics.compactMap { metric in
-    if let resetIn = metric.resetIn?.trimmingCharacters(in: .whitespacesAndNewlines), !resetIn.isEmpty {
-      let normalized = normalizedResetSummary(resetIn)
-      return normalized.isEmpty ? nil : normalized
-    }
-
-    if let resetAt = metric.resetAt {
-      let relative = relativeResetSummary(until: resetAt)
-      return relative.isEmpty ? nil : relative
-    }
-
-    return nil
+    guard let summary = metric.resetCountdown(at: date) else { return nil }
+    return summary == "reset" ? "<1m" : summary
   }
-}
-
-private func normalizedResetSummary(_ rawValue: String) -> String {
-  let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-  let lowercased = value.lowercased()
-
-  if lowercased == "reset" {
-    return "<1m"
-  }
-
-  if lowercased.hasPrefix("reset in ") {
-    return String(value.dropFirst(9)).trimmingCharacters(in: .whitespacesAndNewlines)
-  }
-
-  if lowercased.hasPrefix("in ") {
-    return String(value.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines)
-  }
-
-  if lowercased.hasPrefix("reset ") {
-    return String(value.dropFirst(6)).trimmingCharacters(in: .whitespacesAndNewlines)
-  }
-
-  return value
-}
-
-private func relativeResetSummary(until date: Date) -> String {
-  let seconds = max(0, Int(date.timeIntervalSinceNow))
-  if seconds < 60 {
-    return "<1m"
-  }
-
-  let totalHours = seconds / 3600
-  let minutes = (seconds % 3600) / 60
-
-  if totalHours >= 24 {
-    let days = totalHours / 24
-    let hours = totalHours % 24
-    return hours > 0 ? "\(days)d \(hours)h" : "\(days)d"
-  }
-
-  if totalHours > 0 {
-    return minutes > 0 ? "\(totalHours)h \(minutes)m" : "\(totalHours)h"
-  }
-
-  return "\(minutes)m"
 }
 
 private func percentText(for metric: UsageMetric?) -> String {
