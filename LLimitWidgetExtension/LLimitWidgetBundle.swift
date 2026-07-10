@@ -6,5 +6,6 @@ struct LLimitWidgetBundle: WidgetBundle {
   var body: some Widget {
     LLimitWidget()
     QuotaTrendChartWidget()
+    ProviderQuotaWidget()
   }
 }
