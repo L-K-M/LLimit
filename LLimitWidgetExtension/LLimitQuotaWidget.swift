@@ -6,7 +6,7 @@ struct LLimitWidget: Widget {
   private let kind = SharedConstants.widgetKind
 
   var body: some WidgetConfiguration {
-    StaticConfiguration(kind: kind, provider: QuotaTimelineProvider()) { entry in
+    StaticConfiguration(kind: kind, provider: QuotaTimelineProvider(includesHistory: false)) { entry in
       DashboardWidgetRootView(entry: entry)
         .quotaWidgetBackground(entry: entry, kind: .dashboard)
     }
@@ -20,7 +20,7 @@ struct QuotaTrendChartWidget: Widget {
   private let kind = SharedConstants.trendWidgetKind
 
   var body: some WidgetConfiguration {
-    StaticConfiguration(kind: kind, provider: QuotaTimelineProvider()) { entry in
+    StaticConfiguration(kind: kind, provider: QuotaTimelineProvider(includesHistory: true)) { entry in
       TrendLineChartWidgetView(entry: entry)
         .quotaWidgetBackground(entry: entry, kind: .trend)
     }

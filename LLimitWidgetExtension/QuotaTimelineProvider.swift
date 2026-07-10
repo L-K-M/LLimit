@@ -11,12 +11,13 @@ struct QuotaEntry: TimelineEntry {
 }
 
 struct QuotaTimelineProvider: TimelineProvider {
+  let includesHistory: Bool
 
   func placeholder(in context: Context) -> QuotaEntry {
     QuotaEntry(
       date: Date(),
       snapshot: SampleSnapshotFactory.make(now: Date()),
-      history: SampleSnapshotFactory.makeHistory(now: Date()),
+      history: includesHistory ? SampleSnapshotFactory.makeHistory(now: Date()) : [],
       refreshIntervalMinutes: 30,
       settings: .default
     )
@@ -28,7 +29,7 @@ struct QuotaTimelineProvider: TimelineProvider {
         QuotaEntry(
           date: Date(),
           snapshot: SampleSnapshotFactory.make(now: Date()),
-          history: SampleSnapshotFactory.makeHistory(now: Date()),
+          history: includesHistory ? SampleSnapshotFactory.makeHistory(now: Date()) : [],
           refreshIntervalMinutes: 30,
           settings: .default
         )
@@ -43,42 +44,17 @@ struct QuotaTimelineProvider: TimelineProvider {
     let now = Date()
     let entry = makeStoredEntry(now: now)
     let refreshMinutes = max(15, entry.refreshIntervalMinutes)
-    let refreshIntervalSeconds = TimeInterval(refreshMinutes * 60)
-    let entrySpacingSeconds: TimeInterval = 5 * 60
-
-    var entries: [QuotaEntry] = []
-    var offset: TimeInterval = 0
-    while offset < refreshIntervalSeconds {
-      let entryDate = now.addingTimeInterval(offset)
-      entries.append(QuotaEntry(
-        date: entryDate,
-        snapshot: entry.snapshot,
-        history: entry.history,
-        refreshIntervalMinutes: entry.refreshIntervalMinutes,
-        settings: entry.settings
-      ))
-      offset += entrySpacingSeconds
-    }
-
-    // Final entry at exactly the next refresh boundary
+    let refreshIntervalSeconds = TimeInterval(refreshMinutes) * 60
     let nextRefreshDate = now.addingTimeInterval(refreshIntervalSeconds)
-    if let lastEntry = entries.last, lastEntry.date < nextRefreshDate {
-      entries.append(QuotaEntry(
-        date: nextRefreshDate,
-        snapshot: entry.snapshot,
-        history: entry.history,
-        refreshIntervalMinutes: entry.refreshIntervalMinutes,
-        settings: entry.settings
-      ))
-    }
-
-    completion(Timeline(entries: entries, policy: .atEnd))
+    completion(Timeline(entries: [entry], policy: .after(nextRefreshDate)))
   }
 
   private func makeStoredEntry(now: Date) -> QuotaEntry {
     let settings = loadSettings()
     let snapshot = loadSnapshot()
-    let history = loadHistory(windowDays: max(1, settings.widgetVisibility.trendHistoryDays), fallbackSnapshot: snapshot)
+    let history = includesHistory
+      ? loadHistory(windowDays: max(1, settings.widgetVisibility.trendHistoryDays), fallbackSnapshot: snapshot)
+      : []
     let refreshInterval = max(15, settings.refreshIntervalMinutes)
     return QuotaEntry(
       date: now,
