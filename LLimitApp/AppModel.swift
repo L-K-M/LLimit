@@ -845,11 +845,21 @@ final class AppModel: ObservableObject {
   }
 
   private func nextDisplayName(for provider: QuotaProvider) -> String {
-    let existingCount = providerAccounts.filter { $0.provider == provider }.count
-    if existingCount == 0 {
-      return provider.displayName
+    let existingNames = Set(
+      providerAccounts
+        .filter { $0.provider == provider }
+        .map { $0.resolvedDisplayName.lowercased() }
+    )
+    let baseName = provider.displayName
+    if !existingNames.contains(baseName.lowercased()) {
+      return baseName
     }
-    return "\(provider.displayName) \(existingCount + 1)"
+
+    var suffix = 2
+    while existingNames.contains("\(baseName) \(suffix)".lowercased()) {
+      suffix += 1
+    }
+    return "\(baseName) \(suffix)"
   }
 
   private func emptyCredentials(for provider: QuotaProvider) -> [String: String] {
