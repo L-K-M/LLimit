@@ -79,4 +79,39 @@ final class SnapshotMergeTests: XCTestCase {
     let merged = fresh.mergingStaleUsage(from: previous)
     XCTAssertTrue(merged.providers.isEmpty)
   }
+
+  func testReconcileRemovesInactiveAccountsAndUpdatesNames() {
+    let current = QuotaSnapshot(
+      generatedAt: t0,
+      providers: [
+        usage("claude-1", provider: .anthropic, remaining: 60, at: t0),
+        usage("openai-1", provider: .openAI, remaining: 70, at: t0)
+      ],
+      failures: [failure("openai-1", provider: .openAI)]
+    )
+    let activeAccounts = [
+      ProviderAccount(id: "claude-1", provider: .anthropic, displayName: "Work Claude")
+    ]
+
+    let reconciled = current.reconciled(with: activeAccounts)
+
+    XCTAssertEqual(reconciled.generatedAt, t0)
+    XCTAssertEqual(reconciled.providers.map(\.accountID), ["claude-1"])
+    XCTAssertEqual(reconciled.providers.first?.title, "Work Claude")
+    XCTAssertTrue(reconciled.failures.isEmpty)
+  }
+
+  func testReconcileMapsLegacyProviderKeyForSoleAccount() {
+    let current = QuotaSnapshot(
+      generatedAt: t0,
+      providers: [usage(QuotaProvider.openAI.rawValue, provider: .openAI, remaining: 70, at: t0)],
+      failures: []
+    )
+    let account = ProviderAccount(id: "openai-1", provider: .openAI, displayName: "Personal")
+
+    let reconciled = current.reconciled(with: [account])
+
+    XCTAssertEqual(reconciled.providers.first?.accountID, "openai-1")
+    XCTAssertEqual(reconciled.providers.first?.title, "Personal")
+  }
 }

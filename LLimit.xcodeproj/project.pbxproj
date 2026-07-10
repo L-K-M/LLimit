@@ -14,6 +14,7 @@
 		7505D82D6C3A0DA536BCAFEE /* QuotaTimelineProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F7DC2FD8B8B3CB28CBDBA50 /* QuotaTimelineProvider.swift */; };
 		7B4652AC8FCA0CBC5B22B5B9 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 660DB1B9EAE3B8BCD47F312A /* SettingsView.swift */; };
 		9193818D17AE4427EF6CC9D9 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = FF27A37B7897F137AAC76BBB /* Assets.xcassets */; };
+		A6E91C9F7B3D4E5082F1A627 /* ProviderQuotaWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7FA2D8C6E194305A8C7D912 /* ProviderQuotaWidget.swift */; };
 		B80B0455A0F07A7264543919 /* LLimitWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A726AF33B5B22E70FD23B4C2 /* LLimitWidgetExtension.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		BCF52573CAD84156B1B5D45D /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A209FE6A72662BD8F9B150D /* AppModel.swift */; };
 		C603BA56702B204283583CE3 /* QuotaCore in Frameworks */ = {isa = PBXBuildFile; productRef = 6E84F97B9AB96085556C0709 /* QuotaCore */; };
@@ -59,6 +60,7 @@
 		68C113B427C1BC19E1FF5B41 /* WidgetStylePreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetStylePreset.swift; sourceTree = "<group>"; };
 		8B4155FC0F0418AB20A7F600 /* LLimitQuotaWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLimitQuotaWidget.swift; sourceTree = "<group>"; };
 		A726AF33B5B22E70FD23B4C2 /* LLimitWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LLimitWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		B7FA2D8C6E194305A8C7D912 /* ProviderQuotaWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderQuotaWidget.swift; sourceTree = "<group>"; };
 		C51630B1379FDA77A0391D81 /* LLimit.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LLimit.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E99722E7B145406188DBBCC7 /* QuotaCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = QuotaCore; path = Packages/QuotaCore; sourceTree = SOURCE_ROOT; };
 		FF27A37B7897F137AAC76BBB /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -117,6 +119,7 @@
 			children = (
 				8B4155FC0F0418AB20A7F600 /* LLimitQuotaWidget.swift */,
 				42923ABCF11FECE813FEBB8F /* LLimitWidgetBundle.swift */,
+				B7FA2D8C6E194305A8C7D912 /* ProviderQuotaWidget.swift */,
 				FF4C2112EFC5EBB1917B08D7 /* LLimitWidgetExtension.entitlements */,
 				2F7DC2FD8B8B3CB28CBDBA50 /* QuotaTimelineProvider.swift */,
 			);
@@ -264,6 +267,7 @@
 			files = (
 				0076043CC71CC09BFF9DE74A /* LLimitQuotaWidget.swift in Sources */,
 				CE91F7808594D37146B31F6B /* LLimitWidgetBundle.swift in Sources */,
+				A6E91C9F7B3D4E5082F1A627 /* ProviderQuotaWidget.swift in Sources */,
 				7505D82D6C3A0DA536BCAFEE /* QuotaTimelineProvider.swift in Sources */,
 				7394D6C4263D47B0C75C0D50 /* SharedConstants.swift in Sources */,
 			);

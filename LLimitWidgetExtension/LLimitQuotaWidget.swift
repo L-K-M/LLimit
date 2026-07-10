@@ -6,7 +6,7 @@ struct LLimitWidget: Widget {
   private let kind = SharedConstants.widgetKind
 
   var body: some WidgetConfiguration {
-    StaticConfiguration(kind: kind, provider: QuotaTimelineProvider()) { entry in
+    StaticConfiguration(kind: kind, provider: QuotaTimelineProvider(includesHistory: false)) { entry in
       DashboardWidgetRootView(entry: entry)
         .quotaWidgetBackground(entry: entry, kind: .dashboard)
     }
@@ -20,7 +20,7 @@ struct QuotaTrendChartWidget: Widget {
   private let kind = SharedConstants.trendWidgetKind
 
   var body: some WidgetConfiguration {
-    StaticConfiguration(kind: kind, provider: QuotaTimelineProvider()) { entry in
+    StaticConfiguration(kind: kind, provider: QuotaTimelineProvider(includesHistory: true)) { entry in
       TrendLineChartWidgetView(entry: entry)
         .quotaWidgetBackground(entry: entry, kind: .trend)
     }
@@ -699,9 +699,16 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
   var resetByKey: [SeriesKey: Date] = [:]
   var orderByAccount: [String: [String]] = [:]
   var usageByAccount: [String: ProviderUsage] = [:]
+  let enabledAccounts = entry.settings.accounts.filter(\.isEnabled)
+  let enabledAccountIDs = Set(enabledAccounts.map(\.id))
+  let enabledAccountsByProvider = Dictionary(grouping: enabledAccounts, by: \.provider)
 
   for snapshot in snapshots {
     for usage in snapshot.providers {
+      let isLegacySoleAccount = usage.accountID == usage.provider.rawValue
+        && enabledAccountsByProvider[usage.provider]?.count == 1
+      guard enabledAccountIDs.contains(usage.accountID) || isLegacySoleAccount else { continue }
+
       var metricOrder = orderByAccount[usage.accountID] ?? []
       usageByAccount[usage.accountID] = usage
 
@@ -902,65 +909,11 @@ private func compactProviderName(for usage: ProviderUsage) -> String {
   return compactProviderName(for: usage.provider)
 }
 
-private func resetSummaries(for metrics: [UsageMetric]) -> [String] {
+private func resetSummaries(for metrics: [UsageMetric], at date: Date) -> [String] {
   metrics.compactMap { metric in
-    if let resetIn = metric.resetIn?.trimmingCharacters(in: .whitespacesAndNewlines), !resetIn.isEmpty {
-      let normalized = normalizedResetSummary(resetIn)
-      return normalized.isEmpty ? nil : normalized
-    }
-
-    if let resetAt = metric.resetAt {
-      let relative = relativeResetSummary(until: resetAt)
-      return relative.isEmpty ? nil : relative
-    }
-
-    return nil
+    guard let summary = metric.resetCountdown(at: date) else { return nil }
+    return summary == "reset" ? "<1m" : summary
   }
-}
-
-private func normalizedResetSummary(_ rawValue: String) -> String {
-  let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-  let lowercased = value.lowercased()
-
-  if lowercased == "reset" {
-    return "<1m"
-  }
-
-  if lowercased.hasPrefix("reset in ") {
-    return String(value.dropFirst(9)).trimmingCharacters(in: .whitespacesAndNewlines)
-  }
-
-  if lowercased.hasPrefix("in ") {
-    return String(value.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines)
-  }
-
-  if lowercased.hasPrefix("reset ") {
-    return String(value.dropFirst(6)).trimmingCharacters(in: .whitespacesAndNewlines)
-  }
-
-  return value
-}
-
-private func relativeResetSummary(until date: Date) -> String {
-  let seconds = max(0, Int(date.timeIntervalSinceNow))
-  if seconds < 60 {
-    return "<1m"
-  }
-
-  let totalHours = seconds / 3600
-  let minutes = (seconds % 3600) / 60
-
-  if totalHours >= 24 {
-    let days = totalHours / 24
-    let hours = totalHours % 24
-    return hours > 0 ? "\(days)d \(hours)h" : "\(days)d"
-  }
-
-  if totalHours > 0 {
-    return minutes > 0 ? "\(totalHours)h \(minutes)m" : "\(totalHours)h"
-  }
-
-  return "\(minutes)m"
 }
 
 private func percentText(for metric: UsageMetric?) -> String {
