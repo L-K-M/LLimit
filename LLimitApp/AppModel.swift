@@ -48,6 +48,7 @@ final class AppModel: ObservableObject {
   private var autoRefreshTask: Task<Void, Never>?
   private var widgetReloadTask: Task<Void, Never>?
   private var hasBootstrapped = false
+  private var configurationLoadFailed = false
 
   init() {
     let appSupportDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -101,9 +102,11 @@ final class AppModel: ObservableObject {
     let settings: AppSettings
     do {
       settings = try loadSettingsFromPreferredStore()
+      configurationLoadFailed = false
     } catch {
       settings = .default
-      statusMessage = "Could not load settings. Using defaults."
+      configurationLoadFailed = true
+      statusMessage = "Could not load settings. Using defaults. The existing file will not be overwritten."
     }
 
     refreshIntervalMinutes = max(15, settings.refreshIntervalMinutes)
@@ -120,6 +123,11 @@ final class AppModel: ObservableObject {
   }
 
   func saveConfiguration(showSuccessMessage: Bool = false) {
+    guard !configurationLoadFailed else {
+      statusMessage = "Save blocked because the existing settings file could not be read. Fix or back up the file, then relaunch LLimit."
+      return
+    }
+
     do {
       let settings = currentSettings()
 
