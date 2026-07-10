@@ -2,29 +2,15 @@
 
 Last reconciled from the full `sol.md` review on 2026-07-10. The complete evidence,
 file references, rationale, requested-widget design, and idea inventory remain in
-`sol.md` (PR #7). This document intentionally contains only work that is unresolved,
-awaiting merge, or awaiting validation.
+`sol.md` (PR #7). This document intentionally contains only work that is unresolved or
+awaiting validation.
 
-## Merge queue
+## Validation status
 
-These items have implementation PRs and are removed from the active engineering backlog.
-They still need review and merge. Core-bearing branches were tested locally with Swift
-6.0.3 on Linux; the GitHub macOS jobs failed before checkout because no runner was assigned
-(`runner_id: 0`, zero steps, no logs).
-
-| PR | Scope | Local verification |
-| --- | --- | --- |
-| #6 | OpenAI/Codex live-token synchronization and reactive 401 recovery | Existing GitHub CI passed before the runner outage |
-| #7 | Full `sol.md` review record | Documentation/static check |
-| #8 | Fail safely on malformed account settings and block destructive saves | 38 QuotaCore tests passed |
-| #9 | Reject hostile/non-finite provider numbers and checked conversions | 39 QuotaCore tests passed |
-| #10 | Bound persisted refresh intervals to 15-180 minutes | 37 QuotaCore tests passed |
-| #11 | Reconcile removed/disabled accounts and purge deleted history | 39 QuotaCore tests passed |
-| #12 | Derive reset countdowns from absolute reset dates | 38 QuotaCore tests passed |
-| #13 | Keep trend history out of dashboard entries and shrink timelines | Static review; macOS build pending |
-| #14 | Preserve dormant per-account style overrides | Static review; macOS build pending |
-| #15 | Generate the first unused account-name suffix | Static review; macOS build pending |
-| #16 | Configurable concentric-ring provider/account widget | 42 QuotaCore tests plus two static reviews; Xcode build and visual QA pending |
+The review-cycle implementations are merged. The combined `QuotaCore` suite passes 65 tests
+on Swift 6.0.3/Linux, and all widget sources pass a syntax parse. GitHub macOS jobs still fail
+before checkout because no runner is assigned (`runner_id: 0`, zero steps, no logs), so a real
+Xcode 16.2 app/widget build and visual QA remain required.
 
 ## Immediate release blockers
 
@@ -342,7 +328,7 @@ Do not make speculative endpoint edits without captured evidence.
 
 ## Widget follow-up
 
-### Validate and extend provider tiles after PR #16
+### Validate and extend provider tiles
 
 - Build with Xcode 16.2 and test AppIntent account configuration on macOS 14+.
 - Capture small-widget screenshots against the supplied reference in light/dark desktop
@@ -473,7 +459,7 @@ Do not use red checks from zero-step jobs as code-quality evidence.
 
 ## Recommended order
 
-1. Restore macOS Actions and merge/validate PRs #6-#16.
+1. Restore macOS Actions and validate the merged app/widget with Xcode 16.2.
 2. Ship a correctly signed/notarized widget-capable release pipeline.
 3. Enforce the failure redaction boundary and settings-file permissions.
 4. Correct freshness/history semantics and refresh cancellation/races.
