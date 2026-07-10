@@ -106,7 +106,7 @@ final class AppModel: ObservableObject {
       statusMessage = "Could not load settings. Using defaults."
     }
 
-    refreshIntervalMinutes = max(15, settings.refreshIntervalMinutes)
+    refreshIntervalMinutes = settings.refreshIntervalMinutes
     widgetStyle = settings.widgetStyle
     widgetBackgroundSettings = settings.widgetBackgroundSettings
     widgetVisibility = settings.widgetVisibility
@@ -550,7 +550,10 @@ final class AppModel: ObservableObject {
     Binding(
       get: { self.refreshIntervalMinutes },
       set: { newValue in
-        self.refreshIntervalMinutes = max(15, newValue)
+        self.refreshIntervalMinutes = min(
+          max(newValue, AppSettings.refreshIntervalRange.lowerBound),
+          AppSettings.refreshIntervalRange.upperBound
+        )
         self.saveConfiguration()
         self.restartAutoRefreshLoop()
       }
@@ -915,7 +918,11 @@ final class AppModel: ObservableObject {
   }
 
   private func autoRefreshIntervalNanoseconds() -> UInt64 {
-    let seconds = UInt64(max(15, refreshIntervalMinutes) * 60)
+    let clampedMinutes = min(
+      max(refreshIntervalMinutes, AppSettings.refreshIntervalRange.lowerBound),
+      AppSettings.refreshIntervalRange.upperBound
+    )
+    let seconds = UInt64(clampedMinutes * 60)
     return seconds * 1_000_000_000
   }
 
@@ -928,7 +935,11 @@ final class AppModel: ObservableObject {
       return true
     }
 
-    let maxAgeSeconds = TimeInterval(max(15, refreshIntervalMinutes) * 60)
+    let clampedMinutes = min(
+      max(refreshIntervalMinutes, AppSettings.refreshIntervalRange.lowerBound),
+      AppSettings.refreshIntervalRange.upperBound
+    )
+    let maxAgeSeconds = TimeInterval(clampedMinutes * 60)
     return now.timeIntervalSince(snapshot.generatedAt) >= maxAgeSeconds
   }
 
