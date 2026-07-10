@@ -59,13 +59,22 @@ public enum ChatGPTOAuth {
 
   /// True when the token is missing an `exp`, or expires within `leeway` of `now`.
   public static func isAccessTokenExpired(_ token: String, now: Date = Date(), leeway: TimeInterval = 300) -> Bool {
+    guard let exp = accessTokenExpiry(token) else {
+      return true
+    }
+    return now.addingTimeInterval(leeway) >= exp
+  }
+
+  /// The `exp` (expiry) instant of a ChatGPT access-token JWT, or nil if it can't be
+  /// decoded. Used to compare the freshness of two tokens for the same account.
+  public static func accessTokenExpiry(_ token: String) -> Date? {
     guard
       let payload = jwtPayload(token),
       let exp = (payload["exp"] as? NSNumber)?.doubleValue
     else {
-      return true
+      return nil
     }
-    return now.addingTimeInterval(leeway).timeIntervalSince1970 >= exp
+    return Date(timeIntervalSince1970: exp)
   }
 
   static func accountID(fromJWT jwt: String) -> String? {

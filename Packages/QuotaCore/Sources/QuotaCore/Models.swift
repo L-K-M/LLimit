@@ -1044,6 +1044,8 @@ public struct WidgetVisibilitySettings: Codable, Hashable, Sendable {
 }
 
 public struct AppSettings: Codable, Hashable, Sendable {
+  public static let refreshIntervalRange = 15...180
+
   public var refreshIntervalMinutes: Int
   public var accounts: [ProviderAccount]
   public var widgetStyle: WidgetStyleSettings
@@ -1059,7 +1061,7 @@ public struct AppSettings: Codable, Hashable, Sendable {
     providerStyleSettings: [ProviderStyleSettings] = [],
     widgetVisibility: WidgetVisibilitySettings = .default
   ) {
-    self.refreshIntervalMinutes = refreshIntervalMinutes
+    self.refreshIntervalMinutes = AppSettings.clampedRefreshInterval(refreshIntervalMinutes)
     self.accounts = AppSettings.normalizedAccounts(accounts)
     self.widgetStyle = widgetStyle
     self.widgetBackgroundSettings = widgetBackgroundSettings
@@ -1117,10 +1119,11 @@ public struct AppSettings: Codable, Hashable, Sendable {
   public init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
 
-    refreshIntervalMinutes = (try? container.decodeIfPresent(Int.self, forKey: .refreshIntervalMinutes)) ?? 30
+    let decodedRefreshInterval = (try? container.decodeIfPresent(Int.self, forKey: .refreshIntervalMinutes)) ?? 30
+    refreshIntervalMinutes = AppSettings.clampedRefreshInterval(decodedRefreshInterval)
 
     accounts = AppSettings.normalizedAccounts(
-      (try? container.decodeIfPresent([ProviderAccount].self, forKey: .accounts)) ?? []
+      try container.decodeIfPresent([ProviderAccount].self, forKey: .accounts) ?? []
     )
 
     widgetStyle = (try? container.decodeIfPresent(WidgetStyleSettings.self, forKey: .widgetStyle)) ?? .default
@@ -1143,7 +1146,7 @@ public struct AppSettings: Codable, Hashable, Sendable {
 
   public func encode(to encoder: Encoder) throws {
     var container = encoder.container(keyedBy: CodingKeys.self)
-    try container.encode(refreshIntervalMinutes, forKey: .refreshIntervalMinutes)
+    try container.encode(AppSettings.clampedRefreshInterval(refreshIntervalMinutes), forKey: .refreshIntervalMinutes)
     try container.encode(accounts, forKey: .accounts)
     try container.encode(widgetStyle, forKey: .widgetStyle)
     try container.encode(widgetBackgroundSettings, forKey: .widgetBackgroundSettings)
@@ -1162,6 +1165,10 @@ public struct AppSettings: Codable, Hashable, Sendable {
       seen.insert(normalized.id)
       return normalized
     }
+  }
+
+  private static func clampedRefreshInterval(_ value: Int) -> Int {
+    min(max(value, refreshIntervalRange.lowerBound), refreshIntervalRange.upperBound)
   }
 
   private static func normalizedProviderStyleSettings(

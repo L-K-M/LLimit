@@ -1,11 +1,12 @@
 import Foundation
+import CoreFoundation
 
 func clampPercent(_ value: Int) -> Int {
   max(0, min(100, value))
 }
 
-func percentRemaining(fromUsedPercent usedPercent: Double) -> Int {
-  clampPercent(Int((100.0 - usedPercent).rounded()))
+func percentRemaining(fromUsedPercent usedPercent: Double) -> Int? {
+  roundedPercent(100.0 - usedPercent)
 }
 
 func formatShortDuration(seconds: Int) -> String {
@@ -22,21 +23,53 @@ func formatShortDuration(seconds: Int) -> String {
 }
 
 func formatResetCountdown(to date: Date, now: Date) -> String {
-  let diff = Int(date.timeIntervalSince(now))
-  if diff <= 0 { return "reset" }
-  return formatShortDuration(seconds: diff)
+  let interval = date.timeIntervalSince(now)
+  guard interval.isFinite, interval > 0 else { return "reset" }
+
+  let seconds = roundedInt(interval.rounded(.down)) ?? Int.max
+  return formatShortDuration(seconds: seconds)
+}
+
+public extension UsageMetric {
+  func resetCountdown(at date: Date) -> String? {
+    if let resetAt {
+      return formatResetCountdown(to: resetAt, now: date)
+    }
+
+    guard let resetIn else { return nil }
+    let value = resetIn.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !value.isEmpty else { return nil }
+
+    let lowercased = value.lowercased()
+    if lowercased == "reset" { return "reset" }
+    let normalized: String
+    if lowercased.hasPrefix("reset in ") {
+      normalized = String(value.dropFirst(9))
+    } else if lowercased.hasPrefix("in ") {
+      normalized = String(value.dropFirst(3))
+    } else if lowercased.hasPrefix("reset ") {
+      normalized = String(value.dropFirst(6))
+    } else {
+      normalized = value
+    }
+
+    let trimmed = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
+  }
 }
 
 func parseNumeric(_ value: Any?) -> Double? {
   switch value {
   case let number as NSNumber:
-    return number.doubleValue
+    guard CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+    let parsed = number.doubleValue
+    return parsed.isFinite ? parsed : nil
   case let string as String:
     let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return nil }
 
     let normalized = trimmed.replacingOccurrences(of: ",", with: "")
-    if let direct = Double(normalized) {
+    if let direct = Double(normalized), direct.isFinite {
       return direct
     }
 
@@ -48,7 +81,8 @@ func parseNumeric(_ value: Any?) -> Double? {
     else {
       return nil
     }
-    return Double(normalized[range])
+    guard let parsed = Double(normalized[range]), parsed.isFinite else { return nil }
+    return parsed
   default:
     return nil
   }
@@ -64,16 +98,28 @@ func firstNumeric(in dictionary: [String: Any], keys: [String]) -> Double? {
 }
 
 func formatIntLike(_ value: Double?) -> String? {
-  guard let value else { return nil }
-  if value.rounded() == value {
-    return String(Int(value))
+  guard let value, value.isFinite else { return nil }
+  if let integer = roundedInt(value), Double(integer) == value {
+    return String(integer)
   }
   return String(format: "%.1f", value)
 }
 
 func formatTokensMillions(_ value: Double?) -> String? {
-  guard let value else { return nil }
+  guard let value, value.isFinite else { return nil }
   return String(format: "%.1fM", value / 1_000_000.0)
+}
+
+func roundedInt(_ value: Double) -> Int? {
+  guard value.isFinite else { return nil }
+  let rounded = value.rounded()
+  guard rounded >= Double(Int.min), rounded < Double(Int.max) else { return nil }
+  return Int(rounded)
+}
+
+func roundedPercent(_ value: Double) -> Int? {
+  guard value.isFinite else { return nil }
+  return Int(min(100, max(0, value)).rounded())
 }
 
 func parseJSONObject(from data: Data) throws -> [String: Any] {

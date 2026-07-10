@@ -19,7 +19,7 @@ struct QuotaTimelineProvider: TimelineProvider {
       snapshot: SampleSnapshotFactory.make(now: Date()),
       history: includesHistory ? SampleSnapshotFactory.makeHistory(now: Date()) : [],
       refreshIntervalMinutes: 30,
-      settings: .default
+      settings: SampleSnapshotFactory.makeSettings()
     )
   }
 
@@ -31,7 +31,7 @@ struct QuotaTimelineProvider: TimelineProvider {
           snapshot: SampleSnapshotFactory.make(now: Date()),
           history: includesHistory ? SampleSnapshotFactory.makeHistory(now: Date()) : [],
           refreshIntervalMinutes: 30,
-          settings: .default
+          settings: SampleSnapshotFactory.makeSettings()
         )
       )
       return
@@ -43,7 +43,10 @@ struct QuotaTimelineProvider: TimelineProvider {
   func getTimeline(in context: Context, completion: @escaping (Timeline<QuotaEntry>) -> Void) {
     let now = Date()
     let entry = makeStoredEntry(now: now)
-    let refreshMinutes = max(15, entry.refreshIntervalMinutes)
+    let refreshMinutes = min(
+      max(entry.refreshIntervalMinutes, AppSettings.refreshIntervalRange.lowerBound),
+      AppSettings.refreshIntervalRange.upperBound
+    )
     let refreshIntervalSeconds = TimeInterval(refreshMinutes * 60)
     let nextRefreshDate = now.addingTimeInterval(refreshIntervalSeconds)
     completion(Timeline(entries: [entry], policy: .after(nextRefreshDate)))
@@ -55,7 +58,7 @@ struct QuotaTimelineProvider: TimelineProvider {
     let history = includesHistory
       ? loadHistory(windowDays: max(1, settings.widgetVisibility.trendHistoryDays), fallbackSnapshot: snapshot)
       : []
-    let refreshInterval = max(15, settings.refreshIntervalMinutes)
+    let refreshInterval = settings.refreshIntervalMinutes
     return QuotaEntry(
       date: now,
       snapshot: snapshot,
@@ -115,6 +118,18 @@ struct QuotaTimelineProvider: TimelineProvider {
 }
 
 private enum SampleSnapshotFactory {
+  static func makeSettings() -> AppSettings {
+    AppSettings(
+      accounts: [
+        ProviderAccount(id: QuotaProvider.anthropic.rawValue, provider: .anthropic),
+        ProviderAccount(id: QuotaProvider.openAI.rawValue, provider: .openAI),
+        ProviderAccount(id: QuotaProvider.zhipu.rawValue, provider: .zhipu),
+        ProviderAccount(id: QuotaProvider.googleAntigravity.rawValue, provider: .googleAntigravity),
+        ProviderAccount(id: QuotaProvider.gitHubCopilot.rawValue, provider: .gitHubCopilot)
+      ]
+    )
+  }
+
   static func make(now: Date) -> QuotaSnapshot {
     QuotaSnapshot(
       generatedAt: now,

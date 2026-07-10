@@ -9,6 +9,27 @@ final class QuotaUtilitiesTests: XCTestCase {
     XCTAssertNil(parseNumeric("abc"))
   }
 
+  func testParseNumericRejectsNonFiniteValuesAndBooleans() {
+    XCTAssertNil(parseNumeric("NaN"))
+    XCTAssertNil(parseNumeric("infinity"))
+    XCTAssertNil(parseNumeric(Double.infinity))
+    XCTAssertNil(parseNumeric(true))
+  }
+
+  func testCheckedNumericFormattingRejectsValuesOutsideIntRange() {
+    XCTAssertNil(roundedInt(Double.infinity))
+    XCTAssertNil(roundedInt(Double.greatestFiniteMagnitude))
+    XCTAssertNil(formatIntLike(Double.infinity))
+    XCTAssertEqual(formatIntLike(42), "42")
+  }
+
+  func testPercentConversionClampsOnlyFiniteValues() {
+    XCTAssertEqual(percentRemaining(fromUsedPercent: -20), 100)
+    XCTAssertEqual(percentRemaining(fromUsedPercent: 130), 0)
+    XCTAssertNil(percentRemaining(fromUsedPercent: .nan))
+    XCTAssertNil(roundedPercent(.infinity))
+  }
+
   func testFormatShortDuration() {
     XCTAssertEqual(formatShortDuration(seconds: 65), "1m")
     XCTAssertEqual(formatShortDuration(seconds: 3661), "1h 1m")
@@ -22,6 +43,25 @@ final class QuotaUtilitiesTests: XCTestCase {
 
     XCTAssertEqual(formatResetCountdown(to: past, now: now), "reset")
     XCTAssertEqual(formatResetCountdown(to: future, now: now), "1h 1m")
+  }
+
+  func testMetricResetCountdownPrefersAbsoluteDate() {
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let metric = UsageMetric(
+      id: "limit",
+      label: "Limit",
+      resetAt: now.addingTimeInterval(3_700),
+      resetIn: "20m"
+    )
+
+    XCTAssertEqual(metric.resetCountdown(at: now), "1h 1m")
+    XCTAssertEqual(metric.resetCountdown(at: now.addingTimeInterval(3_701)), "reset")
+  }
+
+  func testMetricResetCountdownNormalizesTextFallback() {
+    let metric = UsageMetric(id: "limit", label: "Limit", resetIn: "Reset in 2h 5m")
+
+    XCTAssertEqual(metric.resetCountdown(at: Date()), "2h 5m")
   }
 
   func testParseISO8601SupportsCalendarDate() {
