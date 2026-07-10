@@ -57,7 +57,7 @@ public struct GoogleAntigravityClient: QuotaProviderClient {
 
       let quotaInfo = modelInfo["quotaInfo"] as? [String: Any]
       let remainingFraction = parseNumeric(quotaInfo?["remainingFraction"]) ?? 0
-      let remainingPercent = clampPercent(Int((remainingFraction * 100).rounded()))
+      guard let remainingPercent = roundedPercent(remainingFraction * 100) else { continue }
       let usagePercent = 100 - remainingPercent
       maxUsage = max(maxUsage, usagePercent)
 

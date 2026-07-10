@@ -5,7 +5,7 @@ LLimit builds and releases entirely from the command line — no Xcode GUI.
 ## TL;DR
 
 ```bash
-# Build locally (ad-hoc signed, runs on your Mac):
+# Build locally (dev-signed, runs on your Mac) + reveal LLimit.app in Finder:
 ./scripts/build.sh
 
 # Cut a release: bump version, tag, push -> GitHub Actions builds & publishes:
@@ -18,13 +18,17 @@ Requires macOS + Xcode command-line tools + [XcodeGen](https://github.com/yonask
 (`brew install xcodegen`).
 
 ```bash
-./scripts/build.sh                 # ad-hoc build -> dist/LLimit.app + .zip + .dmg
-./scripts/build.sh --version 0.2.1 # override version
-./scripts/build.sh --no-dmg        # skip the .dmg
+./scripts/build.sh                     # incremental dev-signed build -> reveals LLimit.app in Finder
+./scripts/build.sh --clean             # reset wedged Xcode build daemons + wipe build/ first
+./scripts/build.sh --dmg --zip         # also package dist/LLimit-<version>.{dmg,zip}
+./scripts/build.sh --app-version 0.2.1 # override the stamped version
 ```
 
-- **Ad-hoc build** (default, no signing vars): the app runs on *your* Mac. If you
-  copy it to another machine, Gatekeeper will block it until you run
+- **Dev-signed build** (default, no signing vars): the app is signed with the
+  project's team so the embedded widget extension registers and can read the shared
+  App Group container, and runs on *your* Mac. Packaging is opt-in — pass `--dmg`
+  and/or `--zip` to produce distributables under `dist/`. If you copy the app to
+  another machine, Gatekeeper will block it until you run
   `xattr -dr com.apple.quarantine /path/to/LLimit.app`.
 - **Signed + notarized build** (for distribution): set the env vars below and the
   script signs with Developer ID, enables the hardened runtime, and notarizes:
@@ -35,7 +39,7 @@ Requires macOS + Xcode command-line tools + [XcodeGen](https://github.com/yonask
   export NOTARY_APPLE_ID="you@example.com"
   export NOTARY_PASSWORD="app-specific-password"   # appleid.apple.com
   export NOTARY_TEAM_ID="ABCDE12345"
-  ./scripts/build.sh
+  ./scripts/build.sh --dmg --zip
   ```
 
 ## Cutting a release (`scripts/release.sh`)
@@ -52,8 +56,10 @@ triggers the **Release** workflow.
 ## GitHub Actions (`.github/workflows/release.yml`)
 
 Runs on every `v*` tag (or manually via *Run workflow*). It builds on a macOS
-runner with `scripts/build.sh` and attaches `dist/*.zip` and `dist/*.dmg` to a
-GitHub Release. Works out of the box producing an **ad-hoc** build.
+runner via `.github/workflows/release.yml` directly (the workflow inlines its own
+`xcodebuild` + packaging — it does not call `scripts/build.sh`) and attaches
+`dist/*.zip` and `dist/*.dmg` to a GitHub Release. Works out of the box producing
+an **ad-hoc** build.
 
 To produce **signed + notarized** releases, add these repository secrets
 (*Settings → Secrets and variables → Actions*):
