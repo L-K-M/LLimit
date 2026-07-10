@@ -41,4 +41,40 @@ final class QuotaHistoryStoreTests: XCTestCase {
     // Keeps the newest entries.
     XCTAssertEqual(recent.last?.generatedAt, now)
   }
+
+  func testRemovePurgesOnlySelectedAccount() throws {
+    let (store, dir) = makeStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let snapshot = QuotaSnapshot(
+      generatedAt: now,
+      providers: [
+        ProviderUsage(
+          accountID: "remove-me",
+          provider: .anthropic,
+          title: "Claude",
+          metrics: [],
+          fetchedAt: now
+        ),
+        ProviderUsage(
+          accountID: "keep-me",
+          provider: .openAI,
+          title: "OpenAI",
+          metrics: [],
+          fetchedAt: now
+        )
+      ],
+      failures: [
+        ProviderFailure(accountID: "remove-me", provider: .anthropic, kind: .auth, message: "failed")
+      ]
+    )
+    try store.save([snapshot])
+
+    try store.remove(accountIDs: ["remove-me"])
+
+    let loaded = try XCTUnwrap(store.load().first)
+    XCTAssertEqual(loaded.providers.map(\.accountID), ["keep-me"])
+    XCTAssertTrue(loaded.failures.isEmpty)
+  }
 }

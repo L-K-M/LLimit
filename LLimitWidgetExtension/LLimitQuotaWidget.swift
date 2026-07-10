@@ -699,9 +699,16 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
   var resetByKey: [SeriesKey: Date] = [:]
   var orderByAccount: [String: [String]] = [:]
   var usageByAccount: [String: ProviderUsage] = [:]
+  let enabledAccounts = entry.settings.accounts.filter(\.isEnabled)
+  let enabledAccountIDs = Set(enabledAccounts.map(\.id))
+  let enabledAccountsByProvider = Dictionary(grouping: enabledAccounts, by: \.provider)
 
   for snapshot in snapshots {
     for usage in snapshot.providers {
+      let isLegacySoleAccount = usage.accountID == usage.provider.rawValue
+        && enabledAccountsByProvider[usage.provider]?.count == 1
+      guard enabledAccountIDs.contains(usage.accountID) || isLegacySoleAccount else { continue }
+
       var metricOrder = orderByAccount[usage.accountID] ?? []
       usageByAccount[usage.accountID] = usage
 

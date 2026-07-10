@@ -85,6 +85,7 @@ final class AppModel: ObservableObject {
 
     do {
       snapshot = try loadSnapshotFromPreferredStore()
+      reconcileSnapshotWithCurrentAccounts()
     } catch {
       statusMessage = "Could not load snapshot: \(error.localizedDescription)"
     }
@@ -227,8 +228,11 @@ final class AppModel: ObservableObject {
   }
 
   func removeProviderAccount(accountID: String) {
+    let removedAccount = providerAccounts.first { $0.id == accountID }
     providerAccounts.removeAll { $0.id == accountID }
     providerStyleSettings.removeValue(forKey: accountID)
+    reconcileSnapshotWithCurrentAccounts()
+    purgeHistory(for: removedAccount)
     reloadAccountStatuses()
     saveConfiguration(showSuccessMessage: true)
   }
@@ -810,7 +814,15 @@ final class AppModel: ObservableObject {
       return
     }
 
+    let previousAccount = providerAccounts[index]
     mutate(&providerAccounts[index])
+
+    let updatedAccount = providerAccounts[index]
+    let wasActive = previousAccount.isEnabled && previousAccount.hasRequiredCredentials
+    let isActive = updatedAccount.isEnabled && updatedAccount.hasRequiredCredentials
+    if wasActive != isActive || previousAccount.resolvedDisplayName != updatedAccount.resolvedDisplayName {
+      reconcileSnapshotWithCurrentAccounts()
+    }
     reloadAccountStatuses()
     saveConfiguration()
   }
@@ -887,6 +899,52 @@ final class AppModel: ObservableObject {
       },
       widgetVisibility: widgetVisibility
     )
+  }
+
+  private func reconcileSnapshotWithCurrentAccounts() {
+    guard let currentSnapshot = snapshot else { return }
+
+    let activeAccounts = providerAccounts.filter { $0.isEnabled && $0.hasRequiredCredentials }
+    let reconciled = currentSnapshot.reconciled(with: activeAccounts)
+    guard reconciled != currentSnapshot else { return }
+
+    snapshot = reconciled
+    do {
+      try snapshotStore.save(reconciled)
+    } catch {
+      print("[LLimit] Snapshot reconciliation save failed: \(error.localizedDescription)")
+    }
+
+    if syncSnapshotToWidgetStore(reconciled) {
+      reloadWidgetTimelines()
+    }
+  }
+
+  private func purgeHistory(for account: ProviderAccount?) {
+    guard let account else { return }
+
+    var accountIDs: Set<String> = [account.id]
+    if !providerAccounts.contains(where: { $0.provider == account.provider }) {
+      accountIDs.insert(account.provider.rawValue)
+    }
+
+    do {
+      try historyStore.remove(accountIDs: accountIDs)
+    } catch {
+      print("[LLimit] Local history purge failed: \(error.localizedDescription)")
+    }
+
+    do {
+      guard let widgetHistoryStore = appGroupHistoryStore() else {
+        print("[LLimit] Widget history purge failed: no App Group history store available")
+        return
+      }
+      try widgetHistoryStore.remove(accountIDs: accountIDs)
+      reloadWidgetTimelines()
+    } catch {
+      print("[LLimit] Widget history purge failed: \(error.localizedDescription)")
+      invalidateAppGroupStores()
+    }
   }
 
   private func restartAutoRefreshLoop() {

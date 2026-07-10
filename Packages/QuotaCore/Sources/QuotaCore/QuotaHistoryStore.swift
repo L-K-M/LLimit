@@ -72,4 +72,18 @@ public final class QuotaHistoryStore: @unchecked Sendable {
 
     try save(history)
   }
+
+  public func remove(accountIDs: Set<String>) throws {
+    guard !accountIDs.isEmpty else { return }
+
+    let filtered = try load().map { snapshot in
+      QuotaSnapshot(
+        version: snapshot.version,
+        generatedAt: snapshot.generatedAt,
+        providers: snapshot.providers.filter { !accountIDs.contains($0.accountID) },
+        failures: snapshot.failures.filter { !accountIDs.contains($0.accountID) }
+      )
+    }
+    try save(filtered)
+  }
 }

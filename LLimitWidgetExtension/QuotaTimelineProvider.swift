@@ -18,7 +18,7 @@ struct QuotaTimelineProvider: TimelineProvider {
       snapshot: SampleSnapshotFactory.make(now: Date()),
       history: SampleSnapshotFactory.makeHistory(now: Date()),
       refreshIntervalMinutes: 30,
-      settings: .default
+      settings: SampleSnapshotFactory.makeSettings()
     )
   }
 
@@ -30,7 +30,7 @@ struct QuotaTimelineProvider: TimelineProvider {
           snapshot: SampleSnapshotFactory.make(now: Date()),
           history: SampleSnapshotFactory.makeHistory(now: Date()),
           refreshIntervalMinutes: 30,
-          settings: .default
+          settings: SampleSnapshotFactory.makeSettings()
         )
       )
       return
@@ -139,6 +139,18 @@ struct QuotaTimelineProvider: TimelineProvider {
 }
 
 private enum SampleSnapshotFactory {
+  static func makeSettings() -> AppSettings {
+    AppSettings(
+      accounts: [
+        ProviderAccount(id: QuotaProvider.anthropic.rawValue, provider: .anthropic),
+        ProviderAccount(id: QuotaProvider.openAI.rawValue, provider: .openAI),
+        ProviderAccount(id: QuotaProvider.zhipu.rawValue, provider: .zhipu),
+        ProviderAccount(id: QuotaProvider.googleAntigravity.rawValue, provider: .googleAntigravity),
+        ProviderAccount(id: QuotaProvider.gitHubCopilot.rawValue, provider: .gitHubCopilot)
+      ]
+    )
+  }
+
   static func make(now: Date) -> QuotaSnapshot {
     QuotaSnapshot(
       generatedAt: now,
