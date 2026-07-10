@@ -30,6 +30,60 @@ public extension QuotaSnapshot {
     )
   }
 
+  /// Removes data for accounts that are no longer active and applies current account names.
+  /// The snapshot timestamp is intentionally preserved: changing configuration does not make
+  /// previously fetched quota data fresh.
+  func reconciled(with activeAccounts: [ProviderAccount]) -> QuotaSnapshot {
+    let accountsByID = Dictionary(
+      activeAccounts.map { ($0.id, $0) },
+      uniquingKeysWith: { first, _ in first }
+    )
+    let accountsByProvider = Dictionary(grouping: activeAccounts, by: \.provider)
+
+    func account(id: String, provider: QuotaProvider) -> ProviderAccount? {
+      if let exact = accountsByID[id], exact.provider == provider {
+        return exact
+      }
+
+      guard
+        id == provider.rawValue,
+        let providerAccounts = accountsByProvider[provider],
+        providerAccounts.count == 1
+      else {
+        return nil
+      }
+      return providerAccounts[0]
+    }
+
+    let reconciledProviders = providers.compactMap { usage -> ProviderUsage? in
+      guard let activeAccount = account(id: usage.accountID, provider: usage.provider) else {
+        return nil
+      }
+
+      var reconciled = usage
+      reconciled.accountID = activeAccount.id
+      reconciled.title = activeAccount.resolvedDisplayName
+      return reconciled
+    }
+
+    let reconciledFailures = failures.compactMap { failure -> ProviderFailure? in
+      guard let activeAccount = account(id: failure.accountID, provider: failure.provider) else {
+        return nil
+      }
+
+      var reconciled = failure
+      reconciled.accountID = activeAccount.id
+      return reconciled
+    }
+
+    return QuotaSnapshot(
+      version: version,
+      generatedAt: generatedAt,
+      providers: reconciledProviders,
+      failures: reconciledFailures
+    )
+  }
+
   /// Returns a copy of this snapshot with the usage/failure entries for `accountIDs`
   /// replaced by whatever `other` holds for those accounts. Used to splice a targeted
   /// re-fetch (e.g. an OpenAI-only retry) back into the full snapshot without re-fetching
