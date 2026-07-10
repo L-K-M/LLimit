@@ -138,6 +138,43 @@ final class StoreRoundTripTests: XCTestCase {
     XCTAssertEqual(tooLarge.refreshIntervalMinutes, 180)
   }
 
+  func testMalformedAccountFailsInsteadOfDroppingAllAccounts() throws {
+    let data = Data(
+      """
+      {
+        "refreshIntervalMinutes": 30,
+        "accounts": [
+          {
+            "id": "openai-primary",
+            "provider": "openai",
+            "displayName": "OpenAI Primary",
+            "isEnabled": true,
+            "credentials": { "openai_access_token": "token" }
+          },
+          {
+            "id": "future-provider",
+            "provider": "provider-added-by-a-newer-version",
+            "displayName": "Future Provider",
+            "isEnabled": true,
+            "credentials": {}
+          }
+        ]
+      }
+      """.utf8
+    )
+
+    XCTAssertThrowsError(try JSONDecoder().decode(AppSettings.self, from: data))
+  }
+
+  func testMissingAccountsKeyStillUsesEmptyDefault() throws {
+    let data = Data("{ \"refreshIntervalMinutes\": 45 }".utf8)
+
+    let settings = try JSONDecoder().decode(AppSettings.self, from: data)
+
+    XCTAssertEqual(settings.refreshIntervalMinutes, 45)
+    XCTAssertTrue(settings.accounts.isEmpty)
+  }
+
   func testQuotaHistoryStoreRoundTripAndRetention() throws {
     let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     let fileURL = tempDir.appendingPathComponent("history.json")
