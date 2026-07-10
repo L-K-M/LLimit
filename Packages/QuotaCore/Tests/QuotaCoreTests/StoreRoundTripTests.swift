@@ -121,6 +121,23 @@ final class StoreRoundTripTests: XCTestCase {
     XCTAssertEqual(loaded.widgetVisibility.trendHistoryDays, 14)
   }
 
+  func testRefreshIntervalIsClampedAtModelAndDecodeBoundaries() throws {
+    XCTAssertEqual(AppSettings(refreshIntervalMinutes: 0).refreshIntervalMinutes, 15)
+    XCTAssertEqual(AppSettings(refreshIntervalMinutes: 10_000).refreshIntervalMinutes, 180)
+
+    let tooSmall = try JSONDecoder().decode(
+      AppSettings.self,
+      from: Data("{ \"refreshIntervalMinutes\": -1 }".utf8)
+    )
+    let tooLarge = try JSONDecoder().decode(
+      AppSettings.self,
+      from: Data("{ \"refreshIntervalMinutes\": 9223372036854775807 }".utf8)
+    )
+
+    XCTAssertEqual(tooSmall.refreshIntervalMinutes, 15)
+    XCTAssertEqual(tooLarge.refreshIntervalMinutes, 180)
+  }
+
   func testMalformedAccountFailsInsteadOfDroppingAllAccounts() throws {
     let data = Data(
       """
