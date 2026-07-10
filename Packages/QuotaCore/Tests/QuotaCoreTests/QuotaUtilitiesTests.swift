@@ -9,6 +9,27 @@ final class QuotaUtilitiesTests: XCTestCase {
     XCTAssertNil(parseNumeric("abc"))
   }
 
+  func testParseNumericRejectsNonFiniteValuesAndBooleans() {
+    XCTAssertNil(parseNumeric("NaN"))
+    XCTAssertNil(parseNumeric("infinity"))
+    XCTAssertNil(parseNumeric(Double.infinity))
+    XCTAssertNil(parseNumeric(true))
+  }
+
+  func testCheckedNumericFormattingRejectsValuesOutsideIntRange() {
+    XCTAssertNil(roundedInt(Double.infinity))
+    XCTAssertNil(roundedInt(Double.greatestFiniteMagnitude))
+    XCTAssertNil(formatIntLike(Double.infinity))
+    XCTAssertEqual(formatIntLike(42), "42")
+  }
+
+  func testPercentConversionClampsOnlyFiniteValues() {
+    XCTAssertEqual(percentRemaining(fromUsedPercent: -20), 100)
+    XCTAssertEqual(percentRemaining(fromUsedPercent: 130), 0)
+    XCTAssertNil(percentRemaining(fromUsedPercent: .nan))
+    XCTAssertNil(roundedPercent(.infinity))
+  }
+
   func testFormatShortDuration() {
     XCTAssertEqual(formatShortDuration(seconds: 65), "1m")
     XCTAssertEqual(formatShortDuration(seconds: 3661), "1h 1m")

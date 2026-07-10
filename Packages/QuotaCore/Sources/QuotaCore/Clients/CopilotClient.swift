@@ -99,7 +99,7 @@ public struct CopilotClient: QuotaProviderClient {
 
     if let limit, limit > 0 {
       let remaining = max(0, Double(limit) - totalUsed)
-      remainingPercent = clampPercent(Int((remaining / Double(limit) * 100.0).rounded()))
+      remainingPercent = roundedPercent(remaining / Double(limit) * 100.0)
       totalDisplay = String(limit)
     } else {
       remainingPercent = nil
@@ -112,7 +112,7 @@ public struct CopilotClient: QuotaProviderClient {
       id: "premium",
       label: "Premium requests",
       remainingPercent: remainingPercent,
-      usedDisplay: String(Int(totalUsed.rounded())),
+      usedDisplay: formatIntLike(totalUsed),
       totalDisplay: totalDisplay,
       resetAt: resetAt,
       resetIn: resetAt.map { formatResetCountdown(to: $0, now: now) }
@@ -249,15 +249,15 @@ public struct CopilotClient: QuotaProviderClient {
       )
     }
 
-    let remainingPercent = clampPercent(Int(quota.percentRemaining.rounded()))
+    let remainingPercent = roundedPercent(quota.percentRemaining)
     let used = max(0, quota.entitlement - quota.remaining)
 
     return UsageMetric(
       id: id,
       label: label,
       remainingPercent: remainingPercent,
-      usedDisplay: String(Int(used.rounded())),
-      totalDisplay: String(Int(quota.entitlement.rounded())),
+      usedDisplay: formatIntLike(used),
+      totalDisplay: formatIntLike(quota.entitlement),
       resetAt: resetAt,
       resetIn: resetIn
     )

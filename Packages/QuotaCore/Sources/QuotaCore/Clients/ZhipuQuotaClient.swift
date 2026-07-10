@@ -41,7 +41,11 @@ public struct ZhipuQuotaClient: QuotaProviderClient {
     }
 
     let payload = try parseJSONObject(from: data)
-    guard (payload["success"] as? Bool) == true, Int(parseNumeric(payload["code"]) ?? -1) == 200 else {
+    guard
+      (payload["success"] as? Bool) == true,
+      let responseCode = parseNumeric(payload["code"]),
+      responseCode == 200
+    else {
       let message = payload["msg"] as? String ?? "Unknown response"
       throw ProviderClientError(kind: .api, message: "\(provider.displayName) API returned non-success payload: \(message)")
     }
@@ -60,7 +64,7 @@ public struct ZhipuQuotaClient: QuotaProviderClient {
 
     if let tokenLimit = limits.first(where: { ($0["type"] as? String) == "TOKENS_LIMIT" }) {
       let percentage = parseNumeric(tokenLimit["percentage"]) ?? 0
-      let remaining = percentRemaining(fromUsedPercent: percentage)
+      guard let remaining = percentRemaining(fromUsedPercent: percentage) else { continue }
       maxUsagePercent = max(maxUsagePercent, 100 - remaining)
 
       let used = firstNumeric(
@@ -103,7 +107,7 @@ public struct ZhipuQuotaClient: QuotaProviderClient {
 
     if let timeLimit = limits.first(where: { ($0["type"] as? String) == "TIME_LIMIT" }) {
       let percentage = parseNumeric(timeLimit["percentage"]) ?? 0
-      let remaining = percentRemaining(fromUsedPercent: percentage)
+      guard let remaining = percentRemaining(fromUsedPercent: percentage) else { continue }
       maxUsagePercent = max(maxUsagePercent, 100 - remaining)
       let resetAt = parseResetDate(in: timeLimit) ?? providerResetAt ?? startOfNextMonth(from: now)
 

@@ -74,7 +74,7 @@ public struct AnthropicClient: QuotaProviderClient {
       guard let object = payload[window.key] as? [String: Any] else { continue }
       guard let utilization = parseNumeric(object["utilization"]) else { continue }
 
-      let usedPercent = clampPercent(Int(utilization.rounded()))
+      guard let usedPercent = roundedPercent(utilization) else { continue }
       maxUsage = max(maxUsage, usedPercent)
 
       let resetAt = parseDateValue(object["resets_at"])
