@@ -112,7 +112,7 @@ public struct CopilotClient: QuotaProviderClient {
       id: "premium",
       label: "Premium requests",
       remainingPercent: remainingPercent,
-      usedDisplay: formatIntLike(totalUsed),
+      usedDisplay: roundedInt(totalUsed).map { String($0) },
       totalDisplay: totalDisplay,
       resetAt: resetAt,
       resetIn: resetAt.map { formatResetCountdown(to: $0, now: now) }
@@ -256,8 +256,8 @@ public struct CopilotClient: QuotaProviderClient {
       id: id,
       label: label,
       remainingPercent: remainingPercent,
-      usedDisplay: formatIntLike(used),
-      totalDisplay: formatIntLike(quota.entitlement),
+      usedDisplay: roundedInt(used).map { String($0) },
+      totalDisplay: roundedInt(quota.entitlement).map { String($0) },
       resetAt: resetAt,
       resetIn: resetIn
     )

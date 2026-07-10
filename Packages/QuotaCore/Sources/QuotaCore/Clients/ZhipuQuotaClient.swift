@@ -63,8 +63,12 @@ public struct ZhipuQuotaClient: QuotaProviderClient {
     var maxUsagePercent = 0
 
     if let tokenLimit = limits.first(where: { ($0["type"] as? String) == "TOKENS_LIMIT" }) {
-      let percentage = parseNumeric(tokenLimit["percentage"]) ?? 0
-      guard let remaining = percentRemaining(fromUsedPercent: percentage) else { continue }
+      guard
+        let percentage = parseNumeric(tokenLimit["percentage"]),
+        let remaining = percentRemaining(fromUsedPercent: percentage)
+      else {
+        throw ProviderClientError(kind: .decoding, message: "\(provider.displayName) token limit has an invalid percentage")
+      }
       maxUsagePercent = max(maxUsagePercent, 100 - remaining)
 
       let used = firstNumeric(
@@ -106,8 +110,12 @@ public struct ZhipuQuotaClient: QuotaProviderClient {
     }
 
     if let timeLimit = limits.first(where: { ($0["type"] as? String) == "TIME_LIMIT" }) {
-      let percentage = parseNumeric(timeLimit["percentage"]) ?? 0
-      guard let remaining = percentRemaining(fromUsedPercent: percentage) else { continue }
+      guard
+        let percentage = parseNumeric(timeLimit["percentage"]),
+        let remaining = percentRemaining(fromUsedPercent: percentage)
+      else {
+        throw ProviderClientError(kind: .decoding, message: "\(provider.displayName) time limit has an invalid percentage")
+      }
       maxUsagePercent = max(maxUsagePercent, 100 - remaining)
       let resetAt = parseResetDate(in: timeLimit) ?? providerResetAt ?? startOfNextMonth(from: now)
 
