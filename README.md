@@ -63,8 +63,9 @@ click **Always Allow**. (To avoid the prompt you can export the token once:
 ## Build & release from the command line (no Xcode GUI)
 
 ```bash
-./scripts/build.sh            # -> dist/LLimit.app + .zip + .dmg (ad-hoc signed)
-./scripts/release.sh 0.3.0    # bump version, tag, push -> GitHub Actions publishes the release
+./scripts/build.sh                # build LLimit.app (dev-signed so the widget works) + reveal in Finder
+./scripts/build.sh --dmg --zip    # also package dist/LLimit-<version>.{dmg,zip}
+./scripts/release.sh 0.3.0        # bump version, tag, push -> GitHub Actions publishes the release
 ```
 
 See [`RELEASING.md`](RELEASING.md) for Developer ID signing + notarization and the
