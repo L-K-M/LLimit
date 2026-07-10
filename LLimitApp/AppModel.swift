@@ -48,6 +48,7 @@ final class AppModel: ObservableObject {
   private var autoRefreshTask: Task<Void, Never>?
   private var widgetReloadTask: Task<Void, Never>?
   private var hasBootstrapped = false
+  private var configurationLoadFailed = false
 
   init() {
     let appSupportDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -102,12 +103,14 @@ final class AppModel: ObservableObject {
     let settings: AppSettings
     do {
       settings = try loadSettingsFromPreferredStore()
+      configurationLoadFailed = false
     } catch {
       settings = .default
-      statusMessage = "Could not load settings. Using defaults."
+      configurationLoadFailed = true
+      statusMessage = "Could not load settings. Using defaults. The existing file will not be overwritten."
     }
 
-    refreshIntervalMinutes = max(15, settings.refreshIntervalMinutes)
+    refreshIntervalMinutes = settings.refreshIntervalMinutes
     widgetStyle = settings.widgetStyle
     widgetBackgroundSettings = settings.widgetBackgroundSettings
     widgetVisibility = settings.widgetVisibility
@@ -121,6 +124,11 @@ final class AppModel: ObservableObject {
   }
 
   func saveConfiguration(showSuccessMessage: Bool = false) {
+    guard !configurationLoadFailed else {
+      statusMessage = "Save blocked because the existing settings file could not be read. Fix or back up the file, then relaunch LLimit."
+      return
+    }
+
     do {
       let settings = currentSettings()
 
@@ -161,7 +169,30 @@ final class AppModel: ObservableObject {
     }
 
     do {
-      let refreshed = try await refreshService.refresh(configurations: enabledConfigs)
+      var refreshed = try await refreshService.refresh(configurations: enabledConfigs)
+
+      // Reactive recovery: if an enabled OpenAI account failed authentication (a token
+      // revoked before its JWT exp, or a Codex rotation that landed mid-cycle), refresh
+      // its token and retry — only the accounts we actually recovered, so healthy accounts
+      // and the other providers aren't re-polled (Anthropic hard-rate-limits repeat pollers).
+      let recoveredIDs = await recoverFailedOpenAITokens(in: refreshed)
+      if !recoveredIDs.isEmpty {
+        let retryConfigs = runtimeConfigurations().filter { configuration in
+          recoveredIDs.contains(configuration.accountID)
+            && configuration.isEnabled
+            && configuration.provider.hasRequiredCredentials(configuration.credentials)
+        }
+        if !retryConfigs.isEmpty {
+          let retriedIDs = Set(retryConfigs.map(\.accountID))
+          // Merge stale-on-failure against the current snapshot so a still-failing retry
+          // keeps the last-known usage, then splice only these accounts' results back in.
+          let retrySnapshot = await refreshService.fetch(configurations: retryConfigs)
+            .mergingStaleUsage(from: refreshed)
+          refreshed = refreshed.replacingResults(forAccountIDs: retriedIDs, from: retrySnapshot)
+          try? refreshService.save(refreshed)
+        }
+      }
+
       do {
         try historyStore.append(refreshed)
       } catch {
@@ -393,43 +424,134 @@ final class AppModel: ObservableObject {
   }
   #endif
 
-  /// Refreshes ChatGPT/Codex access tokens that are missing or about to expire, using
-  /// the stored refresh token, and persists the rotated tokens. ChatGPT tokens expire
-  /// hourly, so without this an imported OpenAI account 401s after ~an hour.
+  /// Prepares ChatGPT/Codex access tokens before a refresh: adopts the live tokens Codex
+  /// maintains on disk, then refreshes anything still missing/expired. ChatGPT tokens
+  /// expire hourly, so without this an imported OpenAI account 401s after ~an hour.
+  ///
+  /// OpenAI uses *rotating* refresh tokens — each refresh invalidates the previous one for
+  /// sibling clients — so LLimit's one-time imported copy dies as soon as the Codex CLI
+  /// refreshes (and vice-versa). Re-reading `~/.codex/auth.json` (matched by ChatGPT
+  /// account id) and adopting Codex's current token keeps the two in sync instead of
+  /// fighting over the grant.
   private func refreshExpiringChatGPTTokens() async {
-    // Snapshot ids up front; re-resolve the index by id around the await since the
-    // account list could change while suspended.
-    let openAIAccountIDs = providerAccounts.filter { $0.provider == .openAI }.map(\.id)
+    // Only enabled accounts: refreshing a disabled account would keep rotating the shared
+    // Codex refresh token and log the user's Codex CLI out of an account they turned off.
+    let openAIAccountIDs = providerAccounts.filter { $0.provider == .openAI && $0.isEnabled }.map(\.id)
+    guard !openAIAccountIDs.isEmpty else { return }
+
     var didChange = false
 
+    // 1. Adopt the freshest local Codex/OpenCode tokens first (Codex may have rotated).
+    if adoptLiveOpenAITokens(forAccountIDs: openAIAccountIDs) {
+      didChange = true
+    }
+
+    // 2. Refresh anything still missing or near expiry using the (possibly just-adopted)
+    //    refresh token.
     for accountID in openAIAccountIDs {
       guard let index = providerAccounts.firstIndex(where: { $0.id == accountID }) else { continue }
-
       let credentials = providerAccounts[index].credentials
       guard let refreshToken = credentials[CredentialField.openAIRefreshToken], !refreshToken.isEmpty else { continue }
 
       let access = credentials[CredentialField.openAIAccessToken] ?? ""
       if !access.isEmpty, !ChatGPTOAuth.isAccessTokenExpired(access) { continue }
 
-      do {
-        let result = try await ChatGPTOAuth.refresh(refreshToken: refreshToken)
-        guard let liveIndex = providerAccounts.firstIndex(where: { $0.id == accountID }) else { continue }
-        providerAccounts[liveIndex].credentials[CredentialField.openAIAccessToken] = result.accessToken
-        if let newRefresh = result.refreshToken {
-          providerAccounts[liveIndex].credentials[CredentialField.openAIRefreshToken] = newRefresh
-        }
-        if let accountID = result.accountID {
-          providerAccounts[liveIndex].credentials[CredentialField.openAIAccountID] = accountID
-        }
+      if await refreshOpenAIAccount(id: accountID, refreshToken: refreshToken) {
         didChange = true
-      } catch {
-        print("[LLimit] ChatGPT token refresh failed: \(error.localizedDescription)")
       }
     }
 
     if didChange {
       saveConfiguration()
     }
+  }
+
+  /// Adopts the live Codex/OpenCode tokens for the given accounts, matched by ChatGPT
+  /// account id. Returns whether any account's credentials changed. Does not save.
+  private func adoptLiveOpenAITokens(forAccountIDs accountIDs: [String]) -> Bool {
+    let live = CredentialDiscovery().discover().credentials
+      .filter { $0.provider == .openAI }
+      .map(\.credentials)
+    guard !live.isEmpty else { return false }
+
+    var changed = false
+    for accountID in accountIDs {
+      guard let index = providerAccounts.firstIndex(where: { $0.id == accountID }) else { continue }
+      guard let updated = OpenAICredentialSync.adoption(
+        for: providerAccounts[index].credentials,
+        among: live,
+        expiry: ChatGPTOAuth.accessTokenExpiry
+      ) else { continue }
+      providerAccounts[index].credentials = updated
+      changed = true
+    }
+    return changed
+  }
+
+  /// Exchanges the stored refresh token for a fresh access token and persists the rotated
+  /// tokens (in memory; caller saves). On failure — typically `invalid_grant` after Codex
+  /// rotated the grant out from under us — re-reads the live Codex file and adopts its
+  /// token as a last resort. Returns whether the account's credentials changed.
+  @discardableResult
+  private func refreshOpenAIAccount(id accountID: String, refreshToken: String) async -> Bool {
+    do {
+      let result = try await ChatGPTOAuth.refresh(refreshToken: refreshToken)
+      // Re-resolve the index across the await — the account list may have changed.
+      guard let index = providerAccounts.firstIndex(where: { $0.id == accountID }) else { return false }
+      providerAccounts[index].credentials[CredentialField.openAIAccessToken] = result.accessToken
+      if let newRefresh = result.refreshToken {
+        providerAccounts[index].credentials[CredentialField.openAIRefreshToken] = newRefresh
+      }
+      if let newAccountID = result.accountID {
+        providerAccounts[index].credentials[CredentialField.openAIAccountID] = newAccountID
+      }
+      return true
+    } catch {
+      print("[LLimit] ChatGPT token refresh failed: \(error.localizedDescription)")
+      // Codex may have rotated the grant; re-read the live file and adopt if it changed.
+      return adoptLiveOpenAITokens(forAccountIDs: [accountID])
+    }
+  }
+
+  /// Reactive recovery for a ChatGPT access token that was revoked server-side before its
+  /// JWT `exp` (logout, password change, refresh-token-family revocation): the proactive
+  /// pass skips a not-yet-expired token, so such an account 401s every cycle. For each
+  /// enabled OpenAI account that failed auth this cycle, first adopt a fresher live token;
+  /// only if nothing fresher is on disk do we force a refresh (which rotates the grant).
+  /// Returns the set of account ids whose credentials changed, so the caller can retry
+  /// exactly those accounts.
+  private func recoverFailedOpenAITokens(in snapshot: QuotaSnapshot) async -> Set<String> {
+    let failedIDs = snapshot.failures
+      .filter { $0.provider == .openAI && $0.kind == .auth }
+      .map(\.accountID)
+    guard !failedIDs.isEmpty else { return [] }
+
+    var recovered: Set<String> = []
+    for accountID in failedIDs {
+      guard
+        let index = providerAccounts.firstIndex(where: { $0.id == accountID }),
+        providerAccounts[index].provider == .openAI,
+        providerAccounts[index].isEnabled
+      else { continue }
+
+      // Prefer adopting Codex's own fresher token — that recovers the account without
+      // rotating the shared grant (which would log the Codex CLI out).
+      if adoptLiveOpenAITokens(forAccountIDs: [accountID]) {
+        recovered.insert(accountID)
+        continue
+      }
+
+      // Nothing fresher on disk: the stored token is genuinely bad, so force a refresh.
+      let refreshToken = providerAccounts[index].credentials[CredentialField.openAIRefreshToken] ?? ""
+      if !refreshToken.isEmpty, await refreshOpenAIAccount(id: accountID, refreshToken: refreshToken) {
+        recovered.insert(accountID)
+      }
+    }
+
+    if !recovered.isEmpty {
+      saveConfiguration()
+    }
+    return recovered
   }
 
   /// Claude Code refreshes its own OAuth token (in `~/.claude/.credentials.json` and the
@@ -554,7 +676,10 @@ final class AppModel: ObservableObject {
     Binding(
       get: { self.refreshIntervalMinutes },
       set: { newValue in
-        self.refreshIntervalMinutes = max(15, newValue)
+        self.refreshIntervalMinutes = min(
+          max(newValue, AppSettings.refreshIntervalRange.lowerBound),
+          AppSettings.refreshIntervalRange.upperBound
+        )
         self.saveConfiguration()
         self.restartAutoRefreshLoop()
       }
@@ -973,7 +1098,11 @@ final class AppModel: ObservableObject {
   }
 
   private func autoRefreshIntervalNanoseconds() -> UInt64 {
-    let seconds = UInt64(max(15, refreshIntervalMinutes) * 60)
+    let clampedMinutes = min(
+      max(refreshIntervalMinutes, AppSettings.refreshIntervalRange.lowerBound),
+      AppSettings.refreshIntervalRange.upperBound
+    )
+    let seconds = UInt64(clampedMinutes * 60)
     return seconds * 1_000_000_000
   }
 
@@ -986,7 +1115,11 @@ final class AppModel: ObservableObject {
       return true
     }
 
-    let maxAgeSeconds = TimeInterval(max(15, refreshIntervalMinutes) * 60)
+    let clampedMinutes = min(
+      max(refreshIntervalMinutes, AppSettings.refreshIntervalRange.lowerBound),
+      AppSettings.refreshIntervalRange.upperBound
+    )
+    let maxAgeSeconds = TimeInterval(clampedMinutes * 60)
     return now.timeIntervalSince(snapshot.generatedAt) >= maxAgeSeconds
   }
 

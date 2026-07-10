@@ -83,4 +83,24 @@ public extension QuotaSnapshot {
       failures: reconciledFailures
     )
   }
+
+  /// Returns a copy of this snapshot with the usage/failure entries for `accountIDs`
+  /// replaced by whatever `other` holds for those accounts. Used to splice a targeted
+  /// re-fetch (e.g. an OpenAI-only retry) back into the full snapshot without re-fetching
+  /// — or disturbing — the other providers.
+  func replacingResults(forAccountIDs accountIDs: Set<String>, from other: QuotaSnapshot) -> QuotaSnapshot {
+    guard !accountIDs.isEmpty else { return self }
+
+    var mergedProviders = providers.filter { !accountIDs.contains($0.accountID) }
+    var mergedFailures = failures.filter { !accountIDs.contains($0.accountID) }
+    mergedProviders += other.providers.filter { accountIDs.contains($0.accountID) }
+    mergedFailures += other.failures.filter { accountIDs.contains($0.accountID) }
+
+    return QuotaSnapshot(
+      version: version,
+      generatedAt: generatedAt,
+      providers: mergedProviders,
+      failures: mergedFailures
+    )
+  }
 }

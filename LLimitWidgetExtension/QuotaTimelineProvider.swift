@@ -42,7 +42,10 @@ struct QuotaTimelineProvider: TimelineProvider {
   func getTimeline(in context: Context, completion: @escaping (Timeline<QuotaEntry>) -> Void) {
     let now = Date()
     let entry = makeStoredEntry(now: now)
-    let refreshMinutes = max(15, entry.refreshIntervalMinutes)
+    let refreshMinutes = min(
+      max(entry.refreshIntervalMinutes, AppSettings.refreshIntervalRange.lowerBound),
+      AppSettings.refreshIntervalRange.upperBound
+    )
     let refreshIntervalSeconds = TimeInterval(refreshMinutes * 60)
     let entrySpacingSeconds: TimeInterval = 5 * 60
 
@@ -79,7 +82,7 @@ struct QuotaTimelineProvider: TimelineProvider {
     let settings = loadSettings()
     let snapshot = loadSnapshot()
     let history = loadHistory(windowDays: max(1, settings.widgetVisibility.trendHistoryDays), fallbackSnapshot: snapshot)
-    let refreshInterval = max(15, settings.refreshIntervalMinutes)
+    let refreshInterval = settings.refreshIntervalMinutes
     return QuotaEntry(
       date: now,
       snapshot: snapshot,
