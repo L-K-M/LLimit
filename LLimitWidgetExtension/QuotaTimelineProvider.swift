@@ -44,7 +44,7 @@ struct QuotaTimelineProvider: TimelineProvider {
     let now = Date()
     let entry = makeStoredEntry(now: now)
     let refreshMinutes = max(15, entry.refreshIntervalMinutes)
-    let refreshIntervalSeconds = TimeInterval(refreshMinutes) * 60
+    let refreshIntervalSeconds = TimeInterval(refreshMinutes * 60)
     let nextRefreshDate = now.addingTimeInterval(refreshIntervalSeconds)
     completion(Timeline(entries: [entry], policy: .after(nextRefreshDate)))
   }
