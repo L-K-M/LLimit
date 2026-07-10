@@ -874,9 +874,6 @@ final class AppModel: ObservableObject {
       set: { newValue in
         self.updateProviderStyle(for: accountID) { style in
           style.useCustomStyle = newValue
-          if newValue {
-            style.style = self.widgetStyle
-          }
         }
       }
     )
