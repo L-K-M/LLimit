@@ -27,6 +27,34 @@ func formatResetCountdown(to date: Date, now: Date) -> String {
   return formatShortDuration(seconds: diff)
 }
 
+public extension UsageMetric {
+  func resetCountdown(at date: Date) -> String? {
+    if let resetAt {
+      return formatResetCountdown(to: resetAt, now: date)
+    }
+
+    guard let resetIn else { return nil }
+    let value = resetIn.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !value.isEmpty else { return nil }
+
+    let lowercased = value.lowercased()
+    if lowercased == "reset" { return "reset" }
+    let normalized: String
+    if lowercased.hasPrefix("reset in ") {
+      normalized = String(value.dropFirst(9))
+    } else if lowercased.hasPrefix("in ") {
+      normalized = String(value.dropFirst(3))
+    } else if lowercased.hasPrefix("reset ") {
+      normalized = String(value.dropFirst(6))
+    } else {
+      normalized = value
+    }
+
+    let trimmed = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
+  }
+}
+
 func parseNumeric(_ value: Any?) -> Double? {
   switch value {
   case let number as NSNumber:

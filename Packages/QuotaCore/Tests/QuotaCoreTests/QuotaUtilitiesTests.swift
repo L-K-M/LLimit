@@ -24,6 +24,25 @@ final class QuotaUtilitiesTests: XCTestCase {
     XCTAssertEqual(formatResetCountdown(to: future, now: now), "1h 1m")
   }
 
+  func testMetricResetCountdownPrefersAbsoluteDate() {
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let metric = UsageMetric(
+      id: "limit",
+      label: "Limit",
+      resetAt: now.addingTimeInterval(3_700),
+      resetIn: "20m"
+    )
+
+    XCTAssertEqual(metric.resetCountdown(at: now), "1h 1m")
+    XCTAssertEqual(metric.resetCountdown(at: now.addingTimeInterval(3_701)), "reset")
+  }
+
+  func testMetricResetCountdownNormalizesTextFallback() {
+    let metric = UsageMetric(id: "limit", label: "Limit", resetIn: "Reset in 2h 5m")
+
+    XCTAssertEqual(metric.resetCountdown(at: Date()), "2h 5m")
+  }
+
   func testParseISO8601SupportsCalendarDate() {
     let parsed = parseISO8601("2026-03-06")
     let calendar = Calendar(identifier: .gregorian)
