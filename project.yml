@@ -33,7 +33,8 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         CODE_SIGN_ENTITLEMENTS: LLimitApp/LLimitApp.entitlements
         MACOSX_DEPLOYMENT_TARGET: 14.0
-        CURRENT_PROJECT_VERSION: 6
+        REGISTER_WITH_LAUNCH_SERVICES: NO
+        CURRENT_PROJECT_VERSION: 7
         MARKETING_VERSION: 0.2.0
     info:
       path: LLimitApp/Info.plist
@@ -74,7 +75,7 @@ targets:
         APPLICATION_EXTENSION_API_ONLY: YES
         MACOSX_DEPLOYMENT_TARGET: 14.0
         SKIP_INSTALL: YES
-        CURRENT_PROJECT_VERSION: 6
+        CURRENT_PROJECT_VERSION: 7
         MARKETING_VERSION: 0.2.0
     info:
       path: LLimitWidgetExtension/Info.plist

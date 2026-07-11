@@ -21,4 +21,28 @@ command -v "$BIN" >/dev/null 2>&1 || {
   echo "error: lkm-build not found — clone https://github.com/L-K-M/release-tool and run ./install.sh" >&2
   exit 1
 }
-exec "$BIN" "$@"
+
+INSTALL=false
+for argument in "$@"; do
+  if [[ "$argument" == "--install" ]]; then
+    INSTALL=true
+    break
+  fi
+done
+
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister"
+if [[ "$INSTALL" == true && -x "$LSREGISTER" ]]; then
+  # Remove stale intermediate registrations before --clean deletes their paths.
+  "$LSREGISTER" -u -R "$PWD/build/Build/Products/Release/$BUILD_APP_NAME.app" >/dev/null 2>&1 || true
+  "$LSREGISTER" -u -R "$PWD/build/Build/Products/Debug/$BUILD_APP_NAME.app" >/dev/null 2>&1 || true
+fi
+
+"$BIN" "$@"
+
+if [[ "$INSTALL" == true && -x "$LSREGISTER" && -d "/Applications/$BUILD_APP_NAME.app" ]]; then
+  "$LSREGISTER" -u -R "$PWD/build/Build/Products/Release/$BUILD_APP_NAME.app" >/dev/null 2>&1 || true
+  "$LSREGISTER" -u -R "$PWD/build/Build/Products/Debug/$BUILD_APP_NAME.app" >/dev/null 2>&1 || true
+  "$LSREGISTER" -u -R "/Applications/$BUILD_APP_NAME.app" >/dev/null 2>&1 || true
+  "$LSREGISTER" -f -R -trusted "/Applications/$BUILD_APP_NAME.app"
+  killall chronod >/dev/null 2>&1 || true
+fi

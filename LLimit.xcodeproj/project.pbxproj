@@ -317,7 +317,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 293A48LC7B;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LLimitApp/Info.plist;
@@ -329,6 +329,7 @@
 				MARKETING_VERSION = 0.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = ch.lkmc.llimit.app;
 				PRODUCT_NAME = LLimit;
+				REGISTER_WITH_LAUNCH_SERVICES = NO;
 				SDKROOT = macosx;
 				SWIFT_VERSION = 5.10;
 			};
@@ -461,7 +462,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 293A48LC7B;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LLimitApp/Info.plist;
@@ -473,6 +474,7 @@
 				MARKETING_VERSION = 0.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = ch.lkmc.llimit.app;
 				PRODUCT_NAME = LLimit;
+				REGISTER_WITH_LAUNCH_SERVICES = NO;
 				SDKROOT = macosx;
 				SWIFT_VERSION = 5.10;
 			};
@@ -485,7 +487,7 @@
 				CODE_SIGN_ENTITLEMENTS = LLimitWidgetExtension/LLimitWidgetExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 293A48LC7B;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LLimitWidgetExtension/Info.plist;
@@ -511,7 +513,7 @@
 				CODE_SIGN_ENTITLEMENTS = LLimitWidgetExtension/LLimitWidgetExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 293A48LC7B;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LLimitWidgetExtension/Info.plist;
