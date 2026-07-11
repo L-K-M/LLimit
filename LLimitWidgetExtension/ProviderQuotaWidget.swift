@@ -4,9 +4,9 @@ import SwiftUI
 import WidgetKit
 import QuotaCore
 
-struct ProviderAccountEntity: AppEntity {
-  static var typeDisplayRepresentation = TypeDisplayRepresentation(name: "LLimit Account")
-  static var defaultQuery = ProviderAccountQuery()
+struct ProviderAccountEntity: AppEntity, Hashable {
+  static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "LLimit Account")
+  static let defaultQuery = ProviderAccountQuery()
 
   let id: String
   let displayName: String
@@ -20,19 +20,27 @@ struct ProviderAccountEntity: AppEntity {
   }
 }
 
-struct ProviderAccountQuery: EntityQuery {
+struct ProviderAccountQuery: EntityQuery, Sendable {
   func entities(for identifiers: [ProviderAccountEntity.ID]) async throws -> [ProviderAccountEntity] {
     let requested = Set(identifiers)
-    return try loadEntities().filter { requested.contains($0.id) }
+    return loadEntities().filter { requested.contains($0.id) }
   }
 
   func suggestedEntities() async throws -> [ProviderAccountEntity] {
-    try loadEntities()
+    loadEntities()
   }
 
-  private func loadEntities() throws -> [ProviderAccountEntity] {
-    let settingsURL = try SharedPaths.settingsFileURL()
-    let settings = try SettingsStore(fileURL: settingsURL).load()
+  func defaultResult() async -> ProviderAccountEntity? {
+    loadEntities().first
+  }
+
+  private func loadEntities() -> [ProviderAccountEntity] {
+    guard
+      let settingsURL = try? SharedPaths.settingsFileURL(),
+      let settings = try? SettingsStore(fileURL: settingsURL).load()
+    else {
+      return []
+    }
     return settings.accounts
       .filter(\.isEnabled)
       .map(ProviderAccountEntity.init)
@@ -48,11 +56,13 @@ private extension ProviderAccountEntity {
 }
 
 struct ProviderQuotaIntent: WidgetConfigurationIntent {
-  static var title: LocalizedStringResource = "Provider Quota"
-  static var description = IntentDescription("Choose the LLimit account shown by this quota tile.")
+  static let title: LocalizedStringResource = "Provider Quota"
+  static let description = IntentDescription("Choose the LLimit account shown by this quota tile.")
 
   @Parameter(title: "Account")
   var account: ProviderAccountEntity?
+
+  init() {}
 
   static var parameterSummary: some ParameterSummary {
     Summary("Show \(\.$account)")

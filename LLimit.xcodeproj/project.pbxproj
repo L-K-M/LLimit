@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		0076043CC71CC09BFF9DE74A /* LLimitQuotaWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B4155FC0F0418AB20A7F600 /* LLimitQuotaWidget.swift */; };
+		1A2B3C4D5E6F708192A3B4C5 /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2B3C4D5E6F708192A3B4C5D6 /* AppIntents.framework */; };
 		386963A9990480361B221F1C /* SharedConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CA36F027D77628AAB911B4F /* SharedConstants.swift */; };
 		4A4AC618CDAE0C085BE6E421 /* LLimitApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65826397D3D90EF0FE3F1AF8 /* LLimitApp.swift */; };
 		7394D6C4263D47B0C75C0D50 /* SharedConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CA36F027D77628AAB911B4F /* SharedConstants.swift */; };
@@ -50,6 +51,7 @@
 
 /* Begin PBXFileReference section */
 		0F5E31A2797200183F69625A /* RefreshService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RefreshService.swift; sourceTree = "<group>"; };
+		2B3C4D5E6F708192A3B4C5D6 /* AppIntents.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppIntents.framework; path = System/Library/Frameworks/AppIntents.framework; sourceTree = SDKROOT; };
 		1D80DFE1041003A3DBEC1B17 /* LLimitApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LLimitApp.entitlements; sourceTree = "<group>"; };
 		2CA36F027D77628AAB911B4F /* SharedConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedConstants.swift; sourceTree = "<group>"; };
 		2F7DC2FD8B8B3CB28CBDBA50 /* QuotaTimelineProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaTimelineProvider.swift; sourceTree = "<group>"; };
@@ -72,6 +74,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1A2B3C4D5E6F708192A3B4C5 /* AppIntents.framework in Frameworks */,
 				CD2849C244BE0DFDA7D3A297 /* QuotaCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -94,8 +97,17 @@
 				53D603EBAF0D2B2679516E1B /* LLimitWidgetExtension */,
 				45FA16505B0046C65DEA3E6D /* Packages */,
 				A177AE9C6B8CB0D9DE7DCF6F /* Shared */,
+				3C4D5E6F708192A3B4C5D6E7 /* Frameworks */,
 				8ACC0DF73430B0833F5BE7C8 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		3C4D5E6F708192A3B4C5D6E7 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				2B3C4D5E6F708192A3B4C5D6 /* AppIntents.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 		45FA16505B0046C65DEA3E6D /* Packages */ = {
@@ -305,7 +317,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = 293A48LC7B;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LLimitApp/Info.plist;
@@ -449,7 +461,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = 293A48LC7B;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LLimitApp/Info.plist;
@@ -473,7 +485,7 @@
 				CODE_SIGN_ENTITLEMENTS = LLimitWidgetExtension/LLimitWidgetExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = 293A48LC7B;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LLimitWidgetExtension/Info.plist;
@@ -499,7 +511,7 @@
 				CODE_SIGN_ENTITLEMENTS = LLimitWidgetExtension/LLimitWidgetExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = 293A48LC7B;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LLimitWidgetExtension/Info.plist;
