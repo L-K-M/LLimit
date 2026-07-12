@@ -21,6 +21,8 @@ struct ProviderAccountEntity: AppEntity, Hashable {
 }
 
 struct ProviderAccountQuery: EntityQuery, Sendable {
+  static let persistentIdentifier = "ch.lkmc.llimit.query.provider-account"
+
   func entities(for identifiers: [ProviderAccountEntity.ID]) async throws -> [ProviderAccountEntity] {
     let requested = Set(identifiers)
     return loadEntities().filter { requested.contains($0.id) }
@@ -56,10 +58,12 @@ private extension ProviderAccountEntity {
 }
 
 struct ProviderQuotaIntent: WidgetConfigurationIntent {
+  static let persistentIdentifier = "ch.lkmc.llimit.intent.provider-quota"
   static let title: LocalizedStringResource = "Provider Quota"
   static let description = IntentDescription("Choose the LLimit account shown by this quota tile.")
+  static let isDiscoverable = false
 
-  @Parameter(title: "Account")
+  @Parameter(title: "Account", default: nil)
   var account: ProviderAccountEntity?
 
   init() {}

@@ -9,8 +9,9 @@ awaiting validation.
 
 The review-cycle implementations are merged. The combined `QuotaCore` suite passes 65 tests
 on Swift 6.0.3/Linux, and all widget sources pass a syntax parse. GitHub macOS jobs still fail
-before checkout because no runner is assigned (`runner_id: 0`, zero steps, no logs), so a real
-Xcode 16.2 app/widget build and visual QA remain required.
+before checkout because no runner is assigned (`runner_id: 0`, zero steps, no logs). Local
+testing now uses Xcode 17F113 with the macOS 26.5 SDK; visual and WidgetKit runtime QA remain
+manual.
 
 ## Immediate release blockers
 
@@ -330,7 +331,22 @@ Do not make speculative endpoint edits without captured evidence.
 
 ### Validate and extend provider tiles
 
-- Build with Xcode 16.2 and test AppIntent account configuration on macOS 14+.
+- Build 7 exports valid `ProviderQuotaIntent` metadata and launches the extension, but
+  `chronod` returns only the two static descriptors and omits
+  `ch.lkmc.llimit.widget.provider-quota`.
+- Build 8 gives the intent/query stable identifiers and makes `scripts/build.sh --install`
+  validate installed metadata, signatures, sandbox entitlement, matching build versions, and
+  the exact PlugInKit registration before restarting `chronod`; the provider descriptor is
+  still absent despite valid installed JSON metadata.
+- Build 9 temporarily adds one static and one parameterless App Intent descriptor probe. Two
+  descriptors means WidgetKit still loaded an older catalog; three means it loaded build 9
+  but rejected every App Intent configuration; four means only the provider account entity
+  graph is rejected; five means registration succeeded and the remaining issue is gallery UI
+  caching/filtering. Remove both probes after collecting this result.
+- Run `./scripts/build.sh --clean --install --run` on macOS, record the build 9 descriptor
+  count and kinds, then remove the probes and require the production catalog to include
+  `ch.lkmc.llimit.widget.provider-quota` before closing this blocker.
+- Test AppIntent account configuration on macOS 14+.
 - Capture small-widget screenshots against the supplied reference in light/dark desktop
   contexts.
 - Verify long names, one/two/no bounded metrics, unlimited, stale, failed, disabled, removed,
