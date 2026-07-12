@@ -51,8 +51,7 @@ fi
 if [[ "$INSTALL" == true && -x "$LSREGISTER" && -d "$INSTALLED_APP" ]]; then
   INTENT_METADATA="$INSTALLED_WIDGET/Contents/Resources/Metadata.appintents/extract.actionsdata"
   if [[ ! -f "$INTENT_METADATA" ]] \
-    || ! /usr/bin/grep -q 'ProviderQuotaIntent' "$INTENT_METADATA" \
-    || ! /usr/bin/grep -q 'RegistrationProbeIntent' "$INTENT_METADATA"; then
+    || ! /usr/bin/grep -q 'ProviderQuotaIntent' "$INTENT_METADATA"; then
     echo "error: installed widget is missing required App Intent metadata" >&2
     exit 1
   fi

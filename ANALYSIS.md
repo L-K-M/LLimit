@@ -334,18 +334,14 @@ Do not make speculative endpoint edits without captured evidence.
 - Build 7 exports valid `ProviderQuotaIntent` metadata and launches the extension, but
   `chronod` returns only the two static descriptors and omits
   `ch.lkmc.llimit.widget.provider-quota`.
-- Build 8 gives the intent/query stable identifiers and makes `scripts/build.sh --install`
-  validate installed metadata, signatures, sandbox entitlement, matching build versions, and
-  the exact PlugInKit registration before restarting `chronod`; the provider descriptor is
-  still absent despite valid installed JSON metadata.
-- Build 9 temporarily adds one static and one parameterless App Intent descriptor probe. Two
-  descriptors means WidgetKit still loaded an older catalog; three means it loaded build 9
-  but rejected every App Intent configuration; four means only the provider account entity
-  graph is rejected; five means registration succeeded and the remaining issue is gallery UI
-  caching/filtering. Remove both probes after collecting this result.
-- Run `./scripts/build.sh --clean --install --run` on macOS, record the build 9 descriptor
-  count and kinds, then remove the probes and require the production catalog to include
-  `ch.lkmc.llimit.widget.provider-quota` before closing this blocker.
+- Build 9 gave the intent/query stable identifiers, hardened installation validation and
+  PlugInKit registration, and temporarily added static and parameterless App Intent probes.
+  The macOS Widget Gallery displayed all five descriptors, including the real configurable
+  `ch.lkmc.llimit.widget.provider-quota`, proving App Intent extraction and runtime descriptor
+  registration work with Xcode 17F113 and the macOS 26.5 SDK.
+- Build 10 removes both diagnostic probes while retaining the registration hardening. Verify
+  that the production gallery contains exactly the dashboard, trend, and provider quota
+  widgets after `./scripts/build.sh --clean --install --run`.
 - Test AppIntent account configuration on macOS 14+.
 - Capture small-widget screenshots against the supplied reference in light/dark desktop
   contexts.
