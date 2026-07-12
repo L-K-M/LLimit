@@ -440,6 +440,7 @@ private struct ProviderQuotaCard: View {
                 .padding(.horizontal, 5)
                 .padding(.vertical, 2)
                 .background(.orange.opacity(0.13), in: Capsule())
+            }
           }
 
           Text(accountDetail)
