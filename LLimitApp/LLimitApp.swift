@@ -27,6 +27,7 @@ struct LLimitApp: App {
         providerStyleSettings: model.providerStyleSettings
       )
     }
+    .menuBarExtraStyle(.window)
   }
 }
 
@@ -138,76 +139,178 @@ private struct MenuBarContent: View {
   }()
 
   var body: some View {
-    if let snapshot = model.snapshot, !snapshot.providers.isEmpty {
-      let providers = providersForMenu(from: snapshot)
-
-      ForEach(providers) { provider in
-        Section {
-          ForEach(provider.metrics) { metric in
-            Text(primaryLine(for: metric))
-
-            if let secondary = secondaryLine(for: metric) {
-              Text(secondary)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-          }
-
-          if let warning = provider.warning, !warning.isEmpty {
-            Text("Warning: \(warning)")
-              .font(.caption)
-              .foregroundStyle(.orange)
-          }
-        } header: {
-          Text(providerHeader(for: provider))
-        }
-      }
-
-      if !snapshot.failures.isEmpty {
-        Divider()
-        ForEach(snapshot.failures.sorted(by: { $0.accountID < $1.accountID })) { failure in
-          Text("\(failure.provider.displayName): \(failure.message)")
-            .font(.caption)
+    VStack(spacing: 0) {
+      TimelineView(.periodic(from: .now, by: 60)) { context in
+        VStack(spacing: 0) {
+          dashboardHeader(now: context.date)
+          Divider()
+          dashboard(now: context.date)
         }
       }
 
       Divider()
-      Text("Updated \(relativeTimeString(from: snapshot.generatedAt))")
-        .font(.caption)
-        .foregroundStyle(.secondary)
-    } else {
-      Text("No quota data yet")
-        .font(.caption)
-      Text("Use Refresh Now to fetch quotas")
-        .font(.caption2)
-        .foregroundStyle(.secondary)
+      actionBar
     }
+    .frame(width: 390)
+    .background(.ultraThinMaterial)
+  }
 
-    Divider()
+  @ViewBuilder
+  private func dashboard(now: Date) -> some View {
+    if let snapshot = model.snapshot {
+      let providers = providersForMenu(from: snapshot)
+      let failuresByAccount = snapshot.failures.reduce(into: [String: ProviderFailure]()) { failures, failure in
+        failures[failure.accountID] = failure
+      }
+      let providerIDs = Set(providers.map(\.accountID))
+      let standaloneFailures = snapshot.failures
+        .filter { !providerIDs.contains($0.accountID) }
+        .sorted { failureTitle(for: $0) < failureTitle(for: $1) }
+      let resultAccountCount = providerIDs.union(snapshot.failures.map(\.accountID)).count
+      let accountCount = max(model.providerAccounts.filter(\.isEnabled).count, resultAccountCount)
 
-    Button("Refresh Now") {
-      Task {
-        await model.refreshNow()
+      if providers.isEmpty && standaloneFailures.isEmpty {
+        emptyState
+      } else {
+        ScrollView {
+          LazyVStack(spacing: 10) {
+            QuotaSummaryStrip(
+              providers: providers,
+              accountCount: accountCount,
+              failureCount: snapshot.failures.count,
+              tint: summaryTint(for: providers)
+            )
+
+            ForEach(providers) { provider in
+              ProviderQuotaCard(
+                usage: provider,
+                accountName: model.account(withID: provider.accountID)?.displayName,
+                failure: failuresByAccount[provider.accountID],
+                globalStyle: model.widgetStyle,
+                providerStyleSettings: model.providerStyleSettings,
+                now: now
+              )
+            }
+
+            ForEach(standaloneFailures) { failure in
+              ProviderFailureCard(
+                failure: failure,
+                accountName: model.account(withID: failure.accountID)?.displayName
+              )
+            }
+          }
+          .padding(12)
+        }
+        .frame(maxHeight: 520)
+      }
+    } else {
+      emptyState
+    }
+  }
+
+  private func dashboardHeader(now: Date) -> some View {
+    HStack(spacing: 10) {
+      ZStack {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+          .fill(.blue.gradient)
+        Image(systemName: "chart.bar.xaxis")
+          .font(.system(size: 15, weight: .semibold))
+          .foregroundStyle(.white)
+      }
+      .frame(width: 30, height: 30)
+
+      VStack(alignment: .leading, spacing: 1) {
+        Text("LLimit")
+          .font(.headline)
+
+        if model.isRefreshing {
+          Text("Updating quotas...")
+            .foregroundStyle(.secondary)
+        } else if let snapshot = model.snapshot {
+          Text("Updated \(relativeTimeString(from: snapshot.generatedAt, relativeTo: now))")
+            .foregroundStyle(.secondary)
+        } else {
+          Text("Waiting for quota data")
+            .foregroundStyle(.secondary)
+        }
+      }
+      .font(.caption)
+
+      Spacer()
+
+      if model.isRefreshing {
+        ProgressView()
+          .controlSize(.small)
+      } else if let snapshot = model.snapshot {
+        Label(
+          snapshot.failures.isEmpty ? "No reported issues" : "\(snapshot.failures.count) issue(s)",
+          systemImage: snapshot.failures.isEmpty ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+        )
+        .labelStyle(.iconOnly)
+        .foregroundStyle(snapshot.failures.isEmpty ? .green : .orange)
+        .help(snapshot.failures.isEmpty ? "No reported issues" : "\(snapshot.failures.count) account issue(s)")
       }
     }
-    .keyboardShortcut("r", modifiers: .command)
-    .disabled(model.isRefreshing)
+    .padding(.horizontal, 12)
+    .padding(.vertical, 10)
+  }
 
-    Button("Open Settings") {
-      SettingsWindowController.shared.show(model: model)
+  private var emptyState: some View {
+    VStack(spacing: 9) {
+      Image(systemName: "gauge.with.dots.needle.0percent")
+        .font(.system(size: 30, weight: .light))
+        .foregroundStyle(.secondary)
+      Text("No quota data yet")
+        .font(.headline)
+      Text("Refresh now to fetch your current limits.")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: 280)
     }
-    .keyboardShortcut(",", modifiers: .command)
+    .frame(maxWidth: .infinity, minHeight: 190)
+    .padding(20)
+  }
 
-    Divider()
+  private var actionBar: some View {
+    HStack(spacing: 8) {
+      Button {
+        Task {
+          await model.refreshNow()
+        }
+      } label: {
+        Label(model.isRefreshing ? "Refreshing" : "Refresh", systemImage: "arrow.clockwise")
+      }
+      .keyboardShortcut("r", modifiers: .command)
+      .disabled(model.isRefreshing)
 
-    Toggle("Launch at Login", isOn: model.launchAtLoginBinding())
+      Spacer()
 
-    Divider()
+      Button {
+        SettingsWindowController.shared.show(model: model)
+      } label: {
+        Label("Settings", systemImage: "gearshape")
+      }
+      .keyboardShortcut(",", modifiers: .command)
 
-    Button("Quit LLimit") {
-      NSApplication.shared.terminate(nil)
+      Menu {
+        Toggle("Launch at Login", isOn: model.launchAtLoginBinding())
+
+        Divider()
+
+        Button("Quit LLimit") {
+          NSApplication.shared.terminate(nil)
+        }
+        .keyboardShortcut("q", modifiers: .command)
+      } label: {
+        Image(systemName: "ellipsis")
+          .frame(width: 18)
+      }
+      .help("More")
     }
-    .keyboardShortcut("q", modifiers: .command)
+    .buttonStyle(.borderless)
+    .padding(.horizontal, 12)
+    .padding(.vertical, 9)
   }
 
   private func providersForMenu(from snapshot: QuotaSnapshot) -> [ProviderUsage] {
@@ -223,56 +326,374 @@ private struct MenuBarContent: View {
     }
   }
 
-  private func providerHeader(for provider: ProviderUsage) -> String {
-    var title = provider.title
-
-    if let subtitle = provider.subtitle, !subtitle.isEmpty {
-      title += " (\(subtitle))"
+  private func summaryTint(for providers: [ProviderUsage]) -> Color {
+    guard let provider = providers.min(by: {
+      (MenuBarQuotaStyling.remainingPercent(for: $0) ?? Int.max)
+        < (MenuBarQuotaStyling.remainingPercent(for: $1) ?? Int.max)
+    }) else {
+      return .secondary
     }
 
-    if provider.metrics.contains(where: { !$0.isUnlimited }) {
-      if let remaining = MenuBarQuotaStyling.remainingPercent(for: provider) {
-        title += " - \(remaining)% left"
+    return Color(nsColor: MenuBarQuotaStyling.color(
+      for: provider,
+      globalStyle: model.widgetStyle,
+      providerStyleSettings: model.providerStyleSettings
+    ))
+  }
+
+  private func failureTitle(for failure: ProviderFailure) -> String {
+    model.account(withID: failure.accountID)?.displayName ?? failure.provider.displayName
+  }
+
+  private func relativeTimeString(from date: Date, relativeTo now: Date) -> String {
+    Self.relativeTimeFormatter.localizedString(for: date, relativeTo: now)
+  }
+}
+
+private struct QuotaSummaryStrip: View {
+  let providers: [ProviderUsage]
+  let accountCount: Int
+  let failureCount: Int
+  let tint: Color
+
+  private var lowestRemaining: Int? {
+    providers.compactMap(MenuBarQuotaStyling.remainingPercent).min()
+  }
+
+  var body: some View {
+    HStack(spacing: 0) {
+      SummaryValue(
+        label: "LOWEST",
+        value: lowestRemaining.map { "\($0)%" } ?? "--",
+        tint: tint
+      )
+      SummaryValue(label: "ACCOUNTS", value: "\(accountCount)", tint: .primary)
+      SummaryValue(
+        label: "ISSUES",
+        value: "\(failureCount)",
+        tint: failureCount == 0 ? .green : .orange
+      )
+    }
+    .padding(.vertical, 10)
+    .background(.quaternary.opacity(0.65), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+    .accessibilityElement(children: .combine)
+  }
+}
+
+private struct SummaryValue: View {
+  let label: String
+  let value: String
+  let tint: Color
+
+  var body: some View {
+    VStack(spacing: 2) {
+      Text(value)
+        .font(.system(size: 18, weight: .bold, design: .rounded))
+        .monospacedDigit()
+        .foregroundStyle(tint)
+      Text(label)
+        .font(.system(size: 9, weight: .semibold))
+        .tracking(0.7)
+        .foregroundStyle(.secondary)
+    }
+    .frame(maxWidth: .infinity)
+  }
+}
+
+private struct ProviderQuotaCard: View {
+  let usage: ProviderUsage
+  let accountName: String?
+  let failure: ProviderFailure?
+  let globalStyle: WidgetStyleSettings
+  let providerStyleSettings: [String: ProviderStyleSettings]
+  let now: Date
+
+  private var accent: Color {
+    Color(nsColor: MenuBarQuotaStyling.color(
+      for: usage,
+      globalStyle: globalStyle,
+      providerStyleSettings: providerStyleSettings
+    ))
+  }
+
+  private var displayName: String {
+    guard let accountName, !accountName.isEmpty else { return usage.title }
+    return accountName
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      HStack(spacing: 10) {
+        ProviderMark(provider: usage.provider, tint: accent)
+
+        VStack(alignment: .leading, spacing: 2) {
+          HStack(spacing: 6) {
+            Text(displayName)
+              .font(.subheadline.weight(.semibold))
+              .lineLimit(1)
+
+            if failure != nil {
+              Text("LAST KNOWN")
+                .font(.system(size: 8, weight: .bold))
+                .tracking(0.5)
+                .foregroundStyle(.orange)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(.orange.opacity(0.13), in: Capsule())
+          }
+
+          Text(accountDetail)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        }
+
+        Spacer(minLength: 8)
+
+        QuotaGauge(
+          remaining: MenuBarQuotaStyling.remainingPercent(for: usage),
+          unlimited: usage.metrics.allSatisfy(\.isUnlimited) && !usage.metrics.isEmpty,
+          tint: accent
+        )
       }
-    } else if provider.metrics.contains(where: \.isUnlimited) {
-      title += " - Unlimited"
-    }
 
-    return title
-  }
-
-  private func primaryLine(for metric: UsageMetric) -> String {
-    if metric.isUnlimited {
-      return "\(metric.label): Unlimited"
-    }
-
-    if let remaining = metric.remainingPercent {
-      if let usageLine = metric.usageLine {
-        return "\(metric.label): \(remaining)% left (\(usageLine))"
+      VStack(spacing: 9) {
+        ForEach(Array(usage.metrics.enumerated()), id: \.element.id) { index, metric in
+          MetricQuotaRow(
+            metric: metric,
+            tint: Color(nsColor: MenuBarQuotaStyling.color(
+              for: metric,
+              accountID: usage.accountID,
+              layer: index == 0 ? .outer : .inner,
+              globalStyle: globalStyle,
+              providerStyleSettings: providerStyleSettings
+            )),
+            now: now
+          )
+        }
       }
-      return "\(metric.label): \(remaining)% left"
-    }
 
-    if let usageLine = metric.usageLine {
-      return "\(metric.label): \(usageLine)"
-    }
+      if let warning = usage.warning, !warning.isEmpty {
+        statusLine(warning, systemImage: "exclamationmark.triangle.fill", color: .orange)
+      }
 
-    return metric.label
+      if let failure {
+        statusLine(failure.message, systemImage: "arrow.triangle.2.circlepath", color: .orange)
+      }
+    }
+    .padding(12)
+    .background(.background.opacity(0.68), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+    .overlay {
+      RoundedRectangle(cornerRadius: 13, style: .continuous)
+        .strokeBorder(accent.opacity(0.2), lineWidth: 1)
+    }
+    .accessibilityElement(children: .contain)
   }
 
-  private func secondaryLine(for metric: UsageMetric) -> String? {
-    guard let resetCountdown = metric.resetCountdown(at: Date()) else {
-      return nil
+  private var accountDetail: String {
+    var parts = [usage.provider.displayName]
+    if let subtitle = usage.subtitle, !subtitle.isEmpty, subtitle != accountName {
+      parts.append(subtitle)
     }
-
-    if resetCountdown == "reset" {
-      return "Reset due"
-    }
-    return "Resets in \(resetCountdown)"
+    parts.append("fetched \(usage.fetchedAt.formatted(.relative(presentation: .named)))")
+    return parts.joined(separator: "  |  ")
   }
 
-  private func relativeTimeString(from date: Date) -> String {
-    Self.relativeTimeFormatter.localizedString(for: date, relativeTo: Date())
+  private func statusLine(_ text: String, systemImage: String, color: Color) -> some View {
+    Label {
+      Text(text)
+        .lineLimit(2)
+    } icon: {
+      Image(systemName: systemImage)
+    }
+    .font(.caption)
+    .foregroundStyle(color)
+  }
+}
+
+private struct ProviderMark: View {
+  let provider: QuotaProvider
+  let tint: Color
+
+  var body: some View {
+    Image(systemName: symbolName)
+      .font(.system(size: 15, weight: .semibold))
+      .foregroundStyle(tint)
+      .frame(width: 32, height: 32)
+      .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+      .accessibilityHidden(true)
+  }
+
+  private var symbolName: String {
+    switch provider {
+    case .anthropic:
+      return "text.bubble.fill"
+    case .openAI:
+      return "sparkles"
+    case .gitHubCopilot:
+      return "chevron.left.forwardslash.chevron.right"
+    case .zhipu, .zai:
+      return "bolt.fill"
+    case .googleAntigravity:
+      return "cloud.fill"
+    }
+  }
+}
+
+private struct QuotaGauge: View {
+  let remaining: Int?
+  let unlimited: Bool
+  let tint: Color
+
+  private var progress: Double {
+    Double(max(0, min(100, remaining ?? 0))) / 100
+  }
+
+  var body: some View {
+    ZStack {
+      Circle()
+        .stroke(tint.opacity(0.14), lineWidth: 5)
+      Circle()
+        .trim(from: 0, to: unlimited ? 1 : progress)
+        .stroke(tint, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+        .rotationEffect(.degrees(-90))
+
+      Text(gaugeText)
+        .font(.system(size: 11, weight: .bold, design: .rounded))
+        .monospacedDigit()
+        .foregroundStyle(tint)
+    }
+    .frame(width: 48, height: 48)
+    .accessibilityLabel(accessibilityText)
+  }
+
+  private var gaugeText: String {
+    if unlimited { return "ALL" }
+    guard let remaining else { return "--" }
+    return "\(max(0, min(100, remaining)))%"
+  }
+
+  private var accessibilityText: String {
+    if unlimited { return "Unlimited" }
+    guard let remaining else { return "Quota unavailable" }
+    return "\(max(0, min(100, remaining))) percent remaining"
+  }
+}
+
+private struct MetricQuotaRow: View {
+  let metric: UsageMetric
+  let tint: Color
+  let now: Date
+
+  private var remaining: Int? {
+    metric.remainingPercent.map { max(0, min(100, $0)) }
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      HStack(alignment: .firstTextBaseline, spacing: 8) {
+        Text(metric.label)
+          .font(.caption.weight(.medium))
+          .lineLimit(1)
+        Spacer()
+        Text(valueText)
+          .font(.caption.weight(.bold))
+          .monospacedDigit()
+          .foregroundStyle(metric.isUnlimited ? tint : .primary)
+      }
+
+      GeometryReader { geometry in
+        ZStack(alignment: .leading) {
+          Capsule()
+            .fill(tint.opacity(0.12))
+          Capsule()
+            .fill(tint.gradient)
+            .frame(width: geometry.size.width * barProgress)
+        }
+      }
+      .frame(height: 6)
+
+      if secondaryUsageLine != nil || resetText != nil {
+        HStack(spacing: 8) {
+          if let usageLine = secondaryUsageLine {
+            Text(usageLine)
+              .lineLimit(1)
+          }
+          Spacer(minLength: 4)
+          if let reset = resetText {
+            Text(reset)
+              .lineLimit(1)
+          }
+        }
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+      }
+
+      if let detail = metric.detail, !detail.isEmpty {
+        Text(detail)
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+          .lineLimit(2)
+      }
+    }
+    .accessibilityElement(children: .combine)
+  }
+
+  private var valueText: String {
+    if metric.isUnlimited { return "Unlimited" }
+    guard let remaining else { return metric.usageLine ?? "Unavailable" }
+    return "\(remaining)% left"
+  }
+
+  private var secondaryUsageLine: String? {
+    guard !metric.isUnlimited, remaining != nil else { return nil }
+    return metric.usageLine
+  }
+
+  private var barProgress: Double {
+    if metric.isUnlimited { return 1 }
+    return Double(remaining ?? 0) / 100
+  }
+
+  private var resetText: String? {
+    guard let countdown = metric.resetCountdown(at: now) else { return nil }
+    return countdown == "reset" ? "Reset due" : "Resets in \(countdown)"
+  }
+}
+
+private struct ProviderFailureCard: View {
+  let failure: ProviderFailure
+  let accountName: String?
+
+  private var displayName: String {
+    guard let accountName, !accountName.isEmpty else { return failure.provider.displayName }
+    return accountName
+  }
+
+  var body: some View {
+    HStack(alignment: .top, spacing: 10) {
+      ProviderMark(provider: failure.provider, tint: .orange)
+
+      VStack(alignment: .leading, spacing: 3) {
+        Text(displayName)
+          .font(.subheadline.weight(.semibold))
+        Text(failure.provider.displayName)
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+        Text(failure.message)
+          .font(.caption)
+          .foregroundStyle(.orange)
+          .lineLimit(3)
+      }
+
+      Spacer(minLength: 0)
+    }
+    .padding(12)
+    .background(.orange.opacity(0.07), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+    .overlay {
+      RoundedRectangle(cornerRadius: 13, style: .continuous)
+        .strokeBorder(.orange.opacity(0.22), lineWidth: 1)
+    }
   }
 }
 
@@ -312,6 +733,23 @@ private enum MenuBarQuotaStyling {
     return NSColor(hexString: hex) ?? .systemGray
   }
 
+  static func color(
+    for metric: UsageMetric,
+    accountID: String,
+    layer: WidgetRingLayer,
+    globalStyle: WidgetStyleSettings,
+    providerStyleSettings: [String: ProviderStyleSettings]
+  ) -> NSColor {
+    let style = effectiveStyle(for: accountID, globalStyle: globalStyle, providerStyleSettings: providerStyleSettings)
+
+    guard let role = colorRole(for: metric) else {
+      return .systemGray
+    }
+
+    let hex = style.ringColors.hexColor(for: role, layer: layer)
+    return NSColor(hexString: hex) ?? .systemGray
+  }
+
   private static func colorRole(for provider: ProviderUsage) -> WidgetRingColorRole? {
     let boundedRemaining = provider.metrics
       .filter { !$0.isUnlimited }
@@ -336,6 +774,21 @@ private enum MenuBarQuotaStyling {
     }
 
     return nil
+  }
+
+  private static func colorRole(for metric: UsageMetric) -> WidgetRingColorRole? {
+    if metric.isUnlimited {
+      return .unlimited
+    }
+
+    guard let value = metric.remainingPercent else {
+      return nil
+    }
+
+    let remaining = clampPercent(value)
+    if remaining >= 70 { return .high }
+    if remaining >= 40 { return .medium }
+    return .low
   }
 
   private static func effectiveStyle(
