@@ -50,9 +50,18 @@ fi
 
 if [[ "$INSTALL" == true && -x "$LSREGISTER" && -d "$INSTALLED_APP" ]]; then
   INTENT_METADATA="$INSTALLED_WIDGET/Contents/Resources/Metadata.appintents/extract.actionsdata"
+  WIDGET_BINARY="$INSTALLED_WIDGET/Contents/MacOS/LLimitWidgetExtension"
   if [[ ! -f "$INTENT_METADATA" ]] \
-    || ! /usr/bin/grep -q 'ProviderQuotaIntent' "$INTENT_METADATA"; then
+    || ! /usr/bin/grep -Fq 'ProviderQuotaConfigurationIntent' "$INTENT_METADATA" \
+    || ! /usr/bin/grep -Fq 'ch.lkmc.llimit.intent.provider-quota.v2' "$INTENT_METADATA" \
+    || ! /usr/bin/grep -Fq 'ProviderAccountOptionsProvider' "$INTENT_METADATA" \
+    || ! /usr/bin/grep -Fq 'accountID' "$INTENT_METADATA"; then
     echo "error: installed widget is missing required App Intent metadata" >&2
+    exit 1
+  fi
+  if [[ ! -f "$WIDGET_BINARY" ]] \
+    || ! /usr/bin/grep -aFq 'ch.lkmc.llimit.widget.provider-quota.v2' "$WIDGET_BINARY"; then
+    echo "error: installed widget is missing the provider quota v2 kind" >&2
     exit 1
   fi
 
@@ -64,10 +73,38 @@ if [[ "$INSTALL" == true && -x "$LSREGISTER" && -d "$INSTALLED_APP" ]]; then
   fi
 
   /usr/bin/codesign --verify --deep --strict "$INSTALLED_APP"
-  if ! /usr/bin/codesign -d --entitlements :- "$INSTALLED_WIDGET" 2>&1 \
-    | /usr/bin/grep -q 'com.apple.security.app-sandbox'; then
+  APP_ENTITLEMENTS=$(/usr/bin/codesign -d --entitlements :- "$INSTALLED_APP" 2>&1)
+  WIDGET_ENTITLEMENTS=$(/usr/bin/codesign -d --entitlements :- "$INSTALLED_WIDGET" 2>&1)
+  if ! /usr/bin/grep -Fq 'com.apple.security.app-sandbox' <<<"$WIDGET_ENTITLEMENTS"; then
     echo "error: installed widget is missing the App Sandbox entitlement" >&2
     exit 1
+  fi
+  APP_GROUPS=$(printf '%s\n' "$APP_ENTITLEMENTS" \
+    | /usr/bin/grep -Eo '[[:alnum:]]+\.group\.ch\.lkmc\.llimit' \
+    | /usr/bin/sort -u || true)
+  WIDGET_GROUPS=$(printf '%s\n' "$WIDGET_ENTITLEMENTS" \
+    | /usr/bin/grep -Eo '[[:alnum:]]+\.group\.ch\.lkmc\.llimit' \
+    | /usr/bin/sort -u || true)
+  if [[ -z "$APP_GROUPS" || "$APP_GROUPS" != "$WIDGET_GROUPS" ]]; then
+    echo "error: app and widget do not share the expected App Group entitlement" >&2
+    exit 1
+  fi
+
+  # WidgetKit can render from one app copy while the configuration service
+  # resolves App Intent metadata from another. Unregister every indexed copy;
+  # only the installed app is registered again below.
+  while IFS= read -r indexed_app; do
+    if [[ -n "$indexed_app" && "$indexed_app" != "$INSTALLED_APP" ]]; then
+      "$LSREGISTER" -u -R "$indexed_app" >/dev/null 2>&1 || true
+    fi
+  done < <(/usr/bin/mdfind "kMDItemCFBundleIdentifier == 'ch.lkmc.llimit.app'cd" 2>/dev/null || true)
+
+  if [[ -x "$PLUGINKIT" ]]; then
+    while IFS= read -r indexed_widget; do
+      if [[ -n "$indexed_widget" && "$indexed_widget" != "$INSTALLED_WIDGET" ]]; then
+        "$PLUGINKIT" -r "$indexed_widget" >/dev/null 2>&1 || true
+      fi
+    done < <(/usr/bin/mdfind "kMDItemCFBundleIdentifier == '$WIDGET_BUNDLE_ID'cd" 2>/dev/null || true)
   fi
 
   "$LSREGISTER" -u -R "$PWD/build/Build/Products/Release/$BUILD_APP_NAME.app" >/dev/null 2>&1 || true

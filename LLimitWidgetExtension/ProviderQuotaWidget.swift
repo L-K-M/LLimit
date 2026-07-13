@@ -4,78 +4,78 @@ import SwiftUI
 import WidgetKit
 import QuotaCore
 
-struct ProviderAccountEntity: AppEntity, Hashable {
-  static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "LLimit Account")
-  static let defaultQuery = ProviderAccountQuery()
-
+struct ProviderAccountSelection: Sendable {
   let id: String
   let displayName: String
   let provider: QuotaProvider
 
-  var displayRepresentation: DisplayRepresentation {
-    DisplayRepresentation(
-      title: "\(displayName)",
-      subtitle: "\(provider.displayName)"
-    )
+  init(id: String, displayName: String, provider: QuotaProvider) {
+    self.id = id
+    self.displayName = displayName
+    self.provider = provider
   }
 }
 
-struct ProviderAccountQuery: EntityQuery, Sendable {
-  static let persistentIdentifier = "ch.lkmc.llimit.query.provider-account"
-
-  func entities(for identifiers: [ProviderAccountEntity.ID]) async throws -> [ProviderAccountEntity] {
-    let requested = Set(identifiers)
-    return loadEntities().filter { requested.contains($0.id) }
+struct ProviderAccountOptionsProvider: DynamicOptionsProvider, Sendable {
+  func results() async throws -> IntentItemCollection<String> {
+    IntentItemCollection<String>(
+      sections: [
+        IntentItemSection<String>(
+          items: loadAccounts().map { account in
+            IntentItem<String>(
+              account.id,
+              title: LocalizedStringResource(stringLiteral: account.resolvedDisplayName),
+              subtitle: LocalizedStringResource(stringLiteral: account.provider.displayName)
+            )
+          }
+        )
+      ]
+    )
   }
 
-  func suggestedEntities() async throws -> [ProviderAccountEntity] {
-    loadEntities()
+  func defaultResult() async -> String? {
+    loadAccounts().first?.id
   }
 
-  func defaultResult() async -> ProviderAccountEntity? {
-    loadEntities().first
-  }
-
-  private func loadEntities() -> [ProviderAccountEntity] {
+  private func loadAccounts() -> [ProviderAccount] {
     guard
       let settingsURL = try? SharedPaths.settingsFileURL(),
       let settings = try? SettingsStore(fileURL: settingsURL).load()
     else {
       return []
     }
-    return settings.accounts
-      .filter(\.isEnabled)
-      .map(ProviderAccountEntity.init)
+    return settings.accounts.filter(\.isEnabled)
   }
 }
 
-private extension ProviderAccountEntity {
+private extension ProviderAccountSelection {
   init(_ account: ProviderAccount) {
-    id = account.id
-    displayName = account.resolvedDisplayName
-    provider = account.provider
+    self.init(
+      id: account.id,
+      displayName: account.resolvedDisplayName,
+      provider: account.provider
+    )
   }
 }
 
-struct ProviderQuotaIntent: WidgetConfigurationIntent {
-  static let persistentIdentifier = "ch.lkmc.llimit.intent.provider-quota"
+struct ProviderQuotaConfigurationIntent: WidgetConfigurationIntent {
+  static let persistentIdentifier = "ch.lkmc.llimit.intent.provider-quota.v2"
   static let title: LocalizedStringResource = "Provider Quota"
   static let description = IntentDescription("Choose the LLimit account shown by this quota tile.")
-  static let isDiscoverable = false
 
-  @Parameter(title: "Account", default: nil)
-  var account: ProviderAccountEntity?
+  @Parameter(title: "Account", optionsProvider: ProviderAccountOptionsProvider())
+  var accountID: String?
 
   init() {}
 
   static var parameterSummary: some ParameterSummary {
-    Summary("Show \(\.$account)")
+    Summary("Show \(\.$accountID)")
   }
 }
 
 struct ProviderQuotaEntry: TimelineEntry {
   let date: Date
-  let account: ProviderAccountEntity?
+  let account: ProviderAccountSelection?
   let usage: ProviderUsage?
   let failure: ProviderFailure?
   let ringColors: WidgetRingColors
@@ -87,14 +87,20 @@ struct ProviderQuotaTimelineProvider: AppIntentTimelineProvider {
     Self.sampleEntry(at: Date())
   }
 
-  func snapshot(for configuration: ProviderQuotaIntent, in context: Context) async -> ProviderQuotaEntry {
+  func snapshot(
+    for configuration: ProviderQuotaConfigurationIntent,
+    in context: Context
+  ) async -> ProviderQuotaEntry {
     if context.isPreview {
       return Self.sampleEntry(at: Date())
     }
     return loadEntry(for: configuration, at: Date())
   }
 
-  func timeline(for configuration: ProviderQuotaIntent, in context: Context) async -> Timeline<ProviderQuotaEntry> {
+  func timeline(
+    for configuration: ProviderQuotaConfigurationIntent,
+    in context: Context
+  ) async -> Timeline<ProviderQuotaEntry> {
     let now = Date()
     let entry = loadEntry(for: configuration, at: now)
     let refreshMinutes = min(max(entry.refreshIntervalMinutes, 15), 180)
@@ -128,12 +134,15 @@ struct ProviderQuotaTimelineProvider: AppIntentTimelineProvider {
     return Timeline(entries: entries, policy: .after(nextRefresh))
   }
 
-  private func loadEntry(for configuration: ProviderQuotaIntent, at date: Date) -> ProviderQuotaEntry {
+  private func loadEntry(
+    for configuration: ProviderQuotaConfigurationIntent,
+    at date: Date
+  ) -> ProviderQuotaEntry {
     let settings = loadSettings()
     let enabledAccounts = settings.accounts.filter(\.isEnabled)
-    let selectedAccount = configuration.account
-      .flatMap { selected in enabledAccounts.first(where: { $0.id == selected.id }) }
-    let accountEntity = selectedAccount.map(ProviderAccountEntity.init)
+    let selectedAccount = configuration.accountID
+      .flatMap { accountID in enabledAccounts.first(where: { $0.id == accountID }) }
+    let accountSelection = selectedAccount.map(ProviderAccountSelection.init)
 
     let snapshot = loadSnapshot()
     let usage = selectedAccount.flatMap { account in
@@ -147,7 +156,7 @@ struct ProviderQuotaTimelineProvider: AppIntentTimelineProvider {
 
     return ProviderQuotaEntry(
       date: date,
-      account: accountEntity ?? configuration.account,
+      account: accountSelection,
       usage: usage,
       failure: failure,
       ringColors: ringColors(for: selectedAccount, settings: settings),
@@ -202,7 +211,7 @@ struct ProviderQuotaTimelineProvider: AppIntentTimelineProvider {
   }
 
   private static func sampleEntry(at date: Date) -> ProviderQuotaEntry {
-    let account = ProviderAccountEntity(id: "sample-zai", displayName: "Z.ai", provider: .zai)
+    let account = ProviderAccountSelection(id: "sample-zai", displayName: "Z.ai", provider: .zai)
     return ProviderQuotaEntry(
       date: date,
       account: account,
@@ -237,7 +246,7 @@ struct ProviderQuotaWidget: Widget {
   var body: some WidgetConfiguration {
     AppIntentConfiguration(
       kind: SharedConstants.providerWidgetKind,
-      intent: ProviderQuotaIntent.self,
+      intent: ProviderQuotaConfigurationIntent.self,
       provider: ProviderQuotaTimelineProvider()
     ) { entry in
       ProviderQuotaTileView(entry: entry)
@@ -283,7 +292,7 @@ private struct ProviderQuotaTileView: View {
     .accessibilityLabel(accessibilitySummary)
   }
 
-  private func loadedContent(account: ProviderAccountEntity, usage: ProviderUsage) -> some View {
+  private func loadedContent(account: ProviderAccountSelection, usage: ProviderUsage) -> some View {
     let metrics = defaultRingMetrics(for: usage)
 
     return VStack(spacing: 4) {
@@ -311,7 +320,7 @@ private struct ProviderQuotaTileView: View {
   }
 
   private func unavailableContent(
-    account: ProviderAccountEntity,
+    account: ProviderAccountSelection,
     hasUsageWithoutPercentage: Bool
   ) -> some View {
     VStack(spacing: 7) {

@@ -339,9 +339,16 @@ Do not make speculative endpoint edits without captured evidence.
   The macOS Widget Gallery displayed all five descriptors, including the real configurable
   `ch.lkmc.llimit.widget.provider-quota`, proving App Intent extraction and runtime descriptor
   registration work with Xcode 17F113 and the macOS 26.5 SDK.
-- Build 10 removes both diagnostic probes while retaining the registration hardening. Verify
-  that the production gallery contains exactly the dashboard, trend, and provider quota
-  widgets after `./scripts/build.sh --clean --install --run`.
+- Build 10 removed both diagnostic probes while retaining the registration hardening. The
+  provider tile appeared, but its App Entity configuration remained unusable. Build 11 replaced
+  that graph with a primitive account-ID parameter, but retained the same widget kind while
+  changing the intent identity and parameter schema. Build 12 gives the tile and intent fresh
+  identities so WidgetKit cannot decode an older tile with incompatible cached metadata.
+- Run `./scripts/build.sh --clean --install --run` on macOS and confirm Edit Widget opens the
+  Account picker for `ch.lkmc.llimit.widget.provider-quota.v2` on a newly added tile before
+  closing this blocker.
+- Remove pre-build-12 provider tiles before testing; the v1 intent payload is intentionally not
+  migrated because its schema changed repeatedly during development.
 - Test AppIntent account configuration on macOS 14+.
 - Capture small-widget screenshots against the supplied reference in light/dark desktop
   contexts.

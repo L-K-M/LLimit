@@ -26,7 +26,7 @@ Providers: Claude (Anthropic), OpenAI/ChatGPT, GitHub Copilot, Zhipu, Z.ai, Goog
   - `QuotaCoordinator.swift` — fans out client calls in parallel into a `QuotaSnapshot`.
   - `Models.swift`, `*Store.swift`, `Utilities.swift`.
 - `LLimitApp/` — the menu-bar app (`MenuBarExtra`), `AppModel`, settings UI.
-- `LLimitWidgetExtension/` — dashboard + trend widgets and their timeline provider.
+- `LLimitWidgetExtension/` — dashboard, trend, and configurable provider/account widgets.
 - `Shared/SharedConstants.swift` — App Group id + shared file paths, used by both targets.
 
 ## Data flow
@@ -77,6 +77,23 @@ Providers: Claude (Anthropic), OpenAI/ChatGPT, GitHub Copilot, Zhipu, Z.ai, Goog
 ## Build
 
 Requires macOS 14+, Xcode 15+, [XcodeGen](https://github.com/yonaskolb/XcodeGen).
+
+### Widget registration
+
+- Keep `REGISTER_WITH_LAUNCH_SERVICES: NO` on the host app target. Xcode must not
+  register the intermediate `build/Build/Products/.../LLimit.app`; only the installed
+  `/Applications/LLimit.app` may be registered.
+- Do not remove the recursive `lsregister` cleanup/registration or `chronod` restart
+  from `scripts/build.sh --install`. Registering both the intermediate and installed
+  apps creates duplicate widget-extension `pluginUUID`s. WidgetKit then marks the
+  extension bad with `Bundle version did not match; LaunchServices DB may need to be
+  rebuilt`, and new widget kinds do not appear in the gallery.
+- Keep the app and widget extension on the same, monotonically increasing
+  `CURRENT_PROJECT_VERSION`, especially whenever the `WidgetBundle` catalog changes.
+- Configurable widgets require `AppIntents.framework` on the widget target and a
+  generated `LLimitWidgetExtension.appex/Contents/Resources/Metadata.appintents`.
+  A successful macOS build must run `ExtractAppIntentsMetadata` and export the widget
+  configuration intent before the feature is considered validated.
 
 ```bash
 xcodegen generate
