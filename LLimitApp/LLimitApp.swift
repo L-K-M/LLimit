@@ -527,9 +527,16 @@ private struct MenuBarContent: View {
       dashboardDivider
       actionBar
     }
-    .frame(width: presentation == .menuBar ? 420 : nil)
-    .frame(minWidth: 390, idealWidth: 430, maxWidth: presentation == .floating ? .infinity : 420)
-    .frame(minHeight: presentation == .floating ? 440 : nil, maxHeight: presentation == .floating ? .infinity : nil)
+    // One flexible frame, never a fixed width: the macOS 26 menu panel proposes a
+    // content width slightly narrower than the window, and a hard 420pt layout
+    // overflows it on both sides. Every card adapts, so compressing is safe.
+    .frame(
+      minWidth: 360,
+      idealWidth: presentation == .menuBar ? 420 : 430,
+      maxWidth: presentation == .floating ? .infinity : 420,
+      minHeight: presentation == .floating ? 440 : nil,
+      maxHeight: presentation == .floating ? .infinity : nil
+    )
     .foregroundStyle(.white)
     .background {
       LinearGradient(
