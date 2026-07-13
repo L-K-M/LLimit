@@ -7,6 +7,7 @@ struct SettingsView: View {
     case overview
     case general
     case appearance
+    case widgets
     case addAccount
     case account(String)
   }
@@ -77,6 +78,8 @@ struct SettingsView: View {
           .tag(SettingsItem.general)
         Label("Appearance", systemImage: "paintpalette")
           .tag(SettingsItem.appearance)
+        Label("Widgets", systemImage: "square.grid.2x2")
+          .tag(SettingsItem.widgets)
       }
     }
     .listStyle(.sidebar)
@@ -111,6 +114,8 @@ struct SettingsView: View {
       scrollSection { generalSettingsSection }
     case .appearance:
       scrollSection { styleSettingsSection }
+    case .widgets:
+      scrollSection { widgetTilesSection }
     case .addAccount:
       addAccountDetail
     case .account(let accountID):
@@ -392,6 +397,88 @@ struct SettingsView: View {
         }
       }
     }
+  }
+
+  // MARK: - Widgets
+
+  private var widgetTilesSection: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Text("Widgets")
+        .font(.title2.weight(.semibold))
+
+      Text("""
+        Each numbered Provider Tile widget shows one account's quota rings. \
+        Tiles left on Automatic fill with the accounts that aren't pinned to \
+        another tile — place tiles 1 through \(AppSettings.providerTileSlotCount) \
+        and they cover your accounts with no setup. Assignments here update the \
+        desktop tiles immediately; the widgets themselves are not editable.
+        """)
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+
+      VStack(spacing: 0) {
+        ForEach(0..<AppSettings.providerTileSlotCount, id: \.self) { index in
+          if index > 0 {
+            Divider()
+          }
+
+          settingsRow(title: "Provider Tile \(index + 1)") {
+            Picker("", selection: model.providerTileSlotBinding(for: index)) {
+              Text(automaticLabel(forSlot: index)).tag("")
+              ForEach(model.providerAccounts) { account in
+                Text(tileAccountLabel(for: account))
+                  .tag(account.id)
+              }
+              if let dangling = danglingTileAssignment(forSlot: index) {
+                Text("Missing account").tag(dangling)
+              }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .frame(minWidth: 220, maxWidth: 320, alignment: .leading)
+          }
+        }
+      }
+    }
+  }
+
+  /// Mirrors the widgets' resolution exactly, so the "Automatic" label names
+  /// the account an unassigned tile will actually show.
+  private var tileSettings: AppSettings {
+    AppSettings(accounts: model.providerAccounts, providerTileSlots: model.providerTileSlots)
+  }
+
+  private func automaticLabel(forSlot index: Int) -> String {
+    // Rank as if this slot were unassigned, since the label describes what
+    // choosing "Automatic" would do.
+    var settings = tileSettings
+    if settings.providerTileSlots.indices.contains(index) {
+      settings.providerTileSlots[index] = ""
+    }
+    let rank = settings.providerTileAutoRank(forSlot: index) ?? 0
+    let candidates = settings.providerTileAutoCandidates()
+    guard candidates.indices.contains(rank) else {
+      return "Automatic (no account left)"
+    }
+    return "Automatic (\(candidates[rank].resolvedDisplayName))"
+  }
+
+  private func tileAccountLabel(for account: ProviderAccount) -> String {
+    var label = "\(account.resolvedDisplayName) — \(account.provider.displayName)"
+    if !account.isEnabled {
+      label += " (disabled)"
+    }
+    return label
+  }
+
+  /// A stored assignment pointing at an account that no longer exists; surfaced
+  /// so the picker doesn't render an empty selection.
+  private func danglingTileAssignment(forSlot index: Int) -> String? {
+    guard model.providerTileSlots.indices.contains(index) else { return nil }
+    let value = model.providerTileSlots[index]
+    guard !value.isEmpty else { return nil }
+    return model.providerAccounts.contains(where: { $0.id == value }) ? nil : value
   }
 
   // MARK: - Appearance

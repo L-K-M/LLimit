@@ -344,44 +344,37 @@ Do not make speculative endpoint edits without captured evidence.
   that graph with a primitive account-ID parameter, but retained the same widget kind while
   changing the intent identity and parameter schema. Build 12 gives the tile and intent fresh
   identities so WidgetKit cannot decode an older tile with incompatible cached metadata.
-- Build 13 (current) returns to Apple's canonical `AppEntity` + `EntityQuery` configuration —
-  the shape the edit picker is documented and sampled around ("Making a configurable widget",
-  Emoji Rangers) — under fresh `.v3` identities rotated together (widget kind, intent, query).
-  The build-10 "entity configuration unusable" verdict is considered contaminated: build 11
-  changed the parameter schema while REUSING the placed kind, a documented way to orphan placed
-  tiles (Apple forums thread 746574), and the entity graph was never retested after the
-  identity reset. The primitive-parameter experiment was equally dead, so parameter shape was
-  never the discriminating variable. Note the build-9 probes only validated GALLERY
-  registration — no build has yet demonstrated the Edit sheet opening for ANY intent from this
-  app, so an app-copy-resolution or per-user chronod failure remains fully plausible.
-- Build 13 also makes the tile self-configuring: a nil configuration auto-selects the first
-  enabled account (stable provider/name order, tagged AUTO in the tile) instead of dying on
-  "Choose an account", so the widget stays useful even while the Edit flow is broken. Tiles
-  whose configured account was disabled or removed now say so explicitly.
-- Diagnostic ladder for the dead Edit flow, in order (`scripts/widget-diagnostics.sh` now
-  prints the live capture command):
-  1. Remove ALL placed LLimit tiles, run `./scripts/build.sh --clean --install --run`, add a
-     fresh v3 tile, and only judge Edit on that fresh tile.
-  2. If still dead: run the live `log stream` capture from `widget-diagnostics.sh` while
-     clicking Edit; look for "missing widgetDescriptor or widgetIntent"-style resolution
-     errors, "Unable to extract bundle metadata", or XPC failures naming the appex.
-  3. `killall NotificationCenter chronod WidgetCenter` and retest — a wedged per-user widget
-     stack is a known Sequoia+ failure mode where widget editing is a silent no-op
-     system-wide.
-  4. Retest in a fresh macOS user account; success there means the main account's chronod
-     cache is corrupt. Failure there too means file Feedback with a sysdiagnose captured right
-     after clicking Edit — no public report documents a Tahoe Edit-flow bug yet.
-  5. Next code-side experiment if all else fails: migrate the appex from legacy NSExtension
-     packaging (`Contents/PlugIns` + `NSExtensionPointIdentifier`) to the ExtensionKit layout
-     (`Contents/Extensions` + `EXAppExtensionAttributes`), which the macOS 26 configuration
-     flow may prefer. Gallery rendering demonstrably works via PlugInKit, so this only
-     concerns the Edit path.
-- Run `./scripts/build.sh --clean --install --run` on macOS and confirm Edit Widget opens the
-  Account picker for `ch.lkmc.llimit.widget.provider-quota.v3` on a newly added tile before
-  closing this blocker.
-- Remove pre-build-13 provider tiles before testing; v1/v2 intent payloads are intentionally
-  not migrated because their schemas changed repeatedly during development.
-- Test AppIntent account configuration on macOS 14+.
+- Build 13 returned to Apple's canonical `AppEntity` + `EntityQuery` configuration under
+  fresh `.v3` identities, on the theory that the build-10 "entity configuration unusable"
+  verdict was contaminated (build 11 changed the parameter schema while REUSING the placed
+  kind — a documented way to orphan placed tiles, Apple forums thread 746574 — and the entity
+  graph was never retested after the identity reset). The Edit flow was STILL dead on a fresh
+  v3 tile. Combined with the fact that no build ever demonstrated the Edit sheet opening for
+  ANY intent from this app (the build-9 probes only validated gallery registration), the Edit
+  flow on this system is considered unusable regardless of intent shape.
+- Build 14 (current) abandons widget-side configuration entirely. The single configurable
+  tile is replaced by six static slot widgets ("Provider Tile 1"…"6", kinds
+  `ch.lkmc.llimit.widget.provider-tile.slot1..6` — WidgetKit registers kinds at compile time,
+  so the count cannot be dynamic). Account selection lives in LLimit → Settings → Widgets
+  (`AppSettings.providerTileSlots`, synced through the App Group store; the app reloads
+  widget timelines on every assignment change). Unassigned tiles auto-fill with the enabled
+  accounts not pinned to any tile (`providerTileAutoCandidates`/`providerTileAutoRank`), so
+  auto tiles never duplicate pinned ones, and each wears a "#N AUTO" badge so desktop tiles
+  can be matched to Settings rows; placing tiles 1..N therefore covers all accounts with
+  zero setup. Explicit states cover disabled accounts, removed accounts ("Tile N —
+  reassign"), more tiles than accounts, and no accounts at all. There is no Edit menu item
+  on static widgets, so the broken flow can no longer be reached.
+- The v1-v3 intent payloads and kinds are intentionally not migrated; remove all pre-build-14
+  provider tiles and add the numbered tiles fresh from the gallery.
+- If widget-side configuration is ever revisited (e.g. after a macOS fix), the historical
+  diagnostic ladder was: fresh tile after full removal → `log stream` on
+  NotificationCenter/chronod/appintentsd while clicking Edit → `killall NotificationCenter
+  chronod WidgetCenter` → fresh macOS user account → Feedback with sysdiagnose; next code
+  experiment would be ExtensionKit packaging (`Contents/Extensions` +
+  `EXAppExtensionAttributes`) instead of legacy NSExtension.
+- Validate on macOS: `./scripts/build.sh --clean --install --run`, add Provider Tiles 1-4,
+  confirm each auto-maps to a distinct account with the #N badge, then pin assignments in
+  Settings → Widgets and confirm the badge disappears and tiles update immediately.
 - Capture small-widget screenshots against the supplied reference in light/dark desktop
   contexts.
 - Verify long names, one/two/no bounded metrics, unlimited, stale, failed, disabled, removed,

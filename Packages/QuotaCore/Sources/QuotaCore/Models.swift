@@ -1045,6 +1045,10 @@ public struct WidgetVisibilitySettings: Codable, Hashable, Sendable {
 
 public struct AppSettings: Codable, Hashable, Sendable {
   public static let refreshIntervalRange = 15...180
+  /// Number of independently placeable "Provider Tile" widgets. WidgetKit requires
+  /// one compile-time widget kind per tile, so this cannot be dynamic; changing it
+  /// means adding/removing ProviderTileSlotNWidget types in the widget bundle too.
+  public static let providerTileSlotCount = 6
 
   public var refreshIntervalMinutes: Int
   public var accounts: [ProviderAccount]
@@ -1052,6 +1056,9 @@ public struct AppSettings: Codable, Hashable, Sendable {
   public var widgetBackgroundSettings: WidgetBackgroundSettings
   public var providerStyleSettings: [ProviderStyleSettings]
   public var widgetVisibility: WidgetVisibilitySettings
+  /// Account ID per provider-tile slot; "" means automatic (first enabled account).
+  /// Always normalized to exactly `providerTileSlotCount` entries.
+  public var providerTileSlots: [String]
 
   public init(
     refreshIntervalMinutes: Int = 30,
@@ -1059,7 +1066,8 @@ public struct AppSettings: Codable, Hashable, Sendable {
     widgetStyle: WidgetStyleSettings = .default,
     widgetBackgroundSettings: WidgetBackgroundSettings = .default,
     providerStyleSettings: [ProviderStyleSettings] = [],
-    widgetVisibility: WidgetVisibilitySettings = .default
+    widgetVisibility: WidgetVisibilitySettings = .default,
+    providerTileSlots: [String] = []
   ) {
     self.refreshIntervalMinutes = AppSettings.clampedRefreshInterval(refreshIntervalMinutes)
     self.accounts = AppSettings.normalizedAccounts(accounts)
@@ -1067,6 +1075,7 @@ public struct AppSettings: Codable, Hashable, Sendable {
     self.widgetBackgroundSettings = widgetBackgroundSettings
     self.providerStyleSettings = AppSettings.normalizedProviderStyleSettings(providerStyleSettings, accounts: self.accounts)
     self.widgetVisibility = widgetVisibility
+    self.providerTileSlots = AppSettings.normalizedProviderTileSlots(providerTileSlots)
   }
 
   public static var `default`: AppSettings {
@@ -1096,6 +1105,48 @@ public struct AppSettings: Codable, Hashable, Sendable {
     )
   }
 
+  /// The account ID assigned to a provider-tile slot, or nil for automatic.
+  public func providerTileAssignment(forSlot index: Int) -> String? {
+    guard providerTileSlots.indices.contains(index) else { return nil }
+    let value = providerTileSlots[index].trimmingCharacters(in: .whitespacesAndNewlines)
+    return value.isEmpty ? nil : value
+  }
+
+  /// Stable order backing automatic tile assignment. The app's Settings UI and
+  /// the widget extension must agree on this order, which is why it lives here.
+  public var providerTileAutoOrder: [ProviderAccount] {
+    accounts.filter(\.isEnabled).sorted { lhs, rhs in
+      if lhs.provider.rawValue != rhs.provider.rawValue {
+        return lhs.provider.rawValue < rhs.provider.rawValue
+      }
+      if lhs.resolvedDisplayName != rhs.resolvedDisplayName {
+        return lhs.resolvedDisplayName < rhs.resolvedDisplayName
+      }
+      return lhs.id < rhs.id
+    }
+  }
+
+  /// Enabled accounts not explicitly pinned to any slot, in stable order.
+  /// Unassigned slots draw from this list so an auto tile never duplicates a
+  /// pinned tile: the K-th unassigned slot shows element K.
+  public func providerTileAutoCandidates() -> [ProviderAccount] {
+    let assigned = Set(
+      providerTileSlots
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty }
+    )
+    return providerTileAutoOrder.filter { !assigned.contains($0.id) }
+  }
+
+  /// Position of an unassigned slot among all unassigned slots (0-based), or
+  /// nil when the slot has an explicit assignment. Indexes
+  /// `providerTileAutoCandidates()`.
+  public func providerTileAutoRank(forSlot index: Int) -> Int? {
+    guard index >= 0, index < AppSettings.providerTileSlotCount else { return nil }
+    guard providerTileAssignment(forSlot: index) == nil else { return nil }
+    return (0..<index).filter { providerTileAssignment(forSlot: $0) == nil }.count
+  }
+
   public func redactedCredentials() -> AppSettings {
     AppSettings(
       refreshIntervalMinutes: refreshIntervalMinutes,
@@ -1103,7 +1154,8 @@ public struct AppSettings: Codable, Hashable, Sendable {
       widgetStyle: widgetStyle,
       widgetBackgroundSettings: widgetBackgroundSettings,
       providerStyleSettings: providerStyleSettings,
-      widgetVisibility: widgetVisibility
+      widgetVisibility: widgetVisibility,
+      providerTileSlots: providerTileSlots
     )
   }
 
@@ -1114,6 +1166,7 @@ public struct AppSettings: Codable, Hashable, Sendable {
     case widgetBackgroundSettings
     case providerStyleSettings
     case widgetVisibility
+    case providerTileSlots
   }
 
   public init(from decoder: Decoder) throws {
@@ -1142,6 +1195,10 @@ public struct AppSettings: Codable, Hashable, Sendable {
     )
 
     widgetVisibility = (try? container.decodeIfPresent(WidgetVisibilitySettings.self, forKey: .widgetVisibility)) ?? .default
+
+    providerTileSlots = AppSettings.normalizedProviderTileSlots(
+      (try? container.decodeIfPresent([String].self, forKey: .providerTileSlots)) ?? []
+    )
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -1152,6 +1209,7 @@ public struct AppSettings: Codable, Hashable, Sendable {
     try container.encode(widgetBackgroundSettings, forKey: .widgetBackgroundSettings)
     try container.encode(providerStyleSettings, forKey: .providerStyleSettings)
     try container.encode(widgetVisibility, forKey: .widgetVisibility)
+    try container.encode(AppSettings.normalizedProviderTileSlots(providerTileSlots), forKey: .providerTileSlots)
   }
 
   private static func normalizedAccounts(_ values: [ProviderAccount]) -> [ProviderAccount] {
@@ -1169,6 +1227,16 @@ public struct AppSettings: Codable, Hashable, Sendable {
 
   private static func clampedRefreshInterval(_ value: Int) -> Int {
     min(max(value, refreshIntervalRange.lowerBound), refreshIntervalRange.upperBound)
+  }
+
+  private static func normalizedProviderTileSlots(_ values: [String]) -> [String] {
+    var slots = values.prefix(providerTileSlotCount).map {
+      $0.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    while slots.count < providerTileSlotCount {
+      slots.append("")
+    }
+    return Array(slots)
   }
 
   private static func normalizedProviderStyleSettings(

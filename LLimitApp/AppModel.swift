@@ -26,6 +26,8 @@ final class AppModel: ObservableObject {
   @Published var widgetVisibility: WidgetVisibilitySettings = .default
   @Published var providerAccounts: [ProviderAccount] = []
   @Published var providerStyleSettings: [String: ProviderStyleSettings] = [:]
+  /// Account ID per provider-tile widget slot; "" = automatic (Nth enabled account).
+  @Published var providerTileSlots: [String] = []
   @Published var accountStatuses: [ProviderAccountStatus] = []
   @Published var snapshot: QuotaSnapshot?
   /// Recent slice of the local refresh history backing the dashboard sparklines.
@@ -120,6 +122,7 @@ final class AppModel: ObservableObject {
     widgetBackgroundSettings = settings.widgetBackgroundSettings
     widgetVisibility = settings.widgetVisibility
     providerAccounts = settings.accounts
+    providerTileSlots = settings.providerTileSlots
     providerStyleSettings = Dictionary(
       uniqueKeysWithValues: providerAccounts.map { account in
         (account.id, settings.styleOverride(for: account.id))
@@ -268,6 +271,9 @@ final class AppModel: ObservableObject {
     let removedAccount = providerAccounts.first { $0.id == accountID }
     providerAccounts.removeAll { $0.id == accountID }
     providerStyleSettings.removeValue(forKey: accountID)
+    // Deleting the account is an explicit choice, so its tile slots fall back to
+    // automatic (visibly badged on the tile) instead of a dead "reassign" state.
+    providerTileSlots = providerTileSlots.map { $0 == accountID ? "" : $0 }
     reconcileSnapshotWithCurrentAccounts()
     purgeHistory(for: removedAccount)
     reloadAccountStatuses()
@@ -692,6 +698,27 @@ final class AppModel: ObservableObject {
     )
   }
 
+  func providerTileSlotBinding(for index: Int) -> Binding<String> {
+    Binding(
+      get: {
+        guard self.providerTileSlots.indices.contains(index) else { return "" }
+        return self.providerTileSlots[index]
+      },
+      set: { newValue in
+        var slots = self.providerTileSlots
+        while slots.count < AppSettings.providerTileSlotCount {
+          slots.append("")
+        }
+        guard slots.indices.contains(index) else { return }
+        slots[index] = newValue
+        self.providerTileSlots = slots
+        // saveConfiguration syncs settings to the App Group store and reloads
+        // widget timelines, which is how the tiles pick up the new assignment.
+        self.saveConfiguration()
+      }
+    )
+  }
+
   func widgetVisibilityBinding(
     for keyPath: WritableKeyPath<WidgetVisibilitySettings, Bool>
   ) -> Binding<Bool> {
@@ -1035,7 +1062,8 @@ final class AppModel: ObservableObject {
       providerStyleSettings: providerAccounts.map { account in
         providerStyle(for: account.id)
       },
-      widgetVisibility: widgetVisibility
+      widgetVisibility: widgetVisibility,
+      providerTileSlots: providerTileSlots
     )
   }
 

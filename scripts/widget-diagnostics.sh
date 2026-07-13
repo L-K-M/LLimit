@@ -45,23 +45,20 @@ section "Signatures"
 /usr/bin/codesign --verify --deep --strict --verbose=2 "$APP" 2>&1 || true
 /usr/bin/codesign -d --entitlements :- "$WIDGET" 2>&1 || true
 
-section "App Intent metadata"
+section "Widget kinds"
+# Provider tiles are static slot widgets configured in the app's Settings; the
+# extension intentionally ships no App Intent configuration.
 if [[ -f "$METADATA" ]]; then
-  printf 'Metadata: %s\n' "$METADATA"
-  metadata_strings="$(/usr/bin/strings "$METADATA")"
-  printf '%s\n' "$metadata_strings" \
-    | /usr/bin/grep -E 'SelectProviderAccountIntent|ProviderAccountEntity|ProviderAccountQuery|provider-quota' \
-    | /usr/bin/sort -u || true
-  if ! printf '%s\n' "$metadata_strings" | /usr/bin/grep -Fq 'SelectProviderAccountIntent'; then
-    printf 'ERROR: SelectProviderAccountIntent is absent from installed metadata\n'
-  fi
-else
-  printf 'MISSING: %s\n' "$METADATA"
+  printf 'note: unexpected App Intent metadata present at %s\n' "$METADATA"
 fi
 if [[ ! -f "$WIDGET_BINARY" ]]; then
   printf 'MISSING: %s\n' "$WIDGET_BINARY"
-elif ! /usr/bin/grep -aFq 'ch.lkmc.llimit.widget.provider-quota.v3' "$WIDGET_BINARY"; then
-  printf 'ERROR: provider quota v3 widget kind is absent from the installed extension binary\n'
+else
+  for slot in 1 2 3 4 5 6; do
+    if ! /usr/bin/grep -aFq "ch.lkmc.llimit.widget.provider-tile.slot$slot" "$WIDGET_BINARY"; then
+      printf 'ERROR: provider tile slot%s kind is absent from the installed extension binary\n' "$slot"
+    fi
+  done
 fi
 
 section "PlugInKit registration"
@@ -88,12 +85,9 @@ section "Recent widget configuration logs ($LOG_WINDOW)"
 
 section "Live capture (manual)"
 cat <<'EOF'
-To catch the Edit-flow failure as it happens, run this in a second terminal,
-then right-click the tile and choose Edit:
+Provider tiles are configured in LLimit -> Settings -> Widgets, not via the
+widget Edit flow. To watch the tiles react to a settings change, run this in a
+second terminal while changing an assignment:
 
-  log stream --info --debug --predicate '(process == "NotificationCenter") OR (process == "chronod") OR (process == "appintentsd") OR (subsystem CONTAINS[c] "chrono") OR (subsystem CONTAINS[c] "appintents") OR (eventMessage CONTAINS[c] "llimit")'
-
-If Edit stays silent and produces no LLimit-related lines at all, suspect a
-wedged per-user widget stack: `killall NotificationCenter chronod WidgetCenter`
-and retest; verify in a fresh macOS user account before calling it an OS bug.
+  log stream --info --debug --predicate '(process == "chronod") OR (process == "LLimitWidgetExtension") OR (eventMessage CONTAINS[c] "llimit")'
 EOF

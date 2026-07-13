@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import QuotaCore
 
 enum SharedConstants {
   static let appGroupSuffix = "group.ch.lkmc.llimit"
@@ -10,16 +11,16 @@ enum SharedConstants {
   static let settingsFileName = "quota-settings.json"
   static let widgetKind = "LLimitWidget"
   static let trendWidgetKind = "ch.lkmc.llimit.widget.trend"
-  // Frozen once tiles are placed. Rotate ONLY together with the intent/query
-  // persistent identifiers, and only when the configuration schema changes —
-  // WidgetKit cannot decode a placed tile whose cached intent no longer matches.
-  static let providerWidgetKind = "ch.lkmc.llimit.widget.provider-quota.v3"
+  // One kind per provider-tile slot; the account for each slot is assigned in the
+  // app's settings, never via the widget Edit flow. Kinds are frozen once placed.
+  static let providerSlotWidgetKinds: [String] = (1...AppSettings.providerTileSlotCount).map {
+    "ch.lkmc.llimit.widget.provider-tile.slot\($0)"
+  }
 
   static let allWidgetKinds: [String] = [
     widgetKind,
-    trendWidgetKind,
-    providerWidgetKind
-  ]
+    trendWidgetKind
+  ] + providerSlotWidgetKinds
 }
 
 private enum AppGroupIdentifierResolver {

@@ -49,21 +49,19 @@ fi
 "$BIN" "$@"
 
 if [[ "$INSTALL" == true && -x "$LSREGISTER" && -d "$INSTALLED_APP" ]]; then
-  INTENT_METADATA="$INSTALLED_WIDGET/Contents/Resources/Metadata.appintents/extract.actionsdata"
+  # Provider tiles are static slot widgets configured inside the app; there is no
+  # widget-side App Intent configuration (and so no Metadata.appintents to gate on).
   WIDGET_BINARY="$INSTALLED_WIDGET/Contents/MacOS/LLimitWidgetExtension"
-  if [[ ! -f "$INTENT_METADATA" ]] \
-    || ! /usr/bin/grep -Fq 'SelectProviderAccountIntent' "$INTENT_METADATA" \
-    || ! /usr/bin/grep -Fq 'ch.lkmc.llimit.intent.provider-quota.v3' "$INTENT_METADATA" \
-    || ! /usr/bin/grep -Fq 'ProviderAccountEntity' "$INTENT_METADATA" \
-    || ! /usr/bin/grep -Fq 'ProviderAccountQuery' "$INTENT_METADATA"; then
-    echo "error: installed widget is missing required App Intent metadata" >&2
+  if [[ ! -f "$WIDGET_BINARY" ]]; then
+    echo "error: installed widget binary is missing" >&2
     exit 1
   fi
-  if [[ ! -f "$WIDGET_BINARY" ]] \
-    || ! /usr/bin/grep -aFq 'ch.lkmc.llimit.widget.provider-quota.v3' "$WIDGET_BINARY"; then
-    echo "error: installed widget is missing the provider quota v3 kind" >&2
-    exit 1
-  fi
+  for slot in 1 2 3 4 5 6; do
+    if ! /usr/bin/grep -aFq "ch.lkmc.llimit.widget.provider-tile.slot$slot" "$WIDGET_BINARY"; then
+      echo "error: installed widget is missing the provider tile slot$slot kind" >&2
+      exit 1
+    fi
+  done
 
   APP_BUILD=$(/usr/bin/plutil -extract CFBundleVersion raw -o - "$INSTALLED_APP/Contents/Info.plist")
   WIDGET_BUILD=$(/usr/bin/plutil -extract CFBundleVersion raw -o - "$INSTALLED_WIDGET/Contents/Info.plist")

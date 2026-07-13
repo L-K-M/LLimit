@@ -175,6 +175,65 @@ final class StoreRoundTripTests: XCTestCase {
     XCTAssertTrue(settings.accounts.isEmpty)
   }
 
+  func testProviderTileSlotsDefaultDecodeAndNormalization() throws {
+    // Legacy settings files without the key decode to all-automatic slots.
+    let legacy = try JSONDecoder().decode(
+      AppSettings.self,
+      from: Data("{ \"refreshIntervalMinutes\": 30 }".utf8)
+    )
+    XCTAssertEqual(legacy.providerTileSlots, Array(repeating: "", count: AppSettings.providerTileSlotCount))
+    XCTAssertNil(legacy.providerTileAssignment(forSlot: 0))
+    XCTAssertNil(legacy.providerTileAssignment(forSlot: AppSettings.providerTileSlotCount))
+
+    // Short arrays pad, long arrays truncate, whitespace-only entries mean automatic.
+    let normalized = AppSettings(providerTileSlots: ["a", "  ", "b"])
+    XCTAssertEqual(normalized.providerTileSlots.count, AppSettings.providerTileSlotCount)
+    XCTAssertEqual(normalized.providerTileAssignment(forSlot: 0), "a")
+    XCTAssertNil(normalized.providerTileAssignment(forSlot: 1))
+    XCTAssertEqual(normalized.providerTileAssignment(forSlot: 2), "b")
+    XCTAssertNil(normalized.providerTileAssignment(forSlot: 3))
+
+    let oversized = AppSettings(
+      providerTileSlots: (0..<(AppSettings.providerTileSlotCount + 3)).map { "slot\($0)" }
+    )
+    XCTAssertEqual(oversized.providerTileSlots.count, AppSettings.providerTileSlotCount)
+
+    let encoded = try JSONEncoder().encode(normalized)
+    let decoded = try JSONDecoder().decode(AppSettings.self, from: encoded)
+    XCTAssertEqual(decoded.providerTileSlots, normalized.providerTileSlots)
+  }
+
+  func testProviderTileAutoOrderIsStableAndSkipsDisabledAccounts() {
+    let accounts = [
+      ProviderAccount(id: "z1", provider: .zai, displayName: "Z.ai", isEnabled: true, credentials: [:]),
+      ProviderAccount(id: "o2", provider: .openAI, displayName: "GPT B", isEnabled: true, credentials: [:]),
+      ProviderAccount(id: "o1", provider: .openAI, displayName: "GPT A", isEnabled: true, credentials: [:]),
+      ProviderAccount(id: "a1", provider: .anthropic, displayName: "Claude", isEnabled: false, credentials: [:])
+    ]
+    let settings = AppSettings(accounts: accounts)
+
+    // Disabled Claude is skipped; OpenAI accounts sort by display name before Z.ai.
+    XCTAssertEqual(settings.providerTileAutoOrder.map(\.id), ["o1", "o2", "z1"])
+  }
+
+  func testProviderTileAutoCandidatesSkipPinnedAccountsAndRankSkipsAssignedSlots() {
+    let accounts = [
+      ProviderAccount(id: "o1", provider: .openAI, displayName: "GPT A", isEnabled: true, credentials: [:]),
+      ProviderAccount(id: "o2", provider: .openAI, displayName: "GPT B", isEnabled: true, credentials: [:]),
+      ProviderAccount(id: "z1", provider: .zai, displayName: "Z.ai", isEnabled: true, credentials: [:])
+    ]
+    // Slot 0 pins GPT B; slots 1+ stay automatic.
+    let settings = AppSettings(accounts: accounts, providerTileSlots: ["o2"])
+
+    // Pinned GPT B never appears as an auto candidate, so the first two
+    // automatic tiles show GPT A and Z.ai without duplicating GPT B.
+    XCTAssertEqual(settings.providerTileAutoCandidates().map(\.id), ["o1", "z1"])
+    XCTAssertNil(settings.providerTileAutoRank(forSlot: 0))
+    XCTAssertEqual(settings.providerTileAutoRank(forSlot: 1), 0)
+    XCTAssertEqual(settings.providerTileAutoRank(forSlot: 2), 1)
+    XCTAssertNil(settings.providerTileAutoRank(forSlot: AppSettings.providerTileSlotCount))
+  }
+
   func testQuotaHistoryStoreRoundTripAndRetention() throws {
     let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     let fileURL = tempDir.appendingPathComponent("history.json")

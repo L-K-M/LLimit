@@ -1,34 +1,69 @@
-import AppIntents
 import Foundation
 import SwiftUI
 import WidgetKit
 import QuotaCore
 
-// Configuration uses Apple's canonical AppEntity + EntityQuery pattern (the shape the
-// widget edit UI is designed around — see "Making a configurable widget"). The earlier
-// String-parameter + DynamicOptionsProvider experiment is retired; its "unusable"
-// verdict on the entity graph predated the identity reset and was contaminated by
-// tiles placed under the reused v1 kind. All identities move to .v3 TOGETHER (widget
-// kind, intent, query) — never change the parameter schema without also rotating the
-// identities, and treat them as frozen once tiles are placed.
+// The provider tiles deliberately have NO widget-side configuration. The macOS
+// "Edit Widget" flow proved unreliable across builds 7-13 (see ANALYSIS.md), so
+// account selection lives in LLimit's Settings instead: each numbered tile reads
+// its slot assignment from the shared settings file, and the app reloads widget
+// timelines whenever an assignment changes. Unassigned tiles auto-fill with the
+// enabled accounts not pinned to any tile (AppSettings.providerTileAutoCandidates)
+// and wear a #N badge, so placing tiles 1..N maps them 1:1 onto accounts with no
+// setup and auto tiles never duplicate pinned ones.
+//
+// WidgetKit registers widget kinds at compile time, one type per kind — the slot
+// count cannot be dynamic. Keep these types in sync with
+// AppSettings.providerTileSlotCount.
 
-struct ProviderAccountEntity: AppEntity, Hashable, Sendable {
-  static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "LLimit Account")
-  static let defaultQuery = ProviderAccountQuery()
+struct ProviderTileSlot1Widget: Widget {
+  var body: some WidgetConfiguration { providerTileConfiguration(slotIndex: 0) }
+}
 
+struct ProviderTileSlot2Widget: Widget {
+  var body: some WidgetConfiguration { providerTileConfiguration(slotIndex: 1) }
+}
+
+struct ProviderTileSlot3Widget: Widget {
+  var body: some WidgetConfiguration { providerTileConfiguration(slotIndex: 2) }
+}
+
+struct ProviderTileSlot4Widget: Widget {
+  var body: some WidgetConfiguration { providerTileConfiguration(slotIndex: 3) }
+}
+
+struct ProviderTileSlot5Widget: Widget {
+  var body: some WidgetConfiguration { providerTileConfiguration(slotIndex: 4) }
+}
+
+struct ProviderTileSlot6Widget: Widget {
+  var body: some WidgetConfiguration { providerTileConfiguration(slotIndex: 5) }
+}
+
+private func providerTileConfiguration(slotIndex: Int) -> some WidgetConfiguration {
+  StaticConfiguration(
+    kind: SharedConstants.providerSlotWidgetKinds[slotIndex],
+    provider: ProviderTileTimelineProvider(slotIndex: slotIndex)
+  ) { entry in
+    ProviderQuotaTileView(entry: entry)
+      .containerBackground(for: .widget) {
+        ProviderTileBackground(provider: entry.account?.provider)
+      }
+  }
+  .configurationDisplayName("Provider Tile \(slotIndex + 1)")
+  .description("Quota rings for the account assigned to tile \(slotIndex + 1) in LLimit's Settings → Widgets.")
+  .supportedFamilies([.systemSmall])
+  .contentMarginsDisabled()
+}
+
+/// The account a tile resolved for display.
+struct ProviderTileSelection: Sendable {
   let id: String
   let displayName: String
   let provider: QuotaProvider
-
-  var displayRepresentation: DisplayRepresentation {
-    DisplayRepresentation(
-      title: "\(displayName)",
-      subtitle: "\(provider.displayName)"
-    )
-  }
 }
 
-extension ProviderAccountEntity {
+extension ProviderTileSelection {
   init(_ account: ProviderAccount) {
     self.init(
       id: account.id,
@@ -38,87 +73,23 @@ extension ProviderAccountEntity {
   }
 }
 
-struct ProviderAccountQuery: EntityQuery, Sendable {
-  static let persistentIdentifier = "ch.lkmc.llimit.query.provider-account.v3"
-
-  func entities(for identifiers: [ProviderAccountEntity.ID]) async throws -> [ProviderAccountEntity] {
-    let requested = Set(identifiers)
-    // Resolve against ALL stored accounts, not only enabled ones, so a placed tile
-    // keeps its identity (name/provider) while its account is temporarily disabled.
-    return ProviderTileAccounts.all().filter { requested.contains($0.id) }.map(ProviderAccountEntity.init)
-  }
-
-  func suggestedEntities() async throws -> [ProviderAccountEntity] {
-    ProviderTileAccounts.enabled().map(ProviderAccountEntity.init)
-  }
-
-  func defaultResult() async -> ProviderAccountEntity? {
-    ProviderTileAccounts.defaultAccount(in: ProviderTileAccounts.enabled()).map(ProviderAccountEntity.init)
-  }
-}
-
-struct SelectProviderAccountIntent: WidgetConfigurationIntent {
-  static let persistentIdentifier = "ch.lkmc.llimit.intent.provider-quota.v3"
-  static let title: LocalizedStringResource = "Provider Quota"
-  static let description = IntentDescription("Choose the LLimit account shown by this quota tile.")
-
-  @Parameter(title: "Account")
-  var account: ProviderAccountEntity?
-
-  init() {}
-
-  static var parameterSummary: some ParameterSummary {
-    Summary("Show \(\.$account)")
-  }
-}
-
-/// Settings-file access shared by the query and the timeline provider. Reads must
-/// never throw out of the widget process: a missing/corrupt file degrades to empty
-/// lists, which the tile renders as its "add an account" state.
-enum ProviderTileAccounts {
-  static func all() -> [ProviderAccount] {
-    guard
-      let settingsURL = try? SharedPaths.settingsFileURL(),
-      let settings = try? SettingsStore(fileURL: settingsURL).load()
-    else {
-      return []
-    }
-    return settings.accounts
-  }
-
-  static func enabled() -> [ProviderAccount] {
-    all().filter(\.isEnabled)
-  }
-
-  /// Deterministic auto-selection used both for the config default and for tiles
-  /// whose configuration is still nil (e.g. while the Edit flow is unavailable):
-  /// stable provider order, then display name, then id.
-  static func defaultAccount(in accounts: [ProviderAccount]) -> ProviderAccount? {
-    accounts.min { lhs, rhs in
-      if lhs.provider.rawValue != rhs.provider.rawValue {
-        return lhs.provider.rawValue < rhs.provider.rawValue
-      }
-      if lhs.resolvedDisplayName != rhs.resolvedDisplayName {
-        return lhs.resolvedDisplayName < rhs.resolvedDisplayName
-      }
-      return lhs.id < rhs.id
-    }
-  }
-}
-
-/// How the tile's account was resolved for an entry, so the view can explain
-/// every state instead of silently falling back to "choose an account".
+/// How the tile's account was resolved, so the view can explain every state
+/// instead of silently showing the wrong thing.
 enum ProviderTileAccountState: Sendable {
   case configured
+  /// Unassigned slot showing the Nth enabled account automatically.
   case autoSelected
   case accountDisabled
   case accountRemoved
+  /// Unassigned slot whose number exceeds the enabled-account count.
+  case awaitingAccount
   case noAccounts
 }
 
 struct ProviderQuotaEntry: TimelineEntry {
   let date: Date
-  let account: ProviderAccountEntity?
+  let slotIndex: Int
+  let account: ProviderTileSelection?
   let accountState: ProviderTileAccountState
   let usage: ProviderUsage?
   let failure: ProviderFailure?
@@ -126,27 +97,24 @@ struct ProviderQuotaEntry: TimelineEntry {
   let refreshIntervalMinutes: Int
 }
 
-struct ProviderQuotaTimelineProvider: AppIntentTimelineProvider {
+struct ProviderTileTimelineProvider: TimelineProvider {
+  let slotIndex: Int
+
   func placeholder(in context: Context) -> ProviderQuotaEntry {
-    Self.sampleEntry(at: Date())
+    Self.sampleEntry(slotIndex: slotIndex, at: Date())
   }
 
-  func snapshot(
-    for configuration: SelectProviderAccountIntent,
-    in context: Context
-  ) async -> ProviderQuotaEntry {
+  func getSnapshot(in context: Context, completion: @escaping (ProviderQuotaEntry) -> Void) {
     if context.isPreview {
-      return Self.sampleEntry(at: Date())
+      completion(Self.sampleEntry(slotIndex: slotIndex, at: Date()))
+      return
     }
-    return loadEntry(for: configuration, at: Date())
+    completion(loadEntry(at: Date()))
   }
 
-  func timeline(
-    for configuration: SelectProviderAccountIntent,
-    in context: Context
-  ) async -> Timeline<ProviderQuotaEntry> {
+  func getTimeline(in context: Context, completion: @escaping (Timeline<ProviderQuotaEntry>) -> Void) {
     let now = Date()
-    let entry = loadEntry(for: configuration, at: now)
+    let entry = loadEntry(at: now)
     let refreshMinutes = min(max(entry.refreshIntervalMinutes, 15), 180)
     let refreshInterval = TimeInterval(refreshMinutes) * 60
     let nextRefresh = now.addingTimeInterval(refreshInterval)
@@ -168,6 +136,7 @@ struct ProviderQuotaTimelineProvider: AppIntentTimelineProvider {
     let entries = entryDates.sorted().map { date in
       ProviderQuotaEntry(
         date: date,
+        slotIndex: entry.slotIndex,
         account: entry.account,
         accountState: entry.accountState,
         usage: entry.usage,
@@ -176,45 +145,51 @@ struct ProviderQuotaTimelineProvider: AppIntentTimelineProvider {
         refreshIntervalMinutes: entry.refreshIntervalMinutes
       )
     }
-    return Timeline(entries: entries, policy: .after(nextRefresh))
+    completion(Timeline(entries: entries, policy: .after(nextRefresh)))
   }
 
-  private func loadEntry(
-    for configuration: SelectProviderAccountIntent,
-    at date: Date
-  ) -> ProviderQuotaEntry {
+  private func loadEntry(at date: Date) -> ProviderQuotaEntry {
     let settings = loadSettings()
     let allAccounts = settings.accounts
     let enabledAccounts = allAccounts.filter(\.isEnabled)
 
     let accountState: ProviderTileAccountState
     let effectiveAccount: ProviderAccount?
-    let entity: ProviderAccountEntity?
+    let selection: ProviderTileSelection?
 
-    if let requested = configuration.account {
-      if let match = enabledAccounts.first(where: { $0.id == requested.id }) {
+    if let assignedID = settings.providerTileAssignment(forSlot: slotIndex) {
+      if let match = enabledAccounts.first(where: { $0.id == assignedID }) {
         accountState = .configured
         effectiveAccount = match
-        entity = ProviderAccountEntity(match)
-      } else if allAccounts.contains(where: { $0.id == requested.id }) {
+        selection = ProviderTileSelection(match)
+      } else if let disabled = allAccounts.first(where: { $0.id == assignedID }) {
         accountState = .accountDisabled
         effectiveAccount = nil
-        entity = requested
+        selection = ProviderTileSelection(disabled)
       } else {
         accountState = .accountRemoved
         effectiveAccount = nil
-        entity = requested
+        selection = nil
       }
-    } else if let fallback = ProviderTileAccounts.defaultAccount(in: enabledAccounts) {
-      // Unconfigured tile: show the default account instead of a dead placeholder,
-      // so the widget is useful even before (or without) the Edit flow.
-      accountState = .autoSelected
-      effectiveAccount = fallback
-      entity = ProviderAccountEntity(fallback)
     } else {
-      accountState = .noAccounts
-      effectiveAccount = nil
-      entity = nil
+      // Unassigned slot: auto-fill from the enabled accounts that are not
+      // pinned to any tile, so auto tiles never duplicate pinned ones and
+      // placing tiles 1..N covers all accounts without any configuration.
+      let candidates = settings.providerTileAutoCandidates()
+      let rank = settings.providerTileAutoRank(forSlot: slotIndex) ?? 0
+      if candidates.indices.contains(rank) {
+        accountState = .autoSelected
+        effectiveAccount = candidates[rank]
+        selection = ProviderTileSelection(candidates[rank])
+      } else if enabledAccounts.isEmpty {
+        accountState = .noAccounts
+        effectiveAccount = nil
+        selection = nil
+      } else {
+        accountState = .awaitingAccount
+        effectiveAccount = nil
+        selection = nil
+      }
     }
 
     let snapshot = loadSnapshot()
@@ -229,11 +204,12 @@ struct ProviderQuotaTimelineProvider: AppIntentTimelineProvider {
 
     return ProviderQuotaEntry(
       date: date,
-      account: entity,
+      slotIndex: slotIndex,
+      account: selection,
       accountState: accountState,
       usage: usage,
       failure: failure,
-      ringColors: ringColors(for: entity?.id, settings: settings),
+      ringColors: ringColors(for: selection?.id, settings: settings),
       refreshIntervalMinutes: max(15, settings.refreshIntervalMinutes)
     )
   }
@@ -284,10 +260,11 @@ struct ProviderQuotaTimelineProvider: AppIntentTimelineProvider {
     return override.useCustomStyle ? override.style.ringColors : settings.widgetStyle.ringColors
   }
 
-  private static func sampleEntry(at date: Date) -> ProviderQuotaEntry {
-    let account = ProviderAccountEntity(id: "sample-zai", displayName: "Z.ai", provider: .zai)
+  private static func sampleEntry(slotIndex: Int, at date: Date) -> ProviderQuotaEntry {
+    let account = ProviderTileSelection(id: "sample-zai", displayName: "Z.ai", provider: .zai)
     return ProviderQuotaEntry(
       date: date,
+      slotIndex: slotIndex,
       account: account,
       accountState: .configured,
       usage: ProviderUsage(
@@ -317,25 +294,6 @@ struct ProviderQuotaTimelineProvider: AppIntentTimelineProvider {
   }
 }
 
-struct ProviderQuotaWidget: Widget {
-  var body: some WidgetConfiguration {
-    AppIntentConfiguration(
-      kind: SharedConstants.providerWidgetKind,
-      intent: SelectProviderAccountIntent.self,
-      provider: ProviderQuotaTimelineProvider()
-    ) { entry in
-      ProviderQuotaTileView(entry: entry)
-        .containerBackground(for: .widget) {
-          ProviderTileBackground(provider: entry.account?.provider)
-        }
-    }
-    .configurationDisplayName("Provider Quota Tile")
-    .description("Concentric quota rings for one LLimit account. Add one tile per account.")
-    .supportedFamilies([.systemSmall])
-    .contentMarginsDisabled()
-  }
-}
-
 private struct ProviderQuotaTileView: View {
   let entry: ProviderQuotaEntry
 
@@ -352,7 +310,20 @@ private struct ProviderQuotaTileView: View {
       } else if let account = entry.account {
         unavailableContent(account: account, hasUsageWithoutPercentage: entry.usage != nil)
       } else {
-        noAccountsContent
+        switch entry.accountState {
+        case .accountRemoved:
+          slotPlaceholder(
+            symbol: "questionmark.circle",
+            message: "Assigned account no longer exists — reassign in LLimit's Settings"
+          )
+        case .awaitingAccount:
+          slotPlaceholder(
+            symbol: "person.crop.circle.badge.plus",
+            message: "Every account already has a tile — add another account or assign one in LLimit's Settings"
+          )
+        default:
+          noAccountsContent
+        }
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -360,7 +331,7 @@ private struct ProviderQuotaTileView: View {
     .accessibilityLabel(accessibilitySummary)
   }
 
-  private func loadedContent(account: ProviderAccountEntity, usage: ProviderUsage) -> some View {
+  private func loadedContent(account: ProviderTileSelection, usage: ProviderUsage) -> some View {
     let metrics = defaultRingMetrics(for: usage)
 
     return VStack(spacing: 5) {
@@ -386,11 +357,13 @@ private struct ProviderQuotaTileView: View {
       }
     }
     .overlay(alignment: .topLeading) {
+      // Number badge only while the tile is auto-mapped, so users can match
+      // desktop tiles to the numbered rows in Settings → Widgets.
       if entry.accountState == .autoSelected {
-        Text("AUTO")
+        Text("#\(entry.slotIndex + 1) AUTO")
           .font(.system(size: 7, weight: .bold))
           .tracking(0.5)
-          .foregroundStyle(.white.opacity(0.55))
+          .foregroundStyle(.white.opacity(0.6))
           .padding(.horizontal, 5)
           .padding(.vertical, 2)
           .background(.black.opacity(0.25), in: Capsule())
@@ -401,7 +374,7 @@ private struct ProviderQuotaTileView: View {
   }
 
   private func unavailableContent(
-    account: ProviderAccountEntity,
+    account: ProviderTileSelection,
     hasUsageWithoutPercentage: Bool
   ) -> some View {
     VStack(spacing: 7) {
@@ -423,8 +396,6 @@ private struct ProviderQuotaTileView: View {
     switch entry.accountState {
     case .accountDisabled:
       return "pause.circle"
-    case .accountRemoved:
-      return "questionmark.circle"
     default:
       if entry.failure != nil { return "exclamationmark.triangle.fill" }
       return hasUsageWithoutPercentage ? "questionmark.circle" : "arrow.clockwise.circle"
@@ -435,12 +406,24 @@ private struct ProviderQuotaTileView: View {
     switch entry.accountState {
     case .accountDisabled:
       return "Account disabled in LLimit"
-    case .accountRemoved:
-      return "Account removed — edit this widget"
     default:
       if entry.failure != nil { return "Quota unavailable" }
       return hasUsageWithoutPercentage ? "Quota percentage unavailable" : "Refresh in LLimit"
     }
+  }
+
+  private func slotPlaceholder(symbol: String, message: String) -> some View {
+    VStack(spacing: 7) {
+      Image(systemName: symbol)
+        .font(.title2)
+      Text("Tile \(entry.slotIndex + 1)")
+        .font(.headline)
+      Text(message)
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+        .multilineTextAlignment(.center)
+    }
+    .padding(14)
   }
 
   private var noAccountsContent: some View {
@@ -492,16 +475,18 @@ private struct ProviderQuotaTileView: View {
 
   private var accessibilitySummary: String {
     guard let account = entry.account else {
-      return "LLimit provider quota. Add an account in LLimit."
+      switch entry.accountState {
+      case .accountRemoved:
+        return "LLimit provider tile \(entry.slotIndex + 1). The assigned account no longer exists. Reassign it in LLimit's settings."
+      case .awaitingAccount:
+        return "LLimit provider tile \(entry.slotIndex + 1). Every account already has a tile. Add another account or assign one in LLimit's settings."
+      default:
+        return "LLimit provider quota. Add an account in LLimit."
+      }
     }
 
-    switch entry.accountState {
-    case .accountDisabled:
+    if entry.accountState == .accountDisabled {
       return "\(account.displayName). Account is disabled in LLimit."
-    case .accountRemoved:
-      return "\(account.displayName). Account was removed. Edit this widget to choose another."
-    case .configured, .autoSelected, .noAccounts:
-      break
     }
 
     guard let usage = entry.usage else {

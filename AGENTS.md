@@ -90,17 +90,17 @@ Requires macOS 14+, Xcode 15+, [XcodeGen](https://github.com/yonaskolb/XcodeGen)
   rebuilt`, and new widget kinds do not appear in the gallery.
 - Keep the app and widget extension on the same, monotonically increasing
   `CURRENT_PROJECT_VERSION`, especially whenever the `WidgetBundle` catalog changes.
-- Configurable widgets require `AppIntents.framework` on the widget target and a
-  generated `LLimitWidgetExtension.appex/Contents/Resources/Metadata.appintents`.
-  A successful macOS build must run `ExtractAppIntentsMetadata` and export the widget
-  configuration intent before the feature is considered validated.
-- Treat a placed widget's `kind` and the intent/query `persistentIdentifier`s as one
-  frozen unit. Never change the configuration parameter schema under an existing kind
-  (that orphans placed tiles — Apple forums thread 746574); when a schema change is
-  unavoidable, rotate kind + intent + query identifiers together (v2 → v3 → ...) and
-  remove all placed tiles before retesting. Widget configuration stays on Apple's
-  canonical `AppEntity` + `EntityQuery` pattern; do not swap it for primitive
-  parameters with `DynamicOptionsProvider` again without new evidence.
+- Widgets carry NO widget-side configuration: the macOS "Edit Widget" flow never
+  worked for this app across builds 7-13 (see ANALYSIS.md) regardless of intent
+  shape, so the provider tiles are static slot widgets whose account assignment
+  lives in the app (Settings → Widgets, `AppSettings.providerTileSlots`). Do not
+  reintroduce `AppIntentConfiguration`/`WidgetConfigurationIntent` without new
+  evidence that the Edit flow works on this system.
+- Treat placed widget `kind` strings as frozen; changing one orphans placed tiles
+  (Apple forums thread 746574). The slot count is compile-time (one Widget type
+  per kind) — keep `AppSettings.providerTileSlotCount`, the
+  `ProviderTileSlotNWidget` types, and `SharedConstants.providerSlotWidgetKinds`
+  in sync when changing it.
 
 ```bash
 xcodegen generate
