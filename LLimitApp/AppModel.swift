@@ -28,6 +28,10 @@ final class AppModel: ObservableObject {
   @Published var providerStyleSettings: [String: ProviderStyleSettings] = [:]
   @Published var accountStatuses: [ProviderAccountStatus] = []
   @Published var snapshot: QuotaSnapshot?
+  /// Recent slice of the local refresh history backing the dashboard sparklines.
+  /// Two days is enough for the 24h spark window while keeping the read cheap
+  /// against the 45-day history file.
+  @Published private(set) var recentHistory: [QuotaSnapshot] = []
   @Published var statusMessage: String = ""
   @Published var isRefreshing = false
   @Published var launchAtLogin = false
@@ -91,6 +95,7 @@ final class AppModel: ObservableObject {
       statusMessage = "Could not load snapshot: \(error.localizedDescription)"
     }
 
+    reloadRecentHistory()
     reloadAccountStatuses()
     restartAutoRefreshLoop()
 
@@ -198,6 +203,7 @@ final class AppModel: ObservableObject {
       } catch {
         print("[LLimit] Local history append failed: \(error.localizedDescription)")
       }
+      reloadRecentHistory()
 
       let widgetSyncReady = syncSnapshotToWidgetStore(refreshed)
       let historySyncReady = syncHistoryToWidgetStore(refreshed)
@@ -1065,6 +1071,7 @@ final class AppModel: ObservableObject {
     } catch {
       print("[LLimit] Local history purge failed: \(error.localizedDescription)")
     }
+    reloadRecentHistory()
 
     do {
       guard let widgetHistoryStore = appGroupHistoryStore() else {
@@ -1077,6 +1084,10 @@ final class AppModel: ObservableObject {
       print("[LLimit] Widget history purge failed: \(error.localizedDescription)")
       invalidateAppGroupStores()
     }
+  }
+
+  private func reloadRecentHistory(now: Date = Date()) {
+    recentHistory = (try? historyStore.loadRecent(days: 2, now: now)) ?? []
   }
 
   private func restartAutoRefreshLoop() {

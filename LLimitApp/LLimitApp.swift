@@ -203,15 +203,301 @@ private struct MenuBarIcon: View {
   }
 }
 
+// MARK: - Dashboard design system
+
+/// Graphite-glass palette for the dropdown/floating dashboard. Accent color always
+/// comes from the user's quota style settings (see MenuBarQuotaStyling); nothing
+/// here should compete with those signal colors.
 private enum DashboardPalette {
-  static let backgroundTop = Color(red: 0.10, green: 0.11, blue: 0.23)
-  static let backgroundBottom = Color(red: 0.16, green: 0.18, blue: 0.36)
+  static let backgroundTop = Color(red: 0.114, green: 0.122, blue: 0.153)
+  static let backgroundBottom = Color(red: 0.062, green: 0.066, blue: 0.086)
   static let card = Color.white.opacity(0.055)
-  static let emphasizedCard = Color.white.opacity(0.075)
-  static let hairline = Color.white.opacity(0.12)
-  static let sectionTitle = Color(red: 0.70, green: 0.92, blue: 0.24)
+  static let cardHover = Color.white.opacity(0.085)
+  static let hairline = Color.white.opacity(0.10)
+  static let rimBottom = Color.white.opacity(0.03)
+  static let sectionTitle = Color.white.opacity(0.48)
   static let secondaryText = Color.white.opacity(0.62)
+  static let tertiaryText = Color.white.opacity(0.42)
+  static let barTrack = Color.white.opacity(0.09)
+  static let brandGradient = [Color(red: 0.33, green: 0.53, blue: 0.98), Color(red: 0.58, green: 0.40, blue: 0.95)]
 }
+
+/// Card chrome shared by every dashboard tile: soft fill, top-lit rim, drop shadow.
+/// The rim gradient is what makes cards read as "glass" on the dark background.
+private struct DashboardCardChrome: ViewModifier {
+  var accent: Color?
+  var isHovered = false
+
+  func body(content: Content) -> some View {
+    content
+      .background(
+        isHovered ? DashboardPalette.cardHover : DashboardPalette.card,
+        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+      )
+      .overlay {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+          .strokeBorder(
+            LinearGradient(
+              colors: [
+                (accent ?? .white).opacity(accent == nil ? 0.14 : 0.30),
+                DashboardPalette.rimBottom
+              ],
+              startPoint: .top,
+              endPoint: .bottom
+            ),
+            lineWidth: 1
+          )
+      }
+      .shadow(color: .black.opacity(0.28), radius: 6, y: 2)
+  }
+}
+
+private extension View {
+  func dashboardCard(accent: Color? = nil, isHovered: Bool = false) -> some View {
+    modifier(DashboardCardChrome(accent: accent, isHovered: isHovered))
+  }
+}
+
+private struct SectionTitle: View {
+  let text: String
+
+  var body: some View {
+    Text(text)
+      .font(.system(size: 10, weight: .semibold))
+      .tracking(1.1)
+      .foregroundStyle(DashboardPalette.sectionTitle)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.horizontal, 2)
+      .accessibilityAddTraits(.isHeader)
+  }
+}
+
+/// Circular gauge with a gradient arc and a soft glow — the dashboard's signature mark.
+private struct GlossRing: View {
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  let remaining: Int?
+  let unlimited: Bool
+  let tint: Color
+  var diameter: CGFloat = 46
+  var lineWidth: CGFloat = 5
+
+  private var progress: Double {
+    if unlimited { return 1 }
+    return Double(max(0, min(100, remaining ?? 0))) / 100
+  }
+
+  var body: some View {
+    ZStack {
+      Circle()
+        .stroke(Color.white.opacity(0.08), lineWidth: lineWidth)
+
+      if progress > 0.001 {
+        Circle()
+          .trim(from: 0, to: progress)
+          .stroke(
+            AngularGradient(
+              gradient: Gradient(colors: [tint.opacity(0.45), tint]),
+              center: .center,
+              startAngle: .degrees(0),
+              endAngle: .degrees(360 * progress)
+            ),
+            style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
+          )
+          .rotationEffect(.degrees(-90))
+          .shadow(color: tint.opacity(0.55), radius: 3.5)
+          .animation(reduceMotion ? nil : .spring(response: 0.6, dampingFraction: 0.8), value: progress)
+      }
+
+      Text(centerText)
+        .font(.system(size: diameter * 0.27, weight: .bold, design: .rounded))
+        .monospacedDigit()
+        .foregroundStyle(.white.opacity(0.94))
+        .contentTransition(.numericText())
+        .minimumScaleFactor(0.6)
+        .lineLimit(1)
+        .frame(width: diameter - lineWidth * 2.6)
+    }
+    .frame(width: diameter, height: diameter)
+    .accessibilityLabel(accessibilityText)
+  }
+
+  private var centerText: String {
+    if unlimited { return "∞" }
+    guard let remaining else { return "--" }
+    return "\(max(0, min(100, remaining)))%"
+  }
+
+  private var accessibilityText: String {
+    if unlimited { return "Unlimited" }
+    guard let remaining else { return "Quota unavailable" }
+    return "\(max(0, min(100, remaining))) percent remaining"
+  }
+}
+
+/// Capsule progress bar with a gradient fill and a glossy top highlight.
+private struct GlossBar: View {
+  let progress: Double
+  let tint: Color
+
+  var body: some View {
+    GeometryReader { geometry in
+      ZStack(alignment: .leading) {
+        Capsule()
+          .fill(DashboardPalette.barTrack)
+
+        if progress > 0 {
+          Capsule()
+            .fill(
+              LinearGradient(colors: [tint.opacity(0.78), tint], startPoint: .leading, endPoint: .trailing)
+            )
+            .overlay(alignment: .top) {
+              Capsule()
+                .fill(
+                  LinearGradient(colors: [.white.opacity(0.30), .clear], startPoint: .top, endPoint: .bottom)
+                )
+                .frame(height: 2.5)
+                .padding(.horizontal, 1)
+            }
+            .frame(width: max(6, geometry.size.width * min(1, progress)))
+            .shadow(color: tint.opacity(0.35), radius: 2)
+        }
+      }
+    }
+    .frame(height: 5)
+    .animation(.spring(response: 0.55, dampingFraction: 0.85), value: progress)
+    .accessibilityHidden(true)
+  }
+}
+
+private struct SparkPoint {
+  let date: Date
+  let remaining: Double
+}
+
+/// Builds per-metric history series for the sparklines from the app's recent
+/// local history. Matching mirrors the trend widget: by accountID, with the
+/// pre-multi-account fallback (accountID == provider raw value) honored only
+/// while that provider still has exactly one enabled account.
+private struct SparkSeriesBuilder {
+  let history: [QuotaSnapshot]
+  let soleAccountProviders: Set<QuotaProvider>
+
+  func points(
+    accountID: String,
+    provider: QuotaProvider,
+    metricID: String,
+    metricLabel: String,
+    window: ClosedRange<Date>
+  ) -> [SparkPoint] {
+    let resolvedID = Self.resolvedMetricID(id: metricID, label: metricLabel)
+    var result: [SparkPoint] = []
+
+    for snapshot in history {
+      guard window.contains(snapshot.generatedAt) else { continue }
+      guard let usage = snapshot.providers.first(where: { usage in
+        usage.accountID == accountID
+          || (usage.provider == provider
+            && usage.accountID == usage.provider.rawValue
+            && soleAccountProviders.contains(provider))
+      }) else { continue }
+      guard let metric = usage.metrics.first(where: { metric in
+        Self.resolvedMetricID(id: metric.id, label: metric.label) == resolvedID
+      }) else { continue }
+
+      if metric.isUnlimited {
+        result.append(SparkPoint(date: snapshot.generatedAt, remaining: 100))
+      } else if let remaining = metric.remainingPercent {
+        result.append(SparkPoint(date: snapshot.generatedAt, remaining: Double(max(0, min(100, remaining)))))
+      }
+    }
+
+    return result
+  }
+
+  private static func resolvedMetricID(id: String, label: String) -> String {
+    let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? label : trimmed
+  }
+}
+
+/// Tiny fixed-domain (0-100%) line chart of the last day of quota history.
+private struct Sparkline: View {
+  let points: [SparkPoint]
+  let tint: Color
+  let start: Date
+  let end: Date
+
+  var body: some View {
+    Canvas { context, size in
+      let duration = end.timeIntervalSince(start)
+      guard duration > 0, points.count >= 2 else { return }
+
+      // Inset vertically so the 1.5pt stroke and end dot never clip at 0/100%.
+      let insetY: CGFloat = 2.5
+      let plotHeight = max(1, size.height - insetY * 2)
+
+      func position(for point: SparkPoint) -> CGPoint {
+        let x = CGFloat(min(max(point.date.timeIntervalSince(start) / duration, 0), 1)) * size.width
+        let y = insetY + (1 - CGFloat(min(max(point.remaining, 0), 100) / 100)) * plotHeight
+        return CGPoint(x: x, y: y)
+      }
+
+      let positions = points.map(position(for:))
+
+      var line = Path()
+      line.move(to: positions[0])
+      for position in positions.dropFirst() {
+        line.addLine(to: position)
+      }
+
+      var area = line
+      area.addLine(to: CGPoint(x: positions[positions.count - 1].x, y: size.height))
+      area.addLine(to: CGPoint(x: positions[0].x, y: size.height))
+      area.closeSubpath()
+
+      context.fill(
+        area,
+        with: .linearGradient(
+          Gradient(colors: [tint.opacity(0.22), tint.opacity(0.02)]),
+          startPoint: CGPoint(x: 0, y: 0),
+          endPoint: CGPoint(x: 0, y: size.height)
+        )
+      )
+      context.stroke(
+        line,
+        with: .color(tint.opacity(0.9)),
+        style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
+      )
+
+      if let last = positions.last {
+        let dot = Path(ellipseIn: CGRect(x: last.x - 2, y: last.y - 2, width: 4, height: 4))
+        context.fill(dot, with: .color(tint))
+      }
+    }
+    .accessibilityHidden(true)
+  }
+}
+
+private struct ResetChip: View {
+  let countdown: String
+
+  private var isDue: Bool { countdown == "reset" }
+
+  var body: some View {
+    HStack(spacing: 3) {
+      Image(systemName: "clock.arrow.circlepath")
+        .font(.system(size: 8, weight: .semibold))
+      Text(isDue ? "reset due" : countdown)
+        .font(.system(size: 10, weight: .semibold))
+        .monospacedDigit()
+    }
+    .foregroundStyle(isDue ? Color.orange : DashboardPalette.tertiaryText)
+    .lineLimit(1)
+    .accessibilityLabel(isDue ? "Reset due" : "Resets in \(countdown)")
+  }
+}
+
+// MARK: - Dashboard
 
 private struct MenuBarContent: View {
   @ObservedObject var model: AppModel
@@ -248,8 +534,8 @@ private struct MenuBarContent: View {
     .background {
       LinearGradient(
         colors: [DashboardPalette.backgroundTop, DashboardPalette.backgroundBottom],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
+        startPoint: .top,
+        endPoint: .bottom
       )
     }
     .environment(\.colorScheme, .dark)
@@ -278,38 +564,63 @@ private struct MenuBarContent: View {
       if providers.isEmpty && standaloneFailures.isEmpty {
         emptyState
       } else {
-        ScrollView {
-          LazyVStack(spacing: 10) {
-            QuotaSummaryStrip(
-              providers: providers,
-              accountCount: accountCount,
-              failureCount: snapshot.failures.count,
-              tint: summaryTint(for: providers),
-              globalStyle: model.widgetStyle,
-              providerStyleSettings: model.providerStyleSettings
-            )
+        let enabledByProvider = Dictionary(grouping: model.providerAccounts.filter(\.isEnabled), by: \.provider)
+        let sparkBuilder = SparkSeriesBuilder(
+          history: model.recentHistory,
+          soleAccountProviders: Set(enabledByProvider.filter { $0.value.count == 1 }.map(\.key))
+        )
 
-            ForEach(providers) { provider in
-              ProviderQuotaCard(
-                usage: provider,
-                accountName: model.account(withID: provider.accountID)?.displayName,
-                failure: failuresByAccount[provider.accountID],
+        ScrollViewReader { proxy in
+          ScrollView {
+            VStack(spacing: 10) {
+              OverviewCard(
+                providers: providers,
+                accountCount: accountCount,
+                failureCount: snapshot.failures.count,
+                tint: summaryTint(for: providers),
                 globalStyle: model.widgetStyle,
                 providerStyleSettings: model.providerStyleSettings,
-                now: now
+                onSelect: { accountID in
+                  withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+                    proxy.scrollTo(accountID, anchor: .top)
+                  }
+                }
               )
-            }
 
-            ForEach(standaloneFailures) { failure in
-              ProviderFailureCard(
-                failure: failure,
-                accountName: model.account(withID: failure.accountID)?.displayName
-              )
+              if !providers.isEmpty {
+                SectionTitle(text: "ACCOUNTS")
+                  .padding(.top, 4)
+              }
+
+              ForEach(providers) { provider in
+                ProviderQuotaCard(
+                  usage: provider,
+                  accountName: model.account(withID: provider.accountID)?.displayName,
+                  failure: failuresByAccount[provider.accountID],
+                  globalStyle: model.widgetStyle,
+                  providerStyleSettings: model.providerStyleSettings,
+                  now: now,
+                  sparkBuilder: sparkBuilder
+                )
+                .id(provider.accountID)
+              }
+
+              if !standaloneFailures.isEmpty {
+                SectionTitle(text: "UNAVAILABLE")
+                  .padding(.top, 4)
+              }
+
+              ForEach(standaloneFailures) { failure in
+                ProviderFailureCard(
+                  failure: failure,
+                  accountName: model.account(withID: failure.accountID)?.displayName
+                )
+              }
             }
+            .padding(12)
           }
-          .padding(12)
+          .scrollIndicators(.automatic)
         }
-        .scrollIndicators(.visible)
       }
     } else {
       emptyState
@@ -317,39 +628,40 @@ private struct MenuBarContent: View {
   }
 
   private func dashboardHeader(now: Date) -> some View {
-    HStack(spacing: 12) {
+    HStack(spacing: 10) {
       ZStack {
-        RoundedRectangle(cornerRadius: 11, style: .continuous)
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
           .fill(
             LinearGradient(
-              colors: [.cyan, .blue],
+              colors: DashboardPalette.brandGradient,
               startPoint: .topLeading,
               endPoint: .bottomTrailing
             )
           )
-        Image(systemName: "chart.bar.xaxis")
-          .font(.system(size: 18, weight: .bold))
+        Image(systemName: "gauge.with.dots.needle.67percent")
+          .font(.system(size: 15, weight: .semibold))
           .foregroundStyle(.white)
       }
-      .frame(width: 40, height: 40)
-      .shadow(color: .blue.opacity(0.35), radius: 8, y: 3)
+      .frame(width: 30, height: 30)
+      .shadow(color: DashboardPalette.brandGradient[0].opacity(0.35), radius: 5, y: 2)
+      .accessibilityHidden(true)
 
       VStack(alignment: .leading, spacing: 1) {
         Text("LLimit")
-          .font(.system(size: 18, weight: .bold, design: .rounded))
+          .font(.system(size: 14.5, weight: .semibold, design: .rounded))
 
-        if model.isRefreshing {
-          Text("Updating quotas...")
-            .foregroundStyle(DashboardPalette.secondaryText)
-        } else if let snapshot = model.snapshot {
-          Text("Updated \(relativeTimeString(from: snapshot.generatedAt, relativeTo: now))")
-            .foregroundStyle(DashboardPalette.secondaryText)
-        } else {
-          Text("Waiting for quota data")
-            .foregroundStyle(DashboardPalette.secondaryText)
+        Group {
+          if model.isRefreshing {
+            Text("Updating quotas...")
+          } else if let snapshot = model.snapshot {
+            Text("Updated \(relativeTimeString(from: snapshot.generatedAt, relativeTo: now))")
+          } else {
+            Text("Waiting for quota data")
+          }
         }
+        .font(.system(size: 10.5))
+        .foregroundStyle(DashboardPalette.secondaryText)
       }
-      .font(.caption)
 
       Spacer()
 
@@ -357,13 +669,27 @@ private struct MenuBarContent: View {
         ProgressView()
           .controlSize(.small)
       } else if let snapshot = model.snapshot {
-        Label(
-          snapshot.failures.isEmpty ? "No reported issues" : "\(snapshot.failures.count) issue(s)",
-          systemImage: snapshot.failures.isEmpty ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
-        )
-        .labelStyle(.iconOnly)
-        .foregroundStyle(snapshot.failures.isEmpty ? .green : .orange)
-        .help(snapshot.failures.isEmpty ? "No reported issues" : "\(snapshot.failures.count) account issue(s)")
+        if snapshot.failures.isEmpty {
+          Image(systemName: "checkmark.circle.fill")
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(.green.opacity(0.9))
+            .help("All accounts reporting")
+            .accessibilityLabel("All accounts reporting")
+        } else {
+          HStack(spacing: 3) {
+            Image(systemName: "exclamationmark.triangle.fill")
+              .font(.system(size: 9, weight: .bold))
+            Text("\(snapshot.failures.count)")
+              .font(.system(size: 10.5, weight: .bold))
+              .monospacedDigit()
+          }
+          .foregroundStyle(.orange)
+          .padding(.horizontal, 7)
+          .padding(.vertical, 3)
+          .background(.orange.opacity(0.15), in: Capsule())
+          .help("\(snapshot.failures.count) account issue(s)")
+          .accessibilityLabel("\(snapshot.failures.count) account issues")
+        }
       }
 
       if presentation == .menuBar {
@@ -384,15 +710,28 @@ private struct MenuBarContent: View {
       }
     }
     .padding(.horizontal, 14)
-    .padding(.vertical, 12)
-    .background(Color.black.opacity(0.08))
+    .padding(.vertical, 11)
+    .background(Color.black.opacity(0.10))
   }
 
   private var emptyState: some View {
-    VStack(spacing: 9) {
-      Image(systemName: "gauge.with.dots.needle.0percent")
-        .font(.system(size: 30, weight: .light))
-        .foregroundStyle(DashboardPalette.sectionTitle)
+    VStack(spacing: 10) {
+      ZStack {
+        Circle()
+          .fill(
+            LinearGradient(
+              colors: DashboardPalette.brandGradient.map { $0.opacity(0.18) },
+              startPoint: .topLeading,
+              endPoint: .bottomTrailing
+            )
+          )
+          .frame(width: 64, height: 64)
+        Image(systemName: "gauge.with.dots.needle.0percent")
+          .font(.system(size: 26, weight: .light))
+          .foregroundStyle(.white.opacity(0.85))
+      }
+      .accessibilityHidden(true)
+
       Text("No quota data yet")
         .font(.headline)
       Text("Refresh now to fetch your current limits.")
@@ -400,31 +739,56 @@ private struct MenuBarContent: View {
         .foregroundStyle(DashboardPalette.secondaryText)
         .multilineTextAlignment(.center)
         .frame(maxWidth: 280)
-    }
-    .frame(maxWidth: .infinity, minHeight: 190)
-    .padding(20)
-  }
 
-  private var actionBar: some View {
-    HStack(spacing: 8) {
       Button {
         Task {
           await model.refreshNow()
         }
       } label: {
-        Label(model.isRefreshing ? "Refreshing" : "Refresh", systemImage: "arrow.clockwise")
+        Label("Refresh Now", systemImage: "arrow.clockwise")
+          .font(.system(size: 12, weight: .semibold))
+          .padding(.horizontal, 14)
+          .padding(.vertical, 7)
+          .background(
+            LinearGradient(
+              colors: DashboardPalette.brandGradient,
+              startPoint: .leading,
+              endPoint: .trailing
+            ),
+            in: Capsule()
+          )
+          .foregroundStyle(.white)
       }
-      .keyboardShortcut("r", modifiers: .command)
+      .buttonStyle(.plain)
       .disabled(model.isRefreshing)
+      .padding(.top, 4)
+    }
+    .frame(maxWidth: .infinity, minHeight: 220)
+    .padding(20)
+  }
+
+  private var actionBar: some View {
+    HStack(spacing: 8) {
+      ActionBarButton(
+        title: model.isRefreshing ? "Refreshing" : "Refresh",
+        systemImage: "arrow.clockwise",
+        isDisabled: model.isRefreshing,
+        shortcut: KeyboardShortcut("r", modifiers: .command)
+      ) {
+        Task {
+          await model.refreshNow()
+        }
+      }
 
       Spacer()
 
-      Button {
+      ActionBarButton(
+        title: "Settings",
+        systemImage: "gearshape",
+        shortcut: KeyboardShortcut(",", modifiers: .command)
+      ) {
         SettingsWindowController.shared.show(model: model)
-      } label: {
-        Label("Settings", systemImage: "gearshape")
       }
-      .keyboardShortcut(",", modifiers: .command)
 
       Menu {
         if presentation == .menuBar {
@@ -455,8 +819,8 @@ private struct MenuBarContent: View {
     .font(.system(size: 13, weight: .medium))
     .foregroundStyle(.white.opacity(0.88))
     .padding(.horizontal, 14)
-    .padding(.vertical, 11)
-    .background(Color.black.opacity(0.08))
+    .padding(.vertical, 10)
+    .background(Color.black.opacity(0.10))
   }
 
   private func providersForMenu(from snapshot: QuotaSnapshot) -> [ProviderUsage] {
@@ -496,6 +860,34 @@ private struct MenuBarContent: View {
   }
 }
 
+private struct ActionBarButton: View {
+  let title: String
+  let systemImage: String
+  var isDisabled = false
+  var shortcut: KeyboardShortcut?
+  let action: () -> Void
+
+  @State private var isHovering = false
+
+  var body: some View {
+    Button(action: action) {
+      Label(title, systemImage: systemImage)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(
+          Color.white.opacity(isHovering && !isDisabled ? 0.09 : 0),
+          in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+        )
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .keyboardShortcut(shortcut)
+    .disabled(isDisabled)
+    .opacity(isDisabled ? 0.5 : 1)
+    .onHover { isHovering = $0 }
+  }
+}
+
 private struct DetachDashboardControl: View {
   let onOpen: () -> Void
   let onDragStart: (NSPoint) -> Void
@@ -513,10 +905,10 @@ private struct DetachDashboardControl: View {
       }
     } label: {
       Image(systemName: "macwindow")
-        .font(.system(size: 14, weight: .semibold))
+        .font(.system(size: 13, weight: .semibold))
         .foregroundStyle(isHovering ? .white : DashboardPalette.secondaryText)
-        .frame(width: 30, height: 30)
-        .background(Color.white.opacity(isHovering ? 0.11 : 0.05), in: RoundedRectangle(cornerRadius: 8))
+        .frame(width: 28, height: 28)
+        .background(Color.white.opacity(isHovering ? 0.11 : 0.05), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
         .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
@@ -546,13 +938,16 @@ private struct DetachDashboardControl: View {
   }
 }
 
-private struct QuotaSummaryStrip: View {
+// MARK: - Overview
+
+private struct OverviewCard: View {
   let providers: [ProviderUsage]
   let accountCount: Int
   let failureCount: Int
   let tint: Color
   let globalStyle: WidgetStyleSettings
   let providerStyleSettings: [String: ProviderStyleSettings]
+  let onSelect: (String) -> Void
 
   private var lowestRemaining: Int? {
     providers.compactMap(MenuBarQuotaStyling.remainingPercent).min()
@@ -563,83 +958,109 @@ private struct QuotaSummaryStrip: View {
   }
 
   var body: some View {
-    VStack(spacing: 10) {
+    VStack(spacing: 12) {
       HStack(alignment: .firstTextBaseline) {
-        Text("OVERVIEW")
-          .font(.system(size: 11, weight: .bold))
-          .tracking(0.8)
-          .foregroundStyle(DashboardPalette.sectionTitle)
-        Spacer()
+        SectionTitle(text: "OVERVIEW")
         Text("\(metricCount) METRICS")
           .font(.system(size: 9, weight: .semibold))
           .tracking(0.6)
-          .foregroundStyle(DashboardPalette.secondaryText)
+          .foregroundStyle(DashboardPalette.tertiaryText)
+      }
+
+      if !providers.isEmpty {
+        HStack(alignment: .top, spacing: 6) {
+          ForEach(Array(providers.prefix(5))) { provider in
+            Button {
+              onSelect(provider.accountID)
+            } label: {
+              VStack(spacing: 5) {
+                GlossRing(
+                  remaining: MenuBarQuotaStyling.remainingPercent(for: provider),
+                  unlimited: provider.metrics.allSatisfy(\.isUnlimited) && !provider.metrics.isEmpty,
+                  tint: Color(nsColor: MenuBarQuotaStyling.color(
+                    for: provider,
+                    globalStyle: globalStyle,
+                    providerStyleSettings: providerStyleSettings
+                  )),
+                  diameter: 40,
+                  lineWidth: 4.5
+                )
+                Text(provider.title)
+                  .font(.system(size: 9, weight: .medium))
+                  .foregroundStyle(DashboardPalette.secondaryText)
+                  .lineLimit(1)
+                  .frame(maxWidth: .infinity)
+              }
+              .frame(maxWidth: .infinity)
+              .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Jump to \(provider.title)")
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(accountGaugeAccessibilityLabel(for: provider))
+          }
+
+          if providers.count > 5 {
+            VStack(spacing: 5) {
+              ZStack {
+                Circle()
+                  .stroke(Color.white.opacity(0.08), lineWidth: 4.5)
+                Text("+\(providers.count - 5)")
+                  .font(.system(size: 11, weight: .bold, design: .rounded))
+                  .foregroundStyle(DashboardPalette.secondaryText)
+              }
+              .frame(width: 40, height: 40)
+              Text("more")
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(DashboardPalette.tertiaryText)
+            }
+            .frame(maxWidth: .infinity)
+          }
+        }
+
+        Rectangle()
+          .fill(DashboardPalette.hairline)
+          .frame(height: 1)
       }
 
       HStack(spacing: 0) {
-        SummaryValue(
+        StatCell(
           label: "LOWEST",
           value: lowestRemaining.map { "\($0)%" } ?? "--",
           tint: tint
         )
-        SummaryValue(label: "ACCOUNTS", value: "\(accountCount)", tint: .white)
-        SummaryValue(
+        statDivider
+        StatCell(label: "ACCOUNTS", value: "\(accountCount)", tint: .white.opacity(0.92))
+        statDivider
+        StatCell(
           label: "ISSUES",
           value: "\(failureCount)",
           tint: failureCount == 0 ? .green : .orange
         )
       }
-
-      if !providers.isEmpty {
-        Rectangle()
-          .fill(DashboardPalette.hairline)
-          .frame(height: 1)
-
-        HStack(alignment: .top, spacing: 6) {
-          ForEach(Array(providers.prefix(5))) { provider in
-            VStack(spacing: 5) {
-              QuotaGauge(
-                remaining: MenuBarQuotaStyling.remainingPercent(for: provider),
-                unlimited: provider.metrics.allSatisfy(\.isUnlimited) && !provider.metrics.isEmpty,
-                tint: Color(nsColor: MenuBarQuotaStyling.color(
-                  for: provider,
-                  globalStyle: globalStyle,
-                  providerStyleSettings: providerStyleSettings
-                ))
-              )
-              Text(provider.title)
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(DashboardPalette.secondaryText)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity)
-            }
-            .frame(maxWidth: .infinity)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(accountGaugeAccessibilityLabel(for: provider))
-          }
-        }
-      }
     }
     .padding(13)
-    .background(DashboardPalette.emphasizedCard, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-    .overlay {
-      RoundedRectangle(cornerRadius: 13, style: .continuous)
-        .strokeBorder(DashboardPalette.hairline, lineWidth: 1)
-    }
+    .dashboardCard()
+  }
+
+  private var statDivider: some View {
+    Rectangle()
+      .fill(DashboardPalette.hairline)
+      .frame(width: 1, height: 26)
   }
 
   private func accountGaugeAccessibilityLabel(for provider: ProviderUsage) -> String {
     if provider.metrics.allSatisfy(\.isUnlimited), !provider.metrics.isEmpty {
-      return "\(provider.title), unlimited"
+      return "\(provider.title), unlimited. Jump to card."
     }
     if let remaining = MenuBarQuotaStyling.remainingPercent(for: provider) {
-      return "\(provider.title), \(remaining) percent remaining"
+      return "\(provider.title), \(remaining) percent remaining. Jump to card."
     }
-    return "\(provider.title), quota unavailable"
+    return "\(provider.title), quota unavailable. Jump to card."
   }
 }
 
-private struct SummaryValue: View {
+private struct StatCell: View {
   let label: String
   let value: String
   let tint: Color
@@ -649,24 +1070,31 @@ private struct SummaryValue: View {
       Text(value)
         .font(.system(size: 18, weight: .bold, design: .rounded))
         .monospacedDigit()
+        .contentTransition(.numericText())
         .foregroundStyle(tint)
       Text(label)
         .font(.system(size: 9, weight: .semibold))
         .tracking(0.7)
-        .foregroundStyle(DashboardPalette.secondaryText)
+        .foregroundStyle(DashboardPalette.tertiaryText)
     }
     .frame(maxWidth: .infinity)
     .accessibilityElement(children: .combine)
   }
 }
 
+// MARK: - Provider cards
+
 private struct ProviderQuotaCard: View {
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   let usage: ProviderUsage
   let accountName: String?
   let failure: ProviderFailure?
   let globalStyle: WidgetStyleSettings
   let providerStyleSettings: [String: ProviderStyleSettings]
   let now: Date
+  let sparkBuilder: SparkSeriesBuilder
+
+  @State private var isHovered = false
 
   private var accent: Color {
     Color(nsColor: MenuBarQuotaStyling.color(
@@ -682,14 +1110,14 @@ private struct ProviderQuotaCard: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
+    VStack(alignment: .leading, spacing: 11) {
       HStack(spacing: 10) {
         ProviderMark(provider: usage.provider, tint: accent)
 
         VStack(alignment: .leading, spacing: 2) {
           HStack(spacing: 6) {
             Text(displayName)
-              .font(.subheadline.weight(.semibold))
+              .font(.system(size: 13, weight: .semibold))
               .lineLimit(1)
 
             if failure != nil {
@@ -704,21 +1132,21 @@ private struct ProviderQuotaCard: View {
           }
 
           Text(accountDetail)
-            .font(.caption)
+            .font(.system(size: 10.5))
             .foregroundStyle(DashboardPalette.secondaryText)
             .lineLimit(1)
         }
 
         Spacer(minLength: 8)
 
-        QuotaGauge(
+        GlossRing(
           remaining: MenuBarQuotaStyling.remainingPercent(for: usage),
           unlimited: usage.metrics.allSatisfy(\.isUnlimited) && !usage.metrics.isEmpty,
           tint: accent
         )
       }
 
-      VStack(spacing: 9) {
+      VStack(spacing: 10) {
         ForEach(Array(usage.metrics.enumerated()), id: \.element.id) { index, metric in
           MetricQuotaRow(
             metric: metric,
@@ -729,7 +1157,8 @@ private struct ProviderQuotaCard: View {
               globalStyle: globalStyle,
               providerStyleSettings: providerStyleSettings
             )),
-            now: now
+            now: now,
+            sparkPoints: sparkPoints(for: metric)
           )
         }
       }
@@ -743,12 +1172,31 @@ private struct ProviderQuotaCard: View {
       }
     }
     .padding(13)
-    .background(DashboardPalette.card, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-    .overlay {
-      RoundedRectangle(cornerRadius: 13, style: .continuous)
-        .strokeBorder(accent.opacity(0.2), lineWidth: 1)
+    .dashboardCard(accent: accent, isHovered: isHovered)
+    .scaleEffect(isHovered && !reduceMotion ? 1.006 : 1)
+    .onHover { hovering in
+      withAnimation(.easeOut(duration: 0.15)) {
+        isHovered = hovering
+      }
     }
     .accessibilityElement(children: .contain)
+  }
+
+  private func sparkPoints(for metric: UsageMetric) -> [SparkPoint] {
+    guard !metric.isUnlimited else { return [] }
+
+    var points = sparkBuilder.points(
+      accountID: usage.accountID,
+      provider: usage.provider,
+      metricID: metric.id,
+      metricLabel: metric.label,
+      window: now.addingTimeInterval(-24 * 3_600)...now
+    )
+    // Extend the line to "now" at the live value so the spark never ends mid-window.
+    if let remaining = metric.remainingPercent {
+      points.append(SparkPoint(date: now, remaining: Double(max(0, min(100, remaining)))))
+    }
+    return points
   }
 
   private var accountDetail: String {
@@ -757,7 +1205,7 @@ private struct ProviderQuotaCard: View {
       parts.append(subtitle)
     }
     parts.append("fetched \(usage.fetchedAt.formatted(.relative(presentation: .named)))")
-    return parts.joined(separator: "  |  ")
+    return parts.joined(separator: " · ")
   }
 
   private func statusLine(_ text: String, systemImage: String, color: Color) -> some View {
@@ -778,10 +1226,21 @@ private struct ProviderMark: View {
 
   var body: some View {
     Image(systemName: symbolName)
-      .font(.system(size: 15, weight: .semibold))
-      .foregroundStyle(tint)
-      .frame(width: 32, height: 32)
-      .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+      .font(.system(size: 14, weight: .semibold))
+      .foregroundStyle(.white.opacity(0.95))
+      .frame(width: 30, height: 30)
+      .background(
+        LinearGradient(
+          colors: [tint.opacity(0.34), tint.opacity(0.16)],
+          startPoint: .topLeading,
+          endPoint: .bottomTrailing
+        ),
+        in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+      )
+      .overlay {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+          .strokeBorder(tint.opacity(0.35), lineWidth: 1)
+      }
       .accessibilityHidden(true)
   }
 
@@ -801,50 +1260,11 @@ private struct ProviderMark: View {
   }
 }
 
-private struct QuotaGauge: View {
-  let remaining: Int?
-  let unlimited: Bool
-  let tint: Color
-
-  private var progress: Double {
-    Double(max(0, min(100, remaining ?? 0))) / 100
-  }
-
-  var body: some View {
-    ZStack {
-      Circle()
-        .stroke(tint.opacity(0.14), lineWidth: 5)
-      Circle()
-        .trim(from: 0, to: unlimited ? 1 : progress)
-        .stroke(tint, style: StrokeStyle(lineWidth: 5, lineCap: .round))
-        .rotationEffect(.degrees(-90))
-
-      Text(gaugeText)
-        .font(.system(size: 11, weight: .bold, design: .rounded))
-        .monospacedDigit()
-        .foregroundStyle(tint)
-    }
-    .frame(width: 48, height: 48)
-    .accessibilityLabel(accessibilityText)
-  }
-
-  private var gaugeText: String {
-    if unlimited { return "ALL" }
-    guard let remaining else { return "--" }
-    return "\(max(0, min(100, remaining)))%"
-  }
-
-  private var accessibilityText: String {
-    if unlimited { return "Unlimited" }
-    guard let remaining else { return "Quota unavailable" }
-    return "\(max(0, min(100, remaining))) percent remaining"
-  }
-}
-
 private struct MetricQuotaRow: View {
   let metric: UsageMetric
   let tint: Color
   let now: Date
+  let sparkPoints: [SparkPoint]
 
   private var remaining: Int? {
     metric.remainingPercent.map { max(0, min(100, $0)) }
@@ -852,48 +1272,52 @@ private struct MetricQuotaRow: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 4) {
-      HStack(alignment: .firstTextBaseline, spacing: 8) {
+      HStack(spacing: 8) {
         Text(metric.label)
-          .font(.caption.weight(.medium))
+          .font(.system(size: 11, weight: .medium))
           .lineLimit(1)
-        Spacer()
-        Text(valueText)
-          .font(.caption.weight(.bold))
-          .monospacedDigit()
-          .foregroundStyle(metric.isUnlimited ? tint : .primary)
-      }
 
-      GeometryReader { geometry in
-        ZStack(alignment: .leading) {
-          Capsule()
-            .fill(tint.opacity(0.12))
-          Capsule()
-            .fill(tint.gradient)
-            .frame(width: geometry.size.width * barProgress)
+        Spacer(minLength: 4)
+
+        if sparkPoints.count >= 3 {
+          Sparkline(
+            points: sparkPoints,
+            tint: tint,
+            start: now.addingTimeInterval(-24 * 3_600),
+            end: now
+          )
+          .frame(width: 88, height: 15)
+          .help("Last 24 hours")
         }
-      }
-      .frame(height: 6)
 
-      if secondaryUsageLine != nil || resetText != nil {
+        Text(valueText)
+          .font(.system(size: 11.5, weight: .bold, design: .rounded))
+          .monospacedDigit()
+          .contentTransition(.numericText())
+          .foregroundStyle(metric.isUnlimited ? tint : .white.opacity(0.92))
+      }
+
+      GlossBar(progress: barProgress, tint: tint)
+
+      if secondaryUsageLine != nil || resetCountdown != nil {
         HStack(spacing: 8) {
           if let usageLine = secondaryUsageLine {
             Text(usageLine)
+              .font(.system(size: 10))
+              .foregroundStyle(DashboardPalette.tertiaryText)
               .lineLimit(1)
           }
           Spacer(minLength: 4)
-          if let reset = resetText {
-            Text(reset)
-              .lineLimit(1)
+          if let resetCountdown {
+            ResetChip(countdown: resetCountdown)
           }
         }
-        .font(.caption2)
-        .foregroundStyle(DashboardPalette.secondaryText)
       }
 
       if let detail = metric.detail, !detail.isEmpty {
         Text(detail)
-          .font(.caption2)
-          .foregroundStyle(DashboardPalette.secondaryText)
+          .font(.system(size: 10))
+          .foregroundStyle(DashboardPalette.tertiaryText)
           .lineLimit(2)
       }
     }
@@ -916,9 +1340,8 @@ private struct MetricQuotaRow: View {
     return Double(remaining ?? 0) / 100
   }
 
-  private var resetText: String? {
-    guard let countdown = metric.resetCountdown(at: now) else { return nil }
-    return countdown == "reset" ? "Reset due" : "Resets in \(countdown)"
+  private var resetCountdown: String? {
+    metric.resetCountdown(at: now)
   }
 }
 
@@ -937,10 +1360,10 @@ private struct ProviderFailureCard: View {
 
       VStack(alignment: .leading, spacing: 3) {
         Text(displayName)
-          .font(.subheadline.weight(.semibold))
+          .font(.system(size: 13, weight: .semibold))
         Text(failure.provider.displayName)
-          .font(.caption2)
-          .foregroundStyle(DashboardPalette.secondaryText)
+          .font(.system(size: 10))
+          .foregroundStyle(DashboardPalette.tertiaryText)
         Text(failure.message)
           .font(.caption)
           .foregroundStyle(.orange)
@@ -950,11 +1373,7 @@ private struct ProviderFailureCard: View {
       Spacer(minLength: 0)
     }
     .padding(13)
-    .background(DashboardPalette.card, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-    .overlay {
-      RoundedRectangle(cornerRadius: 13, style: .continuous)
-        .strokeBorder(.orange.opacity(0.22), lineWidth: 1)
-    }
+    .dashboardCard(accent: .orange)
   }
 }
 
