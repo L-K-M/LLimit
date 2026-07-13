@@ -51,14 +51,17 @@ fi
 if [[ "$INSTALL" == true && -x "$LSREGISTER" && -d "$INSTALLED_APP" ]]; then
   # Provider tiles are static slot widgets configured inside the app; there is no
   # widget-side App Intent configuration (and so no Metadata.appintents to gate on).
+  # The kind strings are string literals in SharedConstants specifically so this
+  # grep can find them; the per-slot widget types show up via their type metadata.
   WIDGET_BINARY="$INSTALLED_WIDGET/Contents/MacOS/LLimitWidgetExtension"
   if [[ ! -f "$WIDGET_BINARY" ]]; then
     echo "error: installed widget binary is missing" >&2
     exit 1
   fi
   for slot in 1 2 3 4 5 6; do
-    if ! /usr/bin/grep -aFq "ch.lkmc.llimit.widget.provider-tile.slot$slot" "$WIDGET_BINARY"; then
-      echo "error: installed widget is missing the provider tile slot$slot kind" >&2
+    if ! /usr/bin/grep -aFq "ch.lkmc.llimit.widget.provider-tile.slot$slot" "$WIDGET_BINARY" \
+      || ! /usr/bin/grep -aFq "ProviderTileSlot${slot}Widget" "$WIDGET_BINARY"; then
+      echo "error: installed widget is missing provider tile slot$slot" >&2
       exit 1
     fi
   done

@@ -13,9 +13,20 @@ enum SharedConstants {
   static let trendWidgetKind = "ch.lkmc.llimit.widget.trend"
   // One kind per provider-tile slot; the account for each slot is assigned in the
   // app's settings, never via the widget Edit flow. Kinds are frozen once placed.
-  static let providerSlotWidgetKinds: [String] = (1...AppSettings.providerTileSlotCount).map {
-    "ch.lkmc.llimit.widget.provider-tile.slot\($0)"
-  }
+  // Spelled out as literals (not interpolated) so the full strings exist as bytes
+  // in the compiled extension — scripts/build.sh greps the binary for them.
+  static let providerSlotWidgetKinds: [String] = {
+    let kinds = [
+      "ch.lkmc.llimit.widget.provider-tile.slot1",
+      "ch.lkmc.llimit.widget.provider-tile.slot2",
+      "ch.lkmc.llimit.widget.provider-tile.slot3",
+      "ch.lkmc.llimit.widget.provider-tile.slot4",
+      "ch.lkmc.llimit.widget.provider-tile.slot5",
+      "ch.lkmc.llimit.widget.provider-tile.slot6"
+    ]
+    assert(kinds.count == AppSettings.providerTileSlotCount)
+    return kinds
+  }()
 
   static let allWidgetKinds: [String] = [
     widgetKind,

@@ -319,7 +319,7 @@ private struct ProviderQuotaTileView: View {
         case .awaitingAccount:
           slotPlaceholder(
             symbol: "person.crop.circle.badge.plus",
-            message: "Every account already has a tile — add another account or assign one in LLimit's Settings"
+            message: "No account left for this tile — lower-numbered tiles cover them all. Add an account or assign one in LLimit's Settings"
           )
         default:
           noAccountsContent
@@ -479,7 +479,7 @@ private struct ProviderQuotaTileView: View {
       case .accountRemoved:
         return "LLimit provider tile \(entry.slotIndex + 1). The assigned account no longer exists. Reassign it in LLimit's settings."
       case .awaitingAccount:
-        return "LLimit provider tile \(entry.slotIndex + 1). Every account already has a tile. Add another account or assign one in LLimit's settings."
+        return "LLimit provider tile \(entry.slotIndex + 1). No account left for this tile; lower-numbered tiles cover them all. Add another account or assign one in LLimit's settings."
       default:
         return "LLimit provider quota. Add an account in LLimit."
       }
