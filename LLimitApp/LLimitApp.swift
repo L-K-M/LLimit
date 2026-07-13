@@ -19,7 +19,7 @@ struct LLimitApp: App {
     // `Settings` scene, which forces itself non-resizable, or a `Window` scene, which
     // would auto-open at launch.
     MenuBarExtra {
-      MenuBarContent(model: model)
+      MenuBarContent(model: model, presentation: .menuBar)
     } label: {
       MenuBarIcon(
         snapshot: model.snapshot,
@@ -29,6 +29,11 @@ struct LLimitApp: App {
     }
     .menuBarExtraStyle(.window)
   }
+}
+
+private enum DashboardPresentation {
+  case menuBar
+  case floating
 }
 
 /// Hosts `SettingsView` in a standard resizable AppKit window, created on first use and
@@ -56,6 +61,71 @@ final class SettingsWindowController {
 
     NSApp.activate(ignoringOtherApps: true)
     window?.makeKeyAndOrderFront(nil)
+  }
+}
+
+/// Owns the optional always-on-top quota dashboard detached from the menu bar.
+@MainActor
+final class DashboardWindowController {
+  static let shared = DashboardWindowController()
+  private var window: NSPanel?
+
+  func show(model: AppModel, near screenPoint: NSPoint? = nil, activate: Bool = true) {
+    if window == nil {
+      let hosting = NSHostingController(
+        rootView: MenuBarContent(model: model, presentation: .floating)
+      )
+      hosting.sizingOptions = []
+
+      let panel = NSPanel(contentViewController: hosting)
+      panel.title = "LLimit Dashboard"
+      panel.styleMask = [.titled, .closable, .miniaturizable, .resizable, .utilityWindow]
+      panel.isFloatingPanel = true
+      panel.level = .floating
+      panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+      panel.hidesOnDeactivate = false
+      panel.isReleasedWhenClosed = false
+      panel.setContentSize(NSSize(width: 430, height: 700))
+      panel.contentMinSize = NSSize(width: 390, height: 500)
+      if !panel.setFrameUsingName("LLimitFloatingDashboard") {
+        panel.center()
+      }
+      panel.setFrameAutosaveName("LLimitFloatingDashboard")
+      window = panel
+    }
+
+    if let screenPoint {
+      positionWindow(near: screenPoint)
+    }
+
+    if activate {
+      activateWindow()
+    } else {
+      window?.orderFrontRegardless()
+    }
+  }
+
+  func move(near screenPoint: NSPoint) {
+    positionWindow(near: screenPoint)
+  }
+
+  func activateWindow() {
+    NSApp.activate(ignoringOtherApps: true)
+    window?.makeKeyAndOrderFront(nil)
+  }
+
+  private func positionWindow(near screenPoint: NSPoint) {
+    guard let window else { return }
+
+    guard let screen = NSScreen.screens.first(where: { $0.frame.contains(screenPoint) }) ?? NSScreen.main else {
+      return
+    }
+
+    var frame = window.frame
+    let proposedX = screenPoint.x - frame.width / 2
+    let proposedY = screenPoint.y - frame.height - 14
+    frame.origin = NSPoint(x: proposedX, y: proposedY)
+    window.setFrame(window.constrainFrameRect(frame, to: screen), display: false)
   }
 }
 
@@ -129,8 +199,19 @@ private struct MenuBarIcon: View {
   }
 }
 
+private enum DashboardPalette {
+  static let backgroundTop = Color(red: 0.10, green: 0.11, blue: 0.23)
+  static let backgroundBottom = Color(red: 0.16, green: 0.18, blue: 0.36)
+  static let card = Color.white.opacity(0.055)
+  static let emphasizedCard = Color.white.opacity(0.075)
+  static let hairline = Color.white.opacity(0.12)
+  static let sectionTitle = Color(red: 0.70, green: 0.92, blue: 0.24)
+  static let secondaryText = Color.white.opacity(0.62)
+}
+
 private struct MenuBarContent: View {
   @ObservedObject var model: AppModel
+  let presentation: DashboardPresentation
 
   private static let relativeTimeFormatter: RelativeDateTimeFormatter = {
     let formatter = RelativeDateTimeFormatter()
@@ -143,16 +224,37 @@ private struct MenuBarContent: View {
       TimelineView(.periodic(from: .now, by: 60)) { context in
         VStack(spacing: 0) {
           dashboardHeader(now: context.date)
-          Divider()
+          dashboardDivider
           dashboard(now: context.date)
+            .frame(
+              minHeight: presentation == .menuBar ? 320 : 380,
+              idealHeight: presentation == .menuBar ? 510 : nil,
+              maxHeight: presentation == .menuBar ? 510 : .infinity
+            )
         }
       }
 
-      Divider()
+      dashboardDivider
       actionBar
     }
-    .frame(width: 390)
-    .background(.ultraThinMaterial)
+    .frame(width: presentation == .menuBar ? 420 : nil)
+    .frame(minWidth: 390, idealWidth: 430, maxWidth: presentation == .floating ? .infinity : 420)
+    .frame(minHeight: presentation == .floating ? 440 : nil, maxHeight: presentation == .floating ? .infinity : nil)
+    .foregroundStyle(.white)
+    .background {
+      LinearGradient(
+        colors: [DashboardPalette.backgroundTop, DashboardPalette.backgroundBottom],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+      )
+    }
+    .environment(\.colorScheme, .dark)
+  }
+
+  private var dashboardDivider: some View {
+    Rectangle()
+      .fill(DashboardPalette.hairline)
+      .frame(height: 1)
   }
 
   @ViewBuilder
@@ -178,7 +280,9 @@ private struct MenuBarContent: View {
               providers: providers,
               accountCount: accountCount,
               failureCount: snapshot.failures.count,
-              tint: summaryTint(for: providers)
+              tint: summaryTint(for: providers),
+              globalStyle: model.widgetStyle,
+              providerStyleSettings: model.providerStyleSettings
             )
 
             ForEach(providers) { provider in
@@ -201,7 +305,7 @@ private struct MenuBarContent: View {
           }
           .padding(12)
         }
-        .frame(maxHeight: 520)
+        .scrollIndicators(.visible)
       }
     } else {
       emptyState
@@ -209,29 +313,36 @@ private struct MenuBarContent: View {
   }
 
   private func dashboardHeader(now: Date) -> some View {
-    HStack(spacing: 10) {
+    HStack(spacing: 12) {
       ZStack {
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
-          .fill(.blue.gradient)
+        RoundedRectangle(cornerRadius: 11, style: .continuous)
+          .fill(
+            LinearGradient(
+              colors: [.cyan, .blue],
+              startPoint: .topLeading,
+              endPoint: .bottomTrailing
+            )
+          )
         Image(systemName: "chart.bar.xaxis")
-          .font(.system(size: 15, weight: .semibold))
+          .font(.system(size: 18, weight: .bold))
           .foregroundStyle(.white)
       }
-      .frame(width: 30, height: 30)
+      .frame(width: 40, height: 40)
+      .shadow(color: .blue.opacity(0.35), radius: 8, y: 3)
 
       VStack(alignment: .leading, spacing: 1) {
         Text("LLimit")
-          .font(.headline)
+          .font(.system(size: 18, weight: .bold, design: .rounded))
 
         if model.isRefreshing {
           Text("Updating quotas...")
-            .foregroundStyle(.secondary)
+            .foregroundStyle(DashboardPalette.secondaryText)
         } else if let snapshot = model.snapshot {
           Text("Updated \(relativeTimeString(from: snapshot.generatedAt, relativeTo: now))")
-            .foregroundStyle(.secondary)
+            .foregroundStyle(DashboardPalette.secondaryText)
         } else {
           Text("Waiting for quota data")
-            .foregroundStyle(.secondary)
+            .foregroundStyle(DashboardPalette.secondaryText)
         }
       }
       .font(.caption)
@@ -250,21 +361,39 @@ private struct MenuBarContent: View {
         .foregroundStyle(snapshot.failures.isEmpty ? .green : .orange)
         .help(snapshot.failures.isEmpty ? "No reported issues" : "\(snapshot.failures.count) account issue(s)")
       }
+
+      if presentation == .menuBar {
+        DetachDashboardControl(
+          onOpen: {
+            DashboardWindowController.shared.show(model: model, near: NSEvent.mouseLocation)
+          },
+          onDragStart: { point in
+            DashboardWindowController.shared.show(model: model, near: point, activate: false)
+          },
+          onMove: { point in
+            DashboardWindowController.shared.move(near: point)
+          },
+          onDragEnd: {
+            DashboardWindowController.shared.activateWindow()
+          }
+        )
+      }
     }
-    .padding(.horizontal, 12)
-    .padding(.vertical, 10)
+    .padding(.horizontal, 14)
+    .padding(.vertical, 12)
+    .background(Color.black.opacity(0.08))
   }
 
   private var emptyState: some View {
     VStack(spacing: 9) {
       Image(systemName: "gauge.with.dots.needle.0percent")
         .font(.system(size: 30, weight: .light))
-        .foregroundStyle(.secondary)
+        .foregroundStyle(DashboardPalette.sectionTitle)
       Text("No quota data yet")
         .font(.headline)
       Text("Refresh now to fetch your current limits.")
         .font(.caption)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(DashboardPalette.secondaryText)
         .multilineTextAlignment(.center)
         .frame(maxWidth: 280)
     }
@@ -294,6 +423,16 @@ private struct MenuBarContent: View {
       .keyboardShortcut(",", modifiers: .command)
 
       Menu {
+        if presentation == .menuBar {
+          Button {
+            DashboardWindowController.shared.show(model: model, near: NSEvent.mouseLocation)
+          } label: {
+            Label("Open Floating Dashboard", systemImage: "macwindow")
+          }
+
+          Divider()
+        }
+
         Toggle("Launch at Login", isOn: model.launchAtLoginBinding())
 
         Divider()
@@ -309,8 +448,11 @@ private struct MenuBarContent: View {
       .help("More")
     }
     .buttonStyle(.borderless)
-    .padding(.horizontal, 12)
-    .padding(.vertical, 9)
+    .font(.system(size: 13, weight: .medium))
+    .foregroundStyle(.white.opacity(0.88))
+    .padding(.horizontal, 14)
+    .padding(.vertical, 11)
+    .background(Color.black.opacity(0.08))
   }
 
   private func providersForMenu(from snapshot: QuotaSnapshot) -> [ProviderUsage] {
@@ -350,33 +492,146 @@ private struct MenuBarContent: View {
   }
 }
 
+private struct DetachDashboardControl: View {
+  let onOpen: () -> Void
+  let onDragStart: (NSPoint) -> Void
+  let onMove: (NSPoint) -> Void
+  let onDragEnd: () -> Void
+
+  @State private var isHovering = false
+  @State private var hasDetached = false
+  @State private var suppressOpen = false
+
+  var body: some View {
+    Button {
+      if !suppressOpen {
+        onOpen()
+      }
+    } label: {
+      Image(systemName: "macwindow")
+        .font(.system(size: 14, weight: .semibold))
+        .foregroundStyle(isHovering ? .white : DashboardPalette.secondaryText)
+        .frame(width: 30, height: 30)
+        .background(Color.white.opacity(isHovering ? 0.11 : 0.05), in: RoundedRectangle(cornerRadius: 8))
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .onHover { isHovering = $0 }
+    .simultaneousGesture(
+      DragGesture(minimumDistance: 6)
+        .onChanged { _ in
+          let point = NSEvent.mouseLocation
+          if hasDetached {
+            onMove(point)
+          } else {
+            hasDetached = true
+            suppressOpen = true
+            onDragStart(point)
+          }
+        }
+        .onEnded { _ in
+          hasDetached = false
+          onDragEnd()
+          DispatchQueue.main.async {
+            suppressOpen = false
+          }
+        }
+    )
+    .help("Click or drag to detach the dashboard")
+    .accessibilityLabel("Detach dashboard")
+  }
+}
+
 private struct QuotaSummaryStrip: View {
   let providers: [ProviderUsage]
   let accountCount: Int
   let failureCount: Int
   let tint: Color
+  let globalStyle: WidgetStyleSettings
+  let providerStyleSettings: [String: ProviderStyleSettings]
 
   private var lowestRemaining: Int? {
     providers.compactMap(MenuBarQuotaStyling.remainingPercent).min()
   }
 
+  private var metricCount: Int {
+    providers.reduce(0) { $0 + $1.metrics.count }
+  }
+
   var body: some View {
-    HStack(spacing: 0) {
-      SummaryValue(
-        label: "LOWEST",
-        value: lowestRemaining.map { "\($0)%" } ?? "--",
-        tint: tint
-      )
-      SummaryValue(label: "ACCOUNTS", value: "\(accountCount)", tint: .primary)
-      SummaryValue(
-        label: "ISSUES",
-        value: "\(failureCount)",
-        tint: failureCount == 0 ? .green : .orange
-      )
+    VStack(spacing: 10) {
+      HStack(alignment: .firstTextBaseline) {
+        Text("OVERVIEW")
+          .font(.system(size: 11, weight: .bold))
+          .tracking(0.8)
+          .foregroundStyle(DashboardPalette.sectionTitle)
+        Spacer()
+        Text("\(metricCount) METRICS")
+          .font(.system(size: 9, weight: .semibold))
+          .tracking(0.6)
+          .foregroundStyle(DashboardPalette.secondaryText)
+      }
+
+      HStack(spacing: 0) {
+        SummaryValue(
+          label: "LOWEST",
+          value: lowestRemaining.map { "\($0)%" } ?? "--",
+          tint: tint
+        )
+        SummaryValue(label: "ACCOUNTS", value: "\(accountCount)", tint: .white)
+        SummaryValue(
+          label: "ISSUES",
+          value: "\(failureCount)",
+          tint: failureCount == 0 ? .green : .orange
+        )
+      }
+
+      if !providers.isEmpty {
+        Rectangle()
+          .fill(DashboardPalette.hairline)
+          .frame(height: 1)
+
+        HStack(alignment: .top, spacing: 6) {
+          ForEach(Array(providers.prefix(5))) { provider in
+            VStack(spacing: 5) {
+              QuotaGauge(
+                remaining: MenuBarQuotaStyling.remainingPercent(for: provider),
+                unlimited: provider.metrics.allSatisfy(\.isUnlimited) && !provider.metrics.isEmpty,
+                tint: Color(nsColor: MenuBarQuotaStyling.color(
+                  for: provider,
+                  globalStyle: globalStyle,
+                  providerStyleSettings: providerStyleSettings
+                ))
+              )
+              Text(provider.title)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(DashboardPalette.secondaryText)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity)
+            }
+            .frame(maxWidth: .infinity)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(accountGaugeAccessibilityLabel(for: provider))
+          }
+        }
+      }
     }
-    .padding(.vertical, 10)
-    .background(.quaternary.opacity(0.65), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-    .accessibilityElement(children: .combine)
+    .padding(13)
+    .background(DashboardPalette.emphasizedCard, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+    .overlay {
+      RoundedRectangle(cornerRadius: 13, style: .continuous)
+        .strokeBorder(DashboardPalette.hairline, lineWidth: 1)
+    }
+  }
+
+  private func accountGaugeAccessibilityLabel(for provider: ProviderUsage) -> String {
+    if provider.metrics.allSatisfy(\.isUnlimited), !provider.metrics.isEmpty {
+      return "\(provider.title), unlimited"
+    }
+    if let remaining = MenuBarQuotaStyling.remainingPercent(for: provider) {
+      return "\(provider.title), \(remaining) percent remaining"
+    }
+    return "\(provider.title), quota unavailable"
   }
 }
 
@@ -394,9 +649,10 @@ private struct SummaryValue: View {
       Text(label)
         .font(.system(size: 9, weight: .semibold))
         .tracking(0.7)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(DashboardPalette.secondaryText)
     }
     .frame(maxWidth: .infinity)
+    .accessibilityElement(children: .combine)
   }
 }
 
@@ -445,7 +701,7 @@ private struct ProviderQuotaCard: View {
 
           Text(accountDetail)
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(DashboardPalette.secondaryText)
             .lineLimit(1)
         }
 
@@ -482,8 +738,8 @@ private struct ProviderQuotaCard: View {
         statusLine(failure.message, systemImage: "arrow.triangle.2.circlepath", color: .orange)
       }
     }
-    .padding(12)
-    .background(.background.opacity(0.68), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+    .padding(13)
+    .background(DashboardPalette.card, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
     .overlay {
       RoundedRectangle(cornerRadius: 13, style: .continuous)
         .strokeBorder(accent.opacity(0.2), lineWidth: 1)
@@ -627,13 +883,13 @@ private struct MetricQuotaRow: View {
           }
         }
         .font(.caption2)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(DashboardPalette.secondaryText)
       }
 
       if let detail = metric.detail, !detail.isEmpty {
         Text(detail)
           .font(.caption2)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(DashboardPalette.secondaryText)
           .lineLimit(2)
       }
     }
@@ -680,7 +936,7 @@ private struct ProviderFailureCard: View {
           .font(.subheadline.weight(.semibold))
         Text(failure.provider.displayName)
           .font(.caption2)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(DashboardPalette.secondaryText)
         Text(failure.message)
           .font(.caption)
           .foregroundStyle(.orange)
@@ -689,8 +945,8 @@ private struct ProviderFailureCard: View {
 
       Spacer(minLength: 0)
     }
-    .padding(12)
-    .background(.orange.opacity(0.07), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+    .padding(13)
+    .background(DashboardPalette.card, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
     .overlay {
       RoundedRectangle(cornerRadius: 13, style: .continuous)
         .strokeBorder(.orange.opacity(0.22), lineWidth: 1)
