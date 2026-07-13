@@ -94,6 +94,13 @@ Requires macOS 14+, Xcode 15+, [XcodeGen](https://github.com/yonaskolb/XcodeGen)
   generated `LLimitWidgetExtension.appex/Contents/Resources/Metadata.appintents`.
   A successful macOS build must run `ExtractAppIntentsMetadata` and export the widget
   configuration intent before the feature is considered validated.
+- Treat a placed widget's `kind` and the intent/query `persistentIdentifier`s as one
+  frozen unit. Never change the configuration parameter schema under an existing kind
+  (that orphans placed tiles — Apple forums thread 746574); when a schema change is
+  unavoidable, rotate kind + intent + query identifiers together (v2 → v3 → ...) and
+  remove all placed tiles before retesting. Widget configuration stays on Apple's
+  canonical `AppEntity` + `EntityQuery` pattern; do not swap it for primitive
+  parameters with `DynamicOptionsProvider` again without new evidence.
 
 ```bash
 xcodegen generate

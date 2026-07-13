@@ -344,11 +344,43 @@ Do not make speculative endpoint edits without captured evidence.
   that graph with a primitive account-ID parameter, but retained the same widget kind while
   changing the intent identity and parameter schema. Build 12 gives the tile and intent fresh
   identities so WidgetKit cannot decode an older tile with incompatible cached metadata.
+- Build 13 (current) returns to Apple's canonical `AppEntity` + `EntityQuery` configuration —
+  the shape the edit picker is documented and sampled around ("Making a configurable widget",
+  Emoji Rangers) — under fresh `.v3` identities rotated together (widget kind, intent, query).
+  The build-10 "entity configuration unusable" verdict is considered contaminated: build 11
+  changed the parameter schema while REUSING the placed kind, a documented way to orphan placed
+  tiles (Apple forums thread 746574), and the entity graph was never retested after the
+  identity reset. The primitive-parameter experiment was equally dead, so parameter shape was
+  never the discriminating variable. Note the build-9 probes only validated GALLERY
+  registration — no build has yet demonstrated the Edit sheet opening for ANY intent from this
+  app, so an app-copy-resolution or per-user chronod failure remains fully plausible.
+- Build 13 also makes the tile self-configuring: a nil configuration auto-selects the first
+  enabled account (stable provider/name order, tagged AUTO in the tile) instead of dying on
+  "Choose an account", so the widget stays useful even while the Edit flow is broken. Tiles
+  whose configured account was disabled or removed now say so explicitly.
+- Diagnostic ladder for the dead Edit flow, in order (`scripts/widget-diagnostics.sh` now
+  prints the live capture command):
+  1. Remove ALL placed LLimit tiles, run `./scripts/build.sh --clean --install --run`, add a
+     fresh v3 tile, and only judge Edit on that fresh tile.
+  2. If still dead: run the live `log stream` capture from `widget-diagnostics.sh` while
+     clicking Edit; look for "missing widgetDescriptor or widgetIntent"-style resolution
+     errors, "Unable to extract bundle metadata", or XPC failures naming the appex.
+  3. `killall NotificationCenter chronod WidgetCenter` and retest — a wedged per-user widget
+     stack is a known Sequoia+ failure mode where widget editing is a silent no-op
+     system-wide.
+  4. Retest in a fresh macOS user account; success there means the main account's chronod
+     cache is corrupt. Failure there too means file Feedback with a sysdiagnose captured right
+     after clicking Edit — no public report documents a Tahoe Edit-flow bug yet.
+  5. Next code-side experiment if all else fails: migrate the appex from legacy NSExtension
+     packaging (`Contents/PlugIns` + `NSExtensionPointIdentifier`) to the ExtensionKit layout
+     (`Contents/Extensions` + `EXAppExtensionAttributes`), which the macOS 26 configuration
+     flow may prefer. Gallery rendering demonstrably works via PlugInKit, so this only
+     concerns the Edit path.
 - Run `./scripts/build.sh --clean --install --run` on macOS and confirm Edit Widget opens the
-  Account picker for `ch.lkmc.llimit.widget.provider-quota.v2` on a newly added tile before
+  Account picker for `ch.lkmc.llimit.widget.provider-quota.v3` on a newly added tile before
   closing this blocker.
-- Remove pre-build-12 provider tiles before testing; the v1 intent payload is intentionally not
-  migrated because its schema changed repeatedly during development.
+- Remove pre-build-13 provider tiles before testing; v1/v2 intent payloads are intentionally
+  not migrated because their schemas changed repeatedly during development.
 - Test AppIntent account configuration on macOS 14+.
 - Capture small-widget screenshots against the supplied reference in light/dark desktop
   contexts.

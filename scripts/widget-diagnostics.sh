@@ -50,18 +50,18 @@ if [[ -f "$METADATA" ]]; then
   printf 'Metadata: %s\n' "$METADATA"
   metadata_strings="$(/usr/bin/strings "$METADATA")"
   printf '%s\n' "$metadata_strings" \
-    | /usr/bin/grep -E 'ProviderQuotaConfigurationIntent|ProviderAccountOptionsProvider|accountID|provider-quota' \
+    | /usr/bin/grep -E 'SelectProviderAccountIntent|ProviderAccountEntity|ProviderAccountQuery|provider-quota' \
     | /usr/bin/sort -u || true
-  if ! printf '%s\n' "$metadata_strings" | /usr/bin/grep -Fq 'ProviderQuotaConfigurationIntent'; then
-    printf 'ERROR: ProviderQuotaConfigurationIntent is absent from installed metadata\n'
+  if ! printf '%s\n' "$metadata_strings" | /usr/bin/grep -Fq 'SelectProviderAccountIntent'; then
+    printf 'ERROR: SelectProviderAccountIntent is absent from installed metadata\n'
   fi
 else
   printf 'MISSING: %s\n' "$METADATA"
 fi
 if [[ ! -f "$WIDGET_BINARY" ]]; then
   printf 'MISSING: %s\n' "$WIDGET_BINARY"
-elif ! /usr/bin/grep -aFq 'ch.lkmc.llimit.widget.provider-quota.v2' "$WIDGET_BINARY"; then
-  printf 'ERROR: provider quota v2 widget kind is absent from the installed extension binary\n'
+elif ! /usr/bin/grep -aFq 'ch.lkmc.llimit.widget.provider-quota.v3' "$WIDGET_BINARY"; then
+  printf 'ERROR: provider quota v3 widget kind is absent from the installed extension binary\n'
 fi
 
 section "PlugInKit registration"
@@ -85,3 +85,15 @@ section "Recent widget configuration logs ($LOG_WINDOW)"
   (eventMessage CONTAINS[c] "ProviderQuota") OR
   (eventMessage CONTAINS[c] "provider-quota")
 ' 2>&1 || true
+
+section "Live capture (manual)"
+cat <<'EOF'
+To catch the Edit-flow failure as it happens, run this in a second terminal,
+then right-click the tile and choose Edit:
+
+  log stream --info --debug --predicate '(process == "NotificationCenter") OR (process == "chronod") OR (process == "appintentsd") OR (subsystem CONTAINS[c] "chrono") OR (subsystem CONTAINS[c] "appintents") OR (eventMessage CONTAINS[c] "llimit")'
+
+If Edit stays silent and produces no LLimit-related lines at all, suspect a
+wedged per-user widget stack: `killall NotificationCenter chronod WidgetCenter`
+and retest; verify in a fresh macOS user account before calling it an OS bug.
+EOF

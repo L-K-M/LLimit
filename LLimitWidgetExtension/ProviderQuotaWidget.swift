@@ -4,51 +4,31 @@ import SwiftUI
 import WidgetKit
 import QuotaCore
 
-struct ProviderAccountSelection: Sendable {
+// Configuration uses Apple's canonical AppEntity + EntityQuery pattern (the shape the
+// widget edit UI is designed around — see "Making a configurable widget"). The earlier
+// String-parameter + DynamicOptionsProvider experiment is retired; its "unusable"
+// verdict on the entity graph predated the identity reset and was contaminated by
+// tiles placed under the reused v1 kind. All identities move to .v3 TOGETHER (widget
+// kind, intent, query) — never change the parameter schema without also rotating the
+// identities, and treat them as frozen once tiles are placed.
+
+struct ProviderAccountEntity: AppEntity, Hashable, Sendable {
+  static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "LLimit Account")
+  static let defaultQuery = ProviderAccountQuery()
+
   let id: String
   let displayName: String
   let provider: QuotaProvider
 
-  init(id: String, displayName: String, provider: QuotaProvider) {
-    self.id = id
-    self.displayName = displayName
-    self.provider = provider
-  }
-}
-
-struct ProviderAccountOptionsProvider: DynamicOptionsProvider, Sendable {
-  func results() async throws -> IntentItemCollection<String> {
-    IntentItemCollection<String>(
-      sections: [
-        IntentItemSection<String>(
-          items: loadAccounts().map { account in
-            IntentItem<String>(
-              account.id,
-              title: LocalizedStringResource(stringLiteral: account.resolvedDisplayName),
-              subtitle: LocalizedStringResource(stringLiteral: account.provider.displayName)
-            )
-          }
-        )
-      ]
+  var displayRepresentation: DisplayRepresentation {
+    DisplayRepresentation(
+      title: "\(displayName)",
+      subtitle: "\(provider.displayName)"
     )
   }
-
-  func defaultResult() async -> String? {
-    loadAccounts().first?.id
-  }
-
-  private func loadAccounts() -> [ProviderAccount] {
-    guard
-      let settingsURL = try? SharedPaths.settingsFileURL(),
-      let settings = try? SettingsStore(fileURL: settingsURL).load()
-    else {
-      return []
-    }
-    return settings.accounts.filter(\.isEnabled)
-  }
 }
 
-private extension ProviderAccountSelection {
+extension ProviderAccountEntity {
   init(_ account: ProviderAccount) {
     self.init(
       id: account.id,
@@ -58,24 +38,88 @@ private extension ProviderAccountSelection {
   }
 }
 
-struct ProviderQuotaConfigurationIntent: WidgetConfigurationIntent {
-  static let persistentIdentifier = "ch.lkmc.llimit.intent.provider-quota.v2"
+struct ProviderAccountQuery: EntityQuery, Sendable {
+  static let persistentIdentifier = "ch.lkmc.llimit.query.provider-account.v3"
+
+  func entities(for identifiers: [ProviderAccountEntity.ID]) async throws -> [ProviderAccountEntity] {
+    let requested = Set(identifiers)
+    // Resolve against ALL stored accounts, not only enabled ones, so a placed tile
+    // keeps its identity (name/provider) while its account is temporarily disabled.
+    return ProviderTileAccounts.all().filter { requested.contains($0.id) }.map(ProviderAccountEntity.init)
+  }
+
+  func suggestedEntities() async throws -> [ProviderAccountEntity] {
+    ProviderTileAccounts.enabled().map(ProviderAccountEntity.init)
+  }
+
+  func defaultResult() async -> ProviderAccountEntity? {
+    ProviderTileAccounts.defaultAccount(in: ProviderTileAccounts.enabled()).map(ProviderAccountEntity.init)
+  }
+}
+
+struct SelectProviderAccountIntent: WidgetConfigurationIntent {
+  static let persistentIdentifier = "ch.lkmc.llimit.intent.provider-quota.v3"
   static let title: LocalizedStringResource = "Provider Quota"
   static let description = IntentDescription("Choose the LLimit account shown by this quota tile.")
 
-  @Parameter(title: "Account", optionsProvider: ProviderAccountOptionsProvider())
-  var accountID: String?
+  @Parameter(title: "Account")
+  var account: ProviderAccountEntity?
 
   init() {}
 
   static var parameterSummary: some ParameterSummary {
-    Summary("Show \(\.$accountID)")
+    Summary("Show \(\.$account)")
   }
+}
+
+/// Settings-file access shared by the query and the timeline provider. Reads must
+/// never throw out of the widget process: a missing/corrupt file degrades to empty
+/// lists, which the tile renders as its "add an account" state.
+enum ProviderTileAccounts {
+  static func all() -> [ProviderAccount] {
+    guard
+      let settingsURL = try? SharedPaths.settingsFileURL(),
+      let settings = try? SettingsStore(fileURL: settingsURL).load()
+    else {
+      return []
+    }
+    return settings.accounts
+  }
+
+  static func enabled() -> [ProviderAccount] {
+    all().filter(\.isEnabled)
+  }
+
+  /// Deterministic auto-selection used both for the config default and for tiles
+  /// whose configuration is still nil (e.g. while the Edit flow is unavailable):
+  /// stable provider order, then display name, then id.
+  static func defaultAccount(in accounts: [ProviderAccount]) -> ProviderAccount? {
+    accounts.min { lhs, rhs in
+      if lhs.provider.rawValue != rhs.provider.rawValue {
+        return lhs.provider.rawValue < rhs.provider.rawValue
+      }
+      if lhs.resolvedDisplayName != rhs.resolvedDisplayName {
+        return lhs.resolvedDisplayName < rhs.resolvedDisplayName
+      }
+      return lhs.id < rhs.id
+    }
+  }
+}
+
+/// How the tile's account was resolved for an entry, so the view can explain
+/// every state instead of silently falling back to "choose an account".
+enum ProviderTileAccountState: Sendable {
+  case configured
+  case autoSelected
+  case accountDisabled
+  case accountRemoved
+  case noAccounts
 }
 
 struct ProviderQuotaEntry: TimelineEntry {
   let date: Date
-  let account: ProviderAccountSelection?
+  let account: ProviderAccountEntity?
+  let accountState: ProviderTileAccountState
   let usage: ProviderUsage?
   let failure: ProviderFailure?
   let ringColors: WidgetRingColors
@@ -88,7 +132,7 @@ struct ProviderQuotaTimelineProvider: AppIntentTimelineProvider {
   }
 
   func snapshot(
-    for configuration: ProviderQuotaConfigurationIntent,
+    for configuration: SelectProviderAccountIntent,
     in context: Context
   ) async -> ProviderQuotaEntry {
     if context.isPreview {
@@ -98,7 +142,7 @@ struct ProviderQuotaTimelineProvider: AppIntentTimelineProvider {
   }
 
   func timeline(
-    for configuration: ProviderQuotaConfigurationIntent,
+    for configuration: SelectProviderAccountIntent,
     in context: Context
   ) async -> Timeline<ProviderQuotaEntry> {
     let now = Date()
@@ -125,6 +169,7 @@ struct ProviderQuotaTimelineProvider: AppIntentTimelineProvider {
       ProviderQuotaEntry(
         date: date,
         account: entry.account,
+        accountState: entry.accountState,
         usage: entry.usage,
         failure: entry.failure,
         ringColors: entry.ringColors,
@@ -135,31 +180,60 @@ struct ProviderQuotaTimelineProvider: AppIntentTimelineProvider {
   }
 
   private func loadEntry(
-    for configuration: ProviderQuotaConfigurationIntent,
+    for configuration: SelectProviderAccountIntent,
     at date: Date
   ) -> ProviderQuotaEntry {
     let settings = loadSettings()
-    let enabledAccounts = settings.accounts.filter(\.isEnabled)
-    let selectedAccount = configuration.accountID
-      .flatMap { accountID in enabledAccounts.first(where: { $0.id == accountID }) }
-    let accountSelection = selectedAccount.map(ProviderAccountSelection.init)
+    let allAccounts = settings.accounts
+    let enabledAccounts = allAccounts.filter(\.isEnabled)
+
+    let accountState: ProviderTileAccountState
+    let effectiveAccount: ProviderAccount?
+    let entity: ProviderAccountEntity?
+
+    if let requested = configuration.account {
+      if let match = enabledAccounts.first(where: { $0.id == requested.id }) {
+        accountState = .configured
+        effectiveAccount = match
+        entity = ProviderAccountEntity(match)
+      } else if allAccounts.contains(where: { $0.id == requested.id }) {
+        accountState = .accountDisabled
+        effectiveAccount = nil
+        entity = requested
+      } else {
+        accountState = .accountRemoved
+        effectiveAccount = nil
+        entity = requested
+      }
+    } else if let fallback = ProviderTileAccounts.defaultAccount(in: enabledAccounts) {
+      // Unconfigured tile: show the default account instead of a dead placeholder,
+      // so the widget is useful even before (or without) the Edit flow.
+      accountState = .autoSelected
+      effectiveAccount = fallback
+      entity = ProviderAccountEntity(fallback)
+    } else {
+      accountState = .noAccounts
+      effectiveAccount = nil
+      entity = nil
+    }
 
     let snapshot = loadSnapshot()
-    let usage = selectedAccount.flatMap { account in
+    let usage = effectiveAccount.flatMap { account in
       snapshot?.providers.first(where: { $0.accountID == account.id })
-        ?? legacyUsage(for: account, in: snapshot, accounts: settings.accounts)
+        ?? legacyUsage(for: account, in: snapshot, accounts: allAccounts)
     }
-    let failure = selectedAccount.flatMap { account in
+    let failure = effectiveAccount.flatMap { account in
       snapshot?.failures.first(where: { $0.accountID == account.id })
-        ?? legacyFailure(for: account, in: snapshot, accounts: settings.accounts)
+        ?? legacyFailure(for: account, in: snapshot, accounts: allAccounts)
     }
 
     return ProviderQuotaEntry(
       date: date,
-      account: accountSelection,
+      account: entity,
+      accountState: accountState,
       usage: usage,
       failure: failure,
-      ringColors: ringColors(for: selectedAccount, settings: settings),
+      ringColors: ringColors(for: entity?.id, settings: settings),
       refreshIntervalMinutes: max(15, settings.refreshIntervalMinutes)
     )
   }
@@ -204,17 +278,18 @@ struct ProviderQuotaTimelineProvider: AppIntentTimelineProvider {
     }
   }
 
-  private func ringColors(for account: ProviderAccount?, settings: AppSettings) -> WidgetRingColors {
-    guard let account else { return settings.widgetStyle.ringColors }
-    let override = settings.styleOverride(for: account.id)
+  private func ringColors(for accountID: String?, settings: AppSettings) -> WidgetRingColors {
+    guard let accountID else { return settings.widgetStyle.ringColors }
+    let override = settings.styleOverride(for: accountID)
     return override.useCustomStyle ? override.style.ringColors : settings.widgetStyle.ringColors
   }
 
   private static func sampleEntry(at date: Date) -> ProviderQuotaEntry {
-    let account = ProviderAccountSelection(id: "sample-zai", displayName: "Z.ai", provider: .zai)
+    let account = ProviderAccountEntity(id: "sample-zai", displayName: "Z.ai", provider: .zai)
     return ProviderQuotaEntry(
       date: date,
       account: account,
+      accountState: .configured,
       usage: ProviderUsage(
         accountID: account.id,
         provider: .zai,
@@ -246,7 +321,7 @@ struct ProviderQuotaWidget: Widget {
   var body: some WidgetConfiguration {
     AppIntentConfiguration(
       kind: SharedConstants.providerWidgetKind,
-      intent: ProviderQuotaConfigurationIntent.self,
+      intent: SelectProviderAccountIntent.self,
       provider: ProviderQuotaTimelineProvider()
     ) { entry in
       ProviderQuotaTileView(entry: entry)
@@ -262,20 +337,12 @@ struct ProviderQuotaWidget: Widget {
 }
 
 private struct ProviderQuotaTileView: View {
-  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
   let entry: ProviderQuotaEntry
 
   var body: some View {
-    ZStack {
-      ContainerRelativeShape()
-        .inset(by: 7)
-        .fill(Color.black.opacity(reduceTransparency ? 0.38 : 0.22))
-        .overlay {
-          ContainerRelativeShape()
-            .inset(by: 7)
-            .stroke(Color.white.opacity(0.34), lineWidth: 0.8)
-        }
-
+    // The gradient container background is the tile's only frame; anything drawn
+    // near the edge reads as a second border inside the system's rounded corner.
+    Group {
       if
         let account = entry.account,
         let usage = entry.usage,
@@ -285,17 +352,18 @@ private struct ProviderQuotaTileView: View {
       } else if let account = entry.account {
         unavailableContent(account: account, hasUsageWithoutPercentage: entry.usage != nil)
       } else {
-        unconfiguredContent
+        noAccountsContent
       }
     }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(accessibilitySummary)
   }
 
-  private func loadedContent(account: ProviderAccountSelection, usage: ProviderUsage) -> some View {
+  private func loadedContent(account: ProviderAccountEntity, usage: ProviderUsage) -> some View {
     let metrics = defaultRingMetrics(for: usage)
 
-    return VStack(spacing: 4) {
+    return VStack(spacing: 5) {
       ProviderConcentricRings(
         metrics: metrics,
         name: account.displayName,
@@ -305,22 +373,35 @@ private struct ProviderQuotaTileView: View {
 
       resetFooter(metrics: metrics)
     }
-    .padding(.horizontal, 13)
-    .padding(.top, 12)
-    .padding(.bottom, 11)
+    .padding(.horizontal, 14)
+    .padding(.top, 13)
+    .padding(.bottom, 12)
     .overlay(alignment: .topTrailing) {
       if isStale(usage) {
         Image(systemName: "exclamationmark.circle.fill")
           .font(.caption)
           .foregroundStyle(.orange, .black.opacity(0.35))
-          .padding(12)
+          .padding(10)
+          .accessibilityHidden(true)
+      }
+    }
+    .overlay(alignment: .topLeading) {
+      if entry.accountState == .autoSelected {
+        Text("AUTO")
+          .font(.system(size: 7, weight: .bold))
+          .tracking(0.5)
+          .foregroundStyle(.white.opacity(0.55))
+          .padding(.horizontal, 5)
+          .padding(.vertical, 2)
+          .background(.black.opacity(0.25), in: Capsule())
+          .padding(10)
           .accessibilityHidden(true)
       }
     }
   }
 
   private func unavailableContent(
-    account: ProviderAccountSelection,
+    account: ProviderAccountEntity,
     hasUsageWithoutPercentage: Bool
   ) -> some View {
     VStack(spacing: 7) {
@@ -333,32 +414,47 @@ private struct ProviderQuotaTileView: View {
       Text(unavailableMessage(hasUsageWithoutPercentage: hasUsageWithoutPercentage))
         .font(.caption2)
         .foregroundStyle(.secondary)
+        .multilineTextAlignment(.center)
     }
-    .padding(18)
+    .padding(16)
   }
 
   private func unavailableSymbol(hasUsageWithoutPercentage: Bool) -> String {
-    if entry.failure != nil { return "exclamationmark.triangle.fill" }
-    return hasUsageWithoutPercentage ? "questionmark.circle" : "arrow.clockwise.circle"
+    switch entry.accountState {
+    case .accountDisabled:
+      return "pause.circle"
+    case .accountRemoved:
+      return "questionmark.circle"
+    default:
+      if entry.failure != nil { return "exclamationmark.triangle.fill" }
+      return hasUsageWithoutPercentage ? "questionmark.circle" : "arrow.clockwise.circle"
+    }
   }
 
   private func unavailableMessage(hasUsageWithoutPercentage: Bool) -> String {
-    if entry.failure != nil { return "Quota unavailable" }
-    return hasUsageWithoutPercentage ? "Quota percentage unavailable" : "Refresh in LLimit"
+    switch entry.accountState {
+    case .accountDisabled:
+      return "Account disabled in LLimit"
+    case .accountRemoved:
+      return "Account removed — edit this widget"
+    default:
+      if entry.failure != nil { return "Quota unavailable" }
+      return hasUsageWithoutPercentage ? "Quota percentage unavailable" : "Refresh in LLimit"
+    }
   }
 
-  private var unconfiguredContent: some View {
+  private var noAccountsContent: some View {
     VStack(spacing: 7) {
       Image(systemName: "gauge.with.dots.needle.bottom.50percent")
         .font(.title2)
-      Text("Choose an account")
+      Text("No accounts yet")
         .font(.headline)
-      Text("Edit this widget or add an account in LLimit")
+      Text("Add an account in LLimit to fill this tile")
         .font(.caption2)
         .foregroundStyle(.secondary)
         .multilineTextAlignment(.center)
     }
-    .padding(18)
+    .padding(16)
   }
 
   private func resetFooter(metrics: [UsageMetric]) -> some View {
@@ -396,8 +492,18 @@ private struct ProviderQuotaTileView: View {
 
   private var accessibilitySummary: String {
     guard let account = entry.account else {
-      return "LLimit provider quota. Choose an account in the widget settings."
+      return "LLimit provider quota. Add an account in LLimit."
     }
+
+    switch entry.accountState {
+    case .accountDisabled:
+      return "\(account.displayName). Account is disabled in LLimit."
+    case .accountRemoved:
+      return "\(account.displayName). Account was removed. Edit this widget to choose another."
+    case .configured, .autoSelected, .noAccounts:
+      break
+    }
+
     guard let usage = entry.usage else {
       if let failure = entry.failure {
         return "\(account.displayName). Quota unavailable. \(failure.kind.rawValue)."
@@ -506,6 +612,7 @@ private struct ProviderConcentricRings: View {
         Text(name)
           .font(.subheadline.weight(.bold))
           .foregroundStyle(.white)
+          .shadow(color: .black.opacity(0.35), radius: 2)
           .lineLimit(2)
           .minimumScaleFactor(0.68)
           .multilineTextAlignment(.center)
@@ -539,15 +646,23 @@ private struct ProviderTileRing: View {
   var body: some View {
     ZStack {
       Circle()
-        .strokeBorder(Color.white.opacity(0.2), lineWidth: lineWidth)
-      Circle()
-        .trim(from: 0, to: progress)
-        .stroke(
-          color,
-          style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round)
-        )
-        .rotationEffect(.degrees(-90))
-        .padding(lineWidth / 2)
+        .strokeBorder(Color.white.opacity(0.14), lineWidth: lineWidth)
+      if progress > 0.001 {
+        Circle()
+          .trim(from: 0, to: progress)
+          .stroke(
+            AngularGradient(
+              gradient: Gradient(colors: [color.opacity(0.55), color]),
+              center: .center,
+              startAngle: .degrees(0),
+              endAngle: .degrees(360 * progress)
+            ),
+            style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round)
+          )
+          .rotationEffect(.degrees(-90))
+          .shadow(color: color.opacity(0.45), radius: 2.5)
+          .padding(lineWidth / 2)
+      }
     }
   }
 
@@ -575,9 +690,9 @@ private struct ProviderTileBackground: View {
           .fill(
             LinearGradient(
               colors: [
-                Color.white.opacity(reduceTransparency ? 0.06 : 0.24),
+                Color.white.opacity(reduceTransparency ? 0.05 : 0.15),
                 Color.clear,
-                Color.black.opacity(0.2)
+                Color.black.opacity(0.16)
               ],
               startPoint: .top,
               endPoint: .bottom

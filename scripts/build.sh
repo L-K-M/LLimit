@@ -52,16 +52,16 @@ if [[ "$INSTALL" == true && -x "$LSREGISTER" && -d "$INSTALLED_APP" ]]; then
   INTENT_METADATA="$INSTALLED_WIDGET/Contents/Resources/Metadata.appintents/extract.actionsdata"
   WIDGET_BINARY="$INSTALLED_WIDGET/Contents/MacOS/LLimitWidgetExtension"
   if [[ ! -f "$INTENT_METADATA" ]] \
-    || ! /usr/bin/grep -Fq 'ProviderQuotaConfigurationIntent' "$INTENT_METADATA" \
-    || ! /usr/bin/grep -Fq 'ch.lkmc.llimit.intent.provider-quota.v2' "$INTENT_METADATA" \
-    || ! /usr/bin/grep -Fq 'ProviderAccountOptionsProvider' "$INTENT_METADATA" \
-    || ! /usr/bin/grep -Fq 'accountID' "$INTENT_METADATA"; then
+    || ! /usr/bin/grep -Fq 'SelectProviderAccountIntent' "$INTENT_METADATA" \
+    || ! /usr/bin/grep -Fq 'ch.lkmc.llimit.intent.provider-quota.v3' "$INTENT_METADATA" \
+    || ! /usr/bin/grep -Fq 'ProviderAccountEntity' "$INTENT_METADATA" \
+    || ! /usr/bin/grep -Fq 'ProviderAccountQuery' "$INTENT_METADATA"; then
     echo "error: installed widget is missing required App Intent metadata" >&2
     exit 1
   fi
   if [[ ! -f "$WIDGET_BINARY" ]] \
-    || ! /usr/bin/grep -aFq 'ch.lkmc.llimit.widget.provider-quota.v2' "$WIDGET_BINARY"; then
-    echo "error: installed widget is missing the provider quota v2 kind" >&2
+    || ! /usr/bin/grep -aFq 'ch.lkmc.llimit.widget.provider-quota.v3' "$WIDGET_BINARY"; then
+    echo "error: installed widget is missing the provider quota v3 kind" >&2
     exit 1
   fi
 

@@ -10,7 +10,10 @@ enum SharedConstants {
   static let settingsFileName = "quota-settings.json"
   static let widgetKind = "LLimitWidget"
   static let trendWidgetKind = "ch.lkmc.llimit.widget.trend"
-  static let providerWidgetKind = "ch.lkmc.llimit.widget.provider-quota.v2"
+  // Frozen once tiles are placed. Rotate ONLY together with the intent/query
+  // persistent identifiers, and only when the configuration schema changes —
+  // WidgetKit cannot decode a placed tile whose cached intent no longer matches.
+  static let providerWidgetKind = "ch.lkmc.llimit.widget.provider-quota.v3"
 
   static let allWidgetKinds: [String] = [
     widgetKind,
