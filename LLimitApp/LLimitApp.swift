@@ -98,6 +98,10 @@ final class DashboardWindowController {
       positionWindow(near: screenPoint)
     }
 
+    if window?.isMiniaturized == true {
+      window?.deminiaturize(nil)
+    }
+
     if activate {
       activateWindow()
     } else {
@@ -365,7 +369,7 @@ private struct MenuBarContent: View {
       if presentation == .menuBar {
         DetachDashboardControl(
           onOpen: {
-            DashboardWindowController.shared.show(model: model, near: NSEvent.mouseLocation)
+            DashboardWindowController.shared.show(model: model)
           },
           onDragStart: { point in
             DashboardWindowController.shared.show(model: model, near: point, activate: false)
@@ -425,7 +429,7 @@ private struct MenuBarContent: View {
       Menu {
         if presentation == .menuBar {
           Button {
-            DashboardWindowController.shared.show(model: model, near: NSEvent.mouseLocation)
+            DashboardWindowController.shared.show(model: model)
           } label: {
             Label("Open Floating Dashboard", systemImage: "macwindow")
           }
