@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		0076043CC71CC09BFF9DE74A /* LLimitQuotaWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B4155FC0F0418AB20A7F600 /* LLimitQuotaWidget.swift */; };
 		386963A9990480361B221F1C /* SharedConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CA36F027D77628AAB911B4F /* SharedConstants.swift */; };
+		3A11C01DE4B02FBA9D01AA02 /* LimitKindColorScheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A11C01DE4B02FBA9D01AA01 /* LimitKindColorScheme.swift */; };
+		3A11C01DE4B02FBA9D01AA03 /* LimitKindColorScheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A11C01DE4B02FBA9D01AA01 /* LimitKindColorScheme.swift */; };
 		4A4AC618CDAE0C085BE6E421 /* LLimitApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65826397D3D90EF0FE3F1AF8 /* LLimitApp.swift */; };
 		7394D6C4263D47B0C75C0D50 /* SharedConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CA36F027D77628AAB911B4F /* SharedConstants.swift */; };
 		7505D82D6C3A0DA536BCAFEE /* QuotaTimelineProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F7DC2FD8B8B3CB28CBDBA50 /* QuotaTimelineProvider.swift */; };
@@ -52,6 +54,7 @@
 		0F5E31A2797200183F69625A /* RefreshService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RefreshService.swift; sourceTree = "<group>"; };
 		1D80DFE1041003A3DBEC1B17 /* LLimitApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LLimitApp.entitlements; sourceTree = "<group>"; };
 		2CA36F027D77628AAB911B4F /* SharedConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedConstants.swift; sourceTree = "<group>"; };
+		3A11C01DE4B02FBA9D01AA01 /* LimitKindColorScheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LimitKindColorScheme.swift; sourceTree = "<group>"; };
 		2F7DC2FD8B8B3CB28CBDBA50 /* QuotaTimelineProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaTimelineProvider.swift; sourceTree = "<group>"; };
 		42923ABCF11FECE813FEBB8F /* LLimitWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLimitWidgetBundle.swift; sourceTree = "<group>"; };
 		4A209FE6A72662BD8F9B150D /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
@@ -160,6 +163,7 @@
 		A177AE9C6B8CB0D9DE7DCF6F /* Shared */ = {
 			isa = PBXGroup;
 			children = (
+				3A11C01DE4B02FBA9D01AA01 /* LimitKindColorScheme.swift */,
 				2CA36F027D77628AAB911B4F /* SharedConstants.swift */,
 			);
 			path = Shared;
@@ -273,6 +277,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				3A11C01DE4B02FBA9D01AA03 /* LimitKindColorScheme.swift in Sources */,
 				0076043CC71CC09BFF9DE74A /* LLimitQuotaWidget.swift in Sources */,
 				CE91F7808594D37146B31F6B /* LLimitWidgetBundle.swift in Sources */,
 				A6E91C9F7B3D4E5082F1A627 /* ProviderQuotaWidget.swift in Sources */,
@@ -287,6 +292,7 @@
 			files = (
 				BCF52573CAD84156B1B5D45D /* AppModel.swift in Sources */,
 				4A4AC618CDAE0C085BE6E421 /* LLimitApp.swift in Sources */,
+				3A11C01DE4B02FBA9D01AA02 /* LimitKindColorScheme.swift in Sources */,
 				FC1C8D8802949AC17AA24E39 /* RefreshService.swift in Sources */,
 				7B4652AC8FCA0CBC5B22B5B9 /* SettingsView.swift in Sources */,
 				386963A9990480361B221F1C /* SharedConstants.swift in Sources */,
