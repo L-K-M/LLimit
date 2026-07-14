@@ -4,7 +4,7 @@ import WidgetKit
 import QuotaCore
 
 // The provider tiles deliberately have NO widget-side configuration. The macOS
-// "Edit Widget" flow proved unreliable across builds 7-13 (see ANALYSIS.md), so
+// "Edit Widget" flow proved unreliable across builds 7-13 (see BACKLOG.md), so
 // account selection lives in LLimit's Settings instead: each numbered tile reads
 // its slot assignment from the shared settings file, and the app reloads widget
 // timelines whenever an assignment changes. Unassigned tiles auto-fill with the
