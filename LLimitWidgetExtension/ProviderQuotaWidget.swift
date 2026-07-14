@@ -78,9 +78,7 @@ private func providerTileConfiguration(
     provider: ProviderTileTimelineProvider(slotIndex: slotIndex)
   ) { entry in
     ProviderQuotaTileView(entry: entry)
-      .containerBackground(for: .widget) {
-        ProviderTileBackground(provider: entry.account?.provider)
-      }
+      .providerTileBackground(entry: entry)
   }
   .configurationDisplayName(Text(verbatim: displayName))
   .description(Text(verbatim: "Quota rings for one LLimit account. Assign accounts in LLimit's Settings → Widgets."))
@@ -125,7 +123,9 @@ struct ProviderQuotaEntry: TimelineEntry {
   let accountState: ProviderTileAccountState
   let usage: ProviderUsage?
   let failure: ProviderFailure?
-  let ringColors: WidgetRingColors
+  /// Effective style for the shown account: per-account override merged with
+  /// the global style, same resolution as the dashboard widget.
+  let style: WidgetStyleSettings
   let refreshIntervalMinutes: Int
 }
 
@@ -173,7 +173,7 @@ struct ProviderTileTimelineProvider: TimelineProvider {
         accountState: entry.accountState,
         usage: entry.usage,
         failure: entry.failure,
-        ringColors: entry.ringColors,
+        style: entry.style,
         refreshIntervalMinutes: entry.refreshIntervalMinutes
       )
     }
@@ -241,7 +241,7 @@ struct ProviderTileTimelineProvider: TimelineProvider {
       accountState: accountState,
       usage: usage,
       failure: failure,
-      ringColors: ringColors(for: selection?.id, settings: settings),
+      style: effectiveStyle(for: selection?.id, settings: settings),
       refreshIntervalMinutes: max(15, settings.refreshIntervalMinutes)
     )
   }
@@ -286,10 +286,15 @@ struct ProviderTileTimelineProvider: TimelineProvider {
     }
   }
 
-  private func ringColors(for accountID: String?, settings: AppSettings) -> WidgetRingColors {
-    guard let accountID else { return settings.widgetStyle.ringColors }
+  private func effectiveStyle(for accountID: String?, settings: AppSettings) -> WidgetStyleSettings {
+    guard let accountID else { return settings.widgetStyle }
     let override = settings.styleOverride(for: accountID)
-    return override.useCustomStyle ? override.style.ringColors : settings.widgetStyle.ringColors
+    guard override.useCustomStyle else { return settings.widgetStyle }
+    return WidgetStyleSettings(
+      backgroundHexColor: override.style.backgroundHexColor ?? settings.widgetStyle.backgroundHexColor,
+      ringColors: override.style.ringColors,
+      useTransparentBackground: override.style.useTransparentBackground
+    )
   }
 
   private static func sampleEntry(slotIndex: Int, at date: Date) -> ProviderQuotaEntry {
@@ -320,7 +325,7 @@ struct ProviderTileTimelineProvider: TimelineProvider {
         fetchedAt: date
       ),
       failure: nil,
-      ringColors: WidgetRingColors.defaults(for: .warm),
+      style: WidgetStyleSettings(ringColors: WidgetRingColors.defaults(for: .warm)),
       refreshIntervalMinutes: 30
     )
   }
@@ -370,7 +375,7 @@ private struct ProviderQuotaTileView: View {
       ProviderConcentricRings(
         metrics: metrics,
         name: account.displayName,
-        colors: entry.ringColors
+        colors: entry.style.ringColors
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -565,7 +570,7 @@ private struct ProviderQuotaTileView: View {
     } else {
       role = .low
     }
-    return Color(providerTileHex: entry.ringColors.hexColor(for: role, layer: layer)) ?? .white
+    return Color(providerTileHex: entry.style.ringColors.hexColor(for: role, layer: layer)) ?? .white
   }
 
   private func resetSummary(for metric: UsageMetric, expanded: Bool = false) -> String {
@@ -689,9 +694,28 @@ private struct ProviderTileRing: View {
   }
 }
 
+private extension View {
+  /// Honors the effective style like the dashboard widget: transparent wins,
+  /// then a custom background color, then the provider-toned gradient.
+  @ViewBuilder
+  func providerTileBackground(entry: ProviderQuotaEntry) -> some View {
+    if entry.style.useTransparentBackground {
+      self.containerBackground(.clear, for: .widget)
+    } else {
+      self.containerBackground(for: .widget) {
+        ProviderTileBackground(
+          provider: entry.account?.provider,
+          customHexColor: entry.style.backgroundHexColor
+        )
+      }
+    }
+  }
+}
+
 private struct ProviderTileBackground: View {
   @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
   let provider: QuotaProvider?
+  let customHexColor: String?
 
   var body: some View {
     ContainerRelativeShape()
@@ -719,6 +743,12 @@ private struct ProviderTileBackground: View {
   }
 
   private var palette: [Color] {
+    // A configured background color replaces the provider tint; the gloss
+    // overlay above still gives the flat color its dimensionality.
+    if let customHexColor, let custom = Color(providerTileHex: customHexColor) {
+      return [custom, custom]
+    }
+
     switch provider {
     case .anthropic:
       return [Color(red: 0.72, green: 0.39, blue: 0.25), Color(red: 0.38, green: 0.21, blue: 0.16)]
