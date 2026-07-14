@@ -35,9 +35,30 @@ PLUGINKIT="/usr/bin/pluginkit"
 INSTALLED_APP="/Applications/$BUILD_APP_NAME.app"
 INSTALLED_WIDGET="$INSTALLED_APP/Contents/PlugIns/LLimitWidgetExtension.appex"
 WIDGET_BUNDLE_ID="ch.lkmc.llimit.app.widgetextension"
+
+# The install flow deregisters the app BEFORE building. If anything fails between
+# that point and the final registration below (build error, validation gate, copy
+# failure), the machine would otherwise be left with LLimit fully deregistered —
+# no widgets in the gallery at all. This trap re-registers whatever is installed
+# so a failed run degrades to "old app still works" instead of "widgets vanished".
+DEREGISTERED=false
+restore_registration_on_failure() {
+  status=$?
+  if [[ "$status" -ne 0 && "$DEREGISTERED" == true && -d "$INSTALLED_APP" && -x "$LSREGISTER" ]]; then
+    echo "warn: install flow failed after deregistration; re-registering $INSTALLED_APP" >&2
+    "$LSREGISTER" -f -R -trusted "$INSTALLED_APP" >/dev/null 2>&1 || true
+    if [[ -x "$PLUGINKIT" && -d "$INSTALLED_WIDGET" ]]; then
+      "$PLUGINKIT" -a "$INSTALLED_WIDGET" >/dev/null 2>&1 || true
+    fi
+    killall chronod >/dev/null 2>&1 || true
+  fi
+}
+trap restore_registration_on_failure EXIT
+
 if [[ "$INSTALL" == true && -x "$LSREGISTER" ]]; then
   # Remove the old installed registration before replacement so PlugInKit never
   # observes a partially copied app, then remove stale intermediate products.
+  DEREGISTERED=true
   if [[ -x "$PLUGINKIT" && -d "$INSTALLED_WIDGET" ]]; then
     "$PLUGINKIT" -r "$INSTALLED_WIDGET" >/dev/null 2>&1 || true
   fi
@@ -120,6 +141,7 @@ if [[ "$INSTALL" == true && -x "$LSREGISTER" && -d "$INSTALLED_APP" ]]; then
     "$PLUGINKIT" -e use -i "$WIDGET_BUNDLE_ID"
   fi
   killall chronod >/dev/null 2>&1 || true
+  DEREGISTERED=false
 
   echo "Registered $WIDGET_BUNDLE_ID build $WIDGET_BUILD from $INSTALLED_WIDGET"
   if [[ -x "$PLUGINKIT" ]]; then
