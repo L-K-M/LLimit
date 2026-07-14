@@ -1141,11 +1141,13 @@ private struct ProviderQuotaCard: View {
         )
       }
 
+      let metricColors = LimitKindColorScheme.colors(for: usage.metrics, colors: kindColors)
+
       VStack(spacing: 10) {
         ForEach(Array(usage.metrics.enumerated()), id: \.element.id) { index, metric in
           MetricQuotaRow(
             metric: metric,
-            tint: LimitKindColorScheme.color(forMetricAt: index, in: usage.metrics, colors: kindColors),
+            tint: metricColors[index],
             now: now,
             sparkPoints: sparkPoints(for: metric)
           )
@@ -1437,21 +1439,6 @@ private enum MenuBarQuotaStyling {
     }
 
     return nil
-  }
-
-  private static func colorRole(for metric: UsageMetric) -> WidgetRingColorRole? {
-    if metric.isUnlimited {
-      return .unlimited
-    }
-
-    guard let value = metric.remainingPercent else {
-      return nil
-    }
-
-    let remaining = clampPercent(value)
-    if remaining >= 70 { return .high }
-    if remaining >= 40 { return .medium }
-    return .low
   }
 
   private static func effectiveStyle(

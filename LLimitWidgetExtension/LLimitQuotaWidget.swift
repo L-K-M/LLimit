@@ -83,8 +83,10 @@ private struct TrendLineChartWidgetView: View {
           .foregroundStyle(.secondary)
         Spacer(minLength: 0)
       } else {
+        // Least important windows first so the risk carriers (weekly/monthly)
+        // draw on top; sorted once here, not per layout pass.
         TrendChartPlotView(
-          series: chartData.series,
+          series: chartData.series.sorted { $0.drawPriority < $1.drawPriority },
           startDate: chartData.startDate,
           endDate: chartData.endDate,
           showAxisLabels: family != .systemSmall
@@ -227,6 +229,8 @@ private struct TrendChartPlotView: View {
         }
 
         if showAxisLabels {
+          let weekdaySymbols = Calendar.current.veryShortWeekdaySymbols
+
           ForEach([100, 50, 0], id: \.self) { level in
             Text("\(level)")
               .font(.system(size: 6.5, weight: .medium))
@@ -240,7 +244,7 @@ private struct TrendChartPlotView: View {
 
           ForEach(Array(boundaries.enumerated()), id: \.element.timeIntervalSince1970) { index, date in
             if index % labelStride == 0 {
-              Text(weekdayLetter(for: date))
+              Text(weekdayLetter(for: date, symbols: weekdaySymbols))
                 .font(.system(size: 6.5, weight: .medium))
                 .foregroundStyle(.white.opacity(0.42))
                 .position(x: xPosition(for: date, width: width) + 6, y: height - 5)
@@ -248,10 +252,9 @@ private struct TrendChartPlotView: View {
           }
         }
 
-        // Data lines: least important windows first so the risk carriers
-        // (weekly/monthly) stay on top. A dark casing keeps every line
-        // separable from whatever background the widget sits on.
-        ForEach(series.sorted { $0.drawPriority < $1.drawPriority }) { line in
+        // Data lines (pre-sorted by draw priority). A dark casing keeps every
+        // line separable from whatever background the widget sits on.
+        ForEach(series) { line in
           if line.points.count >= 2 {
             let path = linePath(for: line, width: width, height: height)
             let casing = StrokeStyle(
@@ -313,10 +316,8 @@ private struct TrendChartPlotView: View {
     }
   }
 
-  private func weekdayLetter(for date: Date) -> String {
-    let calendar = Calendar.current
-    let weekday = calendar.component(.weekday, from: date)
-    let symbols = calendar.veryShortWeekdaySymbols
+  private func weekdayLetter(for date: Date, symbols: [String]) -> String {
+    let weekday = Calendar.current.component(.weekday, from: date)
     guard weekday >= 1, weekday <= symbols.count else {
       return ""
     }
@@ -364,7 +365,6 @@ private struct TrendSeries: Identifiable {
   let points: [TrendPoint]
   let color: Color
   let resetAt: Date?
-  let kind: QuotaWindowKind
   let lineWidth: CGFloat
   let lineOpacity: Double
   let dashPattern: [CGFloat]
@@ -533,7 +533,6 @@ private struct CompactProviderUsageRow: View {
 
   var body: some View {
     let metric = dashboardPrimaryMetric(for: usage)
-    let dualStops = dashboardBarStops(for: usage)
     let dualPercent = showDualLimitPercentages ? dualLimitPercentText(for: usage) : nil
     let percentDisplay = dualPercent ?? dashboardPercentDisplayText(for: usage)
     let basePercent = metric?.remainingPercent ?? providerRemainingPercent(for: usage)
@@ -549,13 +548,8 @@ private struct CompactProviderUsageRow: View {
         MiniProgressBar(
           percent: basePercent,
           unlimited: unlimited,
-          tint: primaryTint(defaultMetric: metric),
-          stops: dualStops.map { stop in
-            (
-              color: LimitKindColorScheme.color(forMetricAt: stop.metricIndex, in: usage.metrics, colors: kindColors),
-              percent: stop.percent
-            )
-          },
+          tint: LimitKindColorScheme.accountAccent(for: usage.metrics, colors: kindColors),
+          stops: dashboardBarStops(for: usage, kindColors: kindColors),
           showDualStops: showDualLimitPercentages
         )
           .frame(height: 5)
@@ -574,16 +568,6 @@ private struct CompactProviderUsageRow: View {
     }
   }
 
-  private func primaryTint(defaultMetric: UsageMetric?) -> Color {
-    if let defaultMetric, let index = usage.metrics.firstIndex(of: defaultMetric) {
-      return LimitKindColorScheme.color(forMetricAt: index, in: usage.metrics, colors: kindColors)
-    }
-    if usage.metrics.contains(where: \.isUnlimited) {
-      return LimitKindColorScheme.color(hex: kindColors.unlimitedHexColor) ?? .white
-    }
-    return .white.opacity(0.7)
-  }
-
   private var shortName: String {
     compactProviderName(for: usage)
   }
@@ -593,7 +577,7 @@ private struct MiniProgressBar: View {
   let percent: Int?
   let unlimited: Bool
   let tint: Color
-  let stops: [(color: Color, percent: Int)]
+  let stops: [DashboardBarStop]
   let showDualStops: Bool
 
   var body: some View {
@@ -601,6 +585,7 @@ private struct MiniProgressBar: View {
       let width = max(0, proxy.size.width)
       let clampedPercent = max(0, min(100, percent ?? 0))
       let twoStops = Array(stops.prefix(2))
+      let longestPercent = twoStops.map(\.percent).max() ?? 0
 
       ZStack(alignment: .leading) {
         Capsule()
@@ -612,20 +597,18 @@ private struct MiniProgressBar: View {
           // Longer fill first so the shorter one stays visible on top; each
           // fill wears its own metric's identity color, the underlying longer
           // one dimmed so the overlap reads as two limits.
-          let ordered = Array(twoStops.enumerated()).sorted(by: { $0.element.percent > $1.element.percent })
-
-          ForEach(Array(ordered.enumerated()), id: \.element.offset) { position, entry in
+          ForEach(twoStops.sorted { $0.percent > $1.percent }) { stop in
             Capsule()
-              .fill(entry.element.color.opacity(position == 0 ? 0.55 : 0.85))
-              .frame(width: width * CGFloat(entry.element.percent) / 100.0)
+              .fill(stop.color.opacity(stop.percent == longestPercent ? 0.55 : 0.85))
+              .frame(width: width * CGFloat(stop.percent) / 100.0)
           }
 
-          ForEach(Array(twoStops.enumerated()), id: \.offset) { entry in
+          ForEach(twoStops) { stop in
             Capsule()
-              .fill(entry.element.color)
+              .fill(stop.color)
               .frame(width: 2.5)
               .position(
-                x: markerPositionX(for: entry.element.percent, width: width),
+                x: markerPositionX(for: stop.percent, width: width),
                 y: proxy.size.height / 2
               )
           }
@@ -652,6 +635,7 @@ private struct MiniProgressBar: View {
 private struct DashboardBarStop: Identifiable {
   let metricIndex: Int
   let percent: Int
+  let color: Color
 
   var id: String {
     "\(metricIndex)-\(percent)"
@@ -699,19 +683,40 @@ private func providerRemainingPercent(for usage: ProviderUsage) -> Int? {
   return nil
 }
 
-private func dashboardBarStops(for usage: ProviderUsage) -> [DashboardBarStop] {
-  usage.metrics.enumerated()
-    .filter { !$0.element.isUnlimited && $0.element.remainingPercent != nil }
-    .prefix(2)
-    .map { index, metric in
-      DashboardBarStop(metricIndex: index, percent: max(0, min(100, metric.remainingPercent ?? 0)))
+// The dashboard bar shows the same provider-preferred metric pair as the tile
+// rings (defaultRingMetrics) so both surfaces show the same two limits in the
+// same identity colors.
+private func dashboardBarMetrics(for usage: ProviderUsage) -> [UsageMetric] {
+  Array(
+    defaultRingMetrics(for: usage)
+      .filter { !$0.isUnlimited && $0.remainingPercent != nil }
+      .prefix(2)
+  )
+}
+
+private func dashboardBarStops(for usage: ProviderUsage, kindColors: LimitKindColors) -> [DashboardBarStop] {
+  let metricColors = LimitKindColorScheme.colors(for: usage.metrics, colors: kindColors)
+
+  return dashboardBarMetrics(for: usage).compactMap { metric in
+    guard let index = usage.metrics.firstIndex(of: metric) else {
+      return nil
     }
+    return DashboardBarStop(
+      metricIndex: index,
+      percent: max(0, min(100, metric.remainingPercent ?? 0)),
+      color: metricColors[index]
+    )
+  }
+}
+
+private func dashboardBarPercents(for usage: ProviderUsage) -> [Int] {
+  dashboardBarMetrics(for: usage)
+    .map { max(0, min(100, $0.remainingPercent ?? 0)) }
+    .sorted()
 }
 
 private func dualLimitPercentText(for usage: ProviderUsage) -> String? {
-  let boundedPercentages = dashboardBarStops(for: usage)
-    .map(\.percent)
-    .sorted()
+  let boundedPercentages = dashboardBarPercents(for: usage)
 
   guard boundedPercentages.count >= 2 else {
     return nil
@@ -721,9 +726,7 @@ private func dualLimitPercentText(for usage: ProviderUsage) -> String? {
 }
 
 private func dashboardPercentDisplayText(for usage: ProviderUsage) -> String? {
-  let boundedPercentages = dashboardBarStops(for: usage)
-    .map(\.percent)
-    .sorted()
+  let boundedPercentages = dashboardBarPercents(for: usage)
 
   if let worst = boundedPercentages.first {
     return "\(worst)%"
@@ -817,7 +820,7 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
   // Series sharing a hue (same window kind on two accounts, or Claude's two
   // weeklies) take successive brightness steps plus a dash so identity never
   // rests on color alone.
-  var stepBySlot: [LimitKindColorScheme.SeriesSlot: Int] = [:]
+  var stepBySlot: [LimitSeriesSlot: Int] = [:]
 
   let accountOrder = usageByAccount.values.sorted { lhs, rhs in
     if lhs.provider.rawValue != rhs.provider.rawValue {
@@ -834,7 +837,7 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
 
     // Resolve color slots against the account's full metric list so the chart
     // agrees with the rings and the dashboard about which color a metric owns.
-    let accountSlots = LimitKindColorScheme.slots(for: usage.metrics)
+    let accountSlots = limitSeriesSlots(for: usage.metrics)
 
     for metricID in metricIDs {
       let key = SeriesKey(accountID: usage.accountID, metricID: metricID)
@@ -851,20 +854,17 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
         displayLabel = compactProviderName(for: usage)
       }
 
-      let slot: LimitKindColorScheme.SeriesSlot
+      let slot: LimitSeriesSlot
       if let index = usage.metrics.firstIndex(where: { $0.id == metricID || $0.label == metricID }) {
         slot = accountSlots[index]
       } else {
-        slot = LimitKindColorScheme.SeriesSlot(
-          kind: QuotaWindowKind.classify(metricID: metricID, label: metricLabel),
-          otherSlot: 0
-        )
+        slot = LimitSeriesSlot(kind: QuotaWindowKind.classify(metricID: metricID, label: metricLabel))
       }
 
       let step = stepBySlot[slot, default: 0]
       stepBySlot[slot] = step + 1
 
-      let baseHex = kindColors.hexColor(for: slot.kind, otherSlot: slot.otherSlot)
+      let baseHex = kindColors.hexColor(for: slot)
       let lineColor = LimitKindColorScheme.steppedColor(hex: baseHex, step: step) ?? .white
 
       let style = seriesStyle(for: slot.kind)
@@ -888,7 +888,6 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
           points: points,
           color: lineColor,
           resetAt: resetByKey[key],
-          kind: slot.kind,
           lineWidth: style.lineWidth,
           lineOpacity: style.opacity,
           dashPattern: dashPattern,
@@ -1211,6 +1210,7 @@ private extension QuotaEntry {
     return WidgetStyleSettings(
       backgroundHexColor: resolvedBackground,
       ringColors: globalStyle.ringColors,
+      limitKindColors: globalStyle.limitKindColors,
       useTransparentBackground: override.useTransparentBackground
     )
   }

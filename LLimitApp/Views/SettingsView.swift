@@ -615,19 +615,19 @@ struct SettingsView: View {
 
             ringColorPickerRow(
               title: WidgetRingColorRole.high.displayName,
-              binding: model.widgetRingColorBinding(for: .high, layer: .outer)
+              binding: model.menuBarStatusColorBinding(for: .high)
             )
             ringColorPickerRow(
               title: WidgetRingColorRole.medium.displayName,
-              binding: model.widgetRingColorBinding(for: .medium, layer: .outer)
+              binding: model.menuBarStatusColorBinding(for: .medium)
             )
             ringColorPickerRow(
               title: WidgetRingColorRole.low.displayName,
-              binding: model.widgetRingColorBinding(for: .low, layer: .outer)
+              binding: model.menuBarStatusColorBinding(for: .low)
             )
             ringColorPickerRow(
               title: WidgetRingColorRole.unlimited.displayName,
-              binding: model.widgetRingColorBinding(for: .unlimited, layer: .outer)
+              binding: model.menuBarStatusColorBinding(for: .unlimited)
             )
           }
         }

@@ -505,11 +505,13 @@ private struct ProviderQuotaTileView: View {
   /// the account's full metric list so the tile, the dashboard, and the trend
   /// chart always agree about which color a limit owns.
   private func ringTints(for metrics: [UsageMetric], in usage: ProviderUsage) -> [Color] {
-    metrics.map { metric in
+    let metricColors = LimitKindColorScheme.colors(for: usage.metrics, colors: entry.style.limitKindColors)
+
+    return metrics.map { metric in
       guard let index = usage.metrics.firstIndex(of: metric) else {
         return LimitKindColorScheme.color(hex: entry.style.limitKindColors.hexColor(for: .other)) ?? .white
       }
-      return LimitKindColorScheme.color(forMetricAt: index, in: usage.metrics, colors: entry.style.limitKindColors)
+      return metricColors[index]
     }
   }
 

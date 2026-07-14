@@ -464,18 +464,12 @@ public enum WidgetRingColorRole: String, CaseIterable, Sendable {
   }
 }
 
+// The inner layer survives only in stored settings (WidgetRingColors keeps
+// both layers Codable); the UI edits the outer layer as the menu bar's
+// status colors.
 public enum WidgetRingLayer: String, CaseIterable, Sendable {
   case outer
   case inner
-
-  public var displayName: String {
-    switch self {
-    case .outer:
-      return "Outer circle"
-    case .inner:
-      return "Inner circle"
-    }
-  }
 }
 
 public struct WidgetRingColors: Codable, Hashable, Sendable {

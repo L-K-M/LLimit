@@ -397,6 +397,15 @@ Do not make speculative endpoint edits without captured evidence.
   relabeled as dashboard-specific.
 - Consider a medium provider-detail family after the small composition is stable.
 - Add widget deep links to the selected account after defining an app URL scheme.
+- Color-system follow-ups (deliberately deferred from build 18): have provider clients
+  declare the window kind on `UsageMetric` where real data exists (OpenAI reports
+  `limit_window_seconds`) so `QuotaWindowKind.classify`'s label parsing becomes a
+  fallback instead of the source of truth; consolidate the five hex parsers (QuotaCore
+  `normalizeHexColor`, `LimitKindColorScheme.rgbaComponents`, `Color(providerTileHex:)`,
+  `backgroundBaseColor`, `NSColor(hexString:)`/AppModel) behind one QuotaCore
+  component parser; consider lifting `limitKindColors` out of per-scope
+  `WidgetStyleSettings` into a single settings-level field so effective-style merges
+  stop hand-patching the global palette back in.
 - Per-account style overrides win over provider-toned palettes since build 17 (background
   color and transparency; rings already followed the override).
 - Build 18 replaces value-based ring/line coloring with limit-kind identity colors

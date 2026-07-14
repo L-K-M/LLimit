@@ -69,6 +69,39 @@ final class LimitKindTests: XCTestCase {
     XCTAssertEqual(custom.monthlyHexColor, LimitKindColors.defaultMonthlyHexColor)
   }
 
+  func testLimitSeriesSlotsAssignStableAuxiliarySlots() {
+    let google = [
+      UsageMetric(id: "gemini-3-pro-image", label: "G3 Image", remainingPercent: 80),
+      UsageMetric(id: "gemini-3-flash", label: "G3 Flash", remainingPercent: 60),
+      UsageMetric(id: "claude-opus-4-5-thinking", label: "Claude", remainingPercent: 40)
+    ]
+
+    let slots = limitSeriesSlots(for: google)
+    XCTAssertEqual(slots.map(\.kind), [.other, .other, .other])
+    XCTAssertEqual(slots.map(\.otherSlot), [0, 1, 2])
+
+    let colors = LimitKindColors.default
+    XCTAssertEqual(colors.hexColor(for: slots[0]), "#B8A8FF")
+    XCTAssertEqual(colors.hexColor(for: slots[1]), "#F2734D")
+    XCTAssertEqual(colors.hexColor(for: slots[2]), "#B8A8FF")
+  }
+
+  func testLimitSeriesSlotsSkipUnlimitedAndClassifiedMetrics() {
+    // Copilot-shaped account: an unlimited chat metric must not consume an
+    // auxiliary slot (it renders with the unlimited tint), and classified
+    // kinds never take one.
+    let metrics = [
+      UsageMetric(id: "premium", label: "Premium requests", remainingPercent: 55),
+      UsageMetric(id: "chat", label: "Chat messages", isUnlimited: true),
+      UsageMetric(id: "custom", label: "Team pool", remainingPercent: 70)
+    ]
+
+    let slots = limitSeriesSlots(for: metrics)
+    XCTAssertEqual(slots[0], LimitSeriesSlot(kind: .monthly))
+    XCTAssertEqual(slots[1], LimitSeriesSlot(kind: .other, otherSlot: 0))
+    XCTAssertEqual(slots[2], LimitSeriesSlot(kind: .other, otherSlot: 0))
+  }
+
   func testWidgetStyleSettingsDecodesWithoutLimitKindColors() throws {
     // Settings written by builds <= 17 have no limitKindColors key.
     let legacyJSON = Data("""
