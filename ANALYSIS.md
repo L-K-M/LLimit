@@ -352,10 +352,11 @@ Do not make speculative endpoint edits without captured evidence.
   v3 tile. Combined with the fact that no build ever demonstrated the Edit sheet opening for
   ANY intent from this app (the build-9 probes only validated gallery registration), the Edit
   flow on this system is considered unusable regardless of intent shape.
-- Build 14 (current) abandons widget-side configuration entirely. The single configurable
-  tile is replaced by six static slot widgets ("Provider Tile 1"…"6", kinds
-  `ch.lkmc.llimit.widget.provider-tile.slot1..6` — WidgetKit registers kinds at compile time,
-  so the count cannot be dynamic). Account selection lives in LLimit → Settings → Widgets
+- Build 14 (extended to eight slots in build 16) abandons widget-side configuration
+  entirely. The single configurable tile is replaced by static slot widgets
+  ("Provider Tile 1"…"8", kinds `ch.lkmc.llimit.widget.provider-tile.slot1..8` —
+  WidgetKit registers kinds at compile time, so the count cannot be dynamic). Account
+  selection lives in LLimit → Settings → Widgets
   (`AppSettings.providerTileSlots`, synced through the App Group store; the app reloads
   widget timelines on every assignment change). Unassigned tiles auto-fill with the enabled
   accounts not pinned to any tile (`providerTileAutoCandidates`/`providerTileAutoRank`), so

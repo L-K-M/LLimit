@@ -79,7 +79,7 @@ if [[ "$INSTALL" == true && -x "$LSREGISTER" && -d "$INSTALLED_APP" ]]; then
     echo "error: installed widget binary is missing" >&2
     exit 1
   fi
-  for slot in 1 2 3 4 5 6; do
+  for slot in 1 2 3 4 5 6 7 8; do
     if ! /usr/bin/grep -aFq "ch.lkmc.llimit.widget.provider-tile.slot$slot" "$WIDGET_BINARY" \
       || ! /usr/bin/grep -aFq "ProviderTileSlot${slot}Widget" "$WIDGET_BINARY"; then
       echo "error: installed widget is missing provider tile slot$slot" >&2

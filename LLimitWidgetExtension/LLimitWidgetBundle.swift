@@ -10,6 +10,8 @@ struct LLimitWidgetBundle: WidgetBundle {
     ProviderTileSlot4Widget()
     ProviderTileSlot5Widget()
     ProviderTileSlot6Widget()
+    ProviderTileSlot7Widget()
+    ProviderTileSlot8Widget()
     LLimitWidget()
     QuotaTrendChartWidget()
   }

@@ -22,7 +22,9 @@ enum SharedConstants {
       "ch.lkmc.llimit.widget.provider-tile.slot3",
       "ch.lkmc.llimit.widget.provider-tile.slot4",
       "ch.lkmc.llimit.widget.provider-tile.slot5",
-      "ch.lkmc.llimit.widget.provider-tile.slot6"
+      "ch.lkmc.llimit.widget.provider-tile.slot6",
+      "ch.lkmc.llimit.widget.provider-tile.slot7",
+      "ch.lkmc.llimit.widget.provider-tile.slot8"
     ]
     assert(kinds.count == AppSettings.providerTileSlotCount)
     return kinds
