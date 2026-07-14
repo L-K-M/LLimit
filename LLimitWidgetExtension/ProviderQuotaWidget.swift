@@ -17,30 +17,50 @@ import QuotaCore
 // AppSettings.providerTileSlotCount.
 
 struct ProviderTileSlot1Widget: Widget {
-  var body: some WidgetConfiguration { providerTileConfiguration(slotIndex: 0) }
+  var body: some WidgetConfiguration {
+    providerTileConfiguration(slotIndex: 0, displayName: "Provider Tile 1")
+  }
 }
 
 struct ProviderTileSlot2Widget: Widget {
-  var body: some WidgetConfiguration { providerTileConfiguration(slotIndex: 1) }
+  var body: some WidgetConfiguration {
+    providerTileConfiguration(slotIndex: 1, displayName: "Provider Tile 2")
+  }
 }
 
 struct ProviderTileSlot3Widget: Widget {
-  var body: some WidgetConfiguration { providerTileConfiguration(slotIndex: 2) }
+  var body: some WidgetConfiguration {
+    providerTileConfiguration(slotIndex: 2, displayName: "Provider Tile 3")
+  }
 }
 
 struct ProviderTileSlot4Widget: Widget {
-  var body: some WidgetConfiguration { providerTileConfiguration(slotIndex: 3) }
+  var body: some WidgetConfiguration {
+    providerTileConfiguration(slotIndex: 3, displayName: "Provider Tile 4")
+  }
 }
 
 struct ProviderTileSlot5Widget: Widget {
-  var body: some WidgetConfiguration { providerTileConfiguration(slotIndex: 4) }
+  var body: some WidgetConfiguration {
+    providerTileConfiguration(slotIndex: 4, displayName: "Provider Tile 5")
+  }
 }
 
 struct ProviderTileSlot6Widget: Widget {
-  var body: some WidgetConfiguration { providerTileConfiguration(slotIndex: 5) }
+  var body: some WidgetConfiguration {
+    providerTileConfiguration(slotIndex: 5, displayName: "Provider Tile 6")
+  }
 }
 
-private func providerTileConfiguration(slotIndex: Int) -> some WidgetConfiguration {
+// configurationDisplayName/description MUST be plain, non-formatted text: an
+// interpolated string literal becomes a LocalizedStringKey with format
+// arguments, and WidgetKit fatal-errors on those when archiving the gallery
+// metadata ("Formatted text for `configurationDisplayName` is not supported"),
+// killing the whole extension. Hence literal per-slot names + Text(verbatim:).
+private func providerTileConfiguration(
+  slotIndex: Int,
+  displayName: String
+) -> some WidgetConfiguration {
   StaticConfiguration(
     kind: SharedConstants.providerSlotWidgetKinds[slotIndex],
     provider: ProviderTileTimelineProvider(slotIndex: slotIndex)
@@ -50,8 +70,8 @@ private func providerTileConfiguration(slotIndex: Int) -> some WidgetConfigurati
         ProviderTileBackground(provider: entry.account?.provider)
       }
   }
-  .configurationDisplayName("Provider Tile \(slotIndex + 1)")
-  .description("Quota rings for the account assigned to tile \(slotIndex + 1) in LLimit's Settings → Widgets.")
+  .configurationDisplayName(Text(verbatim: displayName))
+  .description(Text(verbatim: "Quota rings for one LLimit account. Assign accounts in LLimit's Settings → Widgets."))
   .supportedFamilies([.systemSmall])
   .contentMarginsDisabled()
 }

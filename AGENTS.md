@@ -101,6 +101,14 @@ Requires macOS 14+, Xcode 15+, [XcodeGen](https://github.com/yonaskolb/XcodeGen)
   per kind) — keep `AppSettings.providerTileSlotCount`, the
   `ProviderTileSlotNWidget` types, and `SharedConstants.providerSlotWidgetKinds`
   in sync when changing it.
+- `configurationDisplayName`/`description` must be plain, non-formatted text.
+  An interpolated string literal becomes a LocalizedStringKey with format
+  arguments and WidgetKit fatal-errors on it at extension launch
+  ("Formatted text for `configurationDisplayName` is not supported"), which
+  kills every widget in the bundle and empties the gallery. Use literals or
+  `Text(verbatim:)`. Kind strings must also exist as literals in the source
+  (not built via interpolation) so the install-gate greps can find them in the
+  binary.
 
 ```bash
 xcodegen generate
