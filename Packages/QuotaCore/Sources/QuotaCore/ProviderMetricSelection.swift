@@ -67,3 +67,46 @@ public extension LimitKindColors {
     hexColor(for: slot.kind, otherSlot: slot.otherSlot)
   }
 }
+
+/// How many color-scheme variants exist per identity hue: base, deep, pale.
+/// A fourth account wraps back to the base scheme.
+public let accountColorVariantCount = 3
+
+/// Accounts in the stable order every color and tile decision keys off:
+/// provider, then display name, then id. Shared by the tile auto-order and
+/// the account color variants.
+public func stableAccountOrder(_ accounts: [ProviderAccount]) -> [ProviderAccount] {
+  accounts.sorted { lhs, rhs in
+    if lhs.provider.rawValue != rhs.provider.rawValue {
+      return lhs.provider.rawValue < rhs.provider.rawValue
+    }
+    if lhs.resolvedDisplayName != rhs.resolvedDisplayName {
+      return lhs.resolvedDisplayName < rhs.resolvedDisplayName
+    }
+    return lhs.id < rhs.id
+  }
+}
+
+/// Which variant of every identity hue this account's marks wear (0 = base,
+/// 1 = deep, 2 = pale). The tile rings double as the trend chart's legend, so
+/// no two accounts may share an exact color scheme. Ranked over ALL accounts —
+/// not just enabled ones — so disabling an account never recolors the others,
+/// using the same order users see tiles auto-fill in. Legacy sole-account
+/// usages identify themselves by the provider's raw value and resolve to that
+/// provider's only account.
+public func accountColorStep(forAccountID accountID: String, in accounts: [ProviderAccount]) -> Int {
+  let ordered = stableAccountOrder(accounts)
+
+  if let index = ordered.firstIndex(where: { $0.id == accountID }) {
+    return index % accountColorVariantCount
+  }
+
+  if let provider = QuotaProvider(rawValue: accountID) {
+    let matches = ordered.enumerated().filter { $0.element.provider == provider }
+    if matches.count == 1, let match = matches.first {
+      return match.offset % accountColorVariantCount
+    }
+  }
+
+  return 0
+}

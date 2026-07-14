@@ -418,10 +418,19 @@ Do not make speculative endpoint edits without captured evidence.
   status accents (low-value text, warning chips). The menu bar graph keeps value-based
   status colors (`WidgetRingColors`, now edited under Settings → Appearance → "Menu bar
   colors"); per-account ring color pickers were removed since identity hues are global.
-  The trend chart also gained a legend, data-fitted time domain, reset-aware step
-  rendering (drain slopes, refills snap vertically), de-emphasized session saw-tooths,
-  axis labels in the medium family, and it drops unlimited metrics instead of pinning
+  The trend chart also gained a data-fitted time domain, reset-aware step rendering
+  (drain slopes, refills snap vertically), de-emphasized session saw-tooths, axis
+  labels in the medium family, and it drops unlimited metrics instead of pinning
   them at 100%.
+- Build 19 makes account color schemes mutually exclusive so the provider tiles act
+  as the trend chart's legend (per the user, replacing build 18's in-chart legend
+  chips): every account wears its own variant of each kind hue — base, deep
+  (darken 36% + re-spread channels 1.5x, validated alongside the bases), pale —
+  ranked by `accountColorStep` over ALL accounts in `stableAccountOrder`, so a
+  chart line, dropdown row, bar, and tile ring for the same account+limit always
+  match exactly and no two tiles share a scheme. Within one account, two limits
+  that still resolve to the same hue (Claude's two weeklies, a cycled third
+  per-model quota) are dash-differentiated in the chart only.
 
 ### Existing dashboard
 

@@ -127,6 +127,10 @@ struct ProviderQuotaEntry: TimelineEntry {
   /// the global style, same resolution as the dashboard widget.
   let style: WidgetStyleSettings
   let refreshIntervalMinutes: Int
+  /// Which color-scheme variant this account wears (accountColorStep) — the
+  /// rings double as the trend chart's legend, so tiles for different
+  /// accounts must never share an exact scheme.
+  var accountColorStep = 0
 }
 
 struct ProviderTileTimelineProvider: TimelineProvider {
@@ -174,7 +178,8 @@ struct ProviderTileTimelineProvider: TimelineProvider {
         usage: entry.usage,
         failure: entry.failure,
         style: entry.style,
-        refreshIntervalMinutes: entry.refreshIntervalMinutes
+        refreshIntervalMinutes: entry.refreshIntervalMinutes,
+        accountColorStep: entry.accountColorStep
       )
     }
     completion(Timeline(entries: entries, policy: .after(nextRefresh)))
@@ -242,7 +247,8 @@ struct ProviderTileTimelineProvider: TimelineProvider {
       usage: usage,
       failure: failure,
       style: effectiveStyle(for: selection?.id, settings: settings),
-      refreshIntervalMinutes: max(15, settings.refreshIntervalMinutes)
+      refreshIntervalMinutes: max(15, settings.refreshIntervalMinutes),
+      accountColorStep: selection.map { accountColorStep(forAccountID: $0.id, in: allAccounts) } ?? 0
     )
   }
 
@@ -329,7 +335,9 @@ struct ProviderTileTimelineProvider: TimelineProvider {
       ),
       failure: nil,
       style: WidgetStyleSettings(),
-      refreshIntervalMinutes: 30
+      refreshIntervalMinutes: 30,
+      // Gallery previews cycle the scheme variants so slots visibly differ.
+      accountColorStep: slotIndex % accountColorVariantCount
     )
   }
 }
@@ -505,7 +513,11 @@ private struct ProviderQuotaTileView: View {
   /// the account's full metric list so the tile, the dashboard, and the trend
   /// chart always agree about which color a limit owns.
   private func ringTints(for metrics: [UsageMetric], in usage: ProviderUsage) -> [Color] {
-    let metricColors = LimitKindColorScheme.colors(for: usage.metrics, colors: entry.style.limitKindColors)
+    let metricColors = LimitKindColorScheme.colors(
+      for: usage.metrics,
+      colors: entry.style.limitKindColors,
+      step: entry.accountColorStep
+    )
 
     return metrics.map { metric in
       guard let index = usage.metrics.firstIndex(of: metric) else {

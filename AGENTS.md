@@ -115,17 +115,25 @@ Requires macOS 14+, Xcode 15+, [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 - Color encodes exactly one thing per surface. Identity surfaces (chart lines,
   sparklines, quota bars, tile/dropdown rings) wear the metric's limit-window
   color from `LimitKindColors` via `QuotaWindowKind.classify` +
-  `Shared/LimitKindColorScheme` — one global hue per window kind (session /
-  daily / weekly / monthly, aux slots for `.other`), never per-account and
-  never repainted by the current value. Magnitude is geometry (arc, bar, line
-  height); danger is the reserved status accents (warning chips, low-value
-  text) or the menu bar graph, which is the one surface that still colors by
-  value through `WidgetRingColors` roles.
+  `Shared/LimitKindColorScheme` — one hue per window kind (session / daily /
+  weekly / monthly, aux slots for `.other`), never repainted by the current
+  value. Each ACCOUNT wears its own variant of every hue
+  (`accountColorStep`: base / deep / pale, ranked over ALL accounts in
+  `stableAccountOrder` so toggling one never recolors another): the provider
+  tiles double as the trend chart's legend, so two accounts must never share
+  an exact color scheme, and the chart deliberately has no legend of its own.
+  Magnitude is geometry (arc, bar, line height); danger is the reserved
+  status accents (warning chips, low-value text) or the menu bar graph, which
+  is the one surface that still colors by value through `WidgetRingColors`
+  roles.
 - The default `LimitKindColors` palette is validator-checked (CVD all-pairs
-  ΔE >= 12, chroma >= 0.10, >= 3:1 contrast on the dropdown graphite). If you
-  change a default hex, re-run the dataviz palette validator against both the
-  graphite (`#1D1F27`) and default widget blue (`#5994F2`) surfaces rather
-  than eyeballing it.
+  ΔE >= 12 for the six base hues, >= 8 with secondary encoding for the
+  base+deep twelve; chroma >= 0.10; >= 3:1 contrast on the dropdown
+  graphite). The deep variant formula in `LimitKindColorScheme.steppedColor`
+  (darken 36% toward near-black, re-spread channels 1.5x around their mean)
+  is part of what was validated — if you change a default hex or the formula,
+  re-run the dataviz palette validator against both the graphite (`#1D1F27`)
+  and default widget blue (`#5994F2`) surfaces rather than eyeballing it.
 - `QuotaWindowKind.classify` parses metric ids/labels because providers do not
   report window lengths as data; new provider metrics with a reset cadence
   should either use labels the classifier understands ("N-hour", "N-day",

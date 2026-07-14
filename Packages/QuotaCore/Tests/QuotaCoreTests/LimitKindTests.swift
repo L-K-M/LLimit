@@ -102,6 +102,40 @@ final class LimitKindTests: XCTestCase {
     XCTAssertEqual(slots[2], LimitSeriesSlot(kind: .other, otherSlot: 0))
   }
 
+  func testAccountColorStepsAreMutuallyExclusiveAndStable() {
+    let accounts = [
+      ProviderAccount(id: "o2", provider: .openAI, displayName: "GPT B", isEnabled: true, credentials: [:]),
+      ProviderAccount(id: "o1", provider: .openAI, displayName: "GPT A", isEnabled: true, credentials: [:]),
+      ProviderAccount(id: "a1", provider: .anthropic, displayName: "Claude", isEnabled: false, credentials: [:])
+    ]
+
+    // Stable order: anthropic before openai, then display name. Steps follow it.
+    XCTAssertEqual(accountColorStep(forAccountID: "a1", in: accounts), 0)
+    XCTAssertEqual(accountColorStep(forAccountID: "o1", in: accounts), 1)
+    XCTAssertEqual(accountColorStep(forAccountID: "o2", in: accounts), 2)
+
+    // Disabling an account must not recolor the others: the rank counts ALL
+    // accounts, so o1/o2 keep their steps whether a1 is enabled or not.
+    let enabledClaude = accounts.map { account in
+      var copy = account
+      copy.isEnabled = true
+      return copy
+    }
+    XCTAssertEqual(accountColorStep(forAccountID: "o1", in: enabledClaude), 1)
+    XCTAssertEqual(accountColorStep(forAccountID: "o2", in: enabledClaude), 2)
+
+    // A fourth account wraps to the base variant; unknown ids fall back to it.
+    let four = accounts + [ProviderAccount(id: "z9", provider: .zai, displayName: "Z", isEnabled: true, credentials: [:])]
+    XCTAssertEqual(accountColorStep(forAccountID: "z9", in: four), 0)
+    XCTAssertEqual(accountColorStep(forAccountID: "missing", in: accounts), 0)
+
+    // Legacy sole-account usages identify as the provider raw value.
+    XCTAssertEqual(
+      accountColorStep(forAccountID: QuotaProvider.anthropic.rawValue, in: accounts),
+      accountColorStep(forAccountID: "a1", in: accounts)
+    )
+  }
+
   func testWidgetStyleSettingsDecodesWithoutLimitKindColors() throws {
     // Settings written by builds <= 17 have no limitKindColors key.
     let legacyJSON = Data("""

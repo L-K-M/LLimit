@@ -1301,15 +1301,7 @@ public struct AppSettings: Codable, Hashable, Sendable {
   /// Stable order backing automatic tile assignment. The app's Settings UI and
   /// the widget extension must agree on this order, which is why it lives here.
   public var providerTileAutoOrder: [ProviderAccount] {
-    accounts.filter(\.isEnabled).sorted { lhs, rhs in
-      if lhs.provider.rawValue != rhs.provider.rawValue {
-        return lhs.provider.rawValue < rhs.provider.rawValue
-      }
-      if lhs.resolvedDisplayName != rhs.resolvedDisplayName {
-        return lhs.resolvedDisplayName < rhs.resolvedDisplayName
-      }
-      return lhs.id < rhs.id
-    }
+    stableAccountOrder(accounts.filter(\.isEnabled))
   }
 
   /// Enabled accounts not explicitly pinned to any slot, in stable order.

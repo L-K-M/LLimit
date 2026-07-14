@@ -584,6 +584,7 @@ private struct MenuBarContent: View {
                 failureCount: snapshot.failures.count,
                 tint: summaryTint(for: providers),
                 kindColors: model.widgetStyle.limitKindColors,
+                accounts: model.providerAccounts,
                 onSelect: { accountID in
                   withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
                     proxy.scrollTo(accountID, anchor: .top)
@@ -602,6 +603,7 @@ private struct MenuBarContent: View {
                   accountName: model.account(withID: provider.accountID)?.displayName,
                   failure: failuresByAccount[provider.accountID],
                   kindColors: model.widgetStyle.limitKindColors,
+                  colorStep: accountColorStep(forAccountID: provider.accountID, in: model.providerAccounts),
                   now: now,
                   sparkBuilder: sparkBuilder
                 )
@@ -945,6 +947,7 @@ private struct OverviewCard: View {
   let failureCount: Int
   let tint: Color
   let kindColors: LimitKindColors
+  let accounts: [ProviderAccount]
   let onSelect: (String) -> Void
 
   private var lowestRemaining: Int? {
@@ -975,7 +978,11 @@ private struct OverviewCard: View {
                 GlossRing(
                   remaining: MenuBarQuotaStyling.remainingPercent(for: provider),
                   unlimited: provider.metrics.allSatisfy(\.isUnlimited) && !provider.metrics.isEmpty,
-                  tint: LimitKindColorScheme.accountAccent(for: provider.metrics, colors: kindColors),
+                  tint: LimitKindColorScheme.accountAccent(
+                    for: provider.metrics,
+                    colors: kindColors,
+                    step: accountColorStep(forAccountID: provider.accountID, in: accounts)
+                  ),
                   diameter: 40,
                   lineWidth: 4.5
                 )
@@ -1084,13 +1091,14 @@ private struct ProviderQuotaCard: View {
   let accountName: String?
   let failure: ProviderFailure?
   let kindColors: LimitKindColors
+  let colorStep: Int
   let now: Date
   let sparkBuilder: SparkSeriesBuilder
 
   @State private var isHovered = false
 
   private var accent: Color {
-    LimitKindColorScheme.accountAccent(for: usage.metrics, colors: kindColors)
+    LimitKindColorScheme.accountAccent(for: usage.metrics, colors: kindColors, step: colorStep)
   }
 
   private var displayName: String {
@@ -1135,7 +1143,7 @@ private struct ProviderQuotaCard: View {
         )
       }
 
-      let metricColors = LimitKindColorScheme.colors(for: usage.metrics, colors: kindColors)
+      let metricColors = LimitKindColorScheme.colors(for: usage.metrics, colors: kindColors, step: colorStep)
 
       VStack(spacing: 10) {
         ForEach(Array(usage.metrics.enumerated()), id: \.element.id) { index, metric in

@@ -71,7 +71,6 @@ private struct TrendLineChartWidgetView: View {
   var body: some View {
     let days = max(1, min(30, entry.settings.widgetVisibility.trendHistoryDays))
     let chartData = trendChartData(for: entry, days: days)
-    let legendLimit = family == .systemSmall ? 4 : 8
 
     VStack(alignment: .leading, spacing: 4) {
       if chartData.series.isEmpty {
@@ -85,6 +84,9 @@ private struct TrendLineChartWidgetView: View {
           .foregroundStyle(.secondary)
         Spacer(minLength: 0)
       } else {
+        // No legend by design: line colors match the account's tile rings and
+        // dropdown rows exactly (same hue variant per account), so the circle
+        // charts are the legend.
         // Least important windows first so the risk carriers (weekly/monthly)
         // draw on top; sorted once here, not per layout pass.
         TrendChartPlotView(
@@ -94,18 +96,6 @@ private struct TrendLineChartWidgetView: View {
           showAxisLabels: family != .systemSmall
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-        // Identity never rides on color alone: every series appears here.
-        LegendFlowLayout(hSpacing: 7, vSpacing: 3) {
-          ForEach(chartData.series.prefix(legendLimit)) { line in
-            TrendLegendChip(series: line)
-          }
-          if chartData.series.count > legendLimit {
-            Text("+\(chartData.series.count - legendLimit)")
-              .font(.system(size: 7.5, weight: .semibold))
-              .foregroundStyle(.white.opacity(0.6))
-          }
-        }
 
         if let warning = chartData.warnings.first {
           Label {
@@ -123,76 +113,6 @@ private struct TrendLineChartWidgetView: View {
       }
     }
     .padding(family == .systemSmall ? 7 : 9)
-  }
-}
-
-/// Wrapping row of legend chips; a widget is too narrow for one line of them.
-private struct LegendFlowLayout: Layout {
-  var hSpacing: CGFloat = 7
-  var vSpacing: CGFloat = 3
-
-  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-    let maxWidth = proposal.width ?? .infinity
-    var x: CGFloat = 0
-    var y: CGFloat = 0
-    var rowHeight: CGFloat = 0
-    var width: CGFloat = 0
-
-    for subview in subviews {
-      let size = subview.sizeThatFits(.unspecified)
-      if x > 0, x + size.width > maxWidth {
-        x = 0
-        y += rowHeight + vSpacing
-        rowHeight = 0
-      }
-      width = max(width, x + size.width)
-      x += size.width + hSpacing
-      rowHeight = max(rowHeight, size.height)
-    }
-
-    return CGSize(width: width, height: y + rowHeight)
-  }
-
-  func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-    var x = bounds.minX
-    var y = bounds.minY
-    var rowHeight: CGFloat = 0
-
-    for subview in subviews {
-      let size = subview.sizeThatFits(.unspecified)
-      if x > bounds.minX, x + size.width > bounds.maxX {
-        x = bounds.minX
-        y += rowHeight + vSpacing
-        rowHeight = 0
-      }
-      subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
-      x += size.width + hSpacing
-      rowHeight = max(rowHeight, size.height)
-    }
-  }
-}
-
-private struct TrendLegendChip: View {
-  let series: TrendSeries
-
-  var body: some View {
-    HStack(spacing: 3.5) {
-      if series.dashPattern.isEmpty {
-        Capsule()
-          .fill(series.color)
-          .frame(width: 10, height: 2.5)
-      } else {
-        HStack(spacing: 1.5) {
-          Capsule().fill(series.color).frame(width: 4.5, height: 2.5)
-          Capsule().fill(series.color).frame(width: 4.5, height: 2.5)
-        }
-      }
-
-      Text(series.displayLabel)
-        .font(.system(size: 7.5, weight: .medium))
-        .foregroundStyle(.white.opacity(0.78))
-        .lineLimit(1)
-    }
   }
 }
 
@@ -411,6 +331,7 @@ private struct OverviewSmallQuotaView: View {
           CompactProviderUsageRow(
             usage: usage,
             kindColors: entry.settings.widgetStyle.limitKindColors,
+            colorStep: accountColorStep(forAccountID: usage.accountID, in: entry.settings.accounts),
             showProgressBar: true,
             showPercentages: entry.settings.widgetVisibility.showPercentageValues,
             showDualLimitPercentages: entry.settings.widgetVisibility.showDualLimitPercentagesInDashboard
@@ -491,6 +412,7 @@ private struct MediumCompactQuotaView: View {
           CompactProviderUsageRow(
             usage: usage,
             kindColors: entry.settings.widgetStyle.limitKindColors,
+            colorStep: accountColorStep(forAccountID: usage.accountID, in: entry.settings.accounts),
             showProgressBar: entry.settings.widgetVisibility.showMediumProgressBars,
             showPercentages: entry.settings.widgetVisibility.showPercentageValues,
             showDualLimitPercentages: entry.settings.widgetVisibility.showDualLimitPercentagesInDashboard
@@ -532,6 +454,7 @@ private struct MediumCompactQuotaView: View {
 private struct CompactProviderUsageRow: View {
   let usage: ProviderUsage
   let kindColors: LimitKindColors
+  let colorStep: Int
   let showProgressBar: Bool
   let showPercentages: Bool
   let showDualLimitPercentages: Bool
@@ -552,8 +475,8 @@ private struct CompactProviderUsageRow: View {
         MiniProgressBar(
           percent: basePercent,
           unlimited: unlimited,
-          tint: LimitKindColorScheme.accountAccent(for: usage.metrics, colors: kindColors),
-          stops: dashboardBarStops(for: usage, kindColors: kindColors),
+          tint: LimitKindColorScheme.accountAccent(for: usage.metrics, colors: kindColors, step: colorStep),
+          stops: dashboardBarStops(for: usage, kindColors: kindColors, step: colorStep),
           showDualStops: showDualLimitPercentages
         )
           .frame(height: 5)
@@ -703,8 +626,8 @@ private func dashboardBarMetrics(for usage: ProviderUsage) -> [UsageMetric] {
   )
 }
 
-private func dashboardBarStops(for usage: ProviderUsage, kindColors: LimitKindColors) -> [DashboardBarStop] {
-  let metricColors = LimitKindColorScheme.colors(for: usage.metrics, colors: kindColors)
+private func dashboardBarStops(for usage: ProviderUsage, kindColors: LimitKindColors, step: Int) -> [DashboardBarStop] {
+  let metricColors = LimitKindColorScheme.colors(for: usage.metrics, colors: kindColors, step: step)
 
   return dashboardBarMetrics(for: usage).compactMap { metric in
     guard let index = usage.metrics.firstIndex(of: metric) else {
@@ -817,12 +740,6 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
 
   var series: [TrendSeries] = []
   let kindColors = entry.settings.widgetStyle.limitKindColors
-  // Series sharing a hue take successive brightness steps plus a dash so
-  // identity never rests on color alone. Keyed by the RESOLVED base color,
-  // not the slot: the aux table cycles (a third .other metric reuses aux
-  // color A) and users can point two kinds at the same hue — both must
-  // trigger the stepping.
-  var stepByBaseHex: [String: Int] = [:]
 
   let accountOrder = usageByAccount.values.sorted { lhs, rhs in
     if lhs.provider.rawValue != rhs.provider.rawValue {
@@ -840,6 +757,13 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
     // Resolve color slots against the account's full metric list so the chart
     // agrees with the rings and the dashboard about which color a metric owns.
     let accountSlots = limitSeriesSlots(for: usage.metrics)
+    // Lines wear the account's color-scheme variant — the same colors as the
+    // account's tile rings, which act as the chart's legend.
+    let accountStep = accountColorStep(forAccountID: usage.accountID, in: entry.settings.accounts)
+    // Two limits of ONE account can still resolve to the same hue (Claude's
+    // two weeklies, a third per-model quota re-using an aux color). The tile
+    // can't show those either, so the chart adds a dash for repeats.
+    var duplicateOrdinalByHex: [String: Int] = [:]
 
     for metricID in metricIDs {
       let key = SeriesKey(accountID: usage.accountID, metricID: metricID)
@@ -864,13 +788,13 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
       }
 
       let baseHex = kindColors.hexColor(for: slot)
-      let step = stepByBaseHex[baseHex, default: 0]
-      stepByBaseHex[baseHex] = step + 1
-      let lineColor = LimitKindColorScheme.steppedColor(hex: baseHex, step: step) ?? .white
+      let duplicateOrdinal = duplicateOrdinalByHex[baseHex, default: 0]
+      duplicateOrdinalByHex[baseHex] = duplicateOrdinal + 1
+      let lineColor = LimitKindColorScheme.steppedColor(hex: baseHex, step: accountStep) ?? .white
 
       let style = seriesStyle(for: slot.kind)
       let dashPattern: [CGFloat]
-      switch step {
+      switch duplicateOrdinal {
       case 0:
         dashPattern = []
       case 1:
