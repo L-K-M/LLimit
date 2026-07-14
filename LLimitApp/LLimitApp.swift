@@ -205,8 +205,8 @@ private struct MenuBarIcon: View {
 
 // MARK: - Dashboard design system
 
-/// Graphite-glass palette for the dropdown/floating dashboard. Accent color always
-/// comes from the user's quota style settings (see MenuBarQuotaStyling); nothing
+/// Graphite-glass palette for the dropdown/floating dashboard. Accent colors
+/// come from the limit-kind identity palette (LimitKindColorScheme); nothing
 /// here should compete with those signal colors.
 private enum DashboardPalette {
   static let backgroundTop = Color(red: 0.114, green: 0.122, blue: 0.153)
@@ -585,8 +585,7 @@ private struct MenuBarContent: View {
                 accountCount: accountCount,
                 failureCount: snapshot.failures.count,
                 tint: summaryTint(for: providers),
-                globalStyle: model.widgetStyle,
-                providerStyleSettings: model.providerStyleSettings,
+                kindColors: model.widgetStyle.limitKindColors,
                 onSelect: { accountID in
                   withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
                     proxy.scrollTo(accountID, anchor: .top)
@@ -604,8 +603,7 @@ private struct MenuBarContent: View {
                   usage: provider,
                   accountName: model.account(withID: provider.accountID)?.displayName,
                   failure: failuresByAccount[provider.accountID],
-                  globalStyle: model.widgetStyle,
-                  providerStyleSettings: model.providerStyleSettings,
+                  kindColors: model.widgetStyle.limitKindColors,
                   now: now,
                   sparkBuilder: sparkBuilder
                 )
@@ -952,8 +950,7 @@ private struct OverviewCard: View {
   let accountCount: Int
   let failureCount: Int
   let tint: Color
-  let globalStyle: WidgetStyleSettings
-  let providerStyleSettings: [String: ProviderStyleSettings]
+  let kindColors: LimitKindColors
   let onSelect: (String) -> Void
 
   private var lowestRemaining: Int? {
@@ -984,11 +981,7 @@ private struct OverviewCard: View {
                 GlossRing(
                   remaining: MenuBarQuotaStyling.remainingPercent(for: provider),
                   unlimited: provider.metrics.allSatisfy(\.isUnlimited) && !provider.metrics.isEmpty,
-                  tint: Color(nsColor: MenuBarQuotaStyling.color(
-                    for: provider,
-                    globalStyle: globalStyle,
-                    providerStyleSettings: providerStyleSettings
-                  )),
+                  tint: LimitKindColorScheme.accountAccent(for: provider.metrics, colors: kindColors),
                   diameter: 40,
                   lineWidth: 4.5
                 )
@@ -1096,19 +1089,14 @@ private struct ProviderQuotaCard: View {
   let usage: ProviderUsage
   let accountName: String?
   let failure: ProviderFailure?
-  let globalStyle: WidgetStyleSettings
-  let providerStyleSettings: [String: ProviderStyleSettings]
+  let kindColors: LimitKindColors
   let now: Date
   let sparkBuilder: SparkSeriesBuilder
 
   @State private var isHovered = false
 
   private var accent: Color {
-    Color(nsColor: MenuBarQuotaStyling.color(
-      for: usage,
-      globalStyle: globalStyle,
-      providerStyleSettings: providerStyleSettings
-    ))
+    LimitKindColorScheme.accountAccent(for: usage.metrics, colors: kindColors)
   }
 
   private var displayName: String {
@@ -1157,13 +1145,7 @@ private struct ProviderQuotaCard: View {
         ForEach(Array(usage.metrics.enumerated()), id: \.element.id) { index, metric in
           MetricQuotaRow(
             metric: metric,
-            tint: Color(nsColor: MenuBarQuotaStyling.color(
-              for: metric,
-              accountID: usage.accountID,
-              layer: index == 0 ? .outer : .inner,
-              globalStyle: globalStyle,
-              providerStyleSettings: providerStyleSettings
-            )),
+            tint: LimitKindColorScheme.color(forMetricAt: index, in: usage.metrics, colors: kindColors),
             now: now,
             sparkPoints: sparkPoints(for: metric)
           )
@@ -1301,7 +1283,7 @@ private struct MetricQuotaRow: View {
           .font(.system(size: 11.5, weight: .bold, design: .rounded))
           .monospacedDigit()
           .contentTransition(.numericText())
-          .foregroundStyle(metric.isUnlimited ? tint : .white.opacity(0.92))
+          .foregroundStyle(valueColor)
       }
 
       GlossBar(progress: barProgress, tint: tint)
@@ -1335,6 +1317,17 @@ private struct MetricQuotaRow: View {
     if metric.isUnlimited { return "Unlimited" }
     guard let remaining else { return metric.usageLine ?? "Unavailable" }
     return "\(remaining)% left"
+  }
+
+  /// Row colors carry identity (which limit), so danger gets its own channel:
+  /// the value text shifts to the reserved status accents when a limit runs
+  /// low. The number itself is the label that makes the color readable.
+  private var valueColor: Color {
+    if metric.isUnlimited { return tint }
+    guard let remaining else { return .white.opacity(0.92) }
+    if remaining <= 10 { return Color(red: 1.0, green: 0.36, blue: 0.32) }
+    if remaining <= 25 { return .orange }
+    return .white.opacity(0.92)
   }
 
   private var secondaryUsageLine: String? {
@@ -1420,23 +1413,6 @@ private enum MenuBarQuotaStyling {
     return NSColor(hexString: hex) ?? .systemGray
   }
 
-  static func color(
-    for metric: UsageMetric,
-    accountID: String,
-    layer: WidgetRingLayer,
-    globalStyle: WidgetStyleSettings,
-    providerStyleSettings: [String: ProviderStyleSettings]
-  ) -> NSColor {
-    let style = effectiveStyle(for: accountID, globalStyle: globalStyle, providerStyleSettings: providerStyleSettings)
-
-    guard let role = colorRole(for: metric) else {
-      return .systemGray
-    }
-
-    let hex = style.ringColors.hexColor(for: role, layer: layer)
-    return NSColor(hexString: hex) ?? .systemGray
-  }
-
   private static func colorRole(for provider: ProviderUsage) -> WidgetRingColorRole? {
     let boundedRemaining = provider.metrics
       .filter { !$0.isUnlimited }
@@ -1490,6 +1466,7 @@ private enum MenuBarQuotaStyling {
     return WidgetStyleSettings(
       backgroundHexColor: styleOverride.style.backgroundHexColor ?? globalStyle.backgroundHexColor,
       ringColors: styleOverride.style.ringColors,
+      limitKindColors: globalStyle.limitKindColors,
       useTransparentBackground: styleOverride.style.useTransparentBackground
     )
   }

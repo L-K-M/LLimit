@@ -562,22 +562,72 @@ struct SettingsView: View {
 
         Divider()
 
-        settingsRow(title: "Circle graph colors") {
-          HStack(alignment: .top, spacing: 24) {
-            ringColorLayerColumn(
-              layer: .outer,
-              high: model.widgetRingColorBinding(for: .high, layer: .outer),
-              medium: model.widgetRingColorBinding(for: .medium, layer: .outer),
-              low: model.widgetRingColorBinding(for: .low, layer: .outer),
-              unlimited: model.widgetRingColorBinding(for: .unlimited, layer: .outer)
+        settingsRow(title: "Limit colors") {
+          VStack(alignment: .leading, spacing: 6) {
+            Text("Each limit window keeps one color everywhere — rings, bars, sparklines, and the trend chart.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+
+            ringColorPickerRow(
+              title: QuotaWindowKind.session.displayName,
+              binding: model.limitKindColorBinding(for: .session)
+            )
+            ringColorPickerRow(
+              title: QuotaWindowKind.daily.displayName,
+              binding: model.limitKindColorBinding(for: .daily)
+            )
+            ringColorPickerRow(
+              title: QuotaWindowKind.weekly.displayName,
+              binding: model.limitKindColorBinding(for: .weekly)
+            )
+            ringColorPickerRow(
+              title: QuotaWindowKind.monthly.displayName,
+              binding: model.limitKindColorBinding(for: .monthly)
+            )
+            ringColorPickerRow(
+              title: "Other A",
+              binding: model.limitKindColorBinding(for: .other, otherSlot: 0)
+            )
+            ringColorPickerRow(
+              title: "Other B",
+              binding: model.limitKindColorBinding(for: .other, otherSlot: 1)
+            )
+            ringColorPickerRow(
+              title: "Unlimited",
+              binding: model.limitKindUnlimitedColorBinding()
             )
 
-            ringColorLayerColumn(
-              layer: .inner,
-              high: model.widgetRingColorBinding(for: .high, layer: .inner),
-              medium: model.widgetRingColorBinding(for: .medium, layer: .inner),
-              low: model.widgetRingColorBinding(for: .low, layer: .inner),
-              unlimited: model.widgetRingColorBinding(for: .unlimited, layer: .inner)
+            Button("Reset to defaults") {
+              model.resetLimitKindColors()
+            }
+            .buttonStyle(.link)
+            .font(.caption)
+          }
+        }
+
+        Divider()
+
+        settingsRow(title: "Menu bar colors") {
+          VStack(alignment: .leading, spacing: 6) {
+            Text("The menu bar graph colors each account by how much of its tightest limit is left.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+
+            ringColorPickerRow(
+              title: WidgetRingColorRole.high.displayName,
+              binding: model.widgetRingColorBinding(for: .high, layer: .outer)
+            )
+            ringColorPickerRow(
+              title: WidgetRingColorRole.medium.displayName,
+              binding: model.widgetRingColorBinding(for: .medium, layer: .outer)
+            )
+            ringColorPickerRow(
+              title: WidgetRingColorRole.low.displayName,
+              binding: model.widgetRingColorBinding(for: .low, layer: .outer)
+            )
+            ringColorPickerRow(
+              title: WidgetRingColorRole.unlimited.displayName,
+              binding: model.widgetRingColorBinding(for: .unlimited, layer: .outer)
             )
           }
         }
@@ -781,27 +831,6 @@ struct SettingsView: View {
                 .disabled(providerStyle.style.useTransparentBackground)
             }
 
-            Divider()
-
-            settingsRow(title: "Circle graph colors") {
-              HStack(alignment: .top, spacing: 24) {
-                ringColorLayerColumn(
-                  layer: .outer,
-                  high: model.providerRingColorBinding(for: accountID, role: .high, layer: .outer),
-                  medium: model.providerRingColorBinding(for: accountID, role: .medium, layer: .outer),
-                  low: model.providerRingColorBinding(for: accountID, role: .low, layer: .outer),
-                  unlimited: model.providerRingColorBinding(for: accountID, role: .unlimited, layer: .outer)
-                )
-
-                ringColorLayerColumn(
-                  layer: .inner,
-                  high: model.providerRingColorBinding(for: accountID, role: .high, layer: .inner),
-                  medium: model.providerRingColorBinding(for: accountID, role: .medium, layer: .inner),
-                  low: model.providerRingColorBinding(for: accountID, role: .low, layer: .inner),
-                  unlimited: model.providerRingColorBinding(for: accountID, role: .unlimited, layer: .inner)
-                )
-              }
-            }
           }
 
           Divider()
@@ -955,25 +984,6 @@ struct SettingsView: View {
         .labelsHidden()
         .frame(width: 48)
     }
-  }
-
-  private func ringColorLayerColumn(
-    layer: WidgetRingLayer,
-    high: Binding<Color>,
-    medium: Binding<Color>,
-    low: Binding<Color>,
-    unlimited: Binding<Color>
-  ) -> some View {
-    VStack(alignment: .leading, spacing: 6) {
-      Text(layer.displayName)
-        .font(.caption.weight(.semibold))
-
-      ringColorPickerRow(title: WidgetRingColorRole.high.displayName, binding: high)
-      ringColorPickerRow(title: WidgetRingColorRole.medium.displayName, binding: medium)
-      ringColorPickerRow(title: WidgetRingColorRole.low.displayName, binding: low)
-      ringColorPickerRow(title: WidgetRingColorRole.unlimited.displayName, binding: unlimited)
-    }
-    .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   private func summaryPill(title: String, value: String, tint: Color) -> some View {

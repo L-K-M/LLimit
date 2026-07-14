@@ -290,9 +290,12 @@ struct ProviderTileTimelineProvider: TimelineProvider {
     guard let accountID else { return settings.widgetStyle }
     let override = settings.styleOverride(for: accountID)
     guard override.useCustomStyle else { return settings.widgetStyle }
+    // Limit-kind colors are global identity — per-account overrides only
+    // customize the background.
     return WidgetStyleSettings(
       backgroundHexColor: override.style.backgroundHexColor ?? settings.widgetStyle.backgroundHexColor,
       ringColors: override.style.ringColors,
+      limitKindColors: settings.widgetStyle.limitKindColors,
       useTransparentBackground: override.style.useTransparentBackground
     )
   }
@@ -325,7 +328,7 @@ struct ProviderTileTimelineProvider: TimelineProvider {
         fetchedAt: date
       ),
       failure: nil,
-      style: WidgetStyleSettings(ringColors: WidgetRingColors.defaults(for: .warm)),
+      style: WidgetStyleSettings(),
       refreshIntervalMinutes: 30
     )
   }
@@ -370,16 +373,17 @@ private struct ProviderQuotaTileView: View {
 
   private func loadedContent(account: ProviderTileSelection, usage: ProviderUsage) -> some View {
     let metrics = defaultRingMetrics(for: usage)
+    let tints = ringTints(for: metrics, in: usage)
 
     return VStack(spacing: 5) {
       ProviderConcentricRings(
         metrics: metrics,
         name: account.displayName,
-        colors: entry.style.ringColors
+        tints: tints
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-      resetFooter(metrics: metrics)
+      resetFooter(metrics: metrics, tints: tints)
     }
     .padding(.horizontal, 14)
     .padding(.top, 13)
@@ -477,7 +481,7 @@ private struct ProviderQuotaTileView: View {
     .padding(16)
   }
 
-  private func resetFooter(metrics: [UsageMetric]) -> some View {
+  private func resetFooter(metrics: [UsageMetric], tints: [Color]) -> some View {
     HStack(spacing: 6) {
       ForEach(Array(metrics.prefix(2).enumerated()), id: \.offset) { index, metric in
         if index > 0 {
@@ -486,7 +490,7 @@ private struct ProviderQuotaTileView: View {
         }
         Image(systemName: index == 0 ? "circle" : "smallcircle.filled.circle")
           .font(.system(size: 7, weight: .bold))
-          .foregroundStyle(ringColor(for: metric, layer: index == 0 ? .outer : .inner))
+          .foregroundStyle(index < tints.count ? tints[index] : .white)
         Text(resetSummary(for: metric))
           .font(.caption2.weight(.semibold))
           .monospacedDigit()
@@ -495,6 +499,18 @@ private struct ProviderQuotaTileView: View {
     }
     .foregroundStyle(.white.opacity(0.72))
     .frame(height: 13)
+  }
+
+  /// Each ring wears its metric's limit-kind identity color, resolved against
+  /// the account's full metric list so the tile, the dashboard, and the trend
+  /// chart always agree about which color a limit owns.
+  private func ringTints(for metrics: [UsageMetric], in usage: ProviderUsage) -> [Color] {
+    metrics.map { metric in
+      guard let index = usage.metrics.firstIndex(of: metric) else {
+        return LimitKindColorScheme.color(hex: entry.style.limitKindColors.hexColor(for: .other)) ?? .white
+      }
+      return LimitKindColorScheme.color(forMetricAt: index, in: usage.metrics, colors: entry.style.limitKindColors)
+    }
   }
 
   private func isStale(_ usage: ProviderUsage) -> Bool {
@@ -559,20 +575,6 @@ private struct ProviderQuotaTileView: View {
     return "\(account.displayName). \(metricSummary). \(freshness)\(failureState)"
   }
 
-  private func ringColor(for metric: UsageMetric, layer: WidgetRingLayer) -> Color {
-    let role: WidgetRingColorRole
-    if metric.isUnlimited {
-      role = .unlimited
-    } else if (metric.remainingPercent ?? 0) >= 70 {
-      role = .high
-    } else if (metric.remainingPercent ?? 0) >= 40 {
-      role = .medium
-    } else {
-      role = .low
-    }
-    return Color(providerTileHex: entry.style.ringColors.hexColor(for: role, layer: layer)) ?? .white
-  }
-
   private func resetSummary(for metric: UsageMetric, expanded: Bool = false) -> String {
     if let resetAt = metric.resetAt {
       let interval = resetAt.timeIntervalSince(entry.date)
@@ -604,7 +606,7 @@ private struct ProviderQuotaTileView: View {
 private struct ProviderConcentricRings: View {
   let metrics: [UsageMetric]
   let name: String
-  let colors: WidgetRingColors
+  let tints: [Color]
 
   var body: some View {
     GeometryReader { proxy in
@@ -616,7 +618,7 @@ private struct ProviderConcentricRings: View {
         if let outer {
           ProviderTileRing(
             metric: outer,
-            color: color(for: outer, layer: .outer),
+            color: tints.first ?? .white,
             lineWidth: max(9, side * 0.095)
           )
           .frame(width: side, height: side)
@@ -625,7 +627,7 @@ private struct ProviderConcentricRings: View {
         if let inner {
           ProviderTileRing(
             metric: inner,
-            color: color(for: inner, layer: .inner),
+            color: tints.dropFirst().first ?? .white,
             lineWidth: max(7, side * 0.08)
           )
           .frame(width: side * 0.62, height: side * 0.62)
@@ -643,20 +645,6 @@ private struct ProviderConcentricRings: View {
       .frame(width: side, height: side)
       .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
     }
-  }
-
-  private func color(for metric: UsageMetric, layer: WidgetRingLayer) -> Color {
-    let role: WidgetRingColorRole
-    if metric.isUnlimited {
-      role = .unlimited
-    } else if (metric.remainingPercent ?? 0) >= 70 {
-      role = .high
-    } else if (metric.remainingPercent ?? 0) >= 40 {
-      role = .medium
-    } else {
-      role = .low
-    }
-    return Color(providerTileHex: colors.hexColor(for: role, layer: layer)) ?? .white
   }
 }
 

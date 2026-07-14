@@ -878,6 +878,43 @@ final class AppModel: ObservableObject {
     )
   }
 
+  func limitKindColorBinding(for kind: QuotaWindowKind, otherSlot: Int = 0) -> Binding<Color> {
+    Binding(
+      get: {
+        Self.color(fromHex: self.widgetStyle.limitKindColors.hexColor(for: kind, otherSlot: otherSlot))
+      },
+      set: { newValue in
+        guard let hex = Self.hexColor(from: newValue, allowTransparency: false) else {
+          return
+        }
+
+        self.widgetStyle.limitKindColors.setHexColor(hex, for: kind, otherSlot: otherSlot)
+        self.saveConfiguration()
+      }
+    )
+  }
+
+  func limitKindUnlimitedColorBinding() -> Binding<Color> {
+    Binding(
+      get: {
+        Self.color(fromHex: self.widgetStyle.limitKindColors.unlimitedHexColor)
+      },
+      set: { newValue in
+        guard let hex = Self.hexColor(from: newValue, allowTransparency: false) else {
+          return
+        }
+
+        self.widgetStyle.limitKindColors.unlimitedHexColor = hex
+        self.saveConfiguration()
+      }
+    )
+  }
+
+  func resetLimitKindColors() {
+    widgetStyle.limitKindColors = .default
+    saveConfiguration()
+  }
+
   func providerStyle(for accountID: String) -> ProviderStyleSettings {
     providerStyleSettings[accountID]
       ?? ProviderStyleSettings.defaultValue(
@@ -894,9 +931,12 @@ final class AppModel: ObservableObject {
       return widgetStyle
     }
 
+    // Limit-kind colors are global identity; per-account styling only
+    // customizes the background and the menu bar status colors.
     return WidgetStyleSettings(
       backgroundHexColor: providerStyle.style.backgroundHexColor ?? widgetStyle.backgroundHexColor,
       ringColors: providerStyle.style.ringColors,
+      limitKindColors: widgetStyle.limitKindColors,
       useTransparentBackground: providerStyle.style.useTransparentBackground
     )
   }
@@ -934,28 +974,6 @@ final class AppModel: ObservableObject {
       set: { newValue in
         self.updateProviderStyle(for: accountID) { style in
           style.style.useTransparentBackground = newValue
-        }
-      }
-    )
-  }
-
-  func providerRingColorBinding(
-    for accountID: String,
-    role: WidgetRingColorRole,
-    layer: WidgetRingLayer
-  ) -> Binding<Color> {
-    Binding(
-      get: {
-        let hex = self.providerStyle(for: accountID).style.ringColors.hexColor(for: role, layer: layer)
-        return Self.color(fromHex: hex)
-      },
-      set: { newValue in
-        guard let hex = Self.hexColor(from: newValue, allowTransparency: false) else {
-          return
-        }
-
-        self.updateProviderStyle(for: accountID) { style in
-          style.style.ringColors.setHexColor(hex, for: role, layer: layer)
         }
       }
     )

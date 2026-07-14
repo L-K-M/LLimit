@@ -688,24 +688,214 @@ public struct WidgetRingColors: Codable, Hashable, Sendable {
   }
 }
 
+/// The reset-window family of a quota metric. Drives the metric's identity
+/// color: one hue per kind across the dashboard, the widgets, and the trend
+/// chart, so "weekly" always looks the same regardless of account.
+public enum QuotaWindowKind: String, Codable, CaseIterable, Sendable {
+  case session
+  case daily
+  case weekly
+  case monthly
+  case other
+
+  public var displayName: String {
+    switch self {
+    case .session:
+      return "Session (hours)"
+    case .daily:
+      return "Daily"
+    case .weekly:
+      return "Weekly"
+    case .monthly:
+      return "Monthly"
+    case .other:
+      return "Other"
+    }
+  }
+
+  /// Providers never report the window length as data, only in ids and labels
+  /// ("5-hour limit", "seven_day", "MCP monthly quota"), so classification
+  /// parses both. Metrics with no window wording at all (e.g. Google's
+  /// per-model quotas) land in `.other` and take stable auxiliary colors by
+  /// their position among the account's other-kind metrics.
+  public static func classify(metricID: String, label: String) -> QuotaWindowKind {
+    // GitHub Copilot's premium-request pool resets monthly; nothing in the
+    // metric text says so.
+    if metricID.lowercased() == "premium" {
+      return .monthly
+    }
+
+    let haystack = "\(metricID) \(label)".lowercased()
+    let tokens = haystack
+      .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+      .map(String.init)
+
+    if let hours = leadingCount(beforeUnit: "hour", in: tokens) {
+      return hours >= 20 ? .daily : .session
+    }
+
+    if let days = leadingCount(beforeUnit: "day", in: tokens) {
+      if days <= 1 {
+        return .daily
+      }
+      return days <= 13 ? .weekly : .monthly
+    }
+
+    if haystack.contains("month") {
+      return .monthly
+    }
+    if haystack.contains("week") {
+      return .weekly
+    }
+    if haystack.contains("hour") || haystack.contains("session") {
+      return .session
+    }
+    if haystack.contains("daily") {
+      return .daily
+    }
+
+    return .other
+  }
+
+  private static func leadingCount(beforeUnit unit: String, in tokens: [String]) -> Int? {
+    let plural = unit + "s"
+    for (index, token) in tokens.enumerated() where token == unit || token == plural {
+      guard index > 0, let count = Int(tokens[index - 1]) else {
+        continue
+      }
+      return count
+    }
+    return nil
+  }
+}
+
+/// One identity color per limit-window kind. Values are validated categorical
+/// colors (CVD-separated, chroma >= 0.10, >= 3:1 on the dashboard graphite);
+/// chart lines, sparklines, bars, and rings all resolve through this table.
+public struct LimitKindColors: Codable, Hashable, Sendable {
+  public var sessionHexColor: String
+  public var dailyHexColor: String
+  public var weeklyHexColor: String
+  public var monthlyHexColor: String
+  public var otherHexColors: [String]
+  public var unlimitedHexColor: String
+
+  public static let defaultSessionHexColor = "#3ED8F0"
+  public static let defaultDailyHexColor = "#2ECC6E"
+  public static let defaultWeeklyHexColor = "#FFC145"
+  public static let defaultMonthlyHexColor = "#FF8ED6"
+  public static let defaultOtherHexColors = ["#B8A8FF", "#F2734D"]
+  public static let defaultUnlimitedHexColor = "#C2E5FF"
+
+  public init(
+    sessionHexColor: String = LimitKindColors.defaultSessionHexColor,
+    dailyHexColor: String = LimitKindColors.defaultDailyHexColor,
+    weeklyHexColor: String = LimitKindColors.defaultWeeklyHexColor,
+    monthlyHexColor: String = LimitKindColors.defaultMonthlyHexColor,
+    otherHexColors: [String] = LimitKindColors.defaultOtherHexColors,
+    unlimitedHexColor: String = LimitKindColors.defaultUnlimitedHexColor
+  ) {
+    self.sessionHexColor = normalizeHexColor(sessionHexColor) ?? Self.defaultSessionHexColor
+    self.dailyHexColor = normalizeHexColor(dailyHexColor) ?? Self.defaultDailyHexColor
+    self.weeklyHexColor = normalizeHexColor(weeklyHexColor) ?? Self.defaultWeeklyHexColor
+    self.monthlyHexColor = normalizeHexColor(monthlyHexColor) ?? Self.defaultMonthlyHexColor
+    let normalizedOthers = otherHexColors.compactMap { normalizeHexColor($0) }
+    self.otherHexColors = normalizedOthers.isEmpty ? Self.defaultOtherHexColors : normalizedOthers
+    self.unlimitedHexColor = normalizeHexColor(unlimitedHexColor) ?? Self.defaultUnlimitedHexColor
+  }
+
+  /// `otherSlot` picks the auxiliary color for `.other` metrics (cycling when
+  /// an account has more of them than the table has colors) and is ignored for
+  /// classified kinds.
+  public func hexColor(for kind: QuotaWindowKind, otherSlot: Int = 0) -> String {
+    switch kind {
+    case .session:
+      return sessionHexColor
+    case .daily:
+      return dailyHexColor
+    case .weekly:
+      return weeklyHexColor
+    case .monthly:
+      return monthlyHexColor
+    case .other:
+      guard !otherHexColors.isEmpty else {
+        return Self.defaultOtherHexColors[0]
+      }
+      return otherHexColors[max(0, otherSlot) % otherHexColors.count]
+    }
+  }
+
+  public mutating func setHexColor(_ value: String, for kind: QuotaWindowKind, otherSlot: Int = 0) {
+    guard let normalized = normalizeHexColor(value) else {
+      return
+    }
+
+    switch kind {
+    case .session:
+      sessionHexColor = normalized
+    case .daily:
+      dailyHexColor = normalized
+    case .weekly:
+      weeklyHexColor = normalized
+    case .monthly:
+      monthlyHexColor = normalized
+    case .other:
+      guard !otherHexColors.isEmpty else {
+        otherHexColors = [normalized]
+        return
+      }
+      otherHexColors[max(0, otherSlot) % otherHexColors.count] = normalized
+    }
+  }
+
+  public static var `default`: LimitKindColors {
+    LimitKindColors()
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case sessionHexColor
+    case dailyHexColor
+    case weeklyHexColor
+    case monthlyHexColor
+    case otherHexColors
+    case unlimitedHexColor
+  }
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    self.init(
+      sessionHexColor: (try? container.decodeIfPresent(String.self, forKey: .sessionHexColor)) ?? Self.defaultSessionHexColor,
+      dailyHexColor: (try? container.decodeIfPresent(String.self, forKey: .dailyHexColor)) ?? Self.defaultDailyHexColor,
+      weeklyHexColor: (try? container.decodeIfPresent(String.self, forKey: .weeklyHexColor)) ?? Self.defaultWeeklyHexColor,
+      monthlyHexColor: (try? container.decodeIfPresent(String.self, forKey: .monthlyHexColor)) ?? Self.defaultMonthlyHexColor,
+      otherHexColors: (try? container.decodeIfPresent([String].self, forKey: .otherHexColors)) ?? Self.defaultOtherHexColors,
+      unlimitedHexColor: (try? container.decodeIfPresent(String.self, forKey: .unlimitedHexColor)) ?? Self.defaultUnlimitedHexColor
+    )
+  }
+}
+
 public struct WidgetStyleSettings: Codable, Hashable, Sendable {
   public var backgroundHexColor: String?
   public var ringColors: WidgetRingColors
+  public var limitKindColors: LimitKindColors
   public var useTransparentBackground: Bool
 
   public init(
     backgroundHexColor: String? = nil,
     ringColors: WidgetRingColors = .default,
+    limitKindColors: LimitKindColors = .default,
     useTransparentBackground: Bool = false
   ) {
     self.backgroundHexColor = normalizeHexColor(backgroundHexColor)
     self.ringColors = ringColors
+    self.limitKindColors = limitKindColors
     self.useTransparentBackground = useTransparentBackground
   }
 
   private enum CodingKeys: String, CodingKey {
     case backgroundHexColor
     case ringColors
+    case limitKindColors
     case useTransparentBackground
     case showBackground
     case backgroundStyle
@@ -733,6 +923,7 @@ public struct WidgetStyleSettings: Codable, Hashable, Sendable {
       ringColors = WidgetRingColors.defaults(for: legacyPalette)
     }
 
+    limitKindColors = (try? container.decodeIfPresent(LimitKindColors.self, forKey: .limitKindColors)) ?? .default
     useTransparentBackground = (try? container.decodeIfPresent(Bool.self, forKey: .useTransparentBackground)) ?? false
   }
 
@@ -741,6 +932,7 @@ public struct WidgetStyleSettings: Codable, Hashable, Sendable {
 
     try container.encodeIfPresent(backgroundHexColor, forKey: .backgroundHexColor)
     try container.encode(ringColors, forKey: .ringColors)
+    try container.encode(limitKindColors, forKey: .limitKindColors)
     try container.encode(useTransparentBackground, forKey: .useTransparentBackground)
 
     try container.encode(!useTransparentBackground && backgroundHexColor != nil, forKey: .showBackground)

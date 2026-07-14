@@ -399,6 +399,20 @@ Do not make speculative endpoint edits without captured evidence.
 - Add widget deep links to the selected account after defining an app URL scheme.
 - Per-account style overrides win over provider-toned palettes since build 17 (background
   color and transparency; rings already followed the override).
+- Build 18 replaces value-based ring/line coloring with limit-kind identity colors
+  (`QuotaWindowKind` + `LimitKindColors` in QuotaCore, resolved through
+  `Shared/LimitKindColorScheme`): one global hue per reset window (session cyan, daily
+  green, weekly amber, monthly pink, aux violet/coral for unclassified metrics such as
+  Google's per-model quotas, ice for unlimited), consistent across tile rings, dashboard
+  bars, dropdown rings/sparklines, and the trend chart. Rings no longer flip green →
+  yellow → red with the value — arc length carries magnitude; danger moved to reserved
+  status accents (low-value text, warning chips). The menu bar graph keeps value-based
+  status colors (`WidgetRingColors`, now edited under Settings → Appearance → "Menu bar
+  colors"); per-account ring color pickers were removed since identity hues are global.
+  The trend chart also gained a legend, data-fitted time domain, reset-aware step
+  rendering (drain slopes, refills snap vertically), de-emphasized session saw-tooths,
+  axis labels in the medium family, and it drops unlimited metrics instead of pinning
+  them at 100%.
 
 ### Existing dashboard
 

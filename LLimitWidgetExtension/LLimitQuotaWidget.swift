@@ -65,13 +65,15 @@ private struct DashboardWidgetRootView: View {
 }
 
 private struct TrendLineChartWidgetView: View {
+  @Environment(\.widgetFamily) private var family
   let entry: QuotaEntry
 
   var body: some View {
     let days = max(1, min(30, entry.settings.widgetVisibility.trendHistoryDays))
     let chartData = trendChartData(for: entry, days: days)
+    let legendLimit = family == .systemSmall ? 4 : 8
 
-    VStack(alignment: .leading, spacing: 0) {
+    VStack(alignment: .leading, spacing: 4) {
       if chartData.series.isEmpty {
         Spacer(minLength: 0)
         Text("No history yet")
@@ -84,20 +86,109 @@ private struct TrendLineChartWidgetView: View {
         TrendChartPlotView(
           series: chartData.series,
           startDate: chartData.startDate,
-          endDate: chartData.endDate
+          endDate: chartData.endDate,
+          showAxisLabels: family != .systemSmall
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
 
+        // Identity never rides on color alone: every series appears here.
+        LegendFlowLayout(hSpacing: 7, vSpacing: 3) {
+          ForEach(chartData.series.prefix(legendLimit)) { line in
+            TrendLegendChip(series: line)
+          }
+          if chartData.series.count > legendLimit {
+            Text("+\(chartData.series.count - legendLimit)")
+              .font(.system(size: 7.5, weight: .semibold))
+              .foregroundStyle(.white.opacity(0.6))
+          }
+        }
+
         if let warning = chartData.warnings.first {
-          Text("Risk: \(warning.message)")
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(.orange)
-            .lineLimit(1)
-            .padding(.top, 4)
+          Label {
+            Text(warning.message)
+              .lineLimit(1)
+          } icon: {
+            Image(systemName: "exclamationmark.triangle.fill")
+          }
+          .font(.system(size: 8.5, weight: .semibold))
+          .foregroundStyle(.orange)
+          .padding(.horizontal, 6)
+          .padding(.vertical, 2.5)
+          .background(.orange.opacity(0.16), in: Capsule())
         }
       }
     }
-    .padding(6)
+    .padding(family == .systemSmall ? 7 : 9)
+  }
+}
+
+/// Wrapping row of legend chips; a widget is too narrow for one line of them.
+private struct LegendFlowLayout: Layout {
+  var hSpacing: CGFloat = 7
+  var vSpacing: CGFloat = 3
+
+  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    let maxWidth = proposal.width ?? .infinity
+    var x: CGFloat = 0
+    var y: CGFloat = 0
+    var rowHeight: CGFloat = 0
+    var width: CGFloat = 0
+
+    for subview in subviews {
+      let size = subview.sizeThatFits(.unspecified)
+      if x > 0, x + size.width > maxWidth {
+        x = 0
+        y += rowHeight + vSpacing
+        rowHeight = 0
+      }
+      width = max(width, x + size.width)
+      x += size.width + hSpacing
+      rowHeight = max(rowHeight, size.height)
+    }
+
+    return CGSize(width: width, height: y + rowHeight)
+  }
+
+  func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    var x = bounds.minX
+    var y = bounds.minY
+    var rowHeight: CGFloat = 0
+
+    for subview in subviews {
+      let size = subview.sizeThatFits(.unspecified)
+      if x > bounds.minX, x + size.width > bounds.maxX {
+        x = bounds.minX
+        y += rowHeight + vSpacing
+        rowHeight = 0
+      }
+      subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+      x += size.width + hSpacing
+      rowHeight = max(rowHeight, size.height)
+    }
+  }
+}
+
+private struct TrendLegendChip: View {
+  let series: TrendSeries
+
+  var body: some View {
+    HStack(spacing: 3.5) {
+      if series.dashPattern.isEmpty {
+        Capsule()
+          .fill(series.color)
+          .frame(width: 10, height: 2.5)
+      } else {
+        HStack(spacing: 1.5) {
+          Capsule().fill(series.color).frame(width: 4.5, height: 2.5)
+          Capsule().fill(series.color).frame(width: 4.5, height: 2.5)
+        }
+      }
+
+      Text(series.displayLabel)
+        .font(.system(size: 7.5, weight: .medium))
+        .foregroundStyle(.white.opacity(0.78))
+        .lineLimit(1)
+    }
   }
 }
 
@@ -105,11 +196,14 @@ private struct TrendChartPlotView: View {
   let series: [TrendSeries]
   let startDate: Date
   let endDate: Date
+  let showAxisLabels: Bool
 
   var body: some View {
     GeometryReader { proxy in
       let width = max(1, proxy.size.width)
       let height = max(1, proxy.size.height)
+      let boundaries = dayBoundaries()
+      let labelStride = max(1, Int((Double(boundaries.count) / 6.0).rounded(.up)))
 
       ZStack {
         // Horizontal grid lines at 0%, 25%, 50%, 75%, 100%
@@ -119,43 +213,69 @@ private struct TrendChartPlotView: View {
             path.move(to: CGPoint(x: 0, y: y))
             path.addLine(to: CGPoint(x: width, y: y))
           }
-          .stroke(Color.white.opacity(0.12), lineWidth: 0.8)
+          .stroke(Color.white.opacity(level % 50 == 0 ? 0.13 : 0.07), lineWidth: 0.8)
         }
 
         // Vertical day-separator lines at each midnight boundary
-        ForEach(dayBoundaries(), id: \.timeIntervalSince1970) { date in
+        ForEach(boundaries, id: \.timeIntervalSince1970) { date in
           Path { path in
             let x = xPosition(for: date, width: width)
             path.move(to: CGPoint(x: x, y: 0))
             path.addLine(to: CGPoint(x: x, y: height))
           }
-          .stroke(Color.white.opacity(0.15), style: StrokeStyle(lineWidth: 0.8, dash: [3, 3]))
+          .stroke(Color.white.opacity(0.12), style: StrokeStyle(lineWidth: 0.8, dash: [3, 3]))
         }
 
-        // Data lines
-        ForEach(series) { line in
-          if line.points.count >= 2 {
-            Path { path in
-              for (index, point) in line.points.enumerated() {
-                let coordinate = CGPoint(
-                  x: xPosition(for: point.date, width: width),
-                  y: yPosition(for: point.remainingPercent, height: height)
-                )
+        if showAxisLabels {
+          ForEach([100, 50, 0], id: \.self) { level in
+            Text("\(level)")
+              .font(.system(size: 6.5, weight: .medium))
+              .monospacedDigit()
+              .foregroundStyle(.white.opacity(0.42))
+              .position(
+                x: width - 7,
+                y: min(max(yPosition(for: Double(level), height: height) + (level == 100 ? 5 : -5), 4), height - 4)
+              )
+          }
 
-                if index == 0 {
-                  path.move(to: coordinate)
-                } else {
-                  path.addLine(to: coordinate)
-                }
-              }
+          ForEach(Array(boundaries.enumerated()), id: \.element.timeIntervalSince1970) { index, date in
+            if index % labelStride == 0 {
+              Text(weekdayLetter(for: date))
+                .font(.system(size: 6.5, weight: .medium))
+                .foregroundStyle(.white.opacity(0.42))
+                .position(x: xPosition(for: date, width: width) + 6, y: height - 5)
             }
-            .stroke(line.color.opacity(0.95), style: StrokeStyle(lineWidth: 1.9, lineCap: .round, lineJoin: .round))
+          }
+        }
+
+        // Data lines: least important windows first so the risk carriers
+        // (weekly/monthly) stay on top. A dark casing keeps every line
+        // separable from whatever background the widget sits on.
+        ForEach(series.sorted { $0.drawPriority < $1.drawPriority }) { line in
+          if line.points.count >= 2 {
+            let path = linePath(for: line, width: width, height: height)
+            let casing = StrokeStyle(
+              lineWidth: line.lineWidth + 1.5,
+              lineCap: .round,
+              lineJoin: .round,
+              dash: line.dashPattern
+            )
+            let stroke = StrokeStyle(
+              lineWidth: line.lineWidth,
+              lineCap: .round,
+              lineJoin: .round,
+              dash: line.dashPattern
+            )
+
+            path.stroke(Color.black.opacity(0.28), style: casing)
+            path.stroke(line.color.opacity(line.lineOpacity), style: stroke)
           }
 
           if let latest = line.points.last {
             Circle()
               .fill(line.color)
-              .frame(width: 4, height: 4)
+              .overlay(Circle().stroke(Color.black.opacity(0.35), lineWidth: 0.8))
+              .frame(width: 4.5, height: 4.5)
               .position(
                 x: xPosition(for: latest.date, width: width),
                 y: yPosition(for: latest.remainingPercent, height: height)
@@ -164,6 +284,43 @@ private struct TrendChartPlotView: View {
         }
       }
     }
+  }
+
+  /// Quota traces drain downward and refill in an instant. When a sample pair
+  /// jumps upward a reset happened in between, so draw hold-then-snap instead
+  /// of a misleading diagonal across the gap.
+  private func linePath(for line: TrendSeries, width: CGFloat, height: CGFloat) -> Path {
+    Path { path in
+      var previous: TrendPoint?
+
+      for point in line.points {
+        let coordinate = CGPoint(
+          x: xPosition(for: point.date, width: width),
+          y: yPosition(for: point.remainingPercent, height: height)
+        )
+
+        if let previous {
+          if point.remainingPercent > previous.remainingPercent + 4 {
+            path.addLine(to: CGPoint(x: coordinate.x, y: yPosition(for: previous.remainingPercent, height: height)))
+          }
+          path.addLine(to: coordinate)
+        } else {
+          path.move(to: coordinate)
+        }
+
+        previous = point
+      }
+    }
+  }
+
+  private func weekdayLetter(for date: Date) -> String {
+    let calendar = Calendar.current
+    let weekday = calendar.component(.weekday, from: date)
+    let symbols = calendar.veryShortWeekdaySymbols
+    guard weekday >= 1, weekday <= symbols.count else {
+      return ""
+    }
+    return symbols[weekday - 1]
   }
 
   private func dayBoundaries() -> [Date] {
@@ -207,6 +364,11 @@ private struct TrendSeries: Identifiable {
   let points: [TrendPoint]
   let color: Color
   let resetAt: Date?
+  let kind: QuotaWindowKind
+  let lineWidth: CGFloat
+  let lineOpacity: Double
+  let dashPattern: [CGFloat]
+  let drawPriority: Int
 }
 
 private struct TrendWarning: Identifiable {
@@ -243,7 +405,7 @@ private struct OverviewSmallQuotaView: View {
         ForEach(sortedProviders(snapshot.providers).prefix(providerLimit)) { usage in
           CompactProviderUsageRow(
             usage: usage,
-            ringColors: entry.style(for: usage.accountID).ringColors,
+            kindColors: entry.settings.widgetStyle.limitKindColors,
             showProgressBar: true,
             showPercentages: entry.settings.widgetVisibility.showPercentageValues,
             showDualLimitPercentages: entry.settings.widgetVisibility.showDualLimitPercentagesInDashboard
@@ -323,7 +485,7 @@ private struct MediumCompactQuotaView: View {
         ForEach(sortedProviders(snapshot.providers).prefix(providerLimit)) { usage in
           CompactProviderUsageRow(
             usage: usage,
-            ringColors: entry.style(for: usage.accountID).ringColors,
+            kindColors: entry.settings.widgetStyle.limitKindColors,
             showProgressBar: entry.settings.widgetVisibility.showMediumProgressBars,
             showPercentages: entry.settings.widgetVisibility.showPercentageValues,
             showDualLimitPercentages: entry.settings.widgetVisibility.showDualLimitPercentagesInDashboard
@@ -364,7 +526,7 @@ private struct MediumCompactQuotaView: View {
 
 private struct CompactProviderUsageRow: View {
   let usage: ProviderUsage
-  let ringColors: WidgetRingColors
+  let kindColors: LimitKindColors
   let showProgressBar: Bool
   let showPercentages: Bool
   let showDualLimitPercentages: Bool
@@ -387,8 +549,13 @@ private struct CompactProviderUsageRow: View {
         MiniProgressBar(
           percent: basePercent,
           unlimited: unlimited,
-          ringColors: ringColors,
-          dualStops: dualStops,
+          tint: primaryTint(defaultMetric: metric),
+          stops: dualStops.map { stop in
+            (
+              color: LimitKindColorScheme.color(forMetricAt: stop.metricIndex, in: usage.metrics, colors: kindColors),
+              percent: stop.percent
+            )
+          },
           showDualStops: showDualLimitPercentages
         )
           .frame(height: 5)
@@ -407,142 +574,64 @@ private struct CompactProviderUsageRow: View {
     }
   }
 
+  private func primaryTint(defaultMetric: UsageMetric?) -> Color {
+    if let defaultMetric, let index = usage.metrics.firstIndex(of: defaultMetric) {
+      return LimitKindColorScheme.color(forMetricAt: index, in: usage.metrics, colors: kindColors)
+    }
+    if usage.metrics.contains(where: \.isUnlimited) {
+      return LimitKindColorScheme.color(hex: kindColors.unlimitedHexColor) ?? .white
+    }
+    return .white.opacity(0.7)
+  }
+
   private var shortName: String {
     compactProviderName(for: usage)
-  }
-}
-
-private struct ConcentricQuotaChart: View {
-  enum CenterLabelStyle {
-    case metrics
-    case hidden
-  }
-
-  let metrics: [UsageMetric]
-  let ringColors: WidgetRingColors
-  var centerLabelStyle: CenterLabelStyle = .metrics
-
-  var body: some View {
-    GeometryReader { proxy in
-      let side = min(proxy.size.width, proxy.size.height)
-      let outerMetric = metrics.first
-      let innerMetric = metrics.dropFirst().first
-
-      ZStack {
-        if let outerMetric {
-          CircularQuotaRing(
-            metric: outerMetric,
-            lineWidth: max(8, side * 0.12),
-            ringColors: ringColors,
-            ringLayer: .outer
-          )
-            .frame(width: side, height: side)
-        }
-
-        if let innerMetric {
-          CircularQuotaRing(
-            metric: innerMetric,
-            lineWidth: max(6, side * 0.1),
-            ringColors: ringColors,
-            ringLayer: .inner
-          )
-            .frame(width: side * 0.64, height: side * 0.64)
-        }
-
-        if centerLabelStyle == .metrics {
-          VStack(spacing: 1) {
-            if let outerMetric {
-              Text(percentText(for: outerMetric))
-                .font(.caption.weight(.semibold))
-                .monospacedDigit()
-            } else {
-              Text("--")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            }
-
-            if let innerMetric {
-              Text(percentText(for: innerMetric))
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-            }
-          }
-        }
-      }
-      .frame(width: proxy.size.width, height: proxy.size.height)
-    }
-  }
-}
-
-private struct CircularQuotaRing: View {
-  let metric: UsageMetric
-  let lineWidth: CGFloat
-  let ringColors: WidgetRingColors
-  let ringLayer: WidgetRingLayer
-
-  var body: some View {
-    ZStack {
-      Circle()
-        .stroke(Color.white.opacity(0.16), lineWidth: lineWidth)
-
-      Circle()
-        .trim(from: 0, to: progress)
-        .stroke(
-          ringColor(for: metric, colors: ringColors, layer: ringLayer),
-          style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
-        )
-        .rotationEffect(.degrees(-90))
-    }
-  }
-
-  private var progress: CGFloat {
-    if metric.isUnlimited {
-      return 1
-    }
-    let value = CGFloat(metric.remainingPercent ?? 0)
-    return max(0, min(1, value / 100))
   }
 }
 
 private struct MiniProgressBar: View {
   let percent: Int?
   let unlimited: Bool
-  let ringColors: WidgetRingColors
-  let dualStops: [DashboardBarStop]
+  let tint: Color
+  let stops: [(color: Color, percent: Int)]
   let showDualStops: Bool
 
   var body: some View {
     GeometryReader { proxy in
       let width = max(0, proxy.size.width)
       let clampedPercent = max(0, min(100, percent ?? 0))
-      let twoStops = dualStops.prefix(2)
+      let twoStops = Array(stops.prefix(2))
 
       ZStack(alignment: .leading) {
         Capsule()
           .fill(Color.white.opacity(0.16))
 
         if unlimited {
-          Capsule().fill(unlimitedColor(for: ringColors, layer: .outer))
+          Capsule().fill(tint)
         } else if showDualStops, twoStops.count >= 2 {
-          ForEach(Array(twoStops).sorted(by: { $0.percent > $1.percent })) { stop in
+          // Longer fill first so the shorter one stays visible on top; each
+          // fill wears its own metric's identity color, the underlying longer
+          // one dimmed so the overlap reads as two limits.
+          let ordered = Array(twoStops.enumerated()).sorted(by: { $0.element.percent > $1.element.percent })
+
+          ForEach(Array(ordered.enumerated()), id: \.element.offset) { position, entry in
             Capsule()
-              .fill(ringColor(for: stop.percent, colors: ringColors, layer: stop.layer).opacity(stop.layer == .inner ? 0.55 : 0.82))
-              .frame(width: width * CGFloat(stop.percent) / 100.0)
+              .fill(entry.element.color.opacity(position == 0 ? 0.55 : 0.85))
+              .frame(width: width * CGFloat(entry.element.percent) / 100.0)
           }
 
-          ForEach(Array(twoStops)) { stop in
+          ForEach(Array(twoStops.enumerated()), id: \.offset) { entry in
             Capsule()
-              .fill(ringColor(for: stop.percent, colors: ringColors, layer: stop.layer))
+              .fill(entry.element.color)
               .frame(width: 2.5)
               .position(
-                x: markerPositionX(for: stop.percent, width: width),
+                x: markerPositionX(for: entry.element.percent, width: width),
                 y: proxy.size.height / 2
               )
           }
         } else {
           Capsule()
-            .fill(progressColor)
+            .fill(tint)
             .frame(width: width * CGFloat(clampedPercent) / 100.0)
         }
       }
@@ -558,18 +647,14 @@ private struct MiniProgressBar: View {
     let x = width * normalized
     return max(markerWidth / 2, min(width - markerWidth / 2, x))
   }
-
-  private var progressColor: Color {
-    ringColor(for: percent ?? 0, colors: ringColors, layer: .outer)
-  }
 }
 
 private struct DashboardBarStop: Identifiable {
-  let layer: WidgetRingLayer
+  let metricIndex: Int
   let percent: Int
 
   var id: String {
-    "\(layer.rawValue)-\(percent)"
+    "\(metricIndex)-\(percent)"
   }
 }
 
@@ -615,18 +700,12 @@ private func providerRemainingPercent(for usage: ProviderUsage) -> Int? {
 }
 
 private func dashboardBarStops(for usage: ProviderUsage) -> [DashboardBarStop] {
-  let metrics = chartMetrics(for: usage)
-  var stops: [DashboardBarStop] = []
-
-  if let first = metrics.first, !first.isUnlimited, let remaining = first.remainingPercent {
-    stops.append(DashboardBarStop(layer: .outer, percent: max(0, min(100, remaining))))
-  }
-
-  if let second = metrics.dropFirst().first, !second.isUnlimited, let remaining = second.remainingPercent {
-    stops.append(DashboardBarStop(layer: .inner, percent: max(0, min(100, remaining))))
-  }
-
-  return stops
+  usage.metrics.enumerated()
+    .filter { !$0.element.isUnlimited && $0.element.remainingPercent != nil }
+    .prefix(2)
+    .map { index, metric in
+      DashboardBarStop(metricIndex: index, percent: max(0, min(100, metric.remainingPercent ?? 0)))
+    }
 }
 
 private func dualLimitPercentText(for usage: ProviderUsage) -> String? {
@@ -655,14 +734,6 @@ private func dashboardPercentDisplayText(for usage: ProviderUsage) -> String? {
   }
 
   return nil
-}
-
-private func chartMetrics(for usage: ProviderUsage) -> [UsageMetric] {
-  let candidates = usage.metrics.filter { $0.remainingPercent != nil || $0.isUnlimited }
-  if candidates.isEmpty {
-    return usage.metrics
-  }
-  return Array(candidates.prefix(2))
 }
 
 private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData {
@@ -713,7 +784,9 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
       usageByAccount[usage.accountID] = usage
 
       for metric in usage.metrics {
-        guard metric.remainingPercent != nil || metric.isUnlimited else {
+        // Unlimited metrics have no trend to chart — plotting them pins a
+        // flat line at 100% and only adds noise.
+        guard metric.remainingPercent != nil, !metric.isUnlimited else {
           continue
         }
 
@@ -726,7 +799,7 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
         }
 
         let key = SeriesKey(accountID: usage.accountID, metricID: resolvedID)
-        let remaining = metric.isUnlimited ? 100 : Double(metric.remainingPercent ?? 0)
+        let remaining = Double(metric.remainingPercent ?? 0)
         pointsByKey[key, default: []].append(TrendPoint(date: snapshot.generatedAt, remainingPercent: remaining))
         labelsByKey[key] = metric.label
 
@@ -740,6 +813,11 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
   }
 
   var series: [TrendSeries] = []
+  let kindColors = entry.settings.widgetStyle.limitKindColors
+  // Series sharing a hue (same window kind on two accounts, or Claude's two
+  // weeklies) take successive brightness steps plus a dash so identity never
+  // rests on color alone.
+  var stepBySlot: [LimitKindColorScheme.SeriesSlot: Int] = [:]
 
   let accountOrder = usageByAccount.values.sorted { lhs, rhs in
     if lhs.provider.rawValue != rhs.provider.rawValue {
@@ -754,7 +832,11 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
       continue
     }
 
-    for (metricIndex, metricID) in metricIDs.enumerated() {
+    // Resolve color slots against the account's full metric list so the chart
+    // agrees with the rings and the dashboard about which color a metric owns.
+    let accountSlots = LimitKindColorScheme.slots(for: usage.metrics)
+
+    for metricID in metricIDs {
       let key = SeriesKey(accountID: usage.accountID, metricID: metricID)
       let points = downsampleTrendPoints(pointsByKey[key] ?? [], maxCount: 240)
       guard !points.isEmpty else {
@@ -769,7 +851,32 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
         displayLabel = compactProviderName(for: usage)
       }
 
-      let lineColor = trendLineColor(for: usage.accountID, metricIndex: metricIndex, entry: entry)
+      let slot: LimitKindColorScheme.SeriesSlot
+      if let index = usage.metrics.firstIndex(where: { $0.id == metricID || $0.label == metricID }) {
+        slot = accountSlots[index]
+      } else {
+        slot = LimitKindColorScheme.SeriesSlot(
+          kind: QuotaWindowKind.classify(metricID: metricID, label: metricLabel),
+          otherSlot: 0
+        )
+      }
+
+      let step = stepBySlot[slot, default: 0]
+      stepBySlot[slot] = step + 1
+
+      let baseHex = kindColors.hexColor(for: slot.kind, otherSlot: slot.otherSlot)
+      let lineColor = LimitKindColorScheme.steppedColor(hex: baseHex, step: step) ?? .white
+
+      let style = seriesStyle(for: slot.kind)
+      let dashPattern: [CGFloat]
+      switch step {
+      case 0:
+        dashPattern = []
+      case 1:
+        dashPattern = [4, 2.5]
+      default:
+        dashPattern = [1.6, 2.4]
+      }
 
       series.append(
         TrendSeries(
@@ -780,32 +887,50 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
           displayLabel: displayLabel,
           points: points,
           color: lineColor,
-          resetAt: resetByKey[key]
+          resetAt: resetByKey[key],
+          kind: slot.kind,
+          lineWidth: style.lineWidth,
+          lineOpacity: style.opacity,
+          dashPattern: dashPattern,
+          drawPriority: style.drawPriority
         )
       )
     }
   }
 
+  // Fit the time domain to the data instead of anchoring at the configured
+  // window: two days of history in a seven-day window otherwise huddles in
+  // the right half of an empty chart.
+  var chartStart = startWindow
+  if let earliest = snapshots.first?.generatedAt {
+    chartStart = max(startWindow, earliest)
+  }
+  let minimumSpan: TimeInterval = 6 * 3_600
+  if now.timeIntervalSince(chartStart) < minimumSpan {
+    chartStart = now.addingTimeInterval(-minimumSpan)
+  }
+  chartStart = chartStart.addingTimeInterval(-now.timeIntervalSince(chartStart) * 0.02)
+
   let warnings = depletionWarnings(for: series, now: now)
-  return TrendChartData(series: series, startDate: startWindow, endDate: now, warnings: warnings)
+  return TrendChartData(series: series, startDate: chartStart, endDate: now, warnings: warnings)
 }
 
-private func trendLineColor(for accountID: String, metricIndex: Int, entry: QuotaEntry) -> Color {
-  let colorSlots: [(WidgetRingColorRole, WidgetRingLayer)] = [
-    (.high, .outer),
-    (.high, .inner),
-    (.medium, .outer),
-    (.medium, .inner),
-    (.low, .outer),
-    (.low, .inner),
-    (.unlimited, .outer),
-    (.unlimited, .inner)
-  ]
-
-  let slot = colorSlots[metricIndex % colorSlots.count]
-  let ringColors = entry.style(for: accountID).ringColors
-  let hex = ringColors.hexColor(for: slot.0, layer: slot.1)
-  return Color(hexColor: hex) ?? .white
+/// Short windows churn constantly (a 5-hour limit saw-tooths all day) while
+/// the weekly and monthly traces carry the real exhaustion risk, so the fast
+/// windows render thinner and slightly dimmer and the slow ones sit on top.
+private func seriesStyle(for kind: QuotaWindowKind) -> (lineWidth: CGFloat, opacity: Double, drawPriority: Int) {
+  switch kind {
+  case .session:
+    return (1.5, 0.82, 0)
+  case .daily:
+    return (1.7, 0.9, 1)
+  case .other:
+    return (2.0, 1.0, 2)
+  case .monthly:
+    return (2.1, 1.0, 3)
+  case .weekly:
+    return (2.1, 1.0, 4)
+  }
 }
 
 private func downsampleTrendPoints(_ points: [TrendPoint], maxCount: Int) -> [TrendPoint] {
@@ -1064,26 +1189,6 @@ private struct FancyWidgetBackground: View {
   }
 }
 
-private func ringColor(for metric: UsageMetric, colors: WidgetRingColors, layer: WidgetRingLayer) -> Color {
-  if metric.isUnlimited {
-    return unlimitedColor(for: colors, layer: layer)
-  }
-
-  return ringColor(for: metric.remainingPercent ?? 0, colors: colors, layer: layer)
-}
-
-private func ringColor(for remainingPercent: Int, colors: WidgetRingColors, layer: WidgetRingLayer) -> Color {
-  let value = max(0, min(100, remainingPercent))
-
-  if value >= 70 { return Color(hexColor: colors.hexColor(for: .high, layer: layer)) ?? .green }
-  if value >= 40 { return Color(hexColor: colors.hexColor(for: .medium, layer: layer)) ?? .yellow }
-  return Color(hexColor: colors.hexColor(for: .low, layer: layer)) ?? .red
-}
-
-private func unlimitedColor(for colors: WidgetRingColors, layer: WidgetRingLayer) -> Color {
-  Color(hexColor: colors.hexColor(for: .unlimited, layer: layer)) ?? .blue
-}
-
 private extension QuotaEntry {
   func backgroundStyle(for kind: QuotaWidgetBackgroundKind) -> WidgetStyleSettings {
     switch kind {
@@ -1092,23 +1197,6 @@ private extension QuotaEntry {
     case .trend:
       return backgroundStyle(from: settings.widgetBackgroundSettings.trend)
     }
-  }
-
-  func style(for accountID: String) -> WidgetStyleSettings {
-    let globalStyle = settings.widgetStyle
-    let override = settings.styleOverride(for: accountID)
-
-    guard override.useCustomStyle else {
-      return globalStyle
-    }
-
-    let resolvedBackground = override.style.backgroundHexColor ?? globalStyle.backgroundHexColor
-
-    return WidgetStyleSettings(
-      backgroundHexColor: resolvedBackground,
-      ringColors: override.style.ringColors,
-      useTransparentBackground: override.style.useTransparentBackground
-    )
   }
 
   private func backgroundStyle(from override: WidgetBackgroundOverride) -> WidgetStyleSettings {
@@ -1128,36 +1216,3 @@ private extension QuotaEntry {
   }
 }
 
-private extension Color {
-  init?(hexColor: String?) {
-    guard var raw = hexColor?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
-      return nil
-    }
-
-    if raw.hasPrefix("#") {
-      raw.removeFirst()
-    }
-
-    if raw.count == 3 || raw.count == 4 {
-      raw = raw.map { "\($0)\($0)" }.joined()
-    }
-
-    guard (raw.count == 6 || raw.count == 8), let parsed = UInt64(raw, radix: 16) else {
-      return nil
-    }
-
-    if raw.count == 6 {
-      let red = Double((parsed >> 16) & 0xFF) / 255.0
-      let green = Double((parsed >> 8) & 0xFF) / 255.0
-      let blue = Double(parsed & 0xFF) / 255.0
-      self = Color(red: red, green: green, blue: blue)
-      return
-    }
-
-    let red = Double((parsed >> 24) & 0xFF) / 255.0
-    let green = Double((parsed >> 16) & 0xFF) / 255.0
-    let blue = Double((parsed >> 8) & 0xFF) / 255.0
-    let alpha = Double(parsed & 0xFF) / 255.0
-    self = Color(red: red, green: green, blue: blue, opacity: alpha)
-  }
-}

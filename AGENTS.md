@@ -110,6 +110,27 @@ Requires macOS 14+, Xcode 15+, [XcodeGen](https://github.com/yonaskolb/XcodeGen)
   (not built via interpolation) so the install-gate greps can find them in the
   binary.
 
+### Color semantics
+
+- Color encodes exactly one thing per surface. Identity surfaces (chart lines,
+  sparklines, quota bars, tile/dropdown rings) wear the metric's limit-window
+  color from `LimitKindColors` via `QuotaWindowKind.classify` +
+  `Shared/LimitKindColorScheme` — one global hue per window kind (session /
+  daily / weekly / monthly, aux slots for `.other`), never per-account and
+  never repainted by the current value. Magnitude is geometry (arc, bar, line
+  height); danger is the reserved status accents (warning chips, low-value
+  text) or the menu bar graph, which is the one surface that still colors by
+  value through `WidgetRingColors` roles.
+- The default `LimitKindColors` palette is validator-checked (CVD all-pairs
+  ΔE >= 12, chroma >= 0.10, >= 3:1 contrast on the dropdown graphite). If you
+  change a default hex, re-run the dataviz palette validator against both the
+  graphite (`#1D1F27`) and default widget blue (`#5994F2`) surfaces rather
+  than eyeballing it.
+- `QuotaWindowKind.classify` parses metric ids/labels because providers do not
+  report window lengths as data; new provider metrics with a reset cadence
+  should either use labels the classifier understands ("N-hour", "N-day",
+  "weekly", "monthly") or get a special case next to Copilot's `premium`.
+
 ```bash
 xcodegen generate
 open LLimit.xcodeproj            # set DEVELOPMENT_TEAM on both targets
