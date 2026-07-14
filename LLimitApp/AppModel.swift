@@ -862,26 +862,6 @@ final class AppModel: ObservableObject {
     )
   }
 
-  /// The menu bar graph is the one surface that still colors by value; its
-  /// status colors edit the outer-layer ring roles (the inner layer is
-  /// retained only for stored-settings compatibility).
-  func menuBarStatusColorBinding(for role: WidgetRingColorRole) -> Binding<Color> {
-    Binding(
-      get: {
-        let hex = self.widgetStyle.ringColors.hexColor(for: role, layer: .outer)
-        return Self.color(fromHex: hex)
-      },
-      set: { newValue in
-        guard let hex = Self.hexColor(from: newValue, allowTransparency: false) else {
-          return
-        }
-
-        self.widgetStyle.ringColors.setHexColor(hex, for: role, layer: .outer)
-        self.saveConfiguration()
-      }
-    )
-  }
-
   func limitKindColorBinding(for kind: QuotaWindowKind, otherSlot: Int = 0) -> Binding<Color> {
     Binding(
       get: {

@@ -431,6 +431,13 @@ Do not make speculative endpoint edits without captured evidence.
   match exactly and no two tiles share a scheme. Within one account, two limits
   that still resolve to the same hue (Claude's two weeklies, a cycled third
   per-model quota) are dash-differentiated in the chart only.
+- Build 20 extends the account schemes to the menu bar graph: with every account
+  healthy, the old value-based coloring painted all bars the same green and they
+  could not be told apart. Each bar (and the dropdown's LOWEST stat) now wears its
+  account's scheme accent — the same color as that account's tile rings — while
+  bar height carries the level. That left `WidgetRingColors` with no rendering
+  consumer, so the "Menu bar colors" settings section was removed; the type
+  survives only for stored-settings compatibility.
 
 ### Existing dashboard
 

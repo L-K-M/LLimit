@@ -605,32 +605,6 @@ struct SettingsView: View {
           }
         }
 
-        Divider()
-
-        settingsRow(title: "Menu bar colors") {
-          VStack(alignment: .leading, spacing: 6) {
-            Text("The menu bar graph colors each account by how much of its tightest limit is left.")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-
-            ringColorPickerRow(
-              title: WidgetRingColorRole.high.displayName,
-              binding: model.menuBarStatusColorBinding(for: .high)
-            )
-            ringColorPickerRow(
-              title: WidgetRingColorRole.medium.displayName,
-              binding: model.menuBarStatusColorBinding(for: .medium)
-            )
-            ringColorPickerRow(
-              title: WidgetRingColorRole.low.displayName,
-              binding: model.menuBarStatusColorBinding(for: .low)
-            )
-            ringColorPickerRow(
-              title: WidgetRingColorRole.unlimited.displayName,
-              binding: model.menuBarStatusColorBinding(for: .unlimited)
-            )
-          }
-        }
       }
     }
   }

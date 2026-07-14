@@ -122,10 +122,11 @@ Requires macOS 14+, Xcode 15+, [XcodeGen](https://github.com/yonaskolb/XcodeGen)
   `stableAccountOrder` so toggling one never recolors another): the provider
   tiles double as the trend chart's legend, so two accounts must never share
   an exact color scheme, and the chart deliberately has no legend of its own.
-  Magnitude is geometry (arc, bar, line height); danger is the reserved
-  status accents (warning chips, low-value text) or the menu bar graph, which
-  is the one surface that still colors by value through `WidgetRingColors`
-  roles.
+  The menu bar graph is identity-colored too: each bar wears its account's
+  scheme accent, and the bar's height carries the level. Magnitude is
+  geometry (arc, bar, line height); danger is the reserved status accents
+  (warning chips, low-value text). `WidgetRingColors` survives only for
+  stored-settings compatibility — nothing renders from it.
 - The default `LimitKindColors` palette is validator-checked (CVD all-pairs
   ΔE >= 12 for the six base hues, >= 8 with secondary encoding for the
   base+deep twelve; chroma >= 0.10; >= 3:1 contrast on the dropdown

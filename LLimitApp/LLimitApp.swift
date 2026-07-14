@@ -23,7 +23,8 @@ struct LLimitApp: App {
     } label: {
       MenuBarIcon(
         snapshot: model.snapshot,
-        widgetStyle: model.widgetStyle
+        kindColors: model.widgetStyle.limitKindColors,
+        accounts: model.providerAccounts
       )
     }
     .menuBarExtraStyle(.window)
@@ -134,7 +135,8 @@ final class DashboardWindowController {
 
 private struct MenuBarIcon: View {
   let snapshot: QuotaSnapshot?
-  let widgetStyle: WidgetStyleSettings
+  let kindColors: LimitKindColors
+  let accounts: [ProviderAccount]
 
   var body: some View {
     Image(nsImage: iconImage())
@@ -164,9 +166,14 @@ private struct MenuBarIcon: View {
         let barRect = NSRect(x: x, y: 0, width: barWidth, height: barHeight)
         let barPath = NSBezierPath(roundedRect: barRect, xRadius: cornerRadius, yRadius: cornerRadius)
 
-        MenuBarQuotaStyling
-          .color(for: provider, globalStyle: widgetStyle)
-          .setFill()
+        // Height carries the level; color identifies the account — the same
+        // scheme accent as its tile rings, dropdown gauge, and chart lines.
+        let accent = LimitKindColorScheme.accountAccent(
+          for: provider.metrics,
+          colors: kindColors,
+          step: accountColorStep(forAccountID: provider.accountID, in: accounts)
+        )
+        NSColor(accent).setFill()
         barPath.fill()
       }
       return true
@@ -849,7 +856,13 @@ private struct MenuBarContent: View {
       return .secondary
     }
 
-    return Color(nsColor: MenuBarQuotaStyling.color(for: provider, globalStyle: model.widgetStyle))
+    // The LOWEST stat wears the accent of the account it reports, pointing at
+    // that account's gauge and card.
+    return LimitKindColorScheme.accountAccent(
+      for: provider.metrics,
+      colors: model.widgetStyle.limitKindColors,
+      step: accountColorStep(forAccountID: provider.accountID, in: model.providerAccounts)
+    )
   }
 
   private func failureTitle(for failure: ProviderFailure) -> String {
@@ -1402,79 +1415,8 @@ private enum MenuBarQuotaStyling {
     return nil
   }
 
-  // Status colors come from the global palette only: the per-account style
-  // override customizes backgrounds, and its ringColors snapshot has no
-  // editor anymore — resolving through it would freeze an account's menu bar
-  // color at whatever the palette was when the override was enabled.
-  static func color(for provider: ProviderUsage, globalStyle: WidgetStyleSettings) -> NSColor {
-    guard let role = colorRole(for: provider) else {
-      return .systemGray
-    }
-
-    let hex = globalStyle.ringColors.hexColor(for: role, layer: .outer)
-    return NSColor(hexString: hex) ?? .systemGray
-  }
-
-  private static func colorRole(for provider: ProviderUsage) -> WidgetRingColorRole? {
-    let boundedRemaining = provider.metrics
-      .filter { !$0.isUnlimited }
-      .compactMap(\.remainingPercent)
-
-    if let minimumRemaining = boundedRemaining.min() {
-      let remaining = clampPercent(minimumRemaining)
-      if remaining >= 70 { return .high }
-      if remaining >= 40 { return .medium }
-      return .low
-    }
-
-    if provider.metrics.contains(where: \.isUnlimited) {
-      return .unlimited
-    }
-
-    if let maxUsagePercent = provider.maxUsagePercent {
-      let remaining = clampPercent(100 - maxUsagePercent)
-      if remaining >= 70 { return .high }
-      if remaining >= 40 { return .medium }
-      return .low
-    }
-
-    return nil
-  }
-
   private static func clampPercent(_ value: Int) -> Int {
     max(0, min(100, value))
   }
 }
 
-private extension NSColor {
-  convenience init?(hexString: String) {
-    var hex = hexString.trimmingCharacters(in: .whitespacesAndNewlines)
-    if hex.hasPrefix("#") {
-      hex.removeFirst()
-    }
-
-    if hex.count == 3 || hex.count == 4 {
-      hex = hex.map { "\($0)\($0)" }.joined()
-    }
-
-    guard hex.count == 6 || hex.count == 8, let value = UInt64(hex, radix: 16) else {
-      return nil
-    }
-
-    if hex.count == 6 {
-      self.init(
-        red: CGFloat((value >> 16) & 0xFF) / 255,
-        green: CGFloat((value >> 8) & 0xFF) / 255,
-        blue: CGFloat(value & 0xFF) / 255,
-        alpha: 1
-      )
-    } else {
-      self.init(
-        red: CGFloat((value >> 24) & 0xFF) / 255,
-        green: CGFloat((value >> 16) & 0xFF) / 255,
-        blue: CGFloat((value >> 8) & 0xFF) / 255,
-        alpha: CGFloat(value & 0xFF) / 255
-      )
-    }
-  }
-}
