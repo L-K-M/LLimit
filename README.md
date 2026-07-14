@@ -3,6 +3,8 @@
 **LLimit** is a self-contained macOS menu-bar app + desktop widgets that track how
 much of your LLM subscription quota is left.
 
+![screenshot widgets](screenshot-widgets.png)
+
 You manage your accounts **inside LLimit** — add as many as you like, including
 several accounts for the same provider (e.g. two separate OpenAI accounts), each
 tracked independently. LLimit doesn't depend on any other tool being installed.
@@ -11,6 +13,8 @@ To make setup painless, LLimit can **optionally detect** logins from AI tools yo
 already signed in to (Claude Code, Codex, GitHub Copilot, OpenCode) and import them
 into a new account with one click — so for the common case you never hunt for a
 token. You can always add accounts manually too.
+
+![screenshot floating window](screenshot-window.png)
 
 ## Supported providers
 
