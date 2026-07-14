@@ -367,6 +367,15 @@ Do not make speculative endpoint edits without captured evidence.
   on static widgets, so the broken flow can no longer be reached.
 - The v1-v3 intent payloads and kinds are intentionally not migrated; remove all pre-build-14
   provider tiles and add the numbered tiles fresh from the gallery.
+- Tiles that stay invisible during Space-switch transitions and pop in only after the desktop
+  settles are a pre-render cache problem, not a view bug: macOS composites the sliding desktop
+  from per-extension `.chrono-timeline` archives under
+  `~/Library/Containers/ch.lkmc.llimit.app.widgetextension/Data/SystemData/com.apple.chrono`,
+  and the build 7-13 crash storm left LLimit's archives absent with chronod's reload
+  bookkeeping failure-throttled ("Disallowing reloads due to extensive failures",
+  `FOREIGN KEY constraint failed`). Reinstalls do not clear that on-disk state;
+  `./scripts/widget-diagnostics.sh --reset-chrono-cache` removes it and chronod re-renders
+  fresh archives from the installed extension.
 - If widget-side configuration is ever revisited (e.g. after a macOS fix), the historical
   diagnostic ladder was: fresh tile after full removal → `log stream` on
   NotificationCenter/chronod/appintentsd while clicking Edit → `killall NotificationCenter
@@ -388,7 +397,8 @@ Do not make speculative endpoint edits without captured evidence.
   relabeled as dashboard-specific.
 - Consider a medium provider-detail family after the small composition is stable.
 - Add widget deep links to the selected account after defining an app URL scheme.
-- Decide whether per-account background choices should override provider-toned tile palettes.
+- Per-account style overrides win over provider-toned palettes since build 17 (background
+  color and transparency; rings already followed the override).
 
 ### Existing dashboard
 

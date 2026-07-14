@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 # Reports the installed widget registration and recent LLimit-specific errors.
 # This does not read LLimit settings, snapshots, account names, or credentials.
+#
+# Usage: scripts/widget-diagnostics.sh [LOG_WINDOW|--reset-chrono-cache]
+#   LOG_WINDOW           `log show --last` window for the log section (default 5m)
+#   --reset-chrono-cache Clear the pre-rendered widget archive cache and reload
+#                        throttle state for LLimit's extension, then restart
+#                        chronod/Notification Center. Fixes widgets that stay
+#                        hidden during Space-switch transitions.
 set -u
 
 APP="/Applications/LLimit.app"
@@ -14,6 +21,23 @@ LOG_WINDOW="${1:-5m}"
 if [[ "$(uname -s)" != "Darwin" ]]; then
   printf 'error: widget diagnostics require macOS\n' >&2
   exit 1
+fi
+
+# WidgetKit composites desktops (including Space-switch transitions) from
+# pre-rendered archives in the extension's container. A failure-throttled or
+# corrupted cache from an earlier bad build leaves nothing to composite, so
+# widgets vanish during the slide and pop in afterwards. This clears the whole
+# per-extension chrono state — archives plus the reload bookkeeping that holds
+# the failure throttle — and chronod regenerates it from the installed
+# extension. LLimit settings, accounts, and history live elsewhere and are
+# untouched.
+CHRONO_DATA="$HOME/Library/Containers/ch.lkmc.llimit.app.widgetextension/Data/SystemData/com.apple.chrono"
+if [[ "${1:-}" == "--reset-chrono-cache" ]]; then
+  printf 'Removing pre-rendered widget archives and reload state under\n  %s\n' "$CHRONO_DATA"
+  rm -rf "$CHRONO_DATA"
+  killall chronod NotificationCenter 2>/dev/null || true
+  printf 'Done. chronod and Notification Center restarted; widgets re-render shortly.\n'
+  exit 0
 fi
 
 if [[ ! -d "$WIDGET" ]]; then
