@@ -761,7 +761,11 @@ final class AppModel: ObservableObject {
           return
         }
 
-        self.widgetStyle = preset.style
+        // Presets theme the background and menu bar status colors only; the
+        // user's limit identity colors are not part of any preset and survive.
+        var style = preset.style
+        style.limitKindColors = self.widgetStyle.limitKindColors
+        self.widgetStyle = style
         self.saveConfiguration()
       }
     )

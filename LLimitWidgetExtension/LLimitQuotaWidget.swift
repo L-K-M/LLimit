@@ -76,9 +76,11 @@ private struct TrendLineChartWidgetView: View {
     VStack(alignment: .leading, spacing: 4) {
       if chartData.series.isEmpty {
         Spacer(minLength: 0)
-        Text("No history yet")
+        Text(chartData.hasOnlyUnlimitedData ? "Unlimited plans only" : "No history yet")
           .font(.caption.weight(.semibold))
-        Text("Waiting for automatic refresh")
+        Text(chartData.hasOnlyUnlimitedData
+          ? "Every tracked limit reports unlimited — nothing to chart"
+          : "Waiting for automatic refresh")
           .font(.caption2)
           .foregroundStyle(.secondary)
         Spacer(minLength: 0)
@@ -381,6 +383,9 @@ private struct TrendChartData {
   let startDate: Date
   let endDate: Date
   let warnings: [TrendWarning]
+  // True when history exists but every tracked metric reports unlimited —
+  // there is genuinely nothing to chart, which is different from "no data".
+  var hasOnlyUnlimitedData = false
 }
 
 private struct OverviewSmallQuotaView: View {
@@ -534,7 +539,6 @@ private struct CompactProviderUsageRow: View {
   var body: some View {
     let metric = dashboardPrimaryMetric(for: usage)
     let dualPercent = showDualLimitPercentages ? dualLimitPercentText(for: usage) : nil
-    let percentDisplay = dualPercent ?? dashboardPercentDisplayText(for: usage)
     let basePercent = metric?.remainingPercent ?? providerRemainingPercent(for: usage)
     let unlimited = metric?.isUnlimited ?? usage.metrics.contains(where: \.isUnlimited)
 
@@ -558,7 +562,9 @@ private struct CompactProviderUsageRow: View {
       }
 
       if showPercentages {
-        Text(percentDisplay ?? percentText(for: metric))
+        // Single mode labels the SAME metric the bar fills with
+        // (dashboardPrimaryMetric), so the number can never contradict the bar.
+        Text(dualPercent ?? percentText(for: metric))
           .font(.caption2.weight(.semibold))
           .monospacedDigit()
           .lineLimit(1)
@@ -585,7 +591,6 @@ private struct MiniProgressBar: View {
       let width = max(0, proxy.size.width)
       let clampedPercent = max(0, min(100, percent ?? 0))
       let twoStops = Array(stops.prefix(2))
-      let longestPercent = twoStops.map(\.percent).max() ?? 0
 
       ZStack(alignment: .leading) {
         Capsule()
@@ -596,10 +601,14 @@ private struct MiniProgressBar: View {
         } else if showDualStops, twoStops.count >= 2 {
           // Longer fill first so the shorter one stays visible on top; each
           // fill wears its own metric's identity color, the underlying longer
-          // one dimmed so the overlap reads as two limits.
-          ForEach(twoStops.sorted { $0.percent > $1.percent }) { stop in
+          // one dimmed so the overlap reads as two limits. Dim by position in
+          // the draw order, not by percent — equal percents must still yield
+          // one strong fill.
+          let ordered = twoStops.sorted { $0.percent > $1.percent }
+
+          ForEach(ordered) { stop in
             Capsule()
-              .fill(stop.color.opacity(stop.percent == longestPercent ? 0.55 : 0.85))
+              .fill(stop.color.opacity(stop.id == ordered.first?.id ? 0.55 : 0.85))
               .frame(width: width * CGFloat(stop.percent) / 100.0)
           }
 
@@ -725,20 +734,6 @@ private func dualLimitPercentText(for usage: ProviderUsage) -> String? {
   return "\(boundedPercentages[0])% / \(boundedPercentages[1])%"
 }
 
-private func dashboardPercentDisplayText(for usage: ProviderUsage) -> String? {
-  let boundedPercentages = dashboardBarPercents(for: usage)
-
-  if let worst = boundedPercentages.first {
-    return "\(worst)%"
-  }
-
-  if usage.metrics.contains(where: \.isUnlimited) {
-    return "INF"
-  }
-
-  return nil
-}
-
 private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData {
   let clampedDays = max(1, min(30, days))
   let now = entry.date
@@ -773,6 +768,7 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
   var resetByKey: [SeriesKey: Date] = [:]
   var orderByAccount: [String: [String]] = [:]
   var usageByAccount: [String: ProviderUsage] = [:]
+  var sawUnlimitedMetric = false
   let enabledAccounts = entry.settings.accounts.filter(\.isEnabled)
   let enabledAccountIDs = Set(enabledAccounts.map(\.id))
   let enabledAccountsByProvider = Dictionary(grouping: enabledAccounts, by: \.provider)
@@ -789,7 +785,11 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
       for metric in usage.metrics {
         // Unlimited metrics have no trend to chart — plotting them pins a
         // flat line at 100% and only adds noise.
-        guard metric.remainingPercent != nil, !metric.isUnlimited else {
+        if metric.isUnlimited {
+          sawUnlimitedMetric = true
+          continue
+        }
+        guard metric.remainingPercent != nil else {
           continue
         }
 
@@ -817,10 +817,12 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
 
   var series: [TrendSeries] = []
   let kindColors = entry.settings.widgetStyle.limitKindColors
-  // Series sharing a hue (same window kind on two accounts, or Claude's two
-  // weeklies) take successive brightness steps plus a dash so identity never
-  // rests on color alone.
-  var stepBySlot: [LimitSeriesSlot: Int] = [:]
+  // Series sharing a hue take successive brightness steps plus a dash so
+  // identity never rests on color alone. Keyed by the RESOLVED base color,
+  // not the slot: the aux table cycles (a third .other metric reuses aux
+  // color A) and users can point two kinds at the same hue — both must
+  // trigger the stepping.
+  var stepByBaseHex: [String: Int] = [:]
 
   let accountOrder = usageByAccount.values.sorted { lhs, rhs in
     if lhs.provider.rawValue != rhs.provider.rawValue {
@@ -861,10 +863,9 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
         slot = LimitSeriesSlot(kind: QuotaWindowKind.classify(metricID: metricID, label: metricLabel))
       }
 
-      let step = stepBySlot[slot, default: 0]
-      stepBySlot[slot] = step + 1
-
       let baseHex = kindColors.hexColor(for: slot)
+      let step = stepByBaseHex[baseHex, default: 0]
+      stepByBaseHex[baseHex] = step + 1
       let lineColor = LimitKindColorScheme.steppedColor(hex: baseHex, step: step) ?? .white
 
       let style = seriesStyle(for: slot.kind)
@@ -911,7 +912,13 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
   chartStart = chartStart.addingTimeInterval(-now.timeIntervalSince(chartStart) * 0.02)
 
   let warnings = depletionWarnings(for: series, now: now)
-  return TrendChartData(series: series, startDate: chartStart, endDate: now, warnings: warnings)
+  return TrendChartData(
+    series: series,
+    startDate: chartStart,
+    endDate: now,
+    warnings: warnings,
+    hasOnlyUnlimitedData: series.isEmpty && sawUnlimitedMetric
+  )
 }
 
 /// Short windows churn constantly (a 5-hour limit saw-tooths all day) while

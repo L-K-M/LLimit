@@ -297,7 +297,11 @@ struct WidgetStylePreset: Identifiable, Hashable {
   }
 
   static func id(for style: WidgetStyleSettings) -> String {
-    all.first(where: { $0.style == style })?.id ?? customID
+    // Limit identity colors are not part of any preset — neutralize them so a
+    // customized limit palette doesn't knock the picker back to "Custom".
+    var normalized = style
+    normalized.limitKindColors = .default
+    return all.first(where: { $0.style == normalized })?.id ?? customID
   }
 }
 

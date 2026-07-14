@@ -23,8 +23,7 @@ struct LLimitApp: App {
     } label: {
       MenuBarIcon(
         snapshot: model.snapshot,
-        widgetStyle: model.widgetStyle,
-        providerStyleSettings: model.providerStyleSettings
+        widgetStyle: model.widgetStyle
       )
     }
     .menuBarExtraStyle(.window)
@@ -136,7 +135,6 @@ final class DashboardWindowController {
 private struct MenuBarIcon: View {
   let snapshot: QuotaSnapshot?
   let widgetStyle: WidgetStyleSettings
-  let providerStyleSettings: [String: ProviderStyleSettings]
 
   var body: some View {
     Image(nsImage: iconImage())
@@ -167,7 +165,7 @@ private struct MenuBarIcon: View {
         let barPath = NSBezierPath(roundedRect: barRect, xRadius: cornerRadius, yRadius: cornerRadius)
 
         MenuBarQuotaStyling
-          .color(for: provider, globalStyle: widgetStyle, providerStyleSettings: providerStyleSettings)
+          .color(for: provider, globalStyle: widgetStyle)
           .setFill()
         barPath.fill()
       }
@@ -849,11 +847,7 @@ private struct MenuBarContent: View {
       return .secondary
     }
 
-    return Color(nsColor: MenuBarQuotaStyling.color(
-      for: provider,
-      globalStyle: model.widgetStyle,
-      providerStyleSettings: model.providerStyleSettings
-    ))
+    return Color(nsColor: MenuBarQuotaStyling.color(for: provider, globalStyle: model.widgetStyle))
   }
 
   private func failureTitle(for failure: ProviderFailure) -> String {
@@ -1400,18 +1394,16 @@ private enum MenuBarQuotaStyling {
     return nil
   }
 
-  static func color(
-    for provider: ProviderUsage,
-    globalStyle: WidgetStyleSettings,
-    providerStyleSettings: [String: ProviderStyleSettings]
-  ) -> NSColor {
-    let style = effectiveStyle(for: provider.accountID, globalStyle: globalStyle, providerStyleSettings: providerStyleSettings)
-
+  // Status colors come from the global palette only: the per-account style
+  // override customizes backgrounds, and its ringColors snapshot has no
+  // editor anymore — resolving through it would freeze an account's menu bar
+  // color at whatever the palette was when the override was enabled.
+  static func color(for provider: ProviderUsage, globalStyle: WidgetStyleSettings) -> NSColor {
     guard let role = colorRole(for: provider) else {
       return .systemGray
     }
 
-    let hex = style.ringColors.hexColor(for: role, layer: .outer)
+    let hex = globalStyle.ringColors.hexColor(for: role, layer: .outer)
     return NSColor(hexString: hex) ?? .systemGray
   }
 
@@ -1439,23 +1431,6 @@ private enum MenuBarQuotaStyling {
     }
 
     return nil
-  }
-
-  private static func effectiveStyle(
-    for accountID: String,
-    globalStyle: WidgetStyleSettings,
-    providerStyleSettings: [String: ProviderStyleSettings]
-  ) -> WidgetStyleSettings {
-    guard let styleOverride = providerStyleSettings[accountID], styleOverride.useCustomStyle else {
-      return globalStyle
-    }
-
-    return WidgetStyleSettings(
-      backgroundHexColor: styleOverride.style.backgroundHexColor ?? globalStyle.backgroundHexColor,
-      ringColors: styleOverride.style.ringColors,
-      limitKindColors: globalStyle.limitKindColors,
-      useTransparentBackground: styleOverride.style.useTransparentBackground
-    )
   }
 
   private static func clampPercent(_ value: Int) -> Int {
