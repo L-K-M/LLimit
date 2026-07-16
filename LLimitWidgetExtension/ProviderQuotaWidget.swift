@@ -314,10 +314,12 @@ struct ProviderTileTimelineProvider: TimelineProvider {
 
   private static func sampleEntry(slotIndex: Int, at date: Date) -> ProviderQuotaEntry {
     let account = ProviderTileSelection(id: "sample-zai", displayName: "Z.ai", provider: .zai)
-    // Hoisted into typed locals: the nested single-expression construction
-    // once tripped the type checker's per-expression budget on CI.
-    let tokensReset: TimeInterval = 3 * 3_600 + 44 * 60
-    let mcpReset: TimeInterval = 6 * 86_400 + 19 * 3_600 + 43 * 60
+    // Folded constants: integer-literal arithmetic in a Double context sends
+    // the type checker into its pathological ambiguous-literal search — the
+    // spelled-out sums repeatedly failed CI with "unable to type-check this
+    // expression in reasonable time".
+    let tokensReset: TimeInterval = 13_440 // 3h 44m
+    let mcpReset: TimeInterval = 589_380 // 6d 19h 43m
     let metrics: [UsageMetric] = [
       UsageMetric(
         id: "tokens",
