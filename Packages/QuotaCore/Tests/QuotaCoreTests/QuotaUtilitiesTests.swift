@@ -75,6 +75,25 @@ final class QuotaUtilitiesTests: XCTestCase {
     XCTAssertEqual(components.day, 6)
   }
 
+  func testParseISO8601RenormalizesNonMillisecondFractions() {
+    let reference = parseISO8601("2026-01-09T15:23:13.716Z")
+    XCTAssertNotNil(reference)
+
+    // Protobuf-JSON nanoseconds (9 digits) truncate to milliseconds.
+    XCTAssertEqual(parseISO8601("2026-01-09T15:23:13.716839300Z"), reference)
+    // Microseconds (6 digits) truncate too.
+    XCTAssertEqual(parseISO8601("2026-01-09T15:23:13.716839Z"), reference)
+    // Short fractions pad instead: ".7" means 700ms.
+    XCTAssertEqual(parseISO8601("2026-01-09T15:23:13.7Z"), parseISO8601("2026-01-09T15:23:13.700Z"))
+    // The suffix after the fraction survives, including numeric offsets.
+    XCTAssertEqual(
+      parseISO8601("2026-01-09T15:23:13.716839300+08:00"),
+      parseISO8601("2026-01-09T15:23:13.716+08:00")
+    )
+    // Fraction-free strings take the plain path unchanged.
+    XCTAssertNotNil(parseISO8601("2026-01-09T15:23:13Z"))
+  }
+
   func testParseDateValueHandlesISOAndEpochTimestamps() {
     XCTAssertNotNil(parseDateValue("2026-03-06T12:00:00Z"))
     XCTAssertNotNil(parseDateValue("2026-03-06"))

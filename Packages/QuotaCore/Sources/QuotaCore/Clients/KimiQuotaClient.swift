@@ -22,6 +22,11 @@ import FoundationNetworking
 /// mirrors the tolerances of kimi-cli's `/usage` command (ui/shell/usage.py):
 /// `used` OR `remaining`, alternate reset keys, relative reset seconds, and
 /// `name`/`title`/`scope` label overrides.
+///
+/// Metric ids carry the window cadence ("plan-weekly", "window-5-hour") so the
+/// widget's trend history stays keyed to the window itself — not the server's
+/// array order — and `QuotaWindowKind.classify` keeps the right identity color
+/// even when a server-sent label override replaces the parseable default.
 public struct KimiQuotaClient: QuotaProviderClient {
   public let provider: QuotaProvider = .kimi
   private let endpoint: URL
@@ -50,17 +55,19 @@ public struct KimiQuotaClient: QuotaProviderClient {
 
     let (data, response) = try await httpClient.data(for: request)
     guard (200..<300).contains(response.statusCode) else {
-      let body = String(data: data, encoding: .utf8) ?? ""
       switch response.statusCode {
       case 401, 403:
         throw ProviderClientError(kind: .auth, message: "Kimi authorization failed (\(response.statusCode)) — check the API key")
       case 404:
         // The endpoint only exists on the Kimi Code platform; Moonshot open
-        // platform keys (api.moonshot.ai/.cn) get a 404 here.
-        throw ProviderClientError(kind: .api, message: "Kimi usage endpoint not available — use a Kimi for Coding key, not a Moonshot open-platform key")
+        // platform keys (api.moonshot.ai/.cn) get a 404 here. A transient
+        // routing 404 looks identical, so hint rather than assert.
+        throw ProviderClientError(kind: .api, message: "Kimi usage endpoint not found (404) — if this persists, check that the key is a Kimi for Coding key; Moonshot open-platform keys are not accepted")
       case 429:
+        let body = String(data: data, encoding: .utf8) ?? ""
         throw ProviderClientError(kind: .rateLimit, message: "Kimi API rate limited: \(body)")
       default:
+        let body = String(data: data, encoding: .utf8) ?? ""
         throw ProviderClientError(kind: .api, message: "Kimi API error \(response.statusCode): \(body)")
       }
     }
@@ -68,26 +75,26 @@ public struct KimiQuotaClient: QuotaProviderClient {
     let payload = try parseJSONObject(from: data)
 
     var metrics: [UsageMetric] = []
-    var maxUsagePercent = 0
 
-    if let summary = payload["usage"] as? [String: Any],
-       let parsed = metric(from: summary, id: "plan", fallbackLabel: "Weekly limit", now: now) {
-      metrics.append(parsed.metric)
-      maxUsagePercent = max(maxUsagePercent, parsed.usedPercent)
+    if let summary = payload["usage"] as? [String: Any] {
+      let label = nonEmptyString(summary["name"]) ?? nonEmptyString(summary["title"]) ?? "Weekly limit"
+      if let metric = metric(from: summary, id: "plan-weekly", label: label, now: now) {
+        metrics.append(metric)
+      }
     }
 
     if let windows = payload["limits"] as? [[String: Any]] {
       for (index, item) in windows.enumerated() {
         let detail = (item["detail"] as? [String: Any]) ?? item
         let window = (item["window"] as? [String: Any]) ?? [:]
-        let label = windowLabel(item: item, detail: detail, window: window, index: index)
-        guard let parsed = metric(from: detail, id: "limit-\(index)", fallbackLabel: label, now: now) else {
-          continue
+        let descriptor = windowDescriptor(item: item, detail: detail, window: window, index: index)
+        if let metric = metric(from: detail, id: descriptor.id, label: descriptor.label, now: now) {
+          metrics.append(metric)
         }
-        metrics.append(parsed.metric)
-        maxUsagePercent = max(maxUsagePercent, parsed.usedPercent)
       }
     }
+
+    let maxUsagePercent = metrics.map { 100 - ($0.remainingPercent ?? 100) }.max() ?? 0
 
     if metrics.isEmpty {
       metrics.append(UsageMetric(id: "empty", label: "No quota data available"))
@@ -105,31 +112,23 @@ public struct KimiQuotaClient: QuotaProviderClient {
     )
   }
 
-  private func metric(
-    from data: [String: Any],
-    id: String,
-    fallbackLabel: String,
-    now: Date
-  ) -> (metric: UsageMetric, usedPercent: Int)? {
+  private func metric(from data: [String: Any], id: String, label: String, now: Date) -> UsageMetric? {
     let limit = parseNumeric(data["limit"])
     var used = parseNumeric(data["used"])
     if used == nil, let limit, let remaining = parseNumeric(data["remaining"]) {
-      used = limit - remaining
+      // remaining can exceed limit (top-up quota, plan changes); don't show
+      // a negative usage for it.
+      used = max(0, limit - remaining)
     }
     guard used != nil || limit != nil else { return nil }
 
-    let label = nonEmptyLabel(data["name"]) ?? nonEmptyLabel(data["title"]) ?? fallbackLabel
-
     var remainingPercent: Int?
-    var usedPercent = 0
     if let limit, limit > 0, let used {
-      let percent = clampPercent(roundedPercent(100.0 - used / limit * 100.0) ?? 0)
-      remainingPercent = percent
-      usedPercent = 100 - percent
+      remainingPercent = percentRemaining(fromUsedPercent: used / limit * 100.0)
     }
 
     let resetAt = resetDate(in: data, now: now)
-    let metric = UsageMetric(
+    return UsageMetric(
       id: id,
       label: label,
       remainingPercent: remainingPercent,
@@ -138,64 +137,78 @@ public struct KimiQuotaClient: QuotaProviderClient {
       resetAt: resetAt,
       resetIn: resetAt.map { formatResetCountdown(to: $0, now: now) }
     )
-    return (metric, usedPercent)
   }
 
-  /// Labels follow kimi-cli's rendering, spelled so `QuotaWindowKind.classify`
-  /// can parse the window length ("5-hour limit", not "5h limit").
-  private func windowLabel(
+  /// The window's stable id (duration-based, immune to `limits[]` reordering)
+  /// and display label. Labels follow kimi-cli's rendering but are spelled so
+  /// `QuotaWindowKind.classify` can parse the window length ("5-hour limit",
+  /// not "5h limit"); server-sent name/title/scope overrides replace the label
+  /// only — the id keeps carrying the cadence for classification and history.
+  private func windowDescriptor(
     item: [String: Any],
     detail: [String: Any],
     window: [String: Any],
     index: Int
-  ) -> String {
+  ) -> (id: String, label: String) {
+    var override: String?
     for key in ["name", "title", "scope"] {
-      if let label = nonEmptyLabel(item[key]) ?? nonEmptyLabel(detail[key]) {
-        return label
+      if let label = nonEmptyString(item[key]) ?? nonEmptyString(detail[key]) {
+        override = label
+        break
       }
     }
 
+    // kimi-cli checks all three locations for the window length (usage.py
+    // _limit_label): window first, then the item, then its detail.
     let duration = parseNumeric(window["duration"]) ?? parseNumeric(item["duration"]) ?? parseNumeric(detail["duration"])
-    let timeUnit = ((window["timeUnit"] ?? item["timeUnit"] ?? detail["timeUnit"]) as? String) ?? ""
+    let timeUnit = nonEmptyString(window["timeUnit"]) ?? nonEmptyString(item["timeUnit"]) ?? nonEmptyString(detail["timeUnit"]) ?? ""
 
-    if let duration, duration > 0, let count = roundedInt(duration) {
-      if timeUnit.contains("MINUTE") {
-        if count >= 60, count % 60 == 0 {
-          return "\(count / 60)-hour limit"
-        }
-        return "\(count)-minute limit"
-      }
-      if timeUnit.contains("HOUR") {
-        return "\(count)-hour limit"
-      }
-      if timeUnit.contains("DAY") {
-        return "\(count)-day limit"
-      }
-      return "\(count)-second limit"
+    guard
+      let duration, duration > 0, let rawCount = roundedInt(duration),
+      let unit = windowUnit(count: rawCount, timeUnit: timeUnit)
+    else {
+      return (id: "limit-\(index)", label: override ?? "Limit #\(index + 1)")
     }
 
-    return "Limit #\(index + 1)"
+    let cadence = "\(unit.count)-\(unit.name)"
+    return (id: "window-\(cadence)", label: override ?? "\(cadence) limit")
   }
 
-  private func resetDate(in data: [String: Any], now: Date) -> Date? {
-    for key in ["reset_at", "resetAt", "reset_time", "resetTime"] {
-      if let date = parseDateValue(data[key]) {
-        return date
+  /// Normalizes a protobuf `TIME_UNIT_*` window to a classifier-friendly unit
+  /// word, folding whole-hour minute counts (300 minutes → 5 hours) the way
+  /// kimi-cli renders them. Unknown units return nil rather than fabricating
+  /// a cadence the payload never stated.
+  private func windowUnit(count: Int, timeUnit: String) -> (count: Int, name: String)? {
+    if timeUnit.contains("MINUTE") {
+      if count >= 60, count % 60 == 0 {
+        return (count / 60, "hour")
       }
+      return (count, "minute")
     }
-
-    for key in ["reset_in", "resetIn", "ttl"] {
-      if let seconds = parseNumeric(data[key]), seconds > 0 {
-        return now.addingTimeInterval(seconds)
-      }
+    if timeUnit.contains("HOUR") {
+      return (count, "hour")
     }
-
+    if timeUnit.contains("DAY") {
+      return (count, "day")
+    }
+    if timeUnit.contains("WEEK") {
+      return (count, "week")
+    }
+    if timeUnit.contains("MONTH") {
+      return (count, "month")
+    }
     return nil
   }
 
-  private func nonEmptyLabel(_ value: Any?) -> String? {
-    guard let string = value as? String else { return nil }
-    let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
-    return trimmed.isEmpty ? nil : trimmed
+  private func resetDate(in data: [String: Any], now: Date) -> Date? {
+    if let date = firstDateValue(in: data, keys: ["reset_at", "resetAt", "reset_time", "resetTime"]) {
+      return date
+    }
+
+    if let seconds = firstNumeric(in: data, keys: ["reset_in", "resetIn", "ttl"]), seconds > 0 {
+      return now.addingTimeInterval(seconds)
+    }
+
+    return nil
   }
 }

@@ -54,6 +54,7 @@ final class CredentialDiscoveryTests: XCTestCase {
       "openai": {"type":"oauth","access":"sk-openai-oc"},
       "zhipuai-coding-plan": {"type":"api","key":"zhipu-key"},
       "zai-coding-plan": {"type":"api","key":"zai-key"},
+      "kimi-for-coding": {"type":"api","key":"kimi-key"},
       "github-copilot": {"type":"oauth","refresh":"gho_refresh"}
     }
     """#, to: ".local", "share", "opencode", "auth.json")
@@ -61,6 +62,7 @@ final class CredentialDiscoveryTests: XCTestCase {
     let result = discover()
     XCTAssertEqual(result.first { $0.stableID == "zhipu:opencode" }?.credentials[CredentialField.zhipuAPIKey], "zhipu-key")
     XCTAssertEqual(result.first { $0.stableID == "zai:opencode" }?.credentials[CredentialField.zaiAPIKey], "zai-key")
+    XCTAssertEqual(result.first { $0.stableID == "kimi:opencode" }?.credentials[CredentialField.kimiAPIKey], "kimi-key")
     XCTAssertEqual(result.first { $0.stableID == "github-copilot:opencode" }?.credentials[CredentialField.copilotOAuthToken], "gho_refresh")
     XCTAssertNotNil(result.first { $0.stableID == "anthropic:opencode" })
     XCTAssertNotNil(result.first { $0.stableID == "openai:opencode" })
@@ -103,7 +105,24 @@ final class CredentialDiscoveryTests: XCTestCase {
     let kimi = discover().first { $0.provider == .kimi }
     XCTAssertEqual(kimi?.stableID, "kimi:kimi-cli")
     XCTAssertEqual(kimi?.credentials[CredentialField.kimiAPIKey], "kimi-token-1")
+    XCTAssertEqual(kimi?.credentials[CredentialField.kimiRefreshToken], "r")
     XCTAssertEqual(kimi?.sourceLabel, "Kimi CLI (~/.kimi)")
+  }
+
+  func testSkipsExpiredKimiTokenWithMillisecondEpoch() throws {
+    // 1e12 ms = 2001; a millisecond expiry must not defeat the check.
+    try write(#"{"access_token":"kimi-stale-ms","expires_at":1000000000000}"#,
+              to: ".kimi", "credentials", "kimi-code.json")
+
+    let result = CredentialDiscovery(homeDirectories: [home]).discover()
+    XCTAssertTrue(result.credentials.filter { $0.provider == .kimi }.isEmpty)
+    XCTAssertTrue(result.diagnostics.contains { $0.contains("Kimi: token expired") })
+  }
+
+  func testKeepsKimiTokenWithZeroExpiry() throws {
+    // kimi-cli writes expires_at 0.0 when the expiry is unknown.
+    try write(#"{"access_token":"kimi-zero","expires_at":0.0}"#, to: ".kimi", "credentials", "kimi-code.json")
+    XCTAssertEqual(discover().first { $0.provider == .kimi }?.credentials[CredentialField.kimiAPIKey], "kimi-zero")
   }
 
   func testDiscoversStandaloneKimiCodeToken() throws {

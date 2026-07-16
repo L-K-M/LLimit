@@ -200,11 +200,20 @@ public struct CredentialDiscovery: Sendable {
         continue
       }
 
-      if let expiresAt = (object["expires_at"] as? NSNumber)?.doubleValue,
-         expiresAt > 0,
-         Date(timeIntervalSince1970: expiresAt) < Date() {
+      // kimi-cli writes expires_at as epoch seconds (0.0 when unknown);
+      // parseDateValue also tolerates string/millisecond variants.
+      if let expiresAt = parseDateValue(object["expires_at"]),
+         expiresAt.timeIntervalSince1970 > 0,
+         expiresAt < Date() {
         diagnostics.append("Kimi: token expired (\(shortPath(source.url))) — run the Kimi CLI to refresh it, or paste an API key from kimi.com/code/console")
         continue
+      }
+
+      var credentials = [CredentialField.kimiAPIKey: token]
+      // No refresh flow exists yet, but keeping the refresh token means a
+      // future one can renew this account without a re-import.
+      if let refresh = nonEmptyString(object["refresh_token"]) {
+        credentials[CredentialField.kimiRefreshToken] = refresh
       }
 
       results.append(
@@ -213,7 +222,7 @@ public struct CredentialDiscovery: Sendable {
           provider: .kimi,
           suggestedName: "Kimi",
           sourceLabel: source.label,
-          credentials: [CredentialField.kimiAPIKey: token]
+          credentials: credentials
         )
       )
       diagnostics.append("Kimi: found OAuth token (\(shortPath(source.url)))")
@@ -258,6 +267,10 @@ public struct CredentialDiscovery: Sendable {
 
       if let key = apiKey(in: object, provider: "zai-coding-plan") {
         results.append(make("zai:opencode", .zai, "Z.ai", url, [CredentialField.zaiAPIKey: key]))
+      }
+
+      if let key = apiKey(in: object, provider: "kimi-for-coding") {
+        results.append(make("kimi:opencode", .kimi, "Kimi", url, [CredentialField.kimiAPIKey: key]))
       }
 
       if let copilot = object["github-copilot"] as? [String: Any],
@@ -413,12 +426,6 @@ public struct CredentialDiscovery: Sendable {
       return "~" + path.dropFirst(home.path.count)
     }
     return path
-  }
-
-  private func nonEmptyString(_ value: Any?) -> String? {
-    guard let string = value as? String else { return nil }
-    let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
-    return trimmed.isEmpty ? nil : trimmed
   }
 
   private func extractOpenAIAccountID(from jwt: String) -> String? {

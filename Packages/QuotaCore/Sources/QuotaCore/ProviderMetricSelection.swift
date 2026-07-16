@@ -14,8 +14,10 @@ public func defaultRingMetrics(for usage: ProviderUsage) -> [UsageMetric] {
     preferredIDs = ["tokens", "mcp"]
   case .kimi:
     // 5-hour window first, weekly plan quota second — same short-then-long
-    // ordering as Anthropic and Zhipu.
-    preferredIDs = ["limit-0", "plan"]
+    // ordering as Anthropic and Zhipu. Window ids are duration-based
+    // (KimiQuotaClient.windowDescriptor), so a reordered limits[] array
+    // cannot repoint the ring at a different window.
+    preferredIDs = ["window-5-hour", "plan-weekly"]
   case .gitHubCopilot:
     preferredIDs = ["premium", "chat", "completions"]
   case .googleAntigravity:

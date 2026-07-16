@@ -97,6 +97,21 @@ func firstNumeric(in dictionary: [String: Any], keys: [String]) -> Double? {
   return nil
 }
 
+func firstDateValue(in dictionary: [String: Any], keys: [String]) -> Date? {
+  for key in keys {
+    if let date = parseDateValue(dictionary[key]) {
+      return date
+    }
+  }
+  return nil
+}
+
+func nonEmptyString(_ value: Any?) -> String? {
+  guard let string = value as? String else { return nil }
+  let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+  return trimmed.isEmpty ? nil : trimmed
+}
+
 func formatIntLike(_ value: Double?) -> String? {
   guard let value, value.isFinite else { return nil }
   if let integer = roundedInt(value), Double(integer) == value {
@@ -137,6 +152,15 @@ func parseISO8601(_ string: String?) -> Date? {
 
   let withFractional = ISO8601DateFormatter()
   withFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+  // ISO8601DateFormatter only accepts exactly three fractional digits, but
+  // protobuf-JSON timestamps (e.g. Kimi's resetTime) carry up to nine. Parse
+  // the milliseconds-normalized form first so a platform that leniently
+  // swallows longer fractions as raw milliseconds can't win with a wrong date.
+  if let normalized = normalizedToMillisecondFraction(trimmed), let date = withFractional.date(from: normalized) {
+    return date
+  }
+
   if let date = withFractional.date(from: trimmed) {
     return date
   }
@@ -144,13 +168,6 @@ func parseISO8601(_ string: String?) -> Date? {
   let standard = ISO8601DateFormatter()
   standard.formatOptions = [.withInternetDateTime]
   if let date = standard.date(from: trimmed) {
-    return date
-  }
-
-  // ISO8601DateFormatter only accepts exactly three fractional digits, but
-  // protobuf-JSON timestamps (e.g. Kimi's resetTime) carry up to nine.
-  // Renormalize the fraction to milliseconds and retry.
-  if let normalized = normalizedToMillisecondFraction(trimmed), let date = withFractional.date(from: normalized) {
     return date
   }
 
