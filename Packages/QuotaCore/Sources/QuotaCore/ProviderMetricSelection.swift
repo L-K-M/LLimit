@@ -13,7 +13,9 @@ public func defaultRingMetrics(for usage: ProviderUsage) -> [UsageMetric] {
   case .zhipu, .zai:
     preferredIDs = ["tokens", "mcp"]
   case .kimi:
-    preferredIDs = ["requests", "spend"]
+    // 5-hour window first, weekly plan quota second — same short-then-long
+    // ordering as Anthropic and Zhipu.
+    preferredIDs = ["limit-0", "plan"]
   case .gitHubCopilot:
     preferredIDs = ["premium", "chat", "completions"]
   case .googleAntigravity:

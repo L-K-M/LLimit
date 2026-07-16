@@ -70,6 +70,7 @@ public struct CredentialDiscovery: Sendable {
       candidates += scanClaudeCode(home: home, diagnostics: &diagnostics)
       candidates += scanCodex(home: home, diagnostics: &diagnostics)
       candidates += scanCopilotEditor(home: home, diagnostics: &diagnostics)
+      candidates += scanKimi(home: home, diagnostics: &diagnostics)
       candidates += scanOpenCode(home: home, diagnostics: &diagnostics)
     }
 
@@ -176,6 +177,46 @@ public struct CredentialDiscovery: Sendable {
         )
         diagnostics.append("GitHub Copilot CLI: found token (\(shortPath(cliURL)))")
       }
+    }
+
+    return results
+  }
+
+  private func scanKimi(home: URL, diagnostics: inout [String]) -> [DiscoveredCredential] {
+    // The Kimi CLI (~/.kimi) and its standalone successor Kimi Code
+    // (~/.kimi-code) both store the OAuth login at
+    // credentials/kimi-code.json; the access token doubles as the Bearer key
+    // for the coding-plan usage endpoint.
+    let sources: [(stableID: String, url: URL, label: String)] = [
+      ("kimi:kimi-cli", path(home, ".kimi", "credentials", "kimi-code.json"), "Kimi CLI (~/.kimi)"),
+      ("kimi:kimi-code", path(home, ".kimi-code", "credentials", "kimi-code.json"), "Kimi Code (~/.kimi-code)")
+    ]
+
+    var results: [DiscoveredCredential] = []
+    for source in sources {
+      guard let object = readJSON(at: source.url, label: "Kimi", diagnostics: &diagnostics) else { continue }
+      guard let token = nonEmptyString(object["access_token"]) else {
+        diagnostics.append("Kimi: file found but no access token (\(shortPath(source.url)))")
+        continue
+      }
+
+      if let expiresAt = (object["expires_at"] as? NSNumber)?.doubleValue,
+         expiresAt > 0,
+         Date(timeIntervalSince1970: expiresAt) < Date() {
+        diagnostics.append("Kimi: token expired (\(shortPath(source.url))) — run the Kimi CLI to refresh it, or paste an API key from kimi.com/code/console")
+        continue
+      }
+
+      results.append(
+        DiscoveredCredential(
+          stableID: source.stableID,
+          provider: .kimi,
+          suggestedName: "Kimi",
+          sourceLabel: source.label,
+          credentials: [CredentialField.kimiAPIKey: token]
+        )
+      )
+      diagnostics.append("Kimi: found OAuth token (\(shortPath(source.url)))")
     }
 
     return results

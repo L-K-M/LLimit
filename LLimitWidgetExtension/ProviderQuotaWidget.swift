@@ -239,6 +239,12 @@ struct ProviderTileTimelineProvider: TimelineProvider {
         ?? legacyFailure(for: account, in: snapshot, accounts: allAccounts)
     }
 
+    // Hoisted into typed locals: this construction once tripped the type
+    // checker's per-expression budget on CI (Swift "unable to type-check
+    // this expression in reasonable time").
+    let style: WidgetStyleSettings = effectiveStyle(for: selection?.id, settings: settings)
+    let refreshMinutes: Int = max(15, settings.refreshIntervalMinutes)
+    let colorStep: Int = selection.map { accountColorStep(forAccountID: $0.id, in: allAccounts) } ?? 0
     return ProviderQuotaEntry(
       date: date,
       slotIndex: slotIndex,
@@ -246,9 +252,9 @@ struct ProviderTileTimelineProvider: TimelineProvider {
       accountState: accountState,
       usage: usage,
       failure: failure,
-      style: effectiveStyle(for: selection?.id, settings: settings),
-      refreshIntervalMinutes: max(15, settings.refreshIntervalMinutes),
-      accountColorStep: selection.map { accountColorStep(forAccountID: $0.id, in: allAccounts) } ?? 0
+      style: style,
+      refreshIntervalMinutes: refreshMinutes,
+      accountColorStep: colorStep
     )
   }
 
@@ -308,31 +314,37 @@ struct ProviderTileTimelineProvider: TimelineProvider {
 
   private static func sampleEntry(slotIndex: Int, at date: Date) -> ProviderQuotaEntry {
     let account = ProviderTileSelection(id: "sample-zai", displayName: "Z.ai", provider: .zai)
+    // Hoisted into typed locals: the nested single-expression construction
+    // once tripped the type checker's per-expression budget on CI.
+    let tokensReset: TimeInterval = 3 * 3_600 + 44 * 60
+    let mcpReset: TimeInterval = 6 * 86_400 + 19 * 3_600 + 43 * 60
+    let metrics: [UsageMetric] = [
+      UsageMetric(
+        id: "tokens",
+        label: "Token limit",
+        remainingPercent: 82,
+        resetAt: date.addingTimeInterval(tokensReset)
+      ),
+      UsageMetric(
+        id: "mcp",
+        label: "MCP monthly quota",
+        remainingPercent: 64,
+        resetAt: date.addingTimeInterval(mcpReset)
+      )
+    ]
+    let usage = ProviderUsage(
+      accountID: account.id,
+      provider: .zai,
+      title: account.displayName,
+      metrics: metrics,
+      fetchedAt: date
+    )
     return ProviderQuotaEntry(
       date: date,
       slotIndex: slotIndex,
       account: account,
       accountState: .configured,
-      usage: ProviderUsage(
-        accountID: account.id,
-        provider: .zai,
-        title: account.displayName,
-        metrics: [
-          UsageMetric(
-            id: "tokens",
-            label: "Token limit",
-            remainingPercent: 82,
-            resetAt: date.addingTimeInterval(3 * 3_600 + 44 * 60)
-          ),
-          UsageMetric(
-            id: "mcp",
-            label: "MCP monthly quota",
-            remainingPercent: 64,
-            resetAt: date.addingTimeInterval(6 * 86_400 + 19 * 3_600 + 43 * 60)
-          )
-        ],
-        fetchedAt: date
-      ),
+      usage: usage,
       failure: nil,
       style: WidgetStyleSettings(),
       refreshIntervalMinutes: 30,

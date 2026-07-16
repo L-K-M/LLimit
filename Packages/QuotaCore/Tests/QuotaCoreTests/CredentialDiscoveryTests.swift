@@ -95,4 +95,46 @@ final class CredentialDiscoveryTests: XCTestCase {
   func testReturnsEmptyWhenNothingInstalled() {
     XCTAssertTrue(discover().isEmpty)
   }
+
+  func testDiscoversKimiCLIToken() throws {
+    try write(#"{"access_token":"kimi-token-1","refresh_token":"r","expires_at":4102444800.0}"#,
+              to: ".kimi", "credentials", "kimi-code.json")
+
+    let kimi = discover().first { $0.provider == .kimi }
+    XCTAssertEqual(kimi?.stableID, "kimi:kimi-cli")
+    XCTAssertEqual(kimi?.credentials[CredentialField.kimiAPIKey], "kimi-token-1")
+    XCTAssertEqual(kimi?.sourceLabel, "Kimi CLI (~/.kimi)")
+  }
+
+  func testDiscoversStandaloneKimiCodeToken() throws {
+    try write(#"{"access_token":"kimi-token-2","expires_at":4102444800.0}"#,
+              to: ".kimi-code", "credentials", "kimi-code.json")
+
+    let kimi = discover().first { $0.provider == .kimi }
+    XCTAssertEqual(kimi?.stableID, "kimi:kimi-code")
+    XCTAssertEqual(kimi?.credentials[CredentialField.kimiAPIKey], "kimi-token-2")
+  }
+
+  func testSkipsExpiredKimiToken() throws {
+    try write(#"{"access_token":"kimi-stale","expires_at":1000000000.0}"#,
+              to: ".kimi", "credentials", "kimi-code.json")
+
+    let result = CredentialDiscovery(homeDirectories: [home]).discover()
+    XCTAssertTrue(result.credentials.filter { $0.provider == .kimi }.isEmpty)
+    XCTAssertTrue(result.diagnostics.contains { $0.contains("Kimi: token expired") })
+  }
+
+  func testKeepsKimiTokenWithoutExpiry() throws {
+    try write(#"{"access_token":"kimi-no-expiry"}"#, to: ".kimi", "credentials", "kimi-code.json")
+    XCTAssertEqual(discover().first { $0.provider == .kimi }?.credentials[CredentialField.kimiAPIKey], "kimi-no-expiry")
+  }
+
+  func testDedupesIdenticalKimiTokenFromBothInstalls() throws {
+    try write(#"{"access_token":"kimi-same","expires_at":4102444800.0}"#, to: ".kimi", "credentials", "kimi-code.json")
+    try write(#"{"access_token":"kimi-same","expires_at":4102444800.0}"#, to: ".kimi-code", "credentials", "kimi-code.json")
+
+    let kimi = discover().filter { $0.provider == .kimi }
+    XCTAssertEqual(kimi.count, 1)
+    XCTAssertEqual(kimi.first?.stableID, "kimi:kimi-cli") // first source wins
+  }
 }

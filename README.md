@@ -25,6 +25,7 @@ token. You can always add accounts manually too.
 | **GitHub Copilot** | OAuth token, or PAT + username | `~/.config/github-copilot`, `~/.copilot`, OpenCode |
 | **Zhipu AI** | API key | OpenCode (`zhipuai-coding-plan`) |
 | **Z.ai** | API key | OpenCode (`zai-coding-plan`) |
+| **Kimi** (Moonshot AI) | API key or OAuth access token | Kimi CLI (`~/.kimi`), Kimi Code (`~/.kimi-code`) |
 | **Google (Antigravity)** | Refresh token + project id | OpenCode (`antigravity-accounts.json`) |
 
 ## How accounts work

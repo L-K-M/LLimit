@@ -147,11 +147,36 @@ func parseISO8601(_ string: String?) -> Date? {
     return date
   }
 
+  // ISO8601DateFormatter only accepts exactly three fractional digits, but
+  // protobuf-JSON timestamps (e.g. Kimi's resetTime) carry up to nine.
+  // Renormalize the fraction to milliseconds and retry.
+  if let normalized = normalizedToMillisecondFraction(trimmed), let date = withFractional.date(from: normalized) {
+    return date
+  }
+
   let calendarDate = DateFormatter()
   calendarDate.locale = Locale(identifier: "en_US_POSIX")
   calendarDate.timeZone = TimeZone(secondsFromGMT: 0)
   calendarDate.dateFormat = "yyyy-MM-dd"
   return calendarDate.date(from: trimmed)
+}
+
+/// Rewrites an ISO 8601 string's fractional-second part to exactly three
+/// digits (truncating or zero-padding), or nil when there is no fraction to
+/// fix. Only the first "." is considered — ISO 8601 timestamps have one.
+private func normalizedToMillisecondFraction(_ value: String) -> String? {
+  guard value.contains("T"), let dotIndex = value.firstIndex(of: ".") else { return nil }
+
+  var digits = ""
+  var suffixStart = value.index(after: dotIndex)
+  while suffixStart < value.endIndex, value[suffixStart].isNumber {
+    digits.append(value[suffixStart])
+    suffixStart = value.index(after: suffixStart)
+  }
+  guard !digits.isEmpty, digits.count != 3 else { return nil }
+
+  let milliseconds = String((digits + "000").prefix(3))
+  return value[..<dotIndex] + "." + milliseconds + value[suffixStart...]
 }
 
 func parseDateValue(_ value: Any?) -> Date? {
