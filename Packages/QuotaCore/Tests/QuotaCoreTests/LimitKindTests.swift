@@ -39,6 +39,8 @@ final class LimitKindTests: XCTestCase {
     XCTAssertEqual(QuotaWindowKind.classify(metricID: "x", label: "14-day limit"), .monthly)
     XCTAssertEqual(QuotaWindowKind.classify(metricID: "x", label: "90-day limit"), .monthly)
     XCTAssertEqual(QuotaWindowKind.classify(metricID: "x", label: "20-hour limit"), .daily)
+    XCTAssertEqual(QuotaWindowKind.classify(metricID: "x", label: "90-minute limit"), .session)
+    XCTAssertEqual(QuotaWindowKind.classify(metricID: "x", label: "1440-minute limit"), .daily)
     XCTAssertEqual(QuotaWindowKind.classify(metricID: "empty", label: "No quota data available"), .other)
   }
 

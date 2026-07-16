@@ -70,6 +70,7 @@ public struct CredentialDiscovery: Sendable {
       candidates += scanClaudeCode(home: home, diagnostics: &diagnostics)
       candidates += scanCodex(home: home, diagnostics: &diagnostics)
       candidates += scanCopilotEditor(home: home, diagnostics: &diagnostics)
+      candidates += scanKimi(home: home, diagnostics: &diagnostics)
       candidates += scanOpenCode(home: home, diagnostics: &diagnostics)
     }
 
@@ -181,6 +182,55 @@ public struct CredentialDiscovery: Sendable {
     return results
   }
 
+  private func scanKimi(home: URL, diagnostics: inout [String]) -> [DiscoveredCredential] {
+    // The Kimi CLI (~/.kimi) and its standalone successor Kimi Code
+    // (~/.kimi-code) both store the OAuth login at
+    // credentials/kimi-code.json; the access token doubles as the Bearer key
+    // for the coding-plan usage endpoint.
+    let sources: [(stableID: String, url: URL, label: String)] = [
+      ("kimi:kimi-cli", path(home, ".kimi", "credentials", "kimi-code.json"), "Kimi CLI (~/.kimi)"),
+      ("kimi:kimi-code", path(home, ".kimi-code", "credentials", "kimi-code.json"), "Kimi Code (~/.kimi-code)")
+    ]
+
+    var results: [DiscoveredCredential] = []
+    for source in sources {
+      guard let object = readJSON(at: source.url, label: "Kimi", diagnostics: &diagnostics) else { continue }
+      guard let token = nonEmptyString(object["access_token"]) else {
+        diagnostics.append("Kimi: file found but no access token (\(shortPath(source.url)))")
+        continue
+      }
+
+      // kimi-cli writes expires_at as epoch seconds (0.0 when unknown);
+      // parseDateValue also tolerates string/millisecond variants.
+      if let expiresAt = parseDateValue(object["expires_at"]),
+         expiresAt.timeIntervalSince1970 > 0,
+         expiresAt < Date() {
+        diagnostics.append("Kimi: token expired (\(shortPath(source.url))) — run the Kimi CLI to refresh it, or paste an API key from kimi.com/code/console")
+        continue
+      }
+
+      var credentials = [CredentialField.kimiAPIKey: token]
+      // No refresh flow exists yet, but keeping the refresh token means a
+      // future one can renew this account without a re-import.
+      if let refresh = nonEmptyString(object["refresh_token"]) {
+        credentials[CredentialField.kimiRefreshToken] = refresh
+      }
+
+      results.append(
+        DiscoveredCredential(
+          stableID: source.stableID,
+          provider: .kimi,
+          suggestedName: "Kimi",
+          sourceLabel: source.label,
+          credentials: credentials
+        )
+      )
+      diagnostics.append("Kimi: found OAuth token (\(shortPath(source.url)))")
+    }
+
+    return results
+  }
+
   private func scanOpenCode(home: URL, diagnostics: inout [String]) -> [DiscoveredCredential] {
     var results: [DiscoveredCredential] = []
 
@@ -217,6 +267,10 @@ public struct CredentialDiscovery: Sendable {
 
       if let key = apiKey(in: object, provider: "zai-coding-plan") {
         results.append(make("zai:opencode", .zai, "Z.ai", url, [CredentialField.zaiAPIKey: key]))
+      }
+
+      if let key = apiKey(in: object, provider: "kimi-for-coding") {
+        results.append(make("kimi:opencode", .kimi, "Kimi", url, [CredentialField.kimiAPIKey: key]))
       }
 
       if let copilot = object["github-copilot"] as? [String: Any],
@@ -372,12 +426,6 @@ public struct CredentialDiscovery: Sendable {
       return "~" + path.dropFirst(home.path.count)
     }
     return path
-  }
-
-  private func nonEmptyString(_ value: Any?) -> String? {
-    guard let string = value as? String else { return nil }
-    let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
-    return trimmed.isEmpty ? nil : trimmed
   }
 
   private func extractOpenAIAccountID(from jwt: String) -> String? {

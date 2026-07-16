@@ -6,6 +6,7 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
   case gitHubCopilot = "github-copilot"
   case zhipu = "zhipu"
   case zai = "zai"
+  case kimi = "kimi"
   case googleAntigravity = "google-antigravity"
 
   public var displayName: String {
@@ -18,6 +19,8 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
       return "Zhipu AI"
     case .zai:
       return "Z.ai"
+    case .kimi:
+      return "Kimi"
     case .googleAntigravity:
       return "Google Cloud"
     case .gitHubCopilot:
@@ -87,6 +90,14 @@ public extension QuotaProvider {
         CredentialFieldDescriptor(
           key: CredentialField.zaiAPIKey,
           label: "API key"
+        )
+      ]
+    case .kimi:
+      return [
+        CredentialFieldDescriptor(
+          key: CredentialField.kimiAPIKey,
+          label: "API key",
+          help: "Kimi for Coding API key from kimi.com/code/console."
         )
       ]
     case .googleAntigravity:
@@ -726,6 +737,10 @@ public enum QuotaWindowKind: String, Codable, CaseIterable, Sendable {
 
     if let hours = leadingCount(beforeUnit: "hour", in: tokens) {
       return hours >= 20 ? .daily : .session
+    }
+
+    if let minutes = leadingCount(beforeUnit: "minute", in: tokens) {
+      return minutes >= 1_200 ? .daily : .session
     }
 
     if let days = leadingCount(beforeUnit: "day", in: tokens) {

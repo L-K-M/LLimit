@@ -8,6 +8,9 @@ public enum CredentialField {
   public static let zhipuAPIKey = "zhipu.api_key"
   public static let zaiAPIKey = "zai.api_key"
 
+  public static let kimiAPIKey = "kimi.api_key"
+  public static let kimiRefreshToken = "kimi.refresh_token"
+
   public static let googleRefreshToken = "google.refresh_token"
   public static let googleProjectID = "google.project_id"
   public static let googleEmail = "google.email"

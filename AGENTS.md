@@ -13,8 +13,8 @@ login from a locally installed tool (Claude Code, Codex, Copilot, OpenCode) so t
 user can one-click create a pre-filled account instead of pasting a token. Once
 imported, the account is copied into and owned by LLimit.
 
-Providers: Claude (Anthropic), OpenAI/ChatGPT, GitHub Copilot, Zhipu, Z.ai, Google
-(Antigravity).
+Providers: Claude (Anthropic), OpenAI/ChatGPT, GitHub Copilot, Zhipu, Z.ai, Kimi,
+Google (Antigravity).
 
 ## Layout
 
@@ -47,8 +47,9 @@ Providers: Claude (Anthropic), OpenAI/ChatGPT, GitHub Copilot, Zhipu, Z.ai, Goog
   Group / widget store or logs must be redacted via
   `AppSettings.redactedCredentials()` — the widget never needs credentials.
 - The host app is **not sandboxed** (the import shortcut reads `~/.claude`, `~/.codex`,
-  `~/.config/github-copilot`, `~/.local/share/opencode`, and the Keychain). The widget
-  extension **stays sandboxed**; it only reads the App Group container.
+  `~/.config/github-copilot`, `~/.kimi`, `~/.kimi-code`, `~/.local/share/opencode`,
+  and the Keychain). The widget extension **stays sandboxed**; it only reads the App
+  Group container.
 - Adding a `QuotaProvider` case is a breaking change for exhaustive `switch`es: update
   `Models.displayName`, `Models.credentialFields`, and the widget's `compactProviderName`.
 - Provider APIs are undocumented and unstable. Fail gracefully (`ProviderFailure`) and
@@ -73,6 +74,12 @@ Providers: Claude (Anthropic), OpenAI/ChatGPT, GitHub Copilot, Zhipu, Z.ai, Goog
   Codex/OpenCode OAuth access token + `ChatGPT-Account-Id`.
 - **Copilot**: GitHub internal `copilot_internal/user` (OAuth) or the public premium-
   request billing API (PAT + username).
+- **Kimi**: `GET https://api.kimi.com/coding/v1/usages` with `Authorization: Bearer`
+  (Kimi Code console API key, or the Kimi CLI's OAuth access token — both work; the
+  endpoint 404s for Moonshot open-platform keys). Undocumented but implemented by the
+  official CLI's `/usage` command (MoonshotAI/kimi-cli, ui/shell/usage.py). Returns
+  `usage` (weekly plan quota) + `limits[]` (rolling windows, e.g. 300-minute);
+  protobuf-JSON, so int64s are strings and `resetTime` has nanosecond fractions.
 
 ## Build
 

@@ -239,6 +239,12 @@ struct ProviderTileTimelineProvider: TimelineProvider {
         ?? legacyFailure(for: account, in: snapshot, accounts: allAccounts)
     }
 
+    // Hoisted into typed locals: this construction once tripped the type
+    // checker's per-expression budget on CI (Swift "unable to type-check
+    // this expression in reasonable time").
+    let style: WidgetStyleSettings = effectiveStyle(for: selection?.id, settings: settings)
+    let refreshMinutes: Int = max(15, settings.refreshIntervalMinutes)
+    let colorStep: Int = selection.map { accountColorStep(forAccountID: $0.id, in: allAccounts) } ?? 0
     return ProviderQuotaEntry(
       date: date,
       slotIndex: slotIndex,
@@ -246,9 +252,9 @@ struct ProviderTileTimelineProvider: TimelineProvider {
       accountState: accountState,
       usage: usage,
       failure: failure,
-      style: effectiveStyle(for: selection?.id, settings: settings),
-      refreshIntervalMinutes: max(15, settings.refreshIntervalMinutes),
-      accountColorStep: selection.map { accountColorStep(forAccountID: $0.id, in: allAccounts) } ?? 0
+      style: style,
+      refreshIntervalMinutes: refreshMinutes,
+      accountColorStep: colorStep
     )
   }
 
@@ -308,31 +314,39 @@ struct ProviderTileTimelineProvider: TimelineProvider {
 
   private static func sampleEntry(slotIndex: Int, at date: Date) -> ProviderQuotaEntry {
     let account = ProviderTileSelection(id: "sample-zai", displayName: "Z.ai", provider: .zai)
+    // Folded constants: integer-literal arithmetic in a Double context sends
+    // the type checker into its pathological ambiguous-literal search — the
+    // spelled-out sums repeatedly failed CI with "unable to type-check this
+    // expression in reasonable time".
+    let tokensReset: TimeInterval = 13_440 // 3h 44m
+    let mcpReset: TimeInterval = 589_380 // 6d 19h 43m
+    let metrics: [UsageMetric] = [
+      UsageMetric(
+        id: "tokens",
+        label: "Token limit",
+        remainingPercent: 82,
+        resetAt: date.addingTimeInterval(tokensReset)
+      ),
+      UsageMetric(
+        id: "mcp",
+        label: "MCP monthly quota",
+        remainingPercent: 64,
+        resetAt: date.addingTimeInterval(mcpReset)
+      )
+    ]
+    let usage = ProviderUsage(
+      accountID: account.id,
+      provider: .zai,
+      title: account.displayName,
+      metrics: metrics,
+      fetchedAt: date
+    )
     return ProviderQuotaEntry(
       date: date,
       slotIndex: slotIndex,
       account: account,
       accountState: .configured,
-      usage: ProviderUsage(
-        accountID: account.id,
-        provider: .zai,
-        title: account.displayName,
-        metrics: [
-          UsageMetric(
-            id: "tokens",
-            label: "Token limit",
-            remainingPercent: 82,
-            resetAt: date.addingTimeInterval(3 * 3_600 + 44 * 60)
-          ),
-          UsageMetric(
-            id: "mcp",
-            label: "MCP monthly quota",
-            remainingPercent: 64,
-            resetAt: date.addingTimeInterval(6 * 86_400 + 19 * 3_600 + 43 * 60)
-          )
-        ],
-        fetchedAt: date
-      ),
+      usage: usage,
       failure: nil,
       style: WidgetStyleSettings(),
       refreshIntervalMinutes: 30,
@@ -762,6 +776,8 @@ private struct ProviderTileBackground: View {
       return [Color(red: 0.24, green: 0.45, blue: 0.74), Color(red: 0.16, green: 0.22, blue: 0.43)]
     case .zai:
       return [Color(red: 0.63, green: 0.44, blue: 0.27), Color(red: 0.35, green: 0.22, blue: 0.12)]
+    case .kimi:
+      return [Color(red: 0.52, green: 0.27, blue: 0.55), Color(red: 0.24, green: 0.13, blue: 0.30)]
     case .googleAntigravity:
       return [Color(red: 0.28, green: 0.48, blue: 0.75), Color(red: 0.25, green: 0.24, blue: 0.38)]
     case nil:

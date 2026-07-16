@@ -165,13 +165,7 @@ public struct ZhipuQuotaClient: QuotaProviderClient {
   }
 
   private func parseResetDate(in object: [String: Any]) -> Date? {
-    for key in Self.resetDateKeys {
-      if let date = parseDateValue(object[key]) {
-        return date
-      }
-    }
-
-    return nil
+    firstDateValue(in: object, keys: Self.resetDateKeys)
   }
 
   private static let resetDateKeys = [

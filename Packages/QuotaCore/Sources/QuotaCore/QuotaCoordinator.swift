@@ -24,6 +24,7 @@ public struct QuotaCoordinator: Sendable {
           accountLabel: "Z.ai",
           httpClient: httpClient
         ),
+        KimiQuotaClient(httpClient: httpClient),
         GoogleAntigravityClient(httpClient: httpClient),
         CopilotClient(httpClient: httpClient)
       ]

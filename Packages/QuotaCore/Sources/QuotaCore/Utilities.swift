@@ -97,6 +97,21 @@ func firstNumeric(in dictionary: [String: Any], keys: [String]) -> Double? {
   return nil
 }
 
+func firstDateValue(in dictionary: [String: Any], keys: [String]) -> Date? {
+  for key in keys {
+    if let date = parseDateValue(dictionary[key]) {
+      return date
+    }
+  }
+  return nil
+}
+
+func nonEmptyString(_ value: Any?) -> String? {
+  guard let string = value as? String else { return nil }
+  let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+  return trimmed.isEmpty ? nil : trimmed
+}
+
 func formatIntLike(_ value: Double?) -> String? {
   guard let value, value.isFinite else { return nil }
   if let integer = roundedInt(value), Double(integer) == value {
@@ -137,6 +152,15 @@ func parseISO8601(_ string: String?) -> Date? {
 
   let withFractional = ISO8601DateFormatter()
   withFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+  // ISO8601DateFormatter only accepts exactly three fractional digits, but
+  // protobuf-JSON timestamps (e.g. Kimi's resetTime) carry up to nine. Parse
+  // the milliseconds-normalized form first so a platform that leniently
+  // swallows longer fractions as raw milliseconds can't win with a wrong date.
+  if let normalized = normalizedToMillisecondFraction(trimmed), let date = withFractional.date(from: normalized) {
+    return date
+  }
+
   if let date = withFractional.date(from: trimmed) {
     return date
   }
@@ -152,6 +176,24 @@ func parseISO8601(_ string: String?) -> Date? {
   calendarDate.timeZone = TimeZone(secondsFromGMT: 0)
   calendarDate.dateFormat = "yyyy-MM-dd"
   return calendarDate.date(from: trimmed)
+}
+
+/// Rewrites an ISO 8601 string's fractional-second part to exactly three
+/// digits (truncating or zero-padding), or nil when there is no fraction to
+/// fix. Only the first "." is considered — ISO 8601 timestamps have one.
+private func normalizedToMillisecondFraction(_ value: String) -> String? {
+  guard value.contains("T"), let dotIndex = value.firstIndex(of: ".") else { return nil }
+
+  var digits = ""
+  var suffixStart = value.index(after: dotIndex)
+  while suffixStart < value.endIndex, value[suffixStart].isNumber {
+    digits.append(value[suffixStart])
+    suffixStart = value.index(after: suffixStart)
+  }
+  guard !digits.isEmpty, digits.count != 3 else { return nil }
+
+  let milliseconds = String((digits + "000").prefix(3))
+  return value[..<dotIndex] + "." + milliseconds + value[suffixStart...]
 }
 
 func parseDateValue(_ value: Any?) -> Date? {

@@ -124,6 +124,7 @@ private enum SampleSnapshotFactory {
         ProviderAccount(id: QuotaProvider.anthropic.rawValue, provider: .anthropic),
         ProviderAccount(id: QuotaProvider.openAI.rawValue, provider: .openAI),
         ProviderAccount(id: QuotaProvider.zhipu.rawValue, provider: .zhipu),
+        ProviderAccount(id: QuotaProvider.kimi.rawValue, provider: .kimi),
         ProviderAccount(id: QuotaProvider.googleAntigravity.rawValue, provider: .googleAntigravity),
         ProviderAccount(id: QuotaProvider.gitHubCopilot.rawValue, provider: .gitHubCopilot)
       ]
@@ -192,6 +193,31 @@ private enum SampleSnapshotFactory {
             )
           ],
           maxUsagePercent: 45,
+          fetchedAt: now
+        ),
+        ProviderUsage(
+          provider: .kimi,
+          title: "Kimi",
+          subtitle: "Kimi for Coding",
+          metrics: [
+            UsageMetric(
+              id: "window-5-hour",
+              label: "5-hour limit",
+              remainingPercent: 69,
+              usedDisplay: "62",
+              totalDisplay: "200",
+              resetIn: "3h 12m"
+            ),
+            UsageMetric(
+              id: "plan-weekly",
+              label: "Weekly limit",
+              remainingPercent: 74,
+              usedDisplay: "532",
+              totalDisplay: "2048",
+              resetIn: "4d 2h"
+            )
+          ],
+          maxUsagePercent: 31,
           fetchedAt: now
         ),
         ProviderUsage(
