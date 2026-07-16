@@ -1260,6 +1260,8 @@ private struct ProviderMark: View {
       return "chevron.left.forwardslash.chevron.right"
     case .zhipu, .zai:
       return "bolt.fill"
+    case .kimi:
+      return "moon.fill"
     case .googleAntigravity:
       return "cloud.fill"
     }

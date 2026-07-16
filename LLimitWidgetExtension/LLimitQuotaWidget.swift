@@ -949,6 +949,8 @@ private func compactProviderName(for provider: QuotaProvider) -> String {
     return "Zhipu"
   case .zai:
     return "Z.ai"
+  case .kimi:
+    return "Kimi"
   case .googleAntigravity:
     return "Google"
   case .gitHubCopilot:

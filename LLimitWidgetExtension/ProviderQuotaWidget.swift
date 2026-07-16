@@ -762,6 +762,8 @@ private struct ProviderTileBackground: View {
       return [Color(red: 0.24, green: 0.45, blue: 0.74), Color(red: 0.16, green: 0.22, blue: 0.43)]
     case .zai:
       return [Color(red: 0.63, green: 0.44, blue: 0.27), Color(red: 0.35, green: 0.22, blue: 0.12)]
+    case .kimi:
+      return [Color(red: 0.52, green: 0.27, blue: 0.55), Color(red: 0.24, green: 0.13, blue: 0.30)]
     case .googleAntigravity:
       return [Color(red: 0.28, green: 0.48, blue: 0.75), Color(red: 0.25, green: 0.24, blue: 0.38)]
     case nil:
