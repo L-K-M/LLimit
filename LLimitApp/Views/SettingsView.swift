@@ -500,14 +500,13 @@ struct SettingsView: View {
             }
             .labelsHidden()
             .pickerStyle(.menu)
-            .frame(minWidth: 180, maxWidth: 260, alignment: .leading)
 
             Text("Adjust any color below and the style becomes Custom.")
               .font(.caption)
               .foregroundStyle(.secondary)
-              .frame(maxWidth: 260, alignment: .leading)
               .fixedSize(horizontal: false, vertical: true)
           }
+          .frame(minWidth: 180, maxWidth: 260, alignment: .leading)
         }
 
         Divider()
@@ -796,14 +795,13 @@ struct SettingsView: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
-                .frame(minWidth: 180, maxWidth: 260, alignment: .leading)
 
-                Text("Choose a preset, or set your own background below — a combination that doesn't match a preset shows as Custom. Ring colors always follow the global Limit colors.")
+                Text("Choose a preset or set a background below. Unmatched combinations show as Custom. Ring colors follow the global Limit colors.")
                   .font(.caption)
                   .foregroundStyle(.secondary)
-                  .frame(maxWidth: 260, alignment: .leading)
                   .fixedSize(horizontal: false, vertical: true)
               }
+              .frame(minWidth: 180, maxWidth: 260, alignment: .leading)
             }
 
             Divider()
