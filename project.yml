@@ -35,7 +35,7 @@ targets:
         MACOSX_DEPLOYMENT_TARGET: 14.0
         REGISTER_WITH_LAUNCH_SERVICES: NO
         CURRENT_PROJECT_VERSION: 20
-        MARKETING_VERSION: 0.2.0
+        MARKETING_VERSION: 1.0.0
     info:
       path: LLimitApp/Info.plist
       properties:
@@ -75,7 +75,7 @@ targets:
         MACOSX_DEPLOYMENT_TARGET: 14.0
         SKIP_INSTALL: YES
         CURRENT_PROJECT_VERSION: 20
-        MARKETING_VERSION: 0.2.0
+        MARKETING_VERSION: 1.0.0
     info:
       path: LLimitWidgetExtension/Info.plist
       properties:

@@ -328,7 +328,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.2.0;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = ch.lkmc.llimit.app;
 				PRODUCT_NAME = LLimit;
 				REGISTER_WITH_LAUNCH_SERVICES = NO;
@@ -473,7 +473,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.2.0;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = ch.lkmc.llimit.app;
 				PRODUCT_NAME = LLimit;
 				REGISTER_WITH_LAUNCH_SERVICES = NO;
@@ -499,7 +499,7 @@
 					"@executable_path/../../../../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.2.0;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = ch.lkmc.llimit.app.widgetextension;
 				PRODUCT_NAME = LLimitWidgetExtension;
 				SDKROOT = macosx;
@@ -525,7 +525,7 @@
 					"@executable_path/../../../../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.2.0;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = ch.lkmc.llimit.app.widgetextension;
 				PRODUCT_NAME = LLimitWidgetExtension;
 				SDKROOT = macosx;

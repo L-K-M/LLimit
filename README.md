@@ -3,7 +3,7 @@
 **LLimit** is a self-contained macOS menu-bar app + desktop widgets that track how
 much of your LLM subscription quota is left.
 
-**Latest release:** v<!-- version -->0.1.0<!-- /version --> · [Download](https://github.com/L-K-M/LLimit/releases/latest)
+**Latest release:** v<!-- version -->1.0.0<!-- /version --> · [Download](https://github.com/L-K-M/LLimit/releases/latest)
 
 
 ![screenshot widgets](screenshot-widgets.png)
