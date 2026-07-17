@@ -490,14 +490,22 @@ struct SettingsView: View {
 
       VStack(spacing: 0) {
         settingsRow(title: "Style preset") {
-          Picker("", selection: model.widgetStylePresetBinding()) {
-            Text("Custom").tag(model.customStylePresetID)
-            ForEach(model.stylePresets) { preset in
-              Text(preset.displayName).tag(preset.id)
+          VStack(alignment: .leading, spacing: 6) {
+            Picker("", selection: model.widgetStylePresetBinding()) {
+              Text("Custom").tag(model.customStylePresetID)
+                .selectionDisabled(true)
+              ForEach(model.stylePresets) { preset in
+                Text(preset.displayName).tag(preset.id)
+              }
             }
+            .labelsHidden()
+            .pickerStyle(.menu)
+
+            Text("Adjust any color below and the style becomes Custom.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
           }
-          .labelsHidden()
-          .pickerStyle(.menu)
           .frame(minWidth: 180, maxWidth: 260, alignment: .leading)
         }
 
@@ -777,14 +785,22 @@ struct SettingsView: View {
             Divider()
 
             settingsRow(title: "Style preset") {
-              Picker("", selection: model.providerStylePresetBinding(for: accountID)) {
-                Text("Custom").tag(model.customStylePresetID)
-                ForEach(model.stylePresets) { preset in
-                  Text(preset.displayName).tag(preset.id)
+              VStack(alignment: .leading, spacing: 6) {
+                Picker("", selection: model.providerStylePresetBinding(for: accountID)) {
+                  Text("Custom").tag(model.customStylePresetID)
+                    .selectionDisabled(true)
+                  ForEach(model.stylePresets) { preset in
+                    Text(preset.displayName).tag(preset.id)
+                  }
                 }
+                .labelsHidden()
+                .pickerStyle(.menu)
+
+                Text("Choose a preset or set a background below. Unmatched combinations show as Custom. Ring colors follow the global Limit colors.")
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+                  .fixedSize(horizontal: false, vertical: true)
               }
-              .labelsHidden()
-              .pickerStyle(.menu)
               .frame(minWidth: 180, maxWidth: 260, alignment: .leading)
             }
 
