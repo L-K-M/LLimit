@@ -98,7 +98,7 @@ Requires macOS 14+, Xcode 15+, [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 - Keep the app and widget extension on the same, monotonically increasing
   `CURRENT_PROJECT_VERSION`, especially whenever the `WidgetBundle` catalog changes.
 - Widgets carry NO widget-side configuration: the macOS "Edit Widget" flow never
-   worked for this app across builds 7-13 (see BACKLOG.md) regardless of intent
+  worked for this app across builds 7-13 (see BACKLOG.md) regardless of intent
   shape, so the provider tiles are static slot widgets whose account assignment
   lives in the app (Settings → Widgets, `AppSettings.providerTileSlots`). Do not
   reintroduce `AppIntentConfiguration`/`WidgetConfigurationIntent` without new
