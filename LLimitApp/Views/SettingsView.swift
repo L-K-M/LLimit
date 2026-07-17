@@ -505,6 +505,8 @@ struct SettingsView: View {
             Text("Adjust any color below and the style becomes Custom.")
               .font(.caption)
               .foregroundStyle(.secondary)
+              .frame(maxWidth: 260, alignment: .leading)
+              .fixedSize(horizontal: false, vertical: true)
           }
         }
 
@@ -799,6 +801,8 @@ struct SettingsView: View {
                 Text("Choose a preset, or set your own background below — a combination that doesn't match a preset shows as Custom. Ring colors always follow the global Limit colors.")
                   .font(.caption)
                   .foregroundStyle(.secondary)
+                  .frame(maxWidth: 260, alignment: .leading)
+                  .fixedSize(horizontal: false, vertical: true)
               }
             }
 
