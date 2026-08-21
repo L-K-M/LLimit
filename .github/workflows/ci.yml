@@ -59,10 +59,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Swift
-        uses: swift-actions/setup-swift@v2
-        with:
-          swift-version: '6.2.3'
+      - name: Install Swift 6.2.3
+        # Direct tarball: swift-actions/setup-swift@v2 tops out at 6.2.1, and the
+        # static Linux SDK used for releases must match the toolchain version.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y binutils libcurl4-openssl-dev libedit2 libgcc-13-dev \
+            libpython3-dev libstdc++-13-dev libxml2-dev libncurses-dev libz3-dev \
+            pkg-config tzdata zlib1g-dev
+          curl -sSfL https://download.swift.org/swift-6.2.3-release/ubuntu2404/swift-6.2.3-RELEASE/swift-6.2.3-RELEASE-ubuntu24.04.tar.gz -o /tmp/swift.tar.gz
+          sudo tar xzf /tmp/swift.tar.gz -C / --strip-components=1 --keep-directory-symlink
+          swift --version
       - name: Test QuotaCore
         working-directory: Packages/QuotaCore
         run: swift test
