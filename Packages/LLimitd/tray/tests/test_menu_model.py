@@ -19,6 +19,7 @@ from llimit_tray import (  # noqa: E402
     build_menu_model,
     format_account_header,
     format_metric,
+    main,
 )
 
 
@@ -156,6 +157,23 @@ class BuildMenuModelTests(unittest.TestCase):
         # One divider between the two accounts, one before the action block.
         header_indexes = [i for i, row in enumerate(model.rows) if row.kind == "header"]
         self.assertEqual(model.rows[header_indexes[1] - 1].kind, "separator")
+
+
+class IntervalValidationTests(unittest.TestCase):
+    """A zero interval busy-loops GLib.timeout_add_seconds and a negative one
+    wraps to an interval that never fires, so both are rejected up front."""
+
+    def test_non_positive_intervals_are_rejected(self):
+        for bad in ("0", "-1"):
+            with self.subTest(interval=bad):
+                with self.assertRaises(SystemExit) as caught:
+                    main(["--print-menu", "--interval", bad])
+                self.assertNotEqual(caught.exception.code, 0)
+
+    def test_positive_interval_is_accepted(self):
+        # --print-menu keeps this off the GTK path; llimit is absent here, so the
+        # degraded menu is rendered and the command still succeeds.
+        self.assertEqual(main(["--print-menu", "--interval", "1", "--llimit", "definitely-not-a-real-binary"]), 0)
 
 
 if __name__ == "__main__":

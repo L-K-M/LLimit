@@ -13,15 +13,27 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-BINARY="${1:-$HERE/../.build/release/llimit}"
 MODE="daemon"
 TRAY="no"
+BINARY=""
+# Flags may appear in any position, so the binary is the first non-flag argument
+# rather than simply $1 — otherwise `./install.sh --tray` would take "--tray" as
+# the binary path and fail the executability check below with a confusing error.
 for arg in "$@"; do
   case "$arg" in
     --timer) MODE="timer" ;;
     --tray)  TRAY="yes" ;;
+    --*)     echo "unknown option: $arg" >&2; exit 2 ;;
+    *)
+      if [[ -n "$BINARY" ]]; then
+        echo "unexpected extra argument: $arg" >&2
+        exit 2
+      fi
+      BINARY="$arg"
+      ;;
   esac
 done
+BINARY="${BINARY:-$HERE/../.build/release/llimit}"
 
 if [[ ! -x "$BINARY" ]]; then
   echo "llimit binary not found or not executable: $BINARY" >&2
@@ -42,8 +54,10 @@ if [[ "$TRAY" == "yes" ]]; then
   install -m 0644 "$HERE"/../tray/icons/*.svg "$HOME/.local/share/llimit/tray/icons/"
   # The packaged unit runs /usr/bin/llimit-tray; point it at this install instead.
   # /usr/bin/python3, not `env python3`: the GTK bindings are a distro package
-  # and are only importable by the distro interpreter.
-  sed "s|ExecStart=/usr/bin/llimit-tray|ExecStart=/usr/bin/python3 $HOME/.local/share/llimit/tray/llimit_tray.py --llimit $HOME/.local/bin/llimit|" \
+  # and are only importable by the distro interpreter. Documentation= is dropped
+  # because it points into /usr/share/doc, which a ~/.local install never creates.
+  sed -e "s|ExecStart=/usr/bin/llimit-tray|ExecStart=/usr/bin/python3 $HOME/.local/share/llimit/tray/llimit_tray.py --llimit $HOME/.local/bin/llimit|" \
+      -e "/^Documentation=/d" \
     "$HERE/llimit-tray.service" > "$HOME/.config/systemd/user/llimit-tray.service"
 fi
 

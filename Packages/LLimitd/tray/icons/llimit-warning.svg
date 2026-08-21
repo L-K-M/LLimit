@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- LLimit tray icon — warning. Ring shows quota remaining; colour matches the
+<!-- LLimit tray icon — warning. The arc is a fixed visual per status class,
+     not a per-percent gauge; only the colour carries meaning, matching the
      bar-module palette in Packages/LLimitd/examples. -->
 <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22">
   <circle cx="11" cy="11" r="8" fill="none" stroke="#f9e2af" stroke-opacity="0.28" stroke-width="3"/>

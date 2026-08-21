@@ -22,6 +22,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -224,14 +225,25 @@ def _run_tray(args: argparse.Namespace) -> int:
         )
         return 1
 
-    gi.require_version("Gtk", "3.0")
+    # The typelibs are Suggests, not Depends, so "gi imports but the indicator
+    # is missing" is an expected state and must not surface as a traceback.
     try:
-        gi.require_version("AyatanaAppIndicator3", "0.1")
-        from gi.repository import AyatanaAppIndicator3 as AppIndicator
+        gi.require_version("Gtk", "3.0")
+        try:
+            gi.require_version("AyatanaAppIndicator3", "0.1")
+            from gi.repository import AyatanaAppIndicator3 as AppIndicator
+        except (ValueError, ImportError):
+            # Older distributions ship the pre-fork libappindicator instead.
+            gi.require_version("AppIndicator3", "0.1")
+            from gi.repository import AppIndicator3 as AppIndicator
     except (ValueError, ImportError):
-        # Older distributions ship the pre-fork libappindicator instead.
-        gi.require_version("AppIndicator3", "0.1")
-        from gi.repository import AppIndicator3 as AppIndicator
+        print(
+            "The tray needs GTK and an AppIndicator library, which could not be loaded.\n"
+            "  Install them: sudo apt install python3-gi gir1.2-ayatanaappindicator3-0.1\n"
+            "  No GTK? `llimit status` and the bar modules need none.",
+            file=sys.stderr,
+        )
+        return 1
 
     from gi.repository import GLib, Gtk
 
@@ -287,8 +299,34 @@ def _run_tray(args: argparse.Namespace) -> int:
         if args.show_label:
             indicator.set_label(model.label or "", "LLimit")
 
+    # `llimit status` only reads the snapshot file, but it is still a subprocess:
+    # running it on the GTK main loop would freeze the whole tray — menu, clicks
+    # and Quit included — for as long as it takes, up to STATUS_TIMEOUT_SECONDS.
+    # Read off-thread and marshal the result back with idle_add, which runs on
+    # the main loop, so rebuild() is still only ever called from the main thread.
+    poll_in_flight = threading.Event()
+
     def poll() -> bool:
-        rebuild(build_menu_model(read_status(args.llimit)))
+        if poll_in_flight.is_set():
+            # A previous read is still running (wedged `llimit`); skip this tick
+            # rather than piling up subprocesses.
+            return True
+
+        poll_in_flight.set()
+
+        def worker() -> None:
+            # read_status swallows its own failures and build_menu_model is total,
+            # so this should not raise — but a dead poll thread that never cleared
+            # the flag would freeze updates permanently, so be explicit.
+            try:
+                model = build_menu_model(read_status(args.llimit))
+            except Exception:  # noqa: BLE001 - keep polling whatever happens
+                model = build_menu_model(None)
+            finally:
+                poll_in_flight.clear()
+            GLib.idle_add(rebuild, model)
+
+        threading.Thread(target=worker, daemon=True).start()
         return True  # keep the timeout registered
 
     poll()
@@ -318,6 +356,10 @@ def main(argv: list[str] | None = None) -> int:
         help="print the menu the tray would show, then exit (no GTK needed)",
     )
     args = parser.parse_args(argv)
+    # GLib.timeout_add_seconds(0) reschedules every main-loop iteration, and a
+    # negative value wraps to a huge unsigned interval that never fires again.
+    if args.interval < 1:
+        parser.error("--interval must be a positive number of seconds")
 
     if args.print_menu:
         model = build_menu_model(read_status(args.llimit))
