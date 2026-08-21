@@ -1,6 +1,7 @@
 import Foundation
 import QuotaCore
 import LLimitdCore
+import Dispatch
 #if canImport(Glibc)
 import Glibc
 #elseif canImport(Darwin)
@@ -154,7 +155,17 @@ func accountsAdd(_ args: [String]) {
   }
 
   let daemon = makeDaemon()
-  let account = daemon.addAccount(provider: provider, displayName: name, credentials: credentials)
+  // Lock from re-load through save so a concurrent daemon token-refresh save
+  // cannot silently drop the new account (and vice versa).
+  let account: ProviderAccount
+  do {
+    account = try daemon.settingsLock.withLock {
+      daemon.loadConfiguration()
+      return daemon.addAccount(provider: provider, displayName: name, credentials: credentials)
+    }
+  } catch {
+    fail(error.localizedDescription)
+  }
   print("Added \(account.resolvedDisplayName) [\(account.provider.rawValue)] — id \(account.id)")
 
   let missing = account.missingCredentialLabels
@@ -202,18 +213,31 @@ func accountsImport(_ args: [String]) {
     print("Imported \(account.resolvedDisplayName) [\(account.provider.rawValue)] from \(detected.sourceLabel) — id \(account.id)")
   }
 
+  /// Imports mutate settings, so they run under the settings lock with a fresh
+  /// load — the daemon may be mid-refresh and holding a stale copy otherwise.
+  func importing(_ detected: [DiscoveredCredential]) {
+    do {
+      try daemon.settingsLock.withLock {
+        daemon.loadConfiguration()
+        for credential in detected {
+          importOne(credential)
+        }
+      }
+    } catch {
+      fail(error.localizedDescription)
+    }
+  }
+
   if let wantedID {
     guard let match = daemon.detectedCredentials.first(where: { $0.stableID == wantedID }) else {
       fail("no discovered credential with id \(wantedID); run `llimit accounts import` to list ids")
     }
-    importOne(match)
+    importing([match])
     return
   }
 
   if importAll {
-    for detected in daemon.detectedCredentials {
-      importOne(detected)
-    }
+    importing(daemon.detectedCredentials)
     return
   }
 
@@ -236,9 +260,7 @@ func accountsImport(_ args: [String]) {
   }
 
   if answer.lowercased() == "a" {
-    for detected in daemon.detectedCredentials {
-      importOne(detected)
-    }
+    importing(daemon.detectedCredentials)
     return
   }
 
@@ -248,18 +270,23 @@ func accountsImport(_ args: [String]) {
   else {
     fail("invalid selection: \(answer)")
   }
-  importOne(daemon.detectedCredentials[choice - 1])
+  importing([daemon.detectedCredentials[choice - 1]])
 }
 
 func accountsSetEnabled(_ fragment: String, enabled: Bool) {
   let daemon = makeDaemon()
-  guard let accountID = daemon.resolveAccountID(fragment) else {
-    fail("no account matching \"\(fragment)\" (or the prefix is ambiguous)")
-  }
   do {
-    try daemon.setAccountEnabled(accountID, enabled)
-    let name = daemon.settings.account(withID: accountID)?.resolvedDisplayName ?? accountID
-    print("\(name) \(enabled ? "enabled" : "disabled").")
+    try daemon.settingsLock.withLock {
+      daemon.loadConfiguration()
+      guard let accountID = daemon.resolveAccountID(fragment) else {
+        throw DaemonError.unknownAccount(fragment)
+      }
+      try daemon.setAccountEnabled(accountID, enabled)
+      let name = daemon.settings.account(withID: accountID)?.resolvedDisplayName ?? accountID
+      print("\(name) \(enabled ? "enabled" : "disabled").")
+    }
+  } catch DaemonError.unknownAccount {
+    fail("no account matching \"\(fragment)\" (or the prefix is ambiguous)")
   } catch {
     fail(error.localizedDescription)
   }
@@ -267,13 +294,18 @@ func accountsSetEnabled(_ fragment: String, enabled: Bool) {
 
 func accountsRemove(_ fragment: String) {
   let daemon = makeDaemon()
-  guard let accountID = daemon.resolveAccountID(fragment) else {
-    fail("no account matching \"\(fragment)\" (or the prefix is ambiguous)")
-  }
-  let name = daemon.settings.account(withID: accountID)?.resolvedDisplayName ?? accountID
   do {
-    try daemon.removeAccount(accountID)
-    print("Removed \(name).")
+    try daemon.settingsLock.withLock {
+      daemon.loadConfiguration()
+      guard let accountID = daemon.resolveAccountID(fragment) else {
+        throw DaemonError.unknownAccount(fragment)
+      }
+      let name = daemon.settings.account(withID: accountID)?.resolvedDisplayName ?? accountID
+      try daemon.removeAccount(accountID)
+      print("Removed \(name).")
+    }
+  } catch DaemonError.unknownAccount {
+    fail("no account matching \"\(fragment)\" (or the prefix is ambiguous)")
   } catch {
     fail(error.localizedDescription)
   }
@@ -283,7 +315,14 @@ func accountsRemove(_ fragment: String) {
 
 func runRefresh() async {
   let daemon = makeDaemon()
-  await daemon.refreshNow()
+  do {
+    try await daemon.settingsLock.withLock {
+      daemon.loadConfiguration()
+      await daemon.refreshNow()
+    }
+  } catch {
+    fail(error.localizedDescription)
+  }
   print(StatusRenderer.humanReadable(snapshot: daemon.snapshot))
 }
 
@@ -296,13 +335,32 @@ func runStatus(_ args: [String]) {
   }
 }
 
+/// Retained so the signal sources stay alive for the process lifetime.
+var shutdownSignalSources: [DispatchSourceSignal] = []
+
+/// SIGTERM/SIGINT cancel the refresh-loop task instead of using the default
+/// disposition: `systemctl stop` then lets an in-flight refresh finish writing
+/// its snapshot instead of cutting it off mid-write, and the loop exits at the
+/// next cancellation point.
+func installShutdownHandlers(cancel: @escaping () -> Void) {
+  for sig in [SIGTERM, SIGINT] {
+    signal(sig, SIG_IGN)
+    let source = DispatchSource.makeSignalSource(signal: sig, queue: .global())
+    source.setEventHandler(handler: cancel)
+    source.resume()
+    shutdownSignalSources.append(source)
+  }
+}
+
 func runDaemon() async {
   let daemon = QuotaDaemon(paths: LinuxPaths())
   for line in ["[llimitd] settings: \(daemon.paths.settingsFileURL.path)",
                "[llimitd] snapshot: \(daemon.paths.snapshotFileURL.path)"] {
     FileHandle.standardOutput.write(Data((line + "\n").utf8))
   }
-  await daemon.runRefreshLoop()
+  let loop = Task { await daemon.runRefreshLoop() }
+  installShutdownHandlers { loop.cancel() }
+  await loop.value
 }
 
 // MARK: - terminal input

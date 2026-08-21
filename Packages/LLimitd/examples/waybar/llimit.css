@@ -1,0 +1,33 @@
+/* waybar styles for the LLimit module — import from your ~/.config/waybar/style.css:
+ *
+ *   @import "llimit.css";
+ *
+ * waybar applies the JSON `class` key to the module widget, so these selectors
+ * are exactly the classes `llimit status --json` emits:
+ * ok / warning / critical / error / empty.
+ */
+
+#custom-llimit {
+  padding: 0 8px;
+}
+
+#custom-llimit.ok {
+  color: #a6e3a1; /* green: every account ≥ 40% remaining */
+}
+
+#custom-llimit.warning {
+  color: #f9e2af; /* yellow: some account below 40% */
+}
+
+#custom-llimit.critical {
+  color: #f38ba8; /* red: some account below 15% */
+}
+
+#custom-llimit.error {
+  color: #f38ba8;
+  border-bottom: 2px solid #f38ba8; /* every account failed to refresh */
+}
+
+#custom-llimit.empty {
+  color: #6c7086; /* grey: no snapshot yet */
+}

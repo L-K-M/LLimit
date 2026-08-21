@@ -30,6 +30,10 @@ public final class QuotaDaemon {
   public private(set) var discoveryDiagnostics: [String] = []
 
   public let paths: LinuxPaths
+  /// Serializes settings read-modify-write cycles against other llimit processes
+  /// (see SettingsLock). CLI mutations re-load settings inside this lock so a
+  /// concurrent daemon save can no longer silently drop an edit.
+  public let settingsLock: SettingsLock
   private let settingsStore: SettingsStore
   private let snapshotStore: SnapshotStore
   private let historyStore: QuotaHistoryStore
@@ -52,6 +56,7 @@ public final class QuotaDaemon {
     }
   ) {
     self.paths = paths
+    self.settingsLock = SettingsLock(settingsFileURL: paths.settingsFileURL)
     self.settingsStore = SettingsStore(fileURL: paths.settingsFileURL)
     self.snapshotStore = SnapshotStore(fileURL: paths.snapshotFileURL)
     self.historyStore = QuotaHistoryStore(fileURL: paths.historyFileURL)
@@ -245,13 +250,12 @@ public final class QuotaDaemon {
 
   /// The daemon's main loop. Settings are re-loaded each cycle: on Linux account
   /// management is a separate `llimit` process, so the daemon must pick up its edits
-  /// (unlike the macOS app, which is the sole writer of its own settings).
+  /// (unlike the macOS app, which is the sole writer of its own settings). Each
+  /// load → refresh → save cycle runs under the settings lock: the daemon writes
+  /// settings during token refresh, and without the lock a concurrent
+  /// `llimit accounts …` edit could be overwritten by a stale save.
   public func runRefreshLoop() async {
-    loadConfiguration()
-
-    if shouldRefreshOnBootstrap() {
-      await refreshNow()
-    }
+    await refreshCycle(bootstrap: true)
 
     while !Task.isCancelled {
       let interval = autoRefreshIntervalNanoseconds()
@@ -265,8 +269,23 @@ public final class QuotaDaemon {
         return
       }
 
-      loadConfiguration()
-      await refreshNow()
+      await refreshCycle(bootstrap: false)
+    }
+  }
+
+  /// One locked load → refresh cycle. On bootstrap a refresh only happens when the
+  /// snapshot is missing or older than the configured interval.
+  private func refreshCycle(bootstrap: Bool) async {
+    do {
+      try await settingsLock.withLock {
+        loadConfiguration()
+        if !bootstrap || shouldRefreshOnBootstrap() {
+          await refreshNow()
+        }
+      }
+    } catch {
+      statusMessage = "Settings lock failed: \(error.localizedDescription)"
+      log("[llimitd] \(statusMessage)")
     }
   }
 
