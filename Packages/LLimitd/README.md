@@ -17,6 +17,9 @@ live in [`examples/`](examples/).
   - `StatusRenderer.swift` — human-readable status and the waybar JSON contract.
 - `Sources/llimit/` — the CLI executable (`main.swift`).
 - `examples/` — waybar / polybar / eww modules consuming `llimit status --json`.
+- `tray/` — the tray icon (Python/PyGObject; see "Tray icon"). `llimit_tray.py`
+  keeps its menu model as a pure function so it is unit-tested without GTK;
+  `tray/tests/` holds those tests and `tray/icons/` the per-status SVGs.
 - `systemd/` — user units replacing the macOS launch-at-login path.
 - `packaging/build-deb.sh` — assembles the installable `.deb`.
 
@@ -75,24 +78,68 @@ credentials, ever. Ready-made modules:
 
 See [`examples/README.md`](examples/README.md) for the full key-by-key contract.
 
-## Tray icon: assessed, not built
+## Tray icon
 
-A StatusNotifierItem tray (the menu-bar equivalent) was scoped for Phase 2 and
-cut, deliberately:
+`llimit-tray` puts LLimit in the system tray and shows every account and every
+limit in a popup — the Linux counterpart of the macOS menu-bar item.
 
-- SNI is D-Bus, and Swift has no D-Bus binding — it means a C system-library
-  target against libdbus-1/sd-bus, hand-marshalled messages, and fd-watch
-  integration with Swift concurrency (~1,000 lines, none of it meaningfully
-  testable in CI without a session bus, a watcher, and eyeballs).
-- The dropdown menu is a *second* protocol (`com.canonical.dbusmenu`).
-- GNOME — the majority desktop — shows no tray icons at all without the
-  AppIndicator extension, so the work would primarily serve KDE/Cinnamon/XFCE.
-- The bar modules above already deliver the at-a-glance value on exactly the
-  desktops where status bars are used, from a contract that already exists.
+```
+$ llimit-tray                 # or: systemctl --user enable --now llimit-tray.service
+```
 
-If a tray is revisited, the cheap route is a ~150-line helper in a language with
-mature D-Bus/AppIndicator bindings (e.g. Python + PyGObject) polling
-`llimit status --json` — not libdbus-from-Swift.
+It is a display surface only: it shells out to `llimit status --json` and never
+reads the settings file, so it never touches credentials. Account management
+stays in the CLI. The tray icon colour follows the same
+`ok`/`warning`/`critical`/`error`/`empty` classes the bar modules use.
+
+The popup, dumped straight off the D-Bus menu a panel would render:
+
+```
+Updated 4 min ago
+---
+Claude — 8% left
+Session — 62% left · resets in 3h 12m
+Weekly — 8% left · resets in 4d 2h
+---
+Zhipu AI — unlimited
+Plan — unlimited
+---
+Refresh now
+Quit
+```
+
+`--print-menu` prints exactly that without needing GTK, which is the quickest
+way to check the tray sees your data:
+
+```
+llimit-tray --print-menu
+```
+
+Options: `--interval` (seconds between snapshot reads, default 60), `--llimit`
+(path to the binary), `--icon-dir`, and `--show-label` to put the quota text
+beside the icon. The label is exported as Ayatana's `XAyatanaLabel`, so panels
+that only implement the strict KDE spec ignore it.
+
+### Why this part is Python
+
+The tray protocol is StatusNotifierItem over D-Bus, and the popup is a *second*
+protocol (`com.canonical.dbusmenu`). Swift has no D-Bus binding, so a native
+implementation means hand-marshalling both — roughly 1,000 lines that CI cannot
+meaningfully exercise. PyGObject wraps them already, and the tray needs nothing
+from QuotaCore but the JSON the CLI already emits.
+
+The dependencies are therefore `Suggests`, not `Depends` — the daemon and bar
+modules stay dependency-free, and a headless install pulls in no GTK:
+
+```
+sudo apt install python3-gi gir1.2-ayatanaappindicator3-0.1
+```
+
+### Desktop support
+
+GNOME shows no tray icons without the AppIndicator extension; KDE, Cinnamon,
+XFCE, MATE and most wlroots bars (waybar's `tray` module) show them natively.
+On GNOME, the bar modules or the extension are the options.
 
 ## Install from .deb (no Swift toolchain needed)
 

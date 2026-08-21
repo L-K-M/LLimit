@@ -122,8 +122,9 @@ the text below:
 - `providerTileSlotCount` and slot-pinning were **kept**: they live in QuotaCore's
   `AppSettings` and the macOS widgets depend on them. The Linux side simply ignores
   slots — `StatusRenderer` emits every account and the bar config chooses.
-- The SNI tray icon was assessed and cut; see "Tray icon: assessed, not built" in
-  `Packages/LLimitd/README.md`. Bar modules are the supported display surface.
+- The SNI tray icon was assessed and cut in Phase 2, then **built afterwards** on
+  request — see "Tray icon" in `Packages/LLimitd/README.md`. It is Python/PyGObject
+  rather than Swift, for the D-Bus reasons the original assessment gave.
 
 What shipped:
 
@@ -137,6 +138,10 @@ What shipped:
 - **Hardening from review** — flock-based settings locking (`SettingsLock`) across
   daemon and CLI read-modify-write, and a SIGTERM/SIGINT handler that cancels the
   daemon loop instead of cutting off an in-flight refresh.
+- **Tray icon** (added after Phase 2) — `llimit-tray`, a StatusNotifierItem with a
+  popup listing every account and every limit. Display-only: it reads
+  `llimit status --json` and never touches the settings file. Its GTK dependencies
+  are `Suggests`, so headless installs stay dependency-free.
 
 Original text (for the record):
 

@@ -15,3 +15,7 @@ dist/
 *.local
 Secrets.plist
 .idea/
+
+# Python (tray)
+__pycache__/
+*.pyc

@@ -2,19 +2,25 @@
 # Installs the llimit binary and its systemd user units.
 #
 # Usage:
-#   ./install.sh [path-to-llimit-binary] [--timer]
+#   ./install.sh [path-to-llimit-binary] [--timer] [--tray]
 #
 # Default mode installs the long-running daemon service (llimit.service), which
 # honors the refresh interval from settings and restarts on failure. --timer
 # installs the one-shot service + timer pair instead, refreshing every 30 min.
+#
+# --tray additionally installs the tray icon (llimit-tray.service). It needs
+# GTK: sudo apt install python3-gi gir1.2-ayatanaappindicator3-0.1
 set -euo pipefail
 
-BINARY="${1:-$(dirname "$0")/../.build/release/llimit}"
+HERE="$(cd "$(dirname "$0")" && pwd)"
+BINARY="${1:-$HERE/../.build/release/llimit}"
 MODE="daemon"
+TRAY="no"
 for arg in "$@"; do
-  if [[ "$arg" == "--timer" ]]; then
-    MODE="timer"
-  fi
+  case "$arg" in
+    --timer) MODE="timer" ;;
+    --tray)  TRAY="yes" ;;
+  esac
 done
 
 if [[ ! -x "$BINARY" ]]; then
@@ -25,8 +31,21 @@ fi
 
 mkdir -p "$HOME/.local/bin" "$HOME/.config/systemd/user"
 install -m 0755 "$BINARY" "$HOME/.local/bin/llimit"
-install -m 0644 "$(dirname "$0")"/llimit*.service "$(dirname "$0")"/llimit-refresh.timer \
-  "$HOME/.config/systemd/user/"
+# Daemon/timer units only. The tray unit is handled below because its ExecStart
+# has to be rewritten for a ~/.local install.
+install -m 0644 "$HERE/llimit.service" "$HERE/llimit-refresh.service" \
+  "$HERE/llimit-refresh.timer" "$HOME/.config/systemd/user/"
+
+if [[ "$TRAY" == "yes" ]]; then
+  install -d "$HOME/.local/share/llimit/tray/icons"
+  install -m 0644 "$HERE/../tray/llimit_tray.py" "$HOME/.local/share/llimit/tray/llimit_tray.py"
+  install -m 0644 "$HERE"/../tray/icons/*.svg "$HOME/.local/share/llimit/tray/icons/"
+  # The packaged unit runs /usr/bin/llimit-tray; point it at this install instead.
+  # /usr/bin/python3, not `env python3`: the GTK bindings are a distro package
+  # and are only importable by the distro interpreter.
+  sed "s|ExecStart=/usr/bin/llimit-tray|ExecStart=/usr/bin/python3 $HOME/.local/share/llimit/tray/llimit_tray.py --llimit $HOME/.local/bin/llimit|" \
+    "$HERE/llimit-tray.service" > "$HOME/.config/systemd/user/llimit-tray.service"
+fi
 
 systemctl --user daemon-reload
 if [[ "$MODE" == "timer" ]]; then
@@ -37,6 +56,15 @@ else
   systemctl --user disable --now llimit-refresh.timer 2>/dev/null || true
   systemctl --user enable --now llimit.service
   echo "Installed. Daemon llimit.service is running."
+fi
+
+if [[ "$TRAY" == "yes" ]]; then
+  if systemctl --user enable --now llimit-tray.service 2>/dev/null; then
+    echo "Tray llimit-tray.service is running."
+  else
+    echo "Tray unit installed but not started (no graphical session?)." >&2
+  fi
+  echo "Tray needs GTK: sudo apt install python3-gi gir1.2-ayatanaappindicator3-0.1"
 fi
 
 echo "Check: systemctl --user status llimit*"
