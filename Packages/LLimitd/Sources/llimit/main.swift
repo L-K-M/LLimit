@@ -316,10 +316,13 @@ func accountsRemove(_ fragment: String) {
 func runRefresh() async {
   let daemon = makeDaemon()
   do {
-    try await daemon.settingsLock.withLock {
+    // Load under the lock, then fetch unlocked — the daemon does the same per
+    // cycle, so neither path can block the other for a network round-trip.
+    // Token-refresh writes inside refreshNow re-lock and merge.
+    try daemon.settingsLock.withLock {
       daemon.loadConfiguration()
-      await daemon.refreshNow()
     }
+    await daemon.refreshNow()
   } catch {
     fail(error.localizedDescription)
   }

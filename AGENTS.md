@@ -2,11 +2,12 @@
 
 ## What this is
 
-**LLimit** is a self-contained macOS menu-bar app + WidgetKit widgets that display
-remaining LLM subscription quota across multiple providers. **The app owns account
-management**: the user adds/edits/removes accounts inside LLimit, including multiple
-accounts per provider, and credentials are stored by LLimit. It does not depend on
-any other tool at runtime.
+**LLimit** tracks remaining LLM subscription quota across multiple providers on two
+platforms: a self-contained **macOS** menu-bar app + WidgetKit widgets, and a
+headless **Linux** daemon + CLI (`llimit`) with status-bar modules. On both, **the
+app owns account management**: the user adds/edits/removes accounts inside LLimit,
+including multiple accounts per provider, and credentials are stored by LLimit. It
+does not depend on any other tool at runtime.
 
 `CredentialDiscovery` exists only as an *optional import shortcut* — it can detect a
 login from a locally installed tool (Claude Code, Codex, Copilot, OpenCode) so the
@@ -28,8 +29,32 @@ Google (Antigravity).
 - `LLimitApp/` — the menu-bar app (`MenuBarExtra`), `AppModel`, settings UI.
 - `LLimitWidgetExtension/` — dashboard, trend, and configurable provider/account widgets.
 - `Shared/SharedConstants.swift` — App Group id + shared file paths, used by both targets.
+- `Packages/LLimitd` — the Linux port (SwiftPM, no third-party deps; depends on
+  QuotaCore by path). Runs on macOS too, which is where its unit tests execute in
+  macOS CI. See `Packages/LLimitd/README.md`.
+  - `Sources/LLimitdCore/LinuxPaths.swift` — XDG paths replacing SharedConstants:
+    settings in `$XDG_CONFIG_HOME/LLimit/quota-settings.json` (mode 600,
+    credentials), snapshot/history in `$XDG_DATA_HOME/LLimit/` (credential-free).
+  - `Sources/LLimitdCore/QuotaDaemon.swift` — headless AppModel/RefreshService
+    equivalent: settings, refresh loop, account mutations, token hygiene.
+  - `Sources/LLimitdCore/SettingsLock.swift` — flock on a `quota-settings.lock`
+    sidecar (the settings file itself can't be flocked: saves are atomic renames).
+    Serializes the daemon's token-refresh writes against `llimit accounts …` edits
+    from another process. The daemon holds it only around the settings load and
+    around the merge-save (`mergeAndSaveSettings` three-way merges credential
+    deltas onto a fresh read) — never across a network fetch.
+  - `Sources/LLimitdCore/StatusRenderer.swift` — `llimit status` output and the
+    `status --json` bar contract (`text`/`tooltip`/`class`/`percentage` +
+    `accounts`), built only from the snapshot.
+  - `Sources/llimit/main.swift` — the CLI (accounts add/list/import/enable/
+    disable/remove, refresh, status, daemon, paths).
+  - `examples/` — waybar/polybar/eww modules consuming the JSON contract.
+  - `systemd/` — user units (daemon service, or one-shot + timer).
+  - `packaging/build-deb.sh` — assembles the `.deb` from a static musl build.
 
 ## Data flow
+
+macOS:
 
 1. The user manages `[ProviderAccount]` in Settings → Accounts (add/rename/enable/
    remove, multiple per provider, credentials entered or imported).
@@ -40,12 +65,25 @@ Google (Antigravity).
 4. The `QuotaSnapshot` is written to the App Group container; settings + history too.
 5. `WidgetCenter.reloadAllTimelines()` triggers the widgets, which read the snapshot.
 
+Linux:
+
+1. The user manages accounts via `llimit accounts …` (a separate process from the
+   daemon; `SettingsLock` serializes their writes).
+2. `llimit daemon` (systemd user service or timer) reloads settings each cycle and
+   runs the same `QuotaCoordinator` fetch, including token adoption/refresh for
+   Claude Code and Codex on-disk credentials.
+3. The snapshot lands in `$XDG_DATA_HOME/LLimit/quota-snapshot.json`.
+4. Bars poll `llimit status --json`, which renders the snapshot — never the
+   settings file — into the waybar-style JSON contract. The example bar modules
+   are pure config; adding a key to the contract is fine, renaming is not.
+
 ## Hard constraints
 
 - Credentials are stored **locally only** in the app's own settings file
-  (`~/Library/Application Support/LLimit/`, mode `600`). Anything written to the App
-  Group / widget store or logs must be redacted via
-  `AppSettings.redactedCredentials()` — the widget never needs credentials.
+  (`~/Library/Application Support/LLimit/` on macOS, `$XDG_CONFIG_HOME/LLimit/` on
+  Linux, mode `600`). Anything written to the App Group / widget store, the
+  snapshot/history files, `llimit status` output, or logs must be redacted via
+  `AppSettings.redactedCredentials()` — the display surfaces never need credentials.
 - The host app is **not sandboxed** (the import shortcut reads `~/.claude`, `~/.codex`,
   `~/.config/github-copilot`, `~/.kimi`, `~/.kimi-code`, `~/.local/share/opencode`,
   and the Keychain). The widget extension **stays sandboxed**; it only reads the App
@@ -61,7 +99,11 @@ Google (Antigravity).
 2. Add credential keys to `CredentialField`.
 3. Add a `QuotaProviderClient` in `Clients/` and register it in `QuotaCoordinator.live()`.
 4. Teach `CredentialDiscovery` where that tool stores its credentials.
-5. Add unit tests (discovery parsing + client decoding) — these run on Linux.
+5. Check `Packages/LLimitd/Sources/LLimitdCore/StatusRenderer.swift`: the JSON bar
+   contract and the human-readable status render from `ProviderUsage` generically,
+   but verify a metric with no `remainingPercent` still produces a sane `text`
+   line, and that `QuotaWindowKind.classify` understands the new metric's labels.
+6. Add unit tests (discovery parsing + client decoding) — these run on Linux.
 
 ## Provider API notes
 
@@ -151,4 +193,5 @@ Requires macOS 14+, Xcode 15+, [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 xcodegen generate
 open LLimit.xcodeproj            # set DEVELOPMENT_TEAM on both targets
 cd Packages/QuotaCore && swift test
+swift test --package-path Packages/LLimitd   # Linux daemon + CLI (runs on macOS too)
 ```

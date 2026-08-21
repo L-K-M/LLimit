@@ -18,7 +18,9 @@
     (label :text {llimit.text})))
 
 ;; Standalone demo window. In a real setup you'd drop the (llimit) widget into
-;; your existing bar instead.
+;; your existing bar instead — the widget itself carries no background, your bar
+;; provides it. The .llimit-demo wrapper gives this demo window a dark surface so
+;; the class colors stay readable.
 (defwindow llimit
   :monitor 0
   :geometry (geometry :x "0%"
@@ -29,4 +31,5 @@
   :stacking "fg"
   :windowtype "dock"
   :wm-ignore false
-  (llimit))
+  (box :class "llimit-demo"
+    (llimit)))

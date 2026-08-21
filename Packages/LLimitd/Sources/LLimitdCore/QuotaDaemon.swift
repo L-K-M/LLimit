@@ -42,6 +42,11 @@ public final class QuotaDaemon {
   /// Mirrors AppModel: when the settings file can't be decoded, refuse to overwrite
   /// it (it may hold credentials) until the user fixes or removes it.
   private var configurationLoadFailed = false
+  /// The settings as they were on disk when last loaded (or last merged). The basis
+  /// for the three-way merge in `mergeAndSaveSettings()`: during a refresh the
+  /// daemon only ever changes `credentials` of existing accounts, and the merge
+  /// replays exactly those changes onto a freshly read file.
+  private var settingsBase: AppSettings = .default
   /// Log sink so the CLI can route daemon logs; tests capture them.
   private let log: (String) -> Void
 
@@ -72,6 +77,7 @@ public final class QuotaDaemon {
   public func loadConfiguration() {
     do {
       settings = try settingsStore.load()
+      settingsBase = settings
       configurationLoadFailed = false
     } catch {
       settings = .default
@@ -91,11 +97,64 @@ public final class QuotaDaemon {
   /// file; snapshot/history/status output never contain credentials by construction
   /// (the snapshot is built from ProviderUsage/ProviderFailure, which have no
   /// credential fields).
+  ///
+  /// Callers must hold the settings lock and have loaded inside it (the CLI
+  /// mutation paths do both). The daemon's refresh cycle instead uses
+  /// `mergeAndSaveSettings()`, which acquires the lock itself.
   public func saveConfiguration() throws {
     guard !configurationLoadFailed else {
       throw DaemonError.settingsFileUnreadable
     }
     try settingsStore.save(settings)
+    settingsBase = settings
+  }
+
+  /// Persists credential changes made during a refresh (token adoption/rotation)
+  /// WITHOUT clobbering a concurrent CLI edit. Re-reads the file under the settings
+  /// lock and three-way merges: a credential key is overwritten only when the
+  /// on-disk value still matches what the daemon loaded — i.e. the CLI didn't touch
+  /// that key. Accounts added/removed/enabled by the CLI mid-refresh survive,
+  /// because everything except the daemon's own credential deltas comes from disk.
+  func mergeAndSaveSettings() throws {
+    guard !configurationLoadFailed else {
+      throw DaemonError.settingsFileUnreadable
+    }
+    try settingsLock.withLock {
+      let onDisk = try settingsStore.load()
+      let merged = Self.mergingCredentialChanges(base: settingsBase, current: settings, onto: onDisk)
+      try settingsStore.save(merged)
+      settings = merged
+      settingsBase = merged
+    }
+  }
+
+  /// The merge behind `mergeAndSaveSettings`, pure for testability: replays the
+  /// credential changes between `base` and `current` onto `disk`. A key the CLI
+  /// changed concurrently (disk value ≠ base value) keeps the CLI's value — an
+  /// explicit edit beats an automatic token refresh; the next cycle re-reads live
+  /// tokens anyway. Accounts the CLI removed stay removed; accounts it added are
+  /// untouched (the daemon never adds accounts during a refresh).
+  static func mergingCredentialChanges(base: AppSettings, current: AppSettings, onto disk: AppSettings) -> AppSettings {
+    var result = disk
+    let baseByID = Dictionary(base.accounts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    for currentAccount in current.accounts {
+      guard
+        let baseAccount = baseByID[currentAccount.id],
+        baseAccount.credentials != currentAccount.credentials,
+        let diskIndex = result.accounts.firstIndex(where: { $0.id == currentAccount.id })
+      else { continue }
+
+      var credentials = result.accounts[diskIndex].credentials
+      for (key, currentValue) in currentAccount.credentials {
+        let baseValue = baseAccount.credentials[key]
+        guard currentValue != baseValue else { continue } // the daemon changed this key
+        if credentials[key] == baseValue {
+          credentials[key] = currentValue
+        }
+      }
+      result.accounts[diskIndex].credentials = credentials
+    }
+    return result
   }
 
   // MARK: - Accounts (the Settings → Accounts surface, as plain mutations)
@@ -190,9 +249,24 @@ public final class QuotaDaemon {
 
   /// One refresh cycle. Never throws: every failure is captured in the snapshot's
   /// `failures` and/or `statusMessage`, and the last good snapshot stays on disk.
+  ///
+  /// Locking: callers must have loaded settings first (`refreshCycle` does, under
+  /// the lock). The cycle itself runs UNLOCKED so a fetch never blocks a CLI edit;
+  /// settings writes (token adoption/rotation) go through `mergeAndSaveSettings()`,
+  /// which re-reads the file under the lock and merges instead of overwriting.
   public func refreshNow() async {
-    await refreshExpiringChatGPTTokens()
-    refreshLiveClaudeTokens()
+    let openAITokensChanged = await refreshExpiringChatGPTTokens()
+    let claudeTokensChanged = refreshLiveClaudeTokens()
+    if openAITokensChanged || claudeTokensChanged {
+      // Persist promptly: OpenAI rotates refresh tokens, so the stored grant is
+      // dead the moment a refresh succeeds — losing this save can orphan the
+      // account on machines without a live Codex file to re-adopt from.
+      do {
+        try mergeAndSaveSettings()
+      } catch {
+        log("[llimitd] Settings save failed: \(error.localizedDescription)")
+      }
+    }
 
     let enabledConfigs = runtimeConfigurations().filter { configuration in
       configuration.isEnabled && configuration.provider.hasRequiredCredentials(configuration.credentials)
@@ -216,6 +290,11 @@ public final class QuotaDaemon {
     // and the other providers aren't re-polled (Anthropic hard-rate-limits repeat pollers).
     let recoveredIDs = await recoverFailedOpenAITokens(in: refreshed)
     if !recoveredIDs.isEmpty {
+      do {
+        try mergeAndSaveSettings()
+      } catch {
+        log("[llimitd] Settings save failed: \(error.localizedDescription)")
+      }
       let retryConfigs = runtimeConfigurations().filter { configuration in
         recoveredIDs.contains(configuration.accountID)
           && configuration.isEnabled
@@ -250,10 +329,10 @@ public final class QuotaDaemon {
 
   /// The daemon's main loop. Settings are re-loaded each cycle: on Linux account
   /// management is a separate `llimit` process, so the daemon must pick up its edits
-  /// (unlike the macOS app, which is the sole writer of its own settings). Each
-  /// load → refresh → save cycle runs under the settings lock: the daemon writes
-  /// settings during token refresh, and without the lock a concurrent
-  /// `llimit accounts …` edit could be overwritten by a stale save.
+  /// (unlike the macOS app, which is the sole writer of its own settings). Only the
+  /// load holds the settings lock; the fetch runs unlocked and settings writes
+  /// merge under the lock (see `mergeAndSaveSettings()`), so neither the daemon nor
+  /// a CLI edit can block or overwrite the other.
   public func runRefreshLoop() async {
     await refreshCycle(bootstrap: true)
 
@@ -273,20 +352,26 @@ public final class QuotaDaemon {
     }
   }
 
-  /// One locked load → refresh cycle. On bootstrap a refresh only happens when the
-  /// snapshot is missing or older than the configured interval.
-  private func refreshCycle(bootstrap: Bool) async {
+  /// One load → refresh cycle. Only the load holds the settings lock: the daemon
+  /// writes settings during token refresh, and holding the lock across the network
+  /// fetch would stall a concurrent `llimit accounts …` for the whole cycle.
+  /// Settings writes inside the refresh go through `mergeAndSaveSettings()`.
+  func refreshCycle(bootstrap: Bool) async {
     do {
-      try await settingsLock.withLock {
+      try settingsLock.withLock {
         loadConfiguration()
-        if !bootstrap || shouldRefreshOnBootstrap() {
-          await refreshNow()
-        }
       }
     } catch {
       statusMessage = "Settings lock failed: \(error.localizedDescription)"
       log("[llimitd] \(statusMessage)")
+      return
     }
+
+    if bootstrap && !shouldRefreshOnBootstrap() {
+      return
+    }
+
+    await refreshNow()
   }
 
   // MARK: - Token hygiene (ported from AppModel)
@@ -295,11 +380,13 @@ public final class QuotaDaemon {
   /// imported copy dies as soon as the Codex CLI refreshes (and vice-versa). Adopt
   /// Codex's current on-disk token (matched by ChatGPT account id) and refresh
   /// anything still expired, so the two stay in sync instead of fighting the grant.
-  private func refreshExpiringChatGPTTokens() async {
+  /// Returns whether any credentials changed (in memory; the caller saves via
+  /// `mergeAndSaveSettings()`).
+  private func refreshExpiringChatGPTTokens() async -> Bool {
     // Only enabled accounts: refreshing a disabled account would keep rotating the
     // shared Codex refresh token and log the user's Codex CLI out.
     let openAIAccountIDs = settings.accounts.filter { $0.provider == .openAI && $0.isEnabled }.map(\.id)
-    guard !openAIAccountIDs.isEmpty else { return }
+    guard !openAIAccountIDs.isEmpty else { return false }
 
     var didChange = adoptLiveOpenAITokens(forAccountIDs: openAIAccountIDs)
 
@@ -316,9 +403,7 @@ public final class QuotaDaemon {
       }
     }
 
-    if didChange {
-      try? saveConfiguration()
-    }
+    return didChange
   }
 
   /// Adopts the live Codex/OpenCode tokens for the given accounts, matched by ChatGPT
@@ -370,7 +455,7 @@ public final class QuotaDaemon {
   /// each enabled OpenAI account that failed auth this cycle, first adopt a fresher
   /// live token; only if nothing fresher is on disk do we force a refresh (which
   /// rotates the grant). Returns the ids whose credentials changed, so the caller can
-  /// retry exactly those accounts.
+  /// retry exactly those accounts (and save via `mergeAndSaveSettings()`).
   private func recoverFailedOpenAITokens(in snapshot: QuotaSnapshot) async -> Set<String> {
     let failedIDs = snapshot.failures
       .filter { $0.provider == .openAI && $0.kind == .auth }
@@ -396,9 +481,6 @@ public final class QuotaDaemon {
       }
     }
 
-    if !recovered.isEmpty {
-      try? saveConfiguration()
-    }
     return recovered
   }
 
@@ -408,17 +490,19 @@ public final class QuotaDaemon {
   /// accounts. Only accounts whose stored token is empty or is itself a Claude Code
   /// OAuth token (`sk-ant-oat…`) are updated, so a hand-entered token is never
   /// clobbered. On Linux there is no Keychain fallback — the file is the source.
-  private func refreshLiveClaudeTokens() {
+  /// Returns whether any credentials changed (in memory; the caller saves via
+  /// `mergeAndSaveSettings()`).
+  private func refreshLiveClaudeTokens() -> Bool {
     let claudeAccountIDs = settings.accounts
       .filter { $0.provider == .anthropic && $0.isEnabled }
       .map(\.id)
-    guard !claudeAccountIDs.isEmpty else { return }
+    guard !claudeAccountIDs.isEmpty else { return false }
 
     guard let liveToken = makeDiscovery().discover().credentials
       .first(where: { $0.provider == .anthropic })?
       .credentials[CredentialField.anthropicAccessToken],
       !liveToken.isEmpty
-    else { return }
+    else { return false }
 
     var didChange = false
     for accountID in claudeAccountIDs {
@@ -431,9 +515,7 @@ public final class QuotaDaemon {
       }
     }
 
-    if didChange {
-      try? saveConfiguration()
-    }
+    return didChange
   }
 
   // MARK: - Internals

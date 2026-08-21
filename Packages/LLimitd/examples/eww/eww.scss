@@ -6,6 +6,13 @@
   padding: 0 8px;
 }
 
+// Background for the standalone demo window only (see eww.yuck). The widget
+// itself is transparent on purpose: embedded in your own bar, your theme's bar
+// background shows through.
+.llimit-demo {
+  background-color: #1e1e2e;
+}
+
 .llimit.ok {
   color: #a6e3a1; // green: every account ≥ 40% remaining
 }
