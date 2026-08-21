@@ -1,0 +1,19 @@
+// waybar module for LLimit — merge this block into ~/.config/waybar/config.jsonc
+// and add "custom/llimit" to one of your module lists, e.g.:
+//
+//   "modules-right": ["custom/llimit", "cpu", "memory", "clock"],
+//
+// waybar runs the command every `interval` seconds, reads the JSON (because of
+// "return-type": "json"), shows `text`, uses `tooltip` for the hover popup, and
+// applies `class` (ok / warning / critical / error / empty) as a CSS class —
+// see llimit.css for the matching styles.
+
+"custom/llimit": {
+  "exec": "llimit status --json",
+  "return-type": "json",
+  "interval": 300,
+  "format": "{}",
+  // Optional: force an out-of-cycle refresh when clicking the module. The bar
+  // updates on the next interval tick.
+  "on-click": "llimit refresh"
+}

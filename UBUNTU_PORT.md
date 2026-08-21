@@ -116,6 +116,30 @@ OpenCode, with the same fetch logic and the same tests as macOS.
 
 ### Phase 2 — desktop integration, cheapest surface first
 
+**Status: shipped** (branch `claude/ubuntu-port-phase2`), with two deviations from
+the text below:
+
+- `providerTileSlotCount` and slot-pinning were **kept**: they live in QuotaCore's
+  `AppSettings` and the macOS widgets depend on them. The Linux side simply ignores
+  slots — `StatusRenderer` emits every account and the bar config chooses.
+- The SNI tray icon was assessed and cut; see "Tray icon: assessed, not built" in
+  `Packages/LLimitd/README.md`. Bar modules are the supported display surface.
+
+What shipped:
+
+- **Status bar modules** — `Packages/LLimitd/examples/`: waybar (`custom` module +
+  CSS for the emitted `ok`/`warning`/`critical`/`error`/`empty` classes), polybar
+  (`custom/script` + jq renderer), and an eww `defpoll` widget. All consume
+  `llimit status --json` and were verified running (headless sway + Xvfb).
+- **Packaging** — fully static musl build (`--swift-sdk x86_64-swift-linux-musl`),
+  `packaging/build-deb.sh` producing a `.deb` with the binary, systemd user units
+  and examples, and a `release-linux` job in `release.yml` attaching it to tags.
+- **Hardening from review** — flock-based settings locking (`SettingsLock`) across
+  daemon and CLI read-modify-write, and a SIGTERM/SIGINT handler that cancels the
+  daemon loop instead of cutting off an in-flight refresh.
+
+Original text (for the record):
+
 Don't reproduce WidgetKit. Map onto what Linux desktops actually offer:
 
 - **Status bar modules** — a waybar or polybar `custom` module pointed at
@@ -153,7 +177,7 @@ the port, and why Phase 3 is last.
 
 | On macOS | Why it exists | On Linux |
 | --- | --- | --- |
-| 8 provider-tile slots | WidgetKit demands one compile-time widget *kind* per placeable tile, so the count can't be dynamic (see `AGENTS.md`). | No such limit. Emit every enabled account and let the bar config choose. Drop `providerTileSlotCount` and slot-pinning. |
+| 8 provider-tile slots | WidgetKit demands one compile-time widget *kind* per placeable tile, so the count can't be dynamic (see `AGENTS.md`). | No such limit. Emit every enabled account and let the bar config choose. ~~Drop `providerTileSlotCount` and slot-pinning.~~ **Correction (Phase 2):** kept — they live in QuotaCore's shared `AppSettings` and the macOS widgets read them; Linux just ignores them. |
 | App Group container | The only directory a sandboxed widget extension may share with its host app. | No sandbox, no extension. A plain XDG directory does the job. |
 | Keychain import for Claude | Claude Code stores its token in the macOS Keychain, hence the "Always Allow" prompt. | Nothing to port — Linux Claude Code writes `~/.claude/.credentials.json` directly, which `scanClaudeCode` already reads. Import is *simpler* here. |
 | Signing, notarization, entitlements | Gatekeeper and the App Group entitlement chain. | Gone. `scripts/build.sh`, `RELEASING.md` and the signing half of CI have no Linux counterpart. |
