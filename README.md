@@ -6,7 +6,7 @@
 - **Linux** — a headless `llimit` daemon + CLI, with ready-made status-bar modules
   (waybar, polybar, eww) and a `.deb` package.
 
-**Latest release:** v<!-- version -->1.0.0<!-- /version --> · [Download](https://github.com/L-K-M/LLimit/releases/latest)
+**Latest release:** v<!-- version -->1.0.1<!-- /version --> · [Download](https://github.com/L-K-M/LLimit/releases/latest)
 (macOS `.dmg`/`.zip` + Linux `llimit_*_amd64.deb`)
 
 ![screenshot widgets](screenshot-widgets.png)
