@@ -33,11 +33,11 @@ public struct SettingsLock: Sendable {
     return try body()
   }
 
-  /// Async variant: the lock is held across suspension points. That is
-  /// deliberate — the daemon holds it for a whole refresh cycle (a few seconds
-  /// every interval) so a CLI edit can never interleave with a token-refresh
-  /// save. flock is tied to the open file description, not a thread, so task
-  /// resumption on a different thread is safe.
+  /// Async variant: the lock is held across suspension points. flock is tied to the
+  /// open file description, not a thread, so task resumption on a different thread
+  /// is safe. Note the daemon deliberately does NOT hold it across network fetches
+  /// (see `QuotaDaemon.refreshCycle`) — this exists for short async critical
+  /// sections.
   public func withLock<T>(_ body: () async throws -> T) async throws -> T {
     let fd = try acquire()
     defer { release(fd) }
