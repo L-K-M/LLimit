@@ -78,3 +78,15 @@ jobs:
       - name: Test LLimitd (llimit daemon + CLI)
         working-directory: Packages/LLimitd
         run: swift test
+
+  tray-test:
+    name: Linux (tray)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The menu model is pure Python with no GTK import, so these run without
+      # a display, a session bus or a panel.
+      - name: Test tray menu model
+        run: python3 -m unittest discover -s Packages/LLimitd/tray/tests -v
+      - name: Lint tray for syntax errors
+        run: python3 -m compileall -q Packages/LLimitd/tray/llimit_tray.py

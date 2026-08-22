@@ -1,0 +1,17 @@
+[Unit]
+Description=LLimit tray icon
+Documentation=file:/usr/share/doc/llimit/README.md
+# The tray needs the graphical session's D-Bus and display, not just the user bus.
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/llimit-tray
+Restart=on-failure
+RestartSec=10s
+
+[Install]
+# graphical-session.target, not default.target: starting this without a display
+# would fail in a loop on a headless login.
+WantedBy=graphical-session.target

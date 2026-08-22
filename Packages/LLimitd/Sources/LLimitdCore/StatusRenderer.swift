@@ -66,6 +66,30 @@ public enum StatusRenderer {
     return string
   }
 
+  /// One limit as a JSON row for popup consumers (the tray). Optional fields are
+  /// omitted rather than emitted as null, so a consumer can use plain key lookup
+  /// without distinguishing "absent" from "present but null".
+  static func metricObject(_ metric: UsageMetric) -> [String: Any] {
+    var object: [String: Any] = [
+      "id": metric.id,
+      "label": metric.label,
+      "unlimited": metric.isUnlimited
+    ]
+    if let remaining = metric.remainingPercent {
+      object["remainingPercent"] = remaining
+    }
+    if let resetIn = metric.resetIn {
+      object["resetIn"] = resetIn
+    }
+    if let usageLine = metric.usageLine {
+      object["usageLine"] = usageLine
+    }
+    if let detail = metric.detail {
+      object["detail"] = detail
+    }
+    return object
+  }
+
   static func waybarObject(snapshot: QuotaSnapshot?, now: Date) -> [String: Any] {
     guard let snapshot else {
       return [
@@ -92,7 +116,11 @@ public enum StatusRenderer {
         "provider": usage.provider.rawValue,
         "name": usage.title,
         "remainingPercent": remaining as Any,
-        "stale": now.timeIntervalSince(usage.fetchedAt) > 2 * 3600
+        "stale": now.timeIntervalSince(usage.fetchedAt) > 2 * 3600,
+        // Per-limit breakdown. The headline `remainingPercent` above is only the
+        // worst metric; a popup (the tray) needs every limit as its own row.
+        // Additive: bars that read only the older keys are unaffected.
+        "metrics": usage.metrics.map(metricObject)
       ])
     }
 
