@@ -740,6 +740,7 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
 
   var series: [TrendSeries] = []
   let kindColors = entry.settings.widgetStyle.limitKindColors
+  let showShortTermLimits = entry.settings.widgetVisibility.showShortTermLimitsInTrend
 
   let accountOrder = usageByAccount.values.sorted { lhs, rhs in
     if lhs.provider.rawValue != rhs.provider.rawValue {
@@ -765,7 +766,26 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
     // can't show those either, so the chart adds a dash for repeats.
     var duplicateOrdinalByHex: [String: Int] = [:]
 
-    for metricID in metricIDs {
+    // Slots resolve before any line is built so the long-term filter can weigh
+    // each metric's window against every window this account reports.
+    let resolvedSlots = metricIDs.map { metricID -> (metricID: String, slot: LimitSeriesSlot) in
+      if let index = usage.metrics.firstIndex(where: { $0.id == metricID || $0.label == metricID }) {
+        return (metricID: metricID, slot: accountSlots[index])
+      }
+      let key = SeriesKey(accountID: usage.accountID, metricID: metricID)
+      let metricLabel = labelsByKey[key] ?? metricID
+      return (metricID: metricID, slot: LimitSeriesSlot(kind: QuotaWindowKind.classify(metricID: metricID, label: metricLabel)))
+    }
+
+    // With short-term limits hidden, the fast windows — which saw-tooth all day
+    // and cross over the slow lines — drop out and only the long-term traces
+    // (usually the weekly ones) remain.
+    let accountKinds = resolvedSlots.map { $0.slot.kind }
+    let chartedSlots = showShortTermLimits
+      ? resolvedSlots
+      : resolvedSlots.filter { chartsAsLongTermLimit($0.slot.kind, accountKinds: accountKinds) }
+
+    for (metricID, slot) in chartedSlots {
       let key = SeriesKey(accountID: usage.accountID, metricID: metricID)
       let points = downsampleTrendPoints(pointsByKey[key] ?? [], maxCount: 240)
       guard !points.isEmpty else {
@@ -774,17 +794,10 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
 
       let metricLabel = labelsByKey[key] ?? metricID
       let displayLabel: String
-      if metricIDs.count > 1 {
+      if chartedSlots.count > 1 {
         displayLabel = "\(compactProviderName(for: usage)) \(compactMetricLabel(metricLabel))"
       } else {
         displayLabel = compactProviderName(for: usage)
-      }
-
-      let slot: LimitSeriesSlot
-      if let index = usage.metrics.firstIndex(where: { $0.id == metricID || $0.label == metricID }) {
-        slot = accountSlots[index]
-      } else {
-        slot = LimitSeriesSlot(kind: QuotaWindowKind.classify(metricID: metricID, label: metricLabel))
       }
 
       let baseHex = kindColors.hexColor(for: slot)

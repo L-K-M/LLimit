@@ -74,6 +74,30 @@ public extension LimitKindColors {
   }
 }
 
+public extension QuotaWindowKind {
+  /// Windows that reset within a day. They saw-tooth constantly, which is why
+  /// the trend chart can be asked to leave them out
+  /// (`WidgetVisibilitySettings.showShortTermLimitsInTrend`).
+  var isShortTerm: Bool {
+    switch self {
+    case .session, .daily:
+      return true
+    case .weekly, .monthly, .other:
+      return false
+    }
+  }
+}
+
+/// Whether a metric of `kind` still charts once short-term limits are hidden.
+/// `accountKinds` is the window kind of every metric that account charts: a
+/// short window drops out only while the same account also reports a longer
+/// one, so an account whose only limit is a 5-hour window keeps its line
+/// instead of disappearing from the chart.
+public func chartsAsLongTermLimit(_ kind: QuotaWindowKind, accountKinds: [QuotaWindowKind]) -> Bool {
+  guard kind.isShortTerm else { return true }
+  return !accountKinds.contains { !$0.isShortTerm }
+}
+
 /// How many color-scheme variants exist per identity hue: base, deep, pale.
 /// A fourth account wraps back to the base scheme.
 public let accountColorVariantCount = 3

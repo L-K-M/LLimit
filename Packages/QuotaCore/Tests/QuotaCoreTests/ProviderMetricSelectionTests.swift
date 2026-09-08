@@ -71,6 +71,39 @@ final class ProviderMetricSelectionTests: XCTestCase {
     XCTAssertTrue(defaultRingMetrics(for: makeUsage(provider: .openAI, metrics: [empty])).isEmpty)
   }
 
+  func testShortTermKindsCoverSubDailyWindows() {
+    XCTAssertTrue(QuotaWindowKind.session.isShortTerm)
+    XCTAssertTrue(QuotaWindowKind.daily.isShortTerm)
+    XCTAssertFalse(QuotaWindowKind.weekly.isShortTerm)
+    XCTAssertFalse(QuotaWindowKind.monthly.isShortTerm)
+    XCTAssertFalse(QuotaWindowKind.other.isShortTerm)
+  }
+
+  func testLongTermFilterDropsShortWindowsWhenALongerOneExists() {
+    // Claude's 5-hour window goes, both weeklies stay.
+    let claude: [QuotaWindowKind] = [.session, .weekly, .weekly]
+
+    XCTAssertFalse(chartsAsLongTermLimit(.session, accountKinds: claude))
+    XCTAssertTrue(chartsAsLongTermLimit(.weekly, accountKinds: claude))
+  }
+
+  func testLongTermFilterKeepsShortWindowsWithoutALongerOne() {
+    // A session-only account would otherwise vanish from the chart entirely.
+    let sessionOnly: [QuotaWindowKind] = [.session, .daily]
+
+    XCTAssertTrue(chartsAsLongTermLimit(.session, accountKinds: sessionOnly))
+    XCTAssertTrue(chartsAsLongTermLimit(.daily, accountKinds: sessionOnly))
+  }
+
+  func testLongTermFilterTreatsUnclassifiedWindowsAsLongTerm() {
+    // Google's per-model quotas report no cadence; they anchor the account and
+    // always chart themselves.
+    let unclassified: [QuotaWindowKind] = [.session, .other]
+
+    XCTAssertFalse(chartsAsLongTermLimit(.session, accountKinds: unclassified))
+    XCTAssertTrue(chartsAsLongTermLimit(.other, accountKinds: unclassified))
+  }
+
   private func metric(_ id: String) -> UsageMetric {
     UsageMetric(id: id, label: id, remainingPercent: 50)
   }
