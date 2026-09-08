@@ -1154,6 +1154,10 @@ public struct WidgetVisibilitySettings: Codable, Hashable, Sendable {
   public var showPercentageValues: Bool
   public var showDualLimitPercentagesInDashboard: Bool
   public var showMediumProgressBars: Bool
+  /// When false the trend widget charts only the slow windows: a short window
+  /// (session/daily) drops out while the same account also reports a longer
+  /// one, so the weekly curve reads without the fast lines saw-toothing over it.
+  public var showShortTermLimitsInTrend: Bool
   public var smallDashboardProviderLimit: Int
   public var mediumProviderLimit: Int
   public var trendHistoryDays: Int
@@ -1166,6 +1170,7 @@ public struct WidgetVisibilitySettings: Codable, Hashable, Sendable {
     showPercentageValues: Bool = true,
     showDualLimitPercentagesInDashboard: Bool = true,
     showMediumProgressBars: Bool = true,
+    showShortTermLimitsInTrend: Bool = true,
     smallDashboardProviderLimit: Int = 2,
     mediumProviderLimit: Int = 6,
     trendHistoryDays: Int = 7
@@ -1177,6 +1182,7 @@ public struct WidgetVisibilitySettings: Codable, Hashable, Sendable {
     self.showPercentageValues = showPercentageValues
     self.showDualLimitPercentagesInDashboard = showDualLimitPercentagesInDashboard
     self.showMediumProgressBars = showMediumProgressBars
+    self.showShortTermLimitsInTrend = showShortTermLimitsInTrend
     self.smallDashboardProviderLimit = Self.clampSmallProviderLimit(smallDashboardProviderLimit)
     self.mediumProviderLimit = Self.clampMediumProviderLimit(mediumProviderLimit)
     self.trendHistoryDays = Self.clampTrendHistoryDays(trendHistoryDays)
@@ -1194,6 +1200,7 @@ public struct WidgetVisibilitySettings: Codable, Hashable, Sendable {
     case showPercentageValues
     case showDualLimitPercentagesInDashboard
     case showMediumProgressBars
+    case showShortTermLimitsInTrend
     case smallDashboardProviderLimit
     case mediumProviderLimit
     case trendHistoryDays
@@ -1209,6 +1216,7 @@ public struct WidgetVisibilitySettings: Codable, Hashable, Sendable {
     showPercentageValues = (try? container.decodeIfPresent(Bool.self, forKey: .showPercentageValues)) ?? true
     showDualLimitPercentagesInDashboard = (try? container.decodeIfPresent(Bool.self, forKey: .showDualLimitPercentagesInDashboard)) ?? true
     showMediumProgressBars = (try? container.decodeIfPresent(Bool.self, forKey: .showMediumProgressBars)) ?? true
+    showShortTermLimitsInTrend = (try? container.decodeIfPresent(Bool.self, forKey: .showShortTermLimitsInTrend)) ?? true
     let decodedSmallProviderLimit = (try? container.decodeIfPresent(Int.self, forKey: .smallDashboardProviderLimit)) ?? 2
     smallDashboardProviderLimit = Self.clampSmallProviderLimit(decodedSmallProviderLimit)
     let decodedProviderLimit = (try? container.decodeIfPresent(Int.self, forKey: .mediumProviderLimit)) ?? 6
@@ -1226,6 +1234,7 @@ public struct WidgetVisibilitySettings: Codable, Hashable, Sendable {
     try container.encode(showPercentageValues, forKey: .showPercentageValues)
     try container.encode(showDualLimitPercentagesInDashboard, forKey: .showDualLimitPercentagesInDashboard)
     try container.encode(showMediumProgressBars, forKey: .showMediumProgressBars)
+    try container.encode(showShortTermLimitsInTrend, forKey: .showShortTermLimitsInTrend)
     try container.encode(Self.clampSmallProviderLimit(smallDashboardProviderLimit), forKey: .smallDashboardProviderLimit)
     try container.encode(Self.clampMediumProviderLimit(mediumProviderLimit), forKey: .mediumProviderLimit)
     try container.encode(Self.clampTrendHistoryDays(trendHistoryDays), forKey: .trendHistoryDays)

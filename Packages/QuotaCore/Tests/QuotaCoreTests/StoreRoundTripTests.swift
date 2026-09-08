@@ -47,6 +47,7 @@ final class StoreRoundTripTests: XCTestCase {
     XCTAssertTrue(settings.widgetVisibility.showPercentageValues)
     XCTAssertTrue(settings.widgetVisibility.showDualLimitPercentagesInDashboard)
     XCTAssertTrue(settings.widgetVisibility.showMediumProgressBars)
+    XCTAssertTrue(settings.widgetVisibility.showShortTermLimitsInTrend)
     XCTAssertEqual(settings.widgetVisibility.smallDashboardProviderLimit, 2)
     XCTAssertEqual(settings.widgetVisibility.mediumProviderLimit, 6)
     XCTAssertEqual(settings.widgetVisibility.trendHistoryDays, 7)
@@ -90,6 +91,7 @@ final class StoreRoundTripTests: XCTestCase {
         showPercentageValues: false,
         showDualLimitPercentagesInDashboard: false,
         showMediumProgressBars: false,
+        showShortTermLimitsInTrend: false,
         smallDashboardProviderLimit: 3,
         mediumProviderLimit: 4,
         trendHistoryDays: 14
@@ -116,6 +118,7 @@ final class StoreRoundTripTests: XCTestCase {
     XCTAssertFalse(loaded.widgetVisibility.showPercentageValues)
     XCTAssertFalse(loaded.widgetVisibility.showDualLimitPercentagesInDashboard)
     XCTAssertFalse(loaded.widgetVisibility.showMediumProgressBars)
+    XCTAssertFalse(loaded.widgetVisibility.showShortTermLimitsInTrend)
     XCTAssertEqual(loaded.widgetVisibility.smallDashboardProviderLimit, 3)
     XCTAssertEqual(loaded.widgetVisibility.mediumProviderLimit, 4)
     XCTAssertEqual(loaded.widgetVisibility.trendHistoryDays, 14)

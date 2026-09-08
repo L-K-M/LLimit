@@ -385,6 +385,12 @@ struct SettingsView: View {
             }
 
             settingsGroupCard(title: "Trend Widget") {
+              Toggle(
+                "Show short-term limits in trend chart",
+                isOn: model.widgetVisibilityBinding(for: \.showShortTermLimitsInTrend)
+              )
+              .help("Off charts only the long-term limits — usually the weekly ones. An account whose only limit is short-term keeps its line.")
+
               visibilityStepperRow(
                 title: "Days shown in trend chart",
                 value: model.widgetVisibilityIntBinding(for: \.trendHistoryDays, range: 1...30),
