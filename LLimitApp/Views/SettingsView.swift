@@ -389,7 +389,7 @@ struct SettingsView: View {
                 "Show short-term limits in trend chart",
                 isOn: model.widgetVisibilityBinding(for: \.showShortTermLimitsInTrend)
               )
-              .help("Off charts only the long-term limits — usually the weekly ones. An account whose only limit is short-term keeps its line.")
+              .help("When off, the trend chart shows only long-term limits — usually the weekly ones. An account whose only limit is short-term keeps its line.")
 
               visibilityStepperRow(
                 title: "Days shown in trend chart",
