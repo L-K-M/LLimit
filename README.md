@@ -2,6 +2,9 @@
 
 **LLimit** tracks how much of your LLM subscription quota is left:
 
+> [!IMPORTANT]
+> LLM disclosure: This codebase was written with substantial help from large language models: AI coding agents working from the [`AGENTS.md`](AGENTS.md) brief in this repo.
+
 - **macOS** — a self-contained menu-bar app + desktop widgets.
 - **Linux** — a headless `llimit` daemon + CLI, with ready-made status-bar modules
   (waybar, polybar, eww) and a `.deb` package.
