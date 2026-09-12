@@ -92,7 +92,7 @@ Recommends: ca-certificates
 Suggests: python3-gi, gir1.2-ayatanaappindicator3-0.1
 Description: LLM subscription quota tracking for Linux status bars
  llimit tracks remaining LLM subscription quota (Claude, ChatGPT, Copilot,
- Zhipu, Z.ai, Kimi, Google) and exposes it to status bars. Ships a refresh
+ Zhipu, Z.ai, Kimi, Antigravity) and exposes it to status bars. Ships a refresh
  daemon with systemd user units, an account-management CLI, ready-made
  waybar/polybar/eww modules driven by 'llimit status --json', and an optional
  tray icon with a per-limit popup.

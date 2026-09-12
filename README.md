@@ -58,7 +58,7 @@ the Claude Keychain import is macOS-only — Linux Claude Code writes
 | **Zhipu AI** | API key | OpenCode (`zhipuai-coding-plan`) |
 | **Z.ai** | API key | OpenCode (`zai-coding-plan`) |
 | **Kimi** (Moonshot AI) | API key or OAuth access token | Kimi CLI (`~/.kimi`), Kimi Code (`~/.kimi-code`), OpenCode (`kimi-for-coding`) |
-| **Google (Antigravity)** | Refresh token + project id | OpenCode (`antigravity-accounts.json`) |
+| **Google Antigravity** | Refresh token + project id | Antigravity IDE / CLI (`~/.gemini`), OpenCode (`antigravity-accounts.json`) |
 
 ## How accounts work
 
