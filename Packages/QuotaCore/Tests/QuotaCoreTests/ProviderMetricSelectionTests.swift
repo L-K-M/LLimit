@@ -104,6 +104,20 @@ final class ProviderMetricSelectionTests: XCTestCase {
     XCTAssertTrue(chartsAsLongTermLimit(.other, accountKinds: unclassified))
   }
 
+  func testLongTermFilterDropsZaiTokenWindowAlongsideItsMonthlyQuota() {
+    // Z.ai's token window used to reach the chart as `.other` — unclassified,
+    // therefore long-term — so it kept drawing after short-term limits were
+    // hidden while Claude's and Kimi's equivalents dropped out.
+    let zai = [
+      QuotaWindowKind.classify(metricID: "tokens", label: "Token limit"),
+      QuotaWindowKind.classify(metricID: "mcp", label: "MCP monthly quota")
+    ]
+    XCTAssertEqual(zai, [.session, .monthly])
+
+    XCTAssertFalse(chartsAsLongTermLimit(zai[0], accountKinds: zai))
+    XCTAssertTrue(chartsAsLongTermLimit(zai[1], accountKinds: zai))
+  }
+
   private func metric(_ id: String) -> UsageMetric {
     UsageMetric(id: id, label: id, remainingPercent: 50)
   }

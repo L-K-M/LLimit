@@ -763,6 +763,16 @@ public enum QuotaWindowKind: String, Codable, CaseIterable, Sendable {
       return .daily
     }
 
+    // Zhipu and Z.ai return the same `TOKENS_LIMIT` rolling window from the
+    // same endpoint, but only Zhipu's label spells the duration out. Z.ai's
+    // bare "Token limit" would otherwise land in `.other`, wearing an
+    // auxiliary hue instead of the session color and surviving the trend
+    // chart's long-term-only filter. Checked last so a label that does name a
+    // cadence still classifies by that cadence.
+    if metricID.lowercased() == "tokens" {
+      return .session
+    }
+
     return .other
   }
 

@@ -23,7 +23,9 @@ final class LimitKindTests: XCTestCase {
     // Zhipu / Z.ai
     XCTAssertEqual(QuotaWindowKind.classify(metricID: "tokens", label: "5-hour token limit"), .session)
     XCTAssertEqual(QuotaWindowKind.classify(metricID: "mcp", label: "MCP monthly quota"), .monthly)
-    XCTAssertEqual(QuotaWindowKind.classify(metricID: "tokens", label: "Token limit"), .other)
+    // Z.ai reports the same rolling token window without naming it, so the id
+    // has to carry the classification.
+    XCTAssertEqual(QuotaWindowKind.classify(metricID: "tokens", label: "Token limit"), .session)
 
     // Google Antigravity reports per-model quotas with no window wording.
     XCTAssertEqual(QuotaWindowKind.classify(metricID: "gemini-3-flash", label: "G3 Flash"), .other)
