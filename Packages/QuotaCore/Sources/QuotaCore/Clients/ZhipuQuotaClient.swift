@@ -117,7 +117,7 @@ public struct ZhipuQuotaClient: QuotaProviderClient {
         throw ProviderClientError(kind: .decoding, message: "\(provider.displayName) time limit has an invalid percentage")
       }
       maxUsagePercent = max(maxUsagePercent, 100 - remaining)
-      let resetAt = parseResetDate(in: timeLimit) ?? providerResetAt ?? startOfNextMonth(from: now)
+      let reset = resolveTimeLimitReset(in: timeLimit, planResetAt: providerResetAt, now: now)
 
       let used = firstNumeric(
         in: timeLimit,
@@ -135,8 +135,9 @@ public struct ZhipuQuotaClient: QuotaProviderClient {
           remainingPercent: remaining,
           usedDisplay: formatIntLike(used),
           totalDisplay: formatIntLike(total),
-          resetAt: resetAt,
-          resetIn: resetAt.map { formatResetCountdown(to: $0, now: now) }
+          resetAt: reset.date,
+          resetIn: reset.date.map { formatResetCountdown(to: $0, now: now) },
+          detail: reset.origin.explanation
         )
       )
     }
@@ -162,6 +163,54 @@ public struct ZhipuQuotaClient: QuotaProviderClient {
       warning: maxUsagePercent >= 80 ? "High usage" : nil,
       fetchedAt: now
     )
+  }
+
+  /// Where the MCP quota's reset date came from. The menu dropdown prints the
+  /// matching sentence, so a countdown LLimit inferred is never mistaken for
+  /// one the provider actually sent.
+  private enum TimeLimitResetOrigin {
+    /// The `TIME_LIMIT` entry carried its own reset date.
+    case reported
+    /// The entry carried none, so the plan's renewal date stands in. This is
+    /// the common case, and it is why the countdown rarely lands on the 1st.
+    case planRenewal
+    /// Neither was present, so the date below is LLimit's assumption.
+    case assumedCalendarMonth
+    /// Neither was present and the calendar could not produce a fallback.
+    case unknown
+
+    /// Kept to two short lines: `MetricQuotaRow` truncates the detail text.
+    var explanation: String {
+      switch self {
+      case .reported:
+        return "A separate allowance from the token window, with its own reset."
+      case .planRenewal:
+        return "A separate allowance from the token window. Resets when your plan period renews, not on the 1st."
+      case .assumedCalendarMonth:
+        return "A separate allowance from the token window. No reset date was reported, so the 1st of next month is assumed."
+      case .unknown:
+        return "A separate allowance from the token window. The provider reported no reset date."
+      }
+    }
+  }
+
+  private func resolveTimeLimitReset(
+    in timeLimit: [String: Any],
+    planResetAt: Date?,
+    now: Date
+  ) -> (date: Date?, origin: TimeLimitResetOrigin) {
+    if let reported = parseResetDate(in: timeLimit) {
+      return (reported, .reported)
+    }
+
+    if let planResetAt {
+      return (planResetAt, .planRenewal)
+    }
+
+    guard let assumed = startOfNextMonth(from: now) else {
+      return (nil, .unknown)
+    }
+    return (assumed, .assumedCalendarMonth)
   }
 
   private func parseResetDate(in object: [String: Any]) -> Date? {
