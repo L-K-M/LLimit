@@ -240,10 +240,17 @@ public struct CredentialDiscovery: Sendable {
   /// ``GoogleAntigravityClient`` exchanges it for an access token on every fetch,
   /// so a stale access token in these files does not matter and is not checked.
   ///
-  /// The newest store holding a refresh token wins, and fields are never mixed
-  /// across stores: two of these files can belong to two different Google
-  /// accounts, and pairing one account's token with another's project id would
-  /// silently report the wrong quota.
+  /// Sources are probed in a fixed order, newest Antigravity layout first — file
+  /// mtimes are never consulted — and the first store holding a refresh token wins
+  /// whole. Credentials are never mixed across stores: two of these files can
+  /// belong to two different Google accounts, and pairing one account's token with
+  /// another's project id would silently report the wrong quota.
+  ///
+  /// The email is the one exception, and it is only ever a label. When the winning
+  /// store names no account, it falls back to the Gemini CLI's `oauth_creds.json`,
+  /// which can in principle hold a different Google login, so that borrowing is
+  /// called out in the diagnostics. The quota fetch is unaffected: the token and
+  /// the project id still come from a single store.
   ///
   /// The project id is therefore optional. Some stores omit it, and such a login
   /// is still worth importing: the account arrives pre-filled and both UIs report
@@ -271,8 +278,11 @@ public struct CredentialDiscovery: Sendable {
       // credential file rather than beside the Antigravity token.
       var email = fields.email
       if email == nil,
-         let credentialsFile = readJSON(at: path(home, ".gemini", "oauth_creds.json"), label: "Antigravity", diagnostics: &diagnostics) {
+         let credentialsFile = readJSON(at: path(home, ".gemini", "oauth_creds.json"), label: "Gemini", diagnostics: &diagnostics) {
         email = antigravityFields(in: credentialsFile).email
+        if email != nil {
+          diagnostics.append("Antigravity: account name taken from the Gemini CLI login (~/.gemini/oauth_creds.json) — check that it is the same Google account")
+        }
       }
 
       var credentials = [CredentialField.googleRefreshToken: refreshToken]

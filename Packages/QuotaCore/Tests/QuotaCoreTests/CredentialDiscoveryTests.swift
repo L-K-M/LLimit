@@ -211,9 +211,10 @@ final class CredentialDiscoveryTests: XCTestCase {
     XCTAssertTrue(result.diagnostics.contains { $0.contains("without a project id") })
   }
 
-  func testPrefersNewestAntigravityStoreWithoutMixingStores() throws {
-    // The two stores can hold two different Google accounts, so the newest one
-    // wins whole: its token must never be paired with the other's project id.
+  func testPrefersFirstProbedAntigravityStoreWithoutMixingStores() throws {
+    // The two stores can hold two different Google accounts, so the first
+    // probed one wins whole: its token must never be paired with the other's
+    // project id.
     try write(#"{"refreshToken":"ag-session","email":"first@example.com"}"#,
               to: ".gemini", "antigravity", "session.json")
     try write(#"{"refresh_token":"ag-older","projectId":"other-account-project","email":"second@example.com"}"#,
@@ -259,5 +260,42 @@ final class CredentialDiscoveryTests: XCTestCase {
     XCTAssertEqual(google?.credentials[CredentialField.googleRefreshToken], "oc-new")
     XCTAssertEqual(google?.credentials[CredentialField.googleProjectID], "p-new")
     XCTAssertEqual(google?.sourceLabel, "OpenCode (~/.local/share/opencode/antigravity-accounts.json)")
+  }
+
+  func testDecodesBase64URLEncodedGeminiIDToken() throws {
+    // Real id_token payloads are base64url, and Data(base64Encoded:) rejects that
+    // alphabet's '-' and '_'. This fixture contains both, so it fails if the
+    // decoder ever stops translating them.
+    let jwt = "eyJhbGciOiAiUlMyNTYiLCAidHlwIjogIkpXVCJ9.eyJlbWFpbCI6ICJnZW1pbmlAZXhhbXBsZS5jb20iLCAibmFtZSI6ICJ6REw_YWt-Sn5rR09ES2RpbloifQ.sig"
+    let payload = jwt.split(separator: ".")[1]
+    XCTAssertTrue(payload.contains("-"), "fixture must exercise base64url '-'")
+    XCTAssertTrue(payload.contains("_"), "fixture must exercise base64url '_'")
+
+    try write(#"{"refreshToken":"ag-refresh","projectId":"proj-6"}"#,
+              to: ".gemini", "antigravity", "session.json")
+    try write(#"{"id_token":"\#(jwt)"}"#, to: ".gemini", "oauth_creds.json")
+
+    let google = discover().first { $0.provider == .googleAntigravity }
+    XCTAssertEqual(google?.credentials[CredentialField.googleEmail], "gemini@example.com")
+  }
+
+  func testDiagnosesAntigravityNameBorrowedFromGeminiCLI() throws {
+    // The Gemini CLI can be signed into a different Google account, so borrowing
+    // its identity to label the account has to be visible.
+    try write(#"{"refreshToken":"ag-refresh","projectId":"proj-7"}"#,
+              to: ".gemini", "antigravity", "session.json")
+    try write(#"{"id_token":"eyJhbGciOiAiUlMyNTYiLCAidHlwIjogIkpXVCJ9.eyJlbWFpbCI6ICJnZW1pbmlAZXhhbXBsZS5jb20iLCAibmFtZSI6ICJ6REw_YWt-Sn5rR09ES2RpbloifQ.sig"}"#, to: ".gemini", "oauth_creds.json")
+
+    let result = CredentialDiscovery(homeDirectories: [home]).discover()
+    XCTAssertTrue(result.diagnostics.contains { $0.contains("taken from the Gemini CLI login") })
+  }
+
+  func testDedupesSameOpenCodeAntigravityAccountInBothRoots() throws {
+    // A migrated OpenCode install can leave the old config-root file behind.
+    let accounts = #"{"accounts":[{"email":"dup@example.com","refreshToken":"oc-dup","projectId":"p-dup"}]}"#
+    try write(accounts, to: ".local", "share", "opencode", "antigravity-accounts.json")
+    try write(accounts, to: ".config", "opencode", "antigravity-accounts.json")
+
+    XCTAssertEqual(discover().filter { $0.provider == .googleAntigravity }.count, 1)
   }
 }
