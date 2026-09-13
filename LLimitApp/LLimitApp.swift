@@ -1327,6 +1327,9 @@ private struct MetricQuotaRow: View {
           .font(.system(size: 10))
           .foregroundStyle(DashboardPalette.tertiaryText)
           .lineLimit(2)
+          // Two lines is the budget here, so hovering recovers anything the
+          // row had to truncate.
+          .help(detail)
       }
     }
     .accessibilityElement(children: .combine)
