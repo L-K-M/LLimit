@@ -296,6 +296,22 @@ final class CredentialDiscoveryTests: XCTestCase {
     try write(accounts, to: ".local", "share", "opencode", "antigravity-accounts.json")
     try write(accounts, to: ".config", "opencode", "antigravity-accounts.json")
 
-    XCTAssertEqual(discover().filter { $0.provider == .googleAntigravity }.count, 1)
+    let google = discover().filter { $0.provider == .googleAntigravity }
+    XCTAssertEqual(google.count, 1)
+    // Pin which root survived: a count of 1 alone would also hold if a root
+    // stopped being scanned, which is what the companion test below rules out.
+    XCTAssertEqual(google.first?.sourceLabel, "OpenCode (~/.local/share/opencode/antigravity-accounts.json)")
+  }
+
+  func testReadsOpenCodeAntigravityAccountsFromConfigRoot() throws {
+    // The config root was the only one LLimit ever read, so losing it would
+    // break existing installs silently.
+    try write(#"{"accounts":[{"email":"cfg@example.com","refreshToken":"oc-cfg","projectId":"p-cfg"}]}"#,
+              to: ".config", "opencode", "antigravity-accounts.json")
+
+    let google = discover().filter { $0.provider == .googleAntigravity }
+    XCTAssertEqual(google.count, 1)
+    XCTAssertEqual(google.first?.credentials[CredentialField.googleRefreshToken], "oc-cfg")
+    XCTAssertEqual(google.first?.sourceLabel, "OpenCode (~/.config/opencode/antigravity-accounts.json)")
   }
 }
