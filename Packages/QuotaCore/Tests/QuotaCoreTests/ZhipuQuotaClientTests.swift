@@ -59,29 +59,44 @@ final class ZhipuQuotaClientTests: XCTestCase {
     let usage = try await fetch(payload(planReset: nil))
 
     let mcp = try XCTUnwrap(usage.metrics.first { $0.id == "mcp" })
+    // Pinned by calendar components rather than an epoch: `startOfNextMonth`
+    // works in the runner's own time zone, which moves the exact instant by up
+    // to a day either way. December 1st 2023 is the answer in every zone.
     let resetAt = try XCTUnwrap(mcp.resetAt)
-    XCTAssertGreaterThan(resetAt, now)
+    let components = Calendar(identifier: .gregorian)
+      .dateComponents([.year, .month, .day, .hour], from: resetAt)
+    XCTAssertEqual(components.year, 2023)
+    XCTAssertEqual(components.month, 12)
+    XCTAssertEqual(components.day, 1)
+    XCTAssertEqual(components.hour, 0)
     XCTAssertEqual(
       mcp.detail,
       "A separate allowance from the token window. No reset date was reported, so the 1st of next month is assumed."
     )
   }
 
+  /// Both endpoints are the ones `QuotaCoordinator.live()` registers: same path
+  /// on two hosts, which is why one client serves both providers.
   private func fetch(_ body: String, provider: QuotaProvider = .zai) async throws -> ProviderUsage {
+    let endpoint = provider == .zai
+      ? "https://api.z.ai/api/monitor/usage/quota/limit"
+      : "https://bigmodel.cn/api/monitor/usage/quota/limit"
     let client = ZhipuQuotaClient(
       provider: provider,
-      endpoint: URL(string: "https://api.z.ai/api/monitor/usage/quota/limit")!,
+      endpoint: URL(string: endpoint)!,
       accountLabel: "Z.ai",
-      httpClient: MockZhipuHTTP(status: 200, body: body)
+      httpClient: MockZhipuHTTP(status: 200, body: body, expectedKey: Self.apiKey)
     )
     let key = provider == .zai ? CredentialField.zaiAPIKey : CredentialField.zhipuAPIKey
     let configuration = ProviderRuntimeConfiguration(
       provider: provider,
       isEnabled: true,
-      credentials: [key: "sk-zai"]
+      credentials: [key: Self.apiKey]
     )
     return try await client.fetchUsage(configuration: configuration, now: now)
   }
+
+  private static let apiKey = "sk-zai"
 
   /// `currentValue` is the used count and `usage` the entitlement, matching the
   /// key precedence the client reads.
@@ -103,11 +118,20 @@ final class ZhipuQuotaClientTests: XCTestCase {
   }
 }
 
+/// Answers 200 with `body`, but first checks the request the client built. A
+/// dropped credential header or a wrong path would otherwise 401 or 404 in
+/// production while every parsing test here still passed.
 private struct MockZhipuHTTP: HTTPClient {
   let status: Int
   let body: String
+  let expectedKey: String
 
   func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+    XCTAssertEqual(request.httpMethod, "GET")
+    XCTAssertEqual(request.url?.path, "/api/monitor/usage/quota/limit")
+    // The key goes in bare, with no "Bearer " prefix.
+    XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), expectedKey)
+
     let response = HTTPURLResponse(
       url: request.url!,
       statusCode: status,
