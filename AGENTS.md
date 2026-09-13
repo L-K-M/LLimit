@@ -10,12 +10,13 @@ including multiple accounts per provider, and credentials are stored by LLimit. 
 does not depend on any other tool at runtime.
 
 `CredentialDiscovery` exists only as an *optional import shortcut* — it can detect a
-login from a locally installed tool (Claude Code, Codex, Copilot, OpenCode) so the
+login from a locally installed tool (Claude Code, Codex, Copilot, Antigravity,
+OpenCode) so the
 user can one-click create a pre-filled account instead of pasting a token. Once
 imported, the account is copied into and owned by LLimit.
 
 Providers: Claude (Anthropic), OpenAI/ChatGPT, GitHub Copilot, Zhipu, Z.ai, Kimi,
-Google (Antigravity).
+Google Antigravity.
 
 ## Layout
 
@@ -85,8 +86,8 @@ Linux:
   snapshot/history files, `llimit status` output, or logs must be redacted via
   `AppSettings.redactedCredentials()` — the display surfaces never need credentials.
 - The host app is **not sandboxed** (the import shortcut reads `~/.claude`, `~/.codex`,
-  `~/.config/github-copilot`, `~/.kimi`, `~/.kimi-code`, `~/.local/share/opencode`,
-  and the Keychain). The widget extension **stays sandboxed**; it only reads the App
+  `~/.config/github-copilot`, `~/.kimi`, `~/.kimi-code`, `~/.gemini`,
+  `~/.local/share/opencode`, and the Keychain). The widget extension **stays sandboxed**; it only reads the App
   Group container.
 - Adding a `QuotaProvider` case is a breaking change for exhaustive `switch`es: update
   `Models.displayName`, `Models.credentialFields`, and the widget's `compactProviderName`.
@@ -122,6 +123,17 @@ Linux:
   official CLI's `/usage` command (MoonshotAI/kimi-cli, ui/shell/usage.py). Returns
   `usage` (weekly plan quota) + `limits[]` (rolling windows, e.g. 300-minute);
   protobuf-JSON, so int64s are strings and `resetTime` has nanosecond fractions.
+- **Google Antigravity**: `POST https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels`
+  with `{"project": <id>}`, a Bearer access token minted from the stored refresh token
+  at `https://oauth2.googleapis.com/token`, and the `antigravity/<ver>` User-Agent.
+  Per-model `quotaInfo.remainingFraction` + `resetTime`, no window wording.
+  Antigravity's own login lives under `~/.gemini` and has moved between releases:
+  `antigravity/session.json`, `antigravity-cli/antigravity-oauth-token` (fallback
+  `antigravity-auth-token`), and `jetski-standalone-oauth-token`, with the identity in
+  `oauth_creds.json` (`id_token` JWT). Key spelling varies per writer, so
+  `scanAntigravity` accepts snake_case and camelCase and treats every field but the
+  refresh token as optional. Only those paths are confirmed; the per-file schemas are
+  inferred from third-party importers, not from Google documentation.
 
 ## Build
 

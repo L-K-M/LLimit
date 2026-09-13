@@ -22,7 +22,7 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
     case .kimi:
       return "Kimi"
     case .googleAntigravity:
-      return "Google Cloud"
+      return "Google Antigravity"
     case .gitHubCopilot:
       return "GitHub Copilot"
     }

@@ -222,7 +222,7 @@ private enum SampleSnapshotFactory {
         ),
         ProviderUsage(
           provider: .googleAntigravity,
-          title: "Google Cloud",
+          title: "Google Antigravity",
           subtitle: "workspace@example.com",
           metrics: [
             UsageMetric(
@@ -328,7 +328,7 @@ private enum SampleSnapshotFactory {
         ),
         ProviderUsage(
           provider: .googleAntigravity,
-          title: "Google Cloud",
+          title: "Google Antigravity",
           subtitle: "workspace@example.com",
           metrics: [
             UsageMetric(

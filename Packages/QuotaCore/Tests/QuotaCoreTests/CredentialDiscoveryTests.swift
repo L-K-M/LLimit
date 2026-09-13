@@ -156,4 +156,162 @@ final class CredentialDiscoveryTests: XCTestCase {
     XCTAssertEqual(kimi.count, 1)
     XCTAssertEqual(kimi.first?.stableID, "kimi:kimi-cli") // first source wins
   }
+
+  // MARK: - Antigravity
+
+  func testDiscoversAntigravitySessionFile() throws {
+    try write(#"{"refreshToken":"ag-refresh","projectId":"proj-1","email":"dev@example.com"}"#,
+              to: ".gemini", "antigravity", "session.json")
+
+    let google = discover().first { $0.provider == .googleAntigravity }
+    XCTAssertEqual(google?.stableID, "google-antigravity:antigravity:dev@example.com")
+    XCTAssertEqual(google?.suggestedName, "Google Antigravity (dev@example.com)")
+    XCTAssertEqual(google?.credentials[CredentialField.googleRefreshToken], "ag-refresh")
+    XCTAssertEqual(google?.credentials[CredentialField.googleProjectID], "proj-1")
+    XCTAssertEqual(google?.credentials[CredentialField.googleEmail], "dev@example.com")
+  }
+
+  func testDiscoversAntigravityCLITokenWithSnakeCaseKeys() throws {
+    try write(#"{"access_token":"ya29.stale","refresh_token":"ag-cli-refresh","expires_in":3599,"project_id":"proj-2"}"#,
+              to: ".gemini", "antigravity-cli", "antigravity-oauth-token")
+
+    let google = discover().first { $0.provider == .googleAntigravity }
+    XCTAssertEqual(google?.credentials[CredentialField.googleRefreshToken], "ag-cli-refresh")
+    XCTAssertEqual(google?.credentials[CredentialField.googleProjectID], "proj-2")
+  }
+
+  func testFallsBackToAntigravityAuthTokenFile() throws {
+    try write(#"{"refresh_token":"ag-auth-refresh","managedProjectId":"managed-3"}"#,
+              to: ".gemini", "antigravity-cli", "antigravity-auth-token")
+
+    let google = discover().first { $0.provider == .googleAntigravity }
+    XCTAssertEqual(google?.credentials[CredentialField.googleRefreshToken], "ag-auth-refresh")
+    XCTAssertEqual(google?.credentials[CredentialField.googleProjectID], "managed-3")
+  }
+
+  func testDiscoversJetskiStandaloneToken() throws {
+    try write(#"{"tokens":{"refresh_token":"ag-jetski","projectId":"proj-4"}}"#,
+              to: ".gemini", "jetski-standalone-oauth-token")
+
+    let google = discover().first { $0.provider == .googleAntigravity }
+    XCTAssertEqual(google?.credentials[CredentialField.googleRefreshToken], "ag-jetski")
+    XCTAssertEqual(google?.credentials[CredentialField.googleProjectID], "proj-4")
+  }
+
+  func testImportsAntigravityLoginWithoutProjectID() throws {
+    // A project-less login still imports: the user supplies the one field the
+    // provider reports as missing.
+    try write(#"{"refreshToken":"ag-no-project"}"#, to: ".gemini", "antigravity", "session.json")
+
+    let result = CredentialDiscovery(homeDirectories: [home]).discover()
+    let google = result.credentials.first { $0.provider == .googleAntigravity }
+    XCTAssertEqual(google?.credentials[CredentialField.googleRefreshToken], "ag-no-project")
+    XCTAssertNil(google?.credentials[CredentialField.googleProjectID])
+    XCTAssertEqual(google?.suggestedName, "Google Antigravity")
+    XCTAssertTrue(result.diagnostics.contains { $0.contains("without a project id") })
+  }
+
+  func testPrefersFirstProbedAntigravityStoreWithoutMixingStores() throws {
+    // The two stores can hold two different Google accounts, so the first
+    // probed one wins whole: its token must never be paired with the other's
+    // project id.
+    try write(#"{"refreshToken":"ag-session","email":"first@example.com"}"#,
+              to: ".gemini", "antigravity", "session.json")
+    try write(#"{"refresh_token":"ag-older","projectId":"other-account-project","email":"second@example.com"}"#,
+              to: ".gemini", "antigravity-cli", "antigravity-oauth-token")
+
+    let google = discover().filter { $0.provider == .googleAntigravity }
+    XCTAssertEqual(google.count, 1)
+    XCTAssertEqual(google.first?.credentials[CredentialField.googleRefreshToken], "ag-session")
+    XCTAssertEqual(google.first?.credentials[CredentialField.googleEmail], "first@example.com")
+    XCTAssertNil(google.first?.credentials[CredentialField.googleProjectID])
+  }
+
+  func testTakesAntigravityEmailFromGeminiIDToken() throws {
+    try write(#"{"refreshToken":"ag-refresh","projectId":"proj-5"}"#,
+              to: ".gemini", "antigravity", "session.json")
+    try write(#"{"id_token":"eyJhbGciOiAiUlMyNTYiLCAidHlwIjogIkpXVCJ9.eyJlbWFpbCI6ICJnZW1pbmlAZXhhbXBsZS5jb20iLCAic3ViIjogIjEyMyJ9.sig"}"#, to: ".gemini", "oauth_creds.json")
+
+    let google = discover().first { $0.provider == .googleAntigravity }
+    XCTAssertEqual(google?.credentials[CredentialField.googleEmail], "gemini@example.com")
+    XCTAssertEqual(google?.suggestedName, "Google Antigravity (gemini@example.com)")
+  }
+
+  func testReportsAntigravityStoreWithoutRefreshToken() throws {
+    try write(#"{"access_token":"ya29.only"}"#, to: ".gemini", "antigravity", "session.json")
+
+    let result = CredentialDiscovery(homeDirectories: [home]).discover()
+    XCTAssertTrue(result.credentials.filter { $0.provider == .googleAntigravity }.isEmpty)
+    XCTAssertTrue(result.diagnostics.contains { $0.contains("no refresh token in") })
+  }
+
+  func testDiscoversOpenCodeAntigravityAccountsUnderDataHome() throws {
+    try write(#"""
+    {
+      "version": 3,
+      "accounts": [
+        {"email":"old@example.com","refreshToken":"oc-old","projectId":"p-old","lastUsed":1},
+        {"email":"new@example.com","refreshToken":"oc-new","projectId":"p-new","lastUsed":2}
+      ]
+    }
+    """#, to: ".local", "share", "opencode", "antigravity-accounts.json")
+
+    let google = discover().first { $0.stableID == "google-antigravity:opencode:new@example.com" }
+    XCTAssertEqual(google?.credentials[CredentialField.googleRefreshToken], "oc-new")
+    XCTAssertEqual(google?.credentials[CredentialField.googleProjectID], "p-new")
+    XCTAssertEqual(google?.sourceLabel, "OpenCode (~/.local/share/opencode/antigravity-accounts.json)")
+  }
+
+  func testDecodesBase64URLEncodedGeminiIDToken() throws {
+    // Real id_token payloads are base64url, and Data(base64Encoded:) rejects that
+    // alphabet's '-' and '_'. This fixture contains both, so it fails if the
+    // decoder ever stops translating them.
+    let jwt = "eyJhbGciOiAiUlMyNTYiLCAidHlwIjogIkpXVCJ9.eyJlbWFpbCI6ICJnZW1pbmlAZXhhbXBsZS5jb20iLCAibmFtZSI6ICJ6REw_YWt-Sn5rR09ES2RpbloifQ.sig"
+    let payload = jwt.split(separator: ".")[1]
+    XCTAssertTrue(payload.contains("-"), "fixture must exercise base64url '-'")
+    XCTAssertTrue(payload.contains("_"), "fixture must exercise base64url '_'")
+
+    try write(#"{"refreshToken":"ag-refresh","projectId":"proj-6"}"#,
+              to: ".gemini", "antigravity", "session.json")
+    try write(#"{"id_token":"\#(jwt)"}"#, to: ".gemini", "oauth_creds.json")
+
+    let google = discover().first { $0.provider == .googleAntigravity }
+    XCTAssertEqual(google?.credentials[CredentialField.googleEmail], "gemini@example.com")
+  }
+
+  func testDiagnosesAntigravityNameBorrowedFromGeminiCLI() throws {
+    // The Gemini CLI can be signed into a different Google account, so borrowing
+    // its identity to label the account has to be visible.
+    try write(#"{"refreshToken":"ag-refresh","projectId":"proj-7"}"#,
+              to: ".gemini", "antigravity", "session.json")
+    try write(#"{"id_token":"eyJhbGciOiAiUlMyNTYiLCAidHlwIjogIkpXVCJ9.eyJlbWFpbCI6ICJnZW1pbmlAZXhhbXBsZS5jb20iLCAibmFtZSI6ICJ6REw_YWt-Sn5rR09ES2RpbloifQ.sig"}"#, to: ".gemini", "oauth_creds.json")
+
+    let result = CredentialDiscovery(homeDirectories: [home]).discover()
+    XCTAssertTrue(result.diagnostics.contains { $0.contains("taken from the Gemini CLI login") })
+  }
+
+  func testDedupesSameOpenCodeAntigravityAccountInBothRoots() throws {
+    // A migrated OpenCode install can leave the old config-root file behind.
+    let accounts = #"{"accounts":[{"email":"dup@example.com","refreshToken":"oc-dup","projectId":"p-dup"}]}"#
+    try write(accounts, to: ".local", "share", "opencode", "antigravity-accounts.json")
+    try write(accounts, to: ".config", "opencode", "antigravity-accounts.json")
+
+    let google = discover().filter { $0.provider == .googleAntigravity }
+    XCTAssertEqual(google.count, 1)
+    // Pin which root survived: a count of 1 alone would also hold if a root
+    // stopped being scanned, which is what the companion test below rules out.
+    XCTAssertEqual(google.first?.sourceLabel, "OpenCode (~/.local/share/opencode/antigravity-accounts.json)")
+  }
+
+  func testReadsOpenCodeAntigravityAccountsFromConfigRoot() throws {
+    // The config root was the only one LLimit ever read, so losing it would
+    // break existing installs silently.
+    try write(#"{"accounts":[{"email":"cfg@example.com","refreshToken":"oc-cfg","projectId":"p-cfg"}]}"#,
+              to: ".config", "opencode", "antigravity-accounts.json")
+
+    let google = discover().filter { $0.provider == .googleAntigravity }
+    XCTAssertEqual(google.count, 1)
+    XCTAssertEqual(google.first?.credentials[CredentialField.googleRefreshToken], "oc-cfg")
+    XCTAssertEqual(google.first?.sourceLabel, "OpenCode (~/.config/opencode/antigravity-accounts.json)")
+  }
 }

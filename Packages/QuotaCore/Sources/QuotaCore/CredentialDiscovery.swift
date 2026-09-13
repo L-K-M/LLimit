@@ -71,6 +71,7 @@ public struct CredentialDiscovery: Sendable {
       candidates += scanCodex(home: home, diagnostics: &diagnostics)
       candidates += scanCopilotEditor(home: home, diagnostics: &diagnostics)
       candidates += scanKimi(home: home, diagnostics: &diagnostics)
+      candidates += scanAntigravity(home: home, diagnostics: &diagnostics)
       candidates += scanOpenCode(home: home, diagnostics: &diagnostics)
     }
 
@@ -231,6 +232,87 @@ public struct CredentialDiscovery: Sendable {
     return results
   }
 
+  /// Antigravity (Google's IDE) and its CLI keep the Google login under `~/.gemini`.
+  ///
+  /// The store has moved between Antigravity releases and each component spells
+  /// the keys differently, so probe every location known to have held it and
+  /// accept both snake_case and camelCase. Only the refresh token is imported:
+  /// ``GoogleAntigravityClient`` exchanges it for an access token on every fetch,
+  /// so a stale access token in these files does not matter and is not checked.
+  ///
+  /// Sources are probed in a fixed order, newest Antigravity layout first — file
+  /// mtimes are never consulted — and the first store holding a refresh token wins
+  /// whole. Credentials are never mixed across stores: two of these files can
+  /// belong to two different Google accounts, and pairing one account's token with
+  /// another's project id would silently report the wrong quota.
+  ///
+  /// The email is the one exception, and it is only ever a label. When the winning
+  /// store names no account, it falls back to the Gemini CLI's `oauth_creds.json`,
+  /// which can in principle hold a different Google login, so that borrowing is
+  /// called out in the diagnostics. The quota fetch is unaffected: the token and
+  /// the project id still come from a single store.
+  ///
+  /// The project id is therefore optional. Some stores omit it, and such a login
+  /// is still worth importing: the account arrives pre-filled and both UIs report
+  /// the project id as the one missing credential to supply.
+  private func scanAntigravity(home: URL, diagnostics: inout [String]) -> [DiscoveredCredential] {
+    let sources: [(url: URL, label: String)] = [
+      (path(home, ".gemini", "antigravity", "session.json"), "Antigravity (~/.gemini/antigravity)"),
+      (path(home, ".gemini", "antigravity-cli", "antigravity-oauth-token"), "Antigravity CLI (~/.gemini/antigravity-cli)"),
+      (path(home, ".gemini", "antigravity-cli", "antigravity-auth-token"), "Antigravity CLI (~/.gemini/antigravity-cli)"),
+      (path(home, ".gemini", "jetski-standalone-oauth-token"), "Antigravity (~/.gemini)")
+    ]
+
+    var tokenless: [String] = []
+
+    for source in sources {
+      guard let object = readJSON(at: source.url, label: "Antigravity", diagnostics: &diagnostics) else { continue }
+      let fields = antigravityFields(in: object)
+
+      guard let refreshToken = fields.refreshToken else {
+        tokenless.append(shortPath(source.url))
+        continue
+      }
+
+      // Older installs record the signed-in identity in the Gemini CLI's own
+      // credential file rather than beside the Antigravity token.
+      var email = fields.email
+      if email == nil,
+         let credentialsFile = readJSON(at: path(home, ".gemini", "oauth_creds.json"), label: "Gemini", diagnostics: &diagnostics) {
+        email = antigravityFields(in: credentialsFile).email
+        if email != nil {
+          diagnostics.append("Antigravity: account name taken from the Gemini CLI login (~/.gemini/oauth_creds.json) — check that it is the same Google account")
+        }
+      }
+
+      var credentials = [CredentialField.googleRefreshToken: refreshToken]
+      if let projectID = fields.projectID { credentials[CredentialField.googleProjectID] = projectID }
+      if let email { credentials[CredentialField.googleEmail] = email }
+
+      diagnostics.append(
+        fields.projectID == nil
+          ? "Antigravity: found login without a project id (\(shortPath(source.url))) — add the project id after importing"
+          : "Antigravity: found login (\(shortPath(source.url)))"
+      )
+
+      return [
+        DiscoveredCredential(
+          stableID: "google-antigravity:antigravity:\(email ?? shortPath(source.url))",
+          provider: .googleAntigravity,
+          suggestedName: email.map { "Google Antigravity (\($0))" } ?? "Google Antigravity",
+          sourceLabel: source.label,
+          credentials: credentials
+        )
+      ]
+    }
+
+    if !tokenless.isEmpty {
+      diagnostics.append("Antigravity: no refresh token in \(tokenless.joined(separator: ", ")) — sign in again in Antigravity")
+    }
+
+    return []
+  }
+
   private func scanOpenCode(home: URL, diagnostics: inout [String]) -> [DiscoveredCredential] {
     var results: [DiscoveredCredential] = []
 
@@ -284,10 +366,17 @@ public struct CredentialDiscovery: Sendable {
       }
     }
 
-    // Google Antigravity accounts (separate file).
-    let antigravityURL = path(home, ".config", "opencode", "antigravity-accounts.json")
-    if let object = readJSON(at: antigravityURL, label: "Antigravity", diagnostics: &diagnostics),
-       let accounts = object["accounts"] as? [[String: Any]] {
+    // Google Antigravity accounts (separate file, beside auth.json in whichever
+    // OpenCode root this install uses).
+    for antigravityURL in [
+      path(home, ".local", "share", "opencode", "antigravity-accounts.json"),
+      path(home, ".config", "opencode", "antigravity-accounts.json")
+    ] {
+      guard
+        let object = readJSON(at: antigravityURL, label: "Antigravity", diagnostics: &diagnostics),
+        let accounts = object["accounts"] as? [[String: Any]]
+      else { continue }
+
       let usable = accounts
         .sorted { ((($0["lastUsed"] as? NSNumber)?.doubleValue) ?? 0) > ((($1["lastUsed"] as? NSNumber)?.doubleValue) ?? 0) }
         .first { account in
@@ -309,8 +398,8 @@ public struct CredentialDiscovery: Sendable {
           DiscoveredCredential(
             stableID: "google-antigravity:opencode:\(email ?? project)",
             provider: .googleAntigravity,
-            suggestedName: email.map { "Google (\($0))" } ?? "Google Cloud",
-            sourceLabel: "Antigravity (~/.config/opencode)",
+            suggestedName: email.map { "Google Antigravity (\($0))" } ?? "Google Antigravity",
+            sourceLabel: "OpenCode (\(shortPath(antigravityURL)))",
             credentials: credentials
           )
         )
@@ -361,6 +450,37 @@ public struct CredentialDiscovery: Sendable {
       sourceLabel: "OpenCode (\(shortPath(url)))",
       credentials: credentials
     )
+  }
+
+  /// Pulls the Google login out of one Antigravity credential file.
+  ///
+  /// Every field is optional: these files are undocumented, and which keys are
+  /// present depends on the version of the component that wrote them.
+  private func antigravityFields(in object: [String: Any]) -> (refreshToken: String?, projectID: String?, email: String?) {
+    let nested = ["tokens", "token", "credentials", "session", "oauth", "account"]
+      .compactMap { object[$0] as? [String: Any] }
+    let containers = [object] + nested
+
+    let email = firstValue(["email", "userEmail", "user_email"], in: containers)
+      ?? firstValue(["id_token", "idToken"], in: containers)
+        .flatMap { decodeJWTPayload($0) }
+        .flatMap { nonEmptyString($0["email"]) }
+
+    return (
+      refreshToken: firstValue(["refresh_token", "refreshToken"], in: containers),
+      projectID: firstValue(["projectId", "project_id", "managedProjectId", "managed_project_id", "project"], in: containers),
+      email: email
+    )
+  }
+
+  /// First non-empty string found by trying every key against every container.
+  private func firstValue(_ keys: [String], in containers: [[String: Any]]) -> String? {
+    for container in containers {
+      for key in keys {
+        if let value = nonEmptyString(container[key]) { return value }
+      }
+    }
+    return nil
   }
 
   private func copilotCredentials(oauth: String, username: String?) -> [String: String] {
@@ -429,6 +549,18 @@ public struct CredentialDiscovery: Sendable {
   }
 
   private func extractOpenAIAccountID(from jwt: String) -> String? {
+    guard
+      let payload = decodeJWTPayload(jwt),
+      let auth = payload["https://api.openai.com/auth"] as? [String: Any]
+    else {
+      return nil
+    }
+    return nonEmptyString(auth["chatgpt_account_id"])
+  }
+
+  /// Decodes a JWT's claims without verifying it: these tokens come from the
+  /// user's own login, and the claims are read only to label the account.
+  private func decodeJWTPayload(_ jwt: String) -> [String: Any]? {
     let parts = jwt.split(separator: ".")
     guard parts.count == 3 else { return nil }
 
@@ -440,15 +572,8 @@ public struct CredentialDiscovery: Sendable {
       payload += String(repeating: "=", count: 4 - remainder)
     }
 
-    guard
-      let data = Data(base64Encoded: payload),
-      let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-      let auth = object["https://api.openai.com/auth"] as? [String: Any],
-      let accountID = nonEmptyString(auth["chatgpt_account_id"])
-    else {
-      return nil
-    }
-    return accountID
+    guard let data = Data(base64Encoded: payload) else { return nil }
+    return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
   }
 
   private static func defaultHomeDirectories(environment: [String: String], fileManager: FileManager) -> [URL] {
