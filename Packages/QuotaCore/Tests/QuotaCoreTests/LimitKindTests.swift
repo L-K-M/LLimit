@@ -26,6 +26,9 @@ final class LimitKindTests: XCTestCase {
     // Z.ai reports the same rolling token window without naming it, so the id
     // has to carry the classification.
     XCTAssertEqual(QuotaWindowKind.classify(metricID: "tokens", label: "Token limit"), .session)
+    // Pins the check order: the id fallback runs last, so a label that names a
+    // cadence still wins over it.
+    XCTAssertEqual(QuotaWindowKind.classify(metricID: "tokens", label: "Monthly token limit"), .monthly)
 
     // Google Antigravity reports per-model quotas with no window wording.
     XCTAssertEqual(QuotaWindowKind.classify(metricID: "gemini-3-flash", label: "G3 Flash"), .other)
