@@ -968,6 +968,8 @@ private func compactProviderName(for provider: QuotaProvider) -> String {
     return "Antigravity"
   case .gitHubCopilot:
     return "Copilot"
+  case .devin:
+    return "Devin"
   }
 }
 

@@ -19,7 +19,7 @@ several accounts for the same provider (e.g. two separate OpenAI accounts), each
 tracked independently. LLimit doesn't depend on any other tool being installed.
 
 To make setup painless, LLimit can **optionally detect** logins from AI tools you're
-already signed in to (Claude Code, Codex, GitHub Copilot, Kimi, OpenCode) and import
+already signed in to (Claude Code, Codex, GitHub Copilot, Kimi, OpenCode, Devin) and import
 them into a new account with one click — so for the common case you never hunt for a
 token. You can always add accounts manually too.
 
@@ -59,6 +59,7 @@ the Claude Keychain import is macOS-only — Linux Claude Code writes
 | **Z.ai** | API key | OpenCode (`zai-coding-plan`) |
 | **Kimi** (Moonshot AI) | API key or OAuth access token | Kimi CLI (`~/.kimi`), Kimi Code (`~/.kimi-code`), OpenCode (`kimi-for-coding`) |
 | **Google Antigravity** | Refresh token + project id | Antigravity IDE / CLI (`~/.gemini`), OpenCode (`antigravity-accounts.json`) |
+| **Devin** (Cognition) | Session API key | Devin CLI (`~/.local/share/devin/credentials.toml`) |
 
 ## How accounts work
 

@@ -1264,6 +1264,8 @@ private struct ProviderMark: View {
       return "moon.fill"
     case .googleAntigravity:
       return "cloud.fill"
+    case .devin:
+      return "terminal.fill"
     }
   }
 }
