@@ -22,6 +22,8 @@ public func defaultRingMetrics(for usage: ProviderUsage) -> [UsageMetric] {
     preferredIDs = ["premium", "chat", "completions"]
   case .googleAntigravity:
     preferredIDs = ["gemini-3-pro-high", "gemini-3-flash", "gemini-3-pro-image"]
+  case .devin:
+    preferredIDs = ["quota-daily", "quota-weekly"]
   }
 
   var selected: [UsageMetric] = []

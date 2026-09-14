@@ -3,8 +3,8 @@ import Foundation
 /// A credential auto-detected from a locally-installed AI CLI / tool.
 ///
 /// LLimit never asks the user to paste tokens: it reads the same on-disk
-/// credentials that tools like Claude Code, Codex, GitHub Copilot and OpenCode
-/// already wrote when the user logged in.
+/// credentials that tools like Claude Code, Codex, GitHub Copilot, OpenCode and
+/// the Devin CLI already wrote when the user logged in.
 public struct DiscoveredCredential: Sendable, Hashable, Identifiable, Codable {
   public var id: String { stableID }
   /// Deterministic identity so user preferences (enabled / custom name) survive a rescan.
@@ -48,6 +48,8 @@ public struct CredentialDiscoveryResult: Sendable {
 public struct CredentialDiscovery: Sendable {
   private let homeDirectories: [URL]
   private let fileManager: FileManager
+  /// XDG data dir, when set — the Devin CLI honors it for credentials.toml.
+  private let xdgDataHome: String?
 
   public init(
     homeDirectories: [URL]? = nil,
@@ -55,6 +57,7 @@ public struct CredentialDiscovery: Sendable {
     fileManager: FileManager = .default
   ) {
     self.fileManager = fileManager
+    self.xdgDataHome = environment["XDG_DATA_HOME"]
     if let homeDirectories, !homeDirectories.isEmpty {
       self.homeDirectories = homeDirectories
     } else {
@@ -74,6 +77,8 @@ public struct CredentialDiscovery: Sendable {
       candidates += scanAntigravity(home: home, diagnostics: &diagnostics)
       candidates += scanOpenCode(home: home, diagnostics: &diagnostics)
     }
+
+    candidates += scanDevin(diagnostics: &diagnostics)
 
     return CredentialDiscoveryResult(credentials: dedupe(candidates), diagnostics: diagnostics)
   }
@@ -434,6 +439,53 @@ public struct CredentialDiscovery: Sendable {
     return results
   }
 
+  /// `devin auth login` writes a flat `credentials.toml` in the CLI's data
+  /// directory: `$XDG_DATA_HOME/devin` on Linux (default `~/.local/share`),
+  /// `~/Library/Application Support/devin` on macOS.
+  ///
+  /// The session key is still named `windsurf_api_key` — a leftover from the
+  /// shared Windsurf/Codeium backend — and authenticates GetUserStatus as-is.
+  /// `api_server_url` is imported too so logins pointed at a self-hosted
+  /// backend keep resolving. Every location is surfaced: identical key sets
+  /// collapse in `dedupe`, distinct ones mean two real logins.
+  private func scanDevin(diagnostics: inout [String]) -> [DiscoveredCredential] {
+    var urls: [URL] = []
+    if let xdgDataHome, !xdgDataHome.isEmpty {
+      urls.append(URL(fileURLWithPath: xdgDataHome).appendingPathComponent("devin/credentials.toml"))
+    }
+    for home in homeDirectories {
+      urls.append(path(home, ".local", "share", "devin", "credentials.toml"))
+      urls.append(path(home, "Library", "Application Support", "devin", "credentials.toml"))
+    }
+
+    var results: [DiscoveredCredential] = []
+    for url in urls {
+      guard let fields = readTOML(at: url, label: "Devin CLI", diagnostics: &diagnostics) else { continue }
+      guard let key = fields["windsurf_api_key"], !key.isEmpty else {
+        diagnostics.append("Devin CLI: file found but no windsurf_api_key (\(shortPath(url))) — run `devin auth login`")
+        continue
+      }
+
+      var credentials = [CredentialField.devinAPIKey: key]
+      if let server = fields["api_server_url"], !server.isEmpty {
+        credentials[CredentialField.devinAPIServer] = server
+      }
+
+      results.append(
+        DiscoveredCredential(
+          stableID: "devin:devin-cli:\(shortPath(url))",
+          provider: .devin,
+          suggestedName: "Devin",
+          sourceLabel: "Devin CLI (\(shortPath(url)))",
+          credentials: credentials
+        )
+      )
+      diagnostics.append("Devin CLI: found session key (\(shortPath(url)))")
+    }
+
+    return results
+  }
+
   // MARK: - Helpers
 
   private func make(
@@ -534,6 +586,80 @@ public struct CredentialDiscovery: Sendable {
       diagnostics.append("\(label): could not read \(shortPath(url)) (\(error.localizedDescription))")
       return nil
     }
+  }
+
+  private func readTOML(at url: URL, label: String, diagnostics: inout [String]) -> [String: String]? {
+    guard fileManager.fileExists(atPath: url.path) else { return nil }
+    do {
+      return parseFlatTOML(try String(contentsOf: url, encoding: .utf8))
+    } catch {
+      diagnostics.append("\(label): could not read \(shortPath(url)) (\(error.localizedDescription))")
+      return nil
+    }
+  }
+
+  /// Minimal reader for the flat `key = "value"` files the Devin CLI writes.
+  /// Sections, tables, and arrays never appear there; lines that are not a
+  /// simple assignment are skipped rather than misparsed.
+  private func parseFlatTOML(_ text: String) -> [String: String] {
+    var result: [String: String] = [:]
+
+    for rawLine in text.components(separatedBy: .newlines) {
+      let line = rawLine.trimmingCharacters(in: .whitespaces)
+      if line.isEmpty || line.hasPrefix("#") || line.hasPrefix("[") { continue }
+      guard let equals = line.firstIndex(of: "=") else { continue }
+
+      let key = line[..<equals].trimmingCharacters(in: .whitespaces)
+      guard !key.isEmpty else { continue }
+      let raw = line[line.index(after: equals)...].trimmingCharacters(in: .whitespaces)
+
+      if raw.hasPrefix("\"") {
+        // Basic string: scan to the closing quote honoring backslash escapes,
+        // so a trailing "# comment" after it can't leak into the value.
+        var value = ""
+        var index = raw.index(after: raw.startIndex)
+        while index < raw.endIndex {
+          let character = raw[index]
+          if character == "\\" {
+            let next = raw.index(after: index)
+            guard next < raw.endIndex else { break }
+            switch raw[next] {
+            case "n": value.append("\n")
+            case "t": value.append("\t")
+            case "\"": value.append("\"")
+            case "\\": value.append("\\")
+            default: value.append(raw[next])
+            }
+            index = raw.index(after: next)
+            continue
+          }
+          if character == "\"" {
+            result[key] = value
+            break
+          }
+          value.append(character)
+          index = raw.index(after: index)
+        }
+        continue
+      }
+
+      if raw.hasPrefix("'") {
+        let closing = raw.index(after: raw.startIndex)
+        if closing < raw.endIndex, let end = raw[closing...].firstIndex(of: "'") {
+          result[key] = String(raw[closing..<end])
+        }
+        continue
+      }
+
+      // Bare value: a comment may still follow it.
+      var value = raw
+      if let hash = value.firstIndex(of: "#") {
+        value = String(value[..<hash])
+      }
+      result[key] = value.trimmingCharacters(in: .whitespaces)
+    }
+
+    return result
   }
 
   private func path(_ base: URL, _ components: String...) -> URL {

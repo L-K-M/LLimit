@@ -20,7 +20,7 @@ final class CredentialDiscoveryTests: XCTestCase {
   }
 
   private func discover() -> [DiscoveredCredential] {
-    CredentialDiscovery(homeDirectories: [home]).discover().credentials
+    CredentialDiscovery(homeDirectories: [home], environment: [:]).discover().credentials
   }
 
   func testDiscoversClaudeCodeNestedToken() throws {
@@ -114,7 +114,7 @@ final class CredentialDiscoveryTests: XCTestCase {
     try write(#"{"access_token":"kimi-stale-ms","expires_at":1000000000000}"#,
               to: ".kimi", "credentials", "kimi-code.json")
 
-    let result = CredentialDiscovery(homeDirectories: [home]).discover()
+    let result = CredentialDiscovery(homeDirectories: [home], environment: [:]).discover()
     XCTAssertTrue(result.credentials.filter { $0.provider == .kimi }.isEmpty)
     XCTAssertTrue(result.diagnostics.contains { $0.contains("Kimi: token expired") })
   }
@@ -138,7 +138,7 @@ final class CredentialDiscoveryTests: XCTestCase {
     try write(#"{"access_token":"kimi-stale","expires_at":1000000000.0}"#,
               to: ".kimi", "credentials", "kimi-code.json")
 
-    let result = CredentialDiscovery(homeDirectories: [home]).discover()
+    let result = CredentialDiscovery(homeDirectories: [home], environment: [:]).discover()
     XCTAssertTrue(result.credentials.filter { $0.provider == .kimi }.isEmpty)
     XCTAssertTrue(result.diagnostics.contains { $0.contains("Kimi: token expired") })
   }
@@ -203,7 +203,7 @@ final class CredentialDiscoveryTests: XCTestCase {
     // provider reports as missing.
     try write(#"{"refreshToken":"ag-no-project"}"#, to: ".gemini", "antigravity", "session.json")
 
-    let result = CredentialDiscovery(homeDirectories: [home]).discover()
+    let result = CredentialDiscovery(homeDirectories: [home], environment: [:]).discover()
     let google = result.credentials.first { $0.provider == .googleAntigravity }
     XCTAssertEqual(google?.credentials[CredentialField.googleRefreshToken], "ag-no-project")
     XCTAssertNil(google?.credentials[CredentialField.googleProjectID])
@@ -240,7 +240,7 @@ final class CredentialDiscoveryTests: XCTestCase {
   func testReportsAntigravityStoreWithoutRefreshToken() throws {
     try write(#"{"access_token":"ya29.only"}"#, to: ".gemini", "antigravity", "session.json")
 
-    let result = CredentialDiscovery(homeDirectories: [home]).discover()
+    let result = CredentialDiscovery(homeDirectories: [home], environment: [:]).discover()
     XCTAssertTrue(result.credentials.filter { $0.provider == .googleAntigravity }.isEmpty)
     XCTAssertTrue(result.diagnostics.contains { $0.contains("no refresh token in") })
   }
@@ -286,7 +286,7 @@ final class CredentialDiscoveryTests: XCTestCase {
               to: ".gemini", "antigravity", "session.json")
     try write(#"{"id_token":"eyJhbGciOiAiUlMyNTYiLCAidHlwIjogIkpXVCJ9.eyJlbWFpbCI6ICJnZW1pbmlAZXhhbXBsZS5jb20iLCAibmFtZSI6ICJ6REw_YWt-Sn5rR09ES2RpbloifQ.sig"}"#, to: ".gemini", "oauth_creds.json")
 
-    let result = CredentialDiscovery(homeDirectories: [home]).discover()
+    let result = CredentialDiscovery(homeDirectories: [home], environment: [:]).discover()
     XCTAssertTrue(result.diagnostics.contains { $0.contains("taken from the Gemini CLI login") })
   }
 
@@ -313,5 +313,59 @@ final class CredentialDiscoveryTests: XCTestCase {
     XCTAssertEqual(google.count, 1)
     XCTAssertEqual(google.first?.credentials[CredentialField.googleRefreshToken], "oc-cfg")
     XCTAssertEqual(google.first?.sourceLabel, "OpenCode (~/.config/opencode/antigravity-accounts.json)")
+  }
+
+  func testDiscoversDevinCLICredentialsTOML() throws {
+    try write("""
+      windsurf_api_key = "devin-session-abc"
+      api_server_url = "https://server.codeium.com"
+      devin_webapp_host = "app.devin.ai"
+      devin_api_url = "https://api.devin.ai"
+      """,
+      to: ".local", "share", "devin", "credentials.toml")
+
+    let devin = discover().first { $0.provider == .devin }
+    XCTAssertEqual(devin?.credentials[CredentialField.devinAPIKey], "devin-session-abc")
+    XCTAssertEqual(devin?.credentials[CredentialField.devinAPIServer], "https://server.codeium.com")
+    XCTAssertEqual(devin?.suggestedName, "Devin")
+    XCTAssertEqual(devin?.sourceLabel, "Devin CLI (~/.local/share/devin/credentials.toml)")
+  }
+
+  func testDiscoversDevinCredentialsUnderXDGDataHome() throws {
+    let xdg = home.appendingPathComponent("xdg-data")
+    let file = xdg.appendingPathComponent("devin/credentials.toml")
+    try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try #"windsurf_api_key = "devin-xdg-key""#.data(using: .utf8)!.write(to: file)
+
+    let result = CredentialDiscovery(
+      homeDirectories: [home],
+      environment: ["XDG_DATA_HOME": xdg.path]
+    ).discover()
+
+    let devin = result.credentials.filter { $0.provider == .devin }
+    XCTAssertEqual(devin.count, 1)
+    XCTAssertEqual(devin.first?.credentials[CredentialField.devinAPIKey], "devin-xdg-key")
+  }
+
+  func testDevinTOMLParsesCommentsAndLiteralStrings() throws {
+    try write("""
+      # written by devin auth login
+      windsurf_api_key = 'devin-literal-key' # trailing comment
+      api_server_url = "https://server.example.com" # comment
+      """,
+      to: ".local", "share", "devin", "credentials.toml")
+
+    let devin = discover().first { $0.provider == .devin }
+    XCTAssertEqual(devin?.credentials[CredentialField.devinAPIKey], "devin-literal-key")
+    XCTAssertEqual(devin?.credentials[CredentialField.devinAPIServer], "https://server.example.com")
+  }
+
+  func testDevinFileWithoutKeyIsDiagnosticOnly() throws {
+    try write(#"devin_webapp_host = "app.devin.ai""#,
+              to: ".local", "share", "devin", "credentials.toml")
+
+    let result = CredentialDiscovery(homeDirectories: [home], environment: [:]).discover()
+    XCTAssertTrue(result.credentials.filter { $0.provider == .devin }.isEmpty)
+    XCTAssertTrue(result.diagnostics.contains { $0.contains("no windsurf_api_key") })
   }
 }

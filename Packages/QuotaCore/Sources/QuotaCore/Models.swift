@@ -8,6 +8,7 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
   case zai = "zai"
   case kimi = "kimi"
   case googleAntigravity = "google-antigravity"
+  case devin = "devin"
 
   public var displayName: String {
     switch self {
@@ -25,6 +26,8 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
       return "Google Antigravity"
     case .gitHubCopilot:
       return "GitHub Copilot"
+    case .devin:
+      return "Devin"
     }
   }
 }
@@ -144,6 +147,21 @@ public extension QuotaProvider {
           label: "OAuth token",
           isRequired: false,
           help: "Alternative to PAT plus username."
+        )
+      ]
+    case .devin:
+      return [
+        CredentialFieldDescriptor(
+          key: CredentialField.devinAPIKey,
+          label: "API key",
+          help: "Auto-detected from Devin CLI (~/.local/share/devin/credentials.toml)."
+        ),
+        CredentialFieldDescriptor(
+          key: CredentialField.devinAPIServer,
+          label: "API server",
+          isSecret: false,
+          isRequired: false,
+          help: "Optional. Defaults to https://server.codeium.com; enterprise deployments may differ."
         )
       ]
     }
