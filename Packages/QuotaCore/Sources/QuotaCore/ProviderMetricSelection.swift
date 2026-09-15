@@ -24,6 +24,8 @@ public func defaultRingMetrics(for usage: ProviderUsage) -> [UsageMetric] {
     preferredIDs = ["gemini-3-pro-high", "gemini-3-flash", "gemini-3-pro-image"]
   case .devin:
     preferredIDs = ["quota-daily", "quota-weekly"]
+  case .metaMuse:
+    preferredIDs = ["window", "weekly"]
   }
 
   var selected: [UsageMetric] = []

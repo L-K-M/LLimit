@@ -50,6 +50,8 @@ public struct CredentialDiscovery: Sendable {
   private let fileManager: FileManager
   /// XDG data dir, when set — the Devin CLI honors it for credentials.toml.
   private let xdgDataHome: String?
+  /// XDG config dir, when set — Muse Code honors it for auth.json.
+  private let xdgConfigHome: String?
 
   public init(
     homeDirectories: [URL]? = nil,
@@ -58,6 +60,7 @@ public struct CredentialDiscovery: Sendable {
   ) {
     self.fileManager = fileManager
     self.xdgDataHome = environment["XDG_DATA_HOME"]
+    self.xdgConfigHome = environment["XDG_CONFIG_HOME"]
     if let homeDirectories, !homeDirectories.isEmpty {
       self.homeDirectories = homeDirectories
     } else {
@@ -79,6 +82,7 @@ public struct CredentialDiscovery: Sendable {
     }
 
     candidates += scanDevin(diagnostics: &diagnostics)
+    candidates += scanMuse(diagnostics: &diagnostics)
 
     return CredentialDiscoveryResult(credentials: dedupe(candidates), diagnostics: diagnostics)
   }
@@ -481,6 +485,46 @@ public struct CredentialDiscovery: Sendable {
         )
       )
       diagnostics.append("Devin CLI: found session key (\(shortPath(url)))")
+    }
+
+    return results
+  }
+
+  /// Muse Code stores credentials at `muse/auth.json` in the config dir:
+  /// `$XDG_CONFIG_HOME/muse` on Linux, `~/.config/muse` on macOS and as the
+  /// fallback. The file is `{ "schema_version": 1, "providers": { "meta": {
+  /// "api_key": … } } }` — browser sign-in and `muse auth set` both land the
+  /// usable key at `providers.meta.api_key`, and `muse logout` empties the
+  /// providers map without deleting the file.
+  private func scanMuse(diagnostics: inout [String]) -> [DiscoveredCredential] {
+    var urls: [URL] = []
+    if let xdgConfigHome, !xdgConfigHome.isEmpty {
+      urls.append(URL(fileURLWithPath: xdgConfigHome).appendingPathComponent("muse/auth.json"))
+    }
+    for home in homeDirectories {
+      urls.append(path(home, ".config", "muse", "auth.json"))
+    }
+
+    var results: [DiscoveredCredential] = []
+    for url in urls {
+      guard let object = readJSON(at: url, label: "Muse Code", diagnostics: &diagnostics) else { continue }
+      let providers = (object["providers"] as? [String: Any]) ?? [:]
+      guard let meta = providers["meta"] as? [String: Any],
+            let key = nonEmptyString(meta["api_key"]) else {
+        diagnostics.append("Muse Code: file found but no providers.meta.api_key (\(shortPath(url))) — run `muse login` or `muse auth set`")
+        continue
+      }
+
+      results.append(
+        DiscoveredCredential(
+          stableID: "meta-muse:muse:\(shortPath(url))",
+          provider: .metaMuse,
+          suggestedName: "Meta Muse",
+          sourceLabel: "Muse Code (\(shortPath(url)))",
+          credentials: [CredentialField.metaMuseAPIKey: key]
+        )
+      )
+      diagnostics.append("Muse Code: found API key (\(shortPath(url)))")
     }
 
     return results

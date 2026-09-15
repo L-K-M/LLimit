@@ -18,6 +18,8 @@ public enum CredentialField {
   public static let devinAPIKey = "devin.api_key"
   public static let devinAPIServer = "devin.api_server"
 
+  public static let metaMuseAPIKey = "meta-muse.api_key"
+
   public static let copilotOAuthToken = "copilot.oauth_token"
   public static let copilotPATToken = "copilot.pat_token"
   public static let copilotUsername = "copilot.username"

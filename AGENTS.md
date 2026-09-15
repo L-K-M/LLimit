@@ -11,12 +11,12 @@ does not depend on any other tool at runtime.
 
 `CredentialDiscovery` exists only as an *optional import shortcut* — it can detect a
 login from a locally installed tool (Claude Code, Codex, Copilot, Antigravity,
-OpenCode, Devin CLI) so the
+OpenCode, Devin CLI, Muse Code) so the
 user can one-click create a pre-filled account instead of pasting a token. Once
 imported, the account is copied into and owned by LLimit.
 
 Providers: Claude (Anthropic), OpenAI/ChatGPT, GitHub Copilot, Zhipu, Z.ai, Kimi,
-Google Antigravity, Devin.
+Google Antigravity, Devin, Meta Muse.
 
 ## Layout
 
@@ -87,7 +87,7 @@ Linux:
   `AppSettings.redactedCredentials()` — the display surfaces never need credentials.
 - The host app is **not sandboxed** (the import shortcut reads `~/.claude`, `~/.codex`,
   `~/.config/github-copilot`, `~/.kimi`, `~/.kimi-code`, `~/.gemini`,
-  `~/.local/share/opencode`, `~/.local/share/devin`, and the Keychain). The widget extension **stays sandboxed**; it only reads the App
+  `~/.local/share/opencode`, `~/.local/share/devin`, `~/.config/muse`, and the Keychain). The widget extension **stays sandboxed**; it only reads the App
   Group container.
 - Adding a `QuotaProvider` case is a breaking change for exhaustive `switch`es: update
   `Models.displayName`, `Models.credentialFields`, and the widget's `compactProviderName`.
@@ -145,6 +145,19 @@ Linux:
   `dailyQuotaRemainingPercent`/`weeklyQuotaRemainingPercent` + `*QuotaResetAtUnix`
   epoch strings, `availablePromptCredits` (-1 on quota-billed plans), and
   `planInfo.planName`.
+- **Meta Muse**: no standalone usage endpoint exists (`/muse-code/usage` et al.
+  404; `POST /muse-code/key` is only the login-time mint). The subscription
+  snapshot rides the model stream: `POST https://api.meta.ai/v1/responses`
+  emits an SSE `response.subscription_usage` event carrying
+  `{window: {used_percent, window_duration_mins, resets_at}, weekly:
+  {used_percent, resets_at}}` — the source of the CLI `/usage` panel's
+  "Current"/"Weekly" rows. The probe therefore costs one request + a few
+  tokens per refresh (contributor-tier model, `max_output_tokens` 16); the
+  request sends `x-api-version: 1.0.0` and a `muse-build/<ver>` User-Agent
+  like the CLI. Pay-as-you-go keys stream no such event. Credentials live at
+  `~/.config/muse/auth.json` (`$XDG_CONFIG_HOME/muse`), `providers.meta.api_key`
+  — browser sign-in mints the same key `muse auth set` stores; `muse logout`
+  empties `providers` without deleting the file.
 
 ## Build
 
