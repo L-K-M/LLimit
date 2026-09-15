@@ -970,6 +970,8 @@ private func compactProviderName(for provider: QuotaProvider) -> String {
     return "Copilot"
   case .devin:
     return "Devin"
+  case .metaMuse:
+    return "Muse"
   }
 }
 

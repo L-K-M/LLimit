@@ -368,4 +368,40 @@ final class CredentialDiscoveryTests: XCTestCase {
     XCTAssertTrue(result.credentials.filter { $0.provider == .devin }.isEmpty)
     XCTAssertTrue(result.diagnostics.contains { $0.contains("no windsurf_api_key") })
   }
+
+  func testDiscoversMuseAuthFile() throws {
+    try write(#"{"schema_version":1,"providers":{"meta":{"api_key":"muse-key-1"}}}"#,
+              to: ".config", "muse", "auth.json")
+
+    let muse = discover().first { $0.provider == .metaMuse }
+    XCTAssertEqual(muse?.credentials[CredentialField.metaMuseAPIKey], "muse-key-1")
+    XCTAssertEqual(muse?.suggestedName, "Meta Muse")
+    XCTAssertEqual(muse?.sourceLabel, "Muse Code (~/.config/muse/auth.json)")
+  }
+
+  func testDiscoversMuseAuthUnderXDGConfigHome() throws {
+    let xdg = home.appendingPathComponent("xdg-config")
+    let file = xdg.appendingPathComponent("muse/auth.json")
+    try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try #"{"schema_version":1,"providers":{"meta":{"api_key":"muse-xdg-key"}}}"#.data(using: .utf8)!.write(to: file)
+
+    let result = CredentialDiscovery(
+      homeDirectories: [home],
+      environment: ["XDG_CONFIG_HOME": xdg.path]
+    ).discover()
+
+    let muse = result.credentials.filter { $0.provider == .metaMuse }
+    XCTAssertEqual(muse.count, 1)
+    XCTAssertEqual(muse.first?.credentials[CredentialField.metaMuseAPIKey], "muse-xdg-key")
+  }
+
+  func testLoggedOutMuseFileIsDiagnosticOnly() throws {
+    // muse logout leaves the file behind with an empty providers map.
+    try write(#"{"schema_version":1,"providers":{}}"#,
+              to: ".config", "muse", "auth.json")
+
+    let result = CredentialDiscovery(homeDirectories: [home], environment: [:]).discover()
+    XCTAssertTrue(result.credentials.filter { $0.provider == .metaMuse }.isEmpty)
+    XCTAssertTrue(result.diagnostics.contains { $0.contains("no providers.meta.api_key") })
+  }
 }

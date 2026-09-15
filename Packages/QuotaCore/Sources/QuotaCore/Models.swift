@@ -9,6 +9,7 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
   case kimi = "kimi"
   case googleAntigravity = "google-antigravity"
   case devin = "devin"
+  case metaMuse = "meta-muse"
 
   public var displayName: String {
     switch self {
@@ -28,6 +29,8 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
       return "GitHub Copilot"
     case .devin:
       return "Devin"
+    case .metaMuse:
+      return "Meta Muse"
     }
   }
 }
@@ -162,6 +165,14 @@ public extension QuotaProvider {
           isSecret: false,
           isRequired: false,
           help: "Optional. Defaults to https://server.codeium.com; enterprise deployments may differ."
+        )
+      ]
+    case .metaMuse:
+      return [
+        CredentialFieldDescriptor(
+          key: CredentialField.metaMuseAPIKey,
+          label: "API key",
+          help: "Auto-detected from Muse Code (~/.config/muse/auth.json), or the META_API_KEY value."
         )
       ]
     }

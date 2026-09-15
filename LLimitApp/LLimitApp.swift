@@ -1266,6 +1266,8 @@ private struct ProviderMark: View {
       return "cloud.fill"
     case .devin:
       return "terminal.fill"
+    case .metaMuse:
+      return "wand.and.stars"
     }
   }
 }
