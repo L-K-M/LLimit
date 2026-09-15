@@ -117,7 +117,7 @@ public struct MetaMuseQuotaClient: QuotaProviderClient {
       guard parsed.sawRecognizablePayload else {
         throw ProviderClientError(
           kind: .api,
-          message: "Meta API response contained no recognizable usage payload — stream format may have changed"
+          message: "Meta API response contained no recognizable usage payload — stream format may have changed (body: \(String(body.prefix(200))))"
         )
       }
       metrics.append(UsageMetric(id: "empty", label: "Pay-as-you-go — no subscription quota"))
@@ -179,9 +179,15 @@ public struct MetaMuseQuotaClient: QuotaProviderClient {
       guard
         let object = try? JSONSerialization.jsonObject(with: Data(joined.utf8)) as? [String: Any]
       else { continue }
+
+      // Stream-level errors arrive as HTTP 200 events; they must not read as
+      // a healthy pay-as-you-go stream.
+      let type = eventName ?? (object["type"] as? String)
+      if type == "error" || type == "response.failed" || object["error"] is [String: Any] {
+        return (nil, false)
+      }
       sawRecognizablePayload = true
 
-      let type = eventName ?? (object["type"] as? String)
       if type == "response.subscription_usage", let snapshot = snapshotDict(in: object) {
         return (snapshot, true)
       }
@@ -195,6 +201,9 @@ public struct MetaMuseQuotaClient: QuotaProviderClient {
     guard
       let object = try? JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any]
     else { return (nil, sawRecognizablePayload) }
+    if (object["type"] as? String) == "error" || object["error"] is [String: Any] {
+      return (nil, false)
+    }
     return (snapshotDict(in: object), true)
   }
 

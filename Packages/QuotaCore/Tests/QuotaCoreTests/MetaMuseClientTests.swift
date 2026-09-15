@@ -141,6 +141,23 @@ final class MetaMuseClientTests: XCTestCase {
     }
   }
 
+  // Stream-level errors arrive as HTTP 200 events — not pay-as-you-go.
+  func testStreamErrorEventThrowsAPI() async {
+    let body = sse("error", #"{"type":"error","code":"invalid_api_key","message":"bad key"}"#)
+    let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 200, body: body))
+    await assertThrows(kind: .api) {
+      try await client.fetchUsage(configuration: self.config(), now: self.now)
+    }
+  }
+
+  // Same for a 200 whose whole body is an error envelope.
+  func testJSONErrorBodyThrowsAPI() async {
+    let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 200, body: #"{"error":{"message":"bad key"}}"#))
+    await assertThrows(kind: .api) {
+      try await client.fetchUsage(configuration: self.config(), now: self.now)
+    }
+  }
+
   func testServerErrorThrowsAPI() async {
     let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 503, body: "upstream unavailable"))
     await assertThrows(kind: .api, messageContains: "unavailable") {
