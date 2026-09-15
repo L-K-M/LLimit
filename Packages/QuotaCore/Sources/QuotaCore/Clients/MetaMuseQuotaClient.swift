@@ -115,9 +115,13 @@ public struct MetaMuseQuotaClient: QuotaProviderClient {
       // an unrecognizable body means the undocumented frame moved — fail
       // loudly instead of wearing a green placeholder.
       guard parsed.sawRecognizablePayload else {
+        // Prefer the API's own explanation — "bad key" beats "format changed".
+        let excerpt = String(body.prefix(200))
+        let detail = parsed.streamError ?? apiErrorMessage(in: data)
         throw ProviderClientError(
           kind: .api,
-          message: "Meta API response contained no recognizable usage payload — stream format may have changed (body: \(String(body.prefix(200))))"
+          message: detail.map { "Meta API error: \($0) (body: \(excerpt))" }
+            ?? "Meta API response contained no recognizable usage payload — stream format may have changed (body: \(excerpt))"
         )
       }
       metrics.append(UsageMetric(id: "empty", label: "Pay-as-you-go — no subscription quota"))
@@ -154,7 +158,13 @@ public struct MetaMuseQuotaClient: QuotaProviderClient {
   /// JSON response. `sawRecognizablePayload` distinguishes a healthy stream
   /// that simply carries no snapshot (pay-as-you-go) from an undecodable
   /// body, which is a protocol break worth surfacing as an error.
-  private func subscriptionUsageSnapshot(in body: String) -> (snapshot: [String: Any]?, sawRecognizablePayload: Bool) {
+  /// `streamError` carries the message of a stream-level error event so the
+  /// thrown failure can headline the API's own explanation.
+  private func subscriptionUsageSnapshot(in body: String) -> (
+    snapshot: [String: Any]?,
+    sawRecognizablePayload: Bool,
+    streamError: String?
+  ) {
     var sawRecognizablePayload = false
 
     // SSE permits CRLF line endings; normalize or multi-event bodies stay one
@@ -184,27 +194,36 @@ public struct MetaMuseQuotaClient: QuotaProviderClient {
       // a healthy pay-as-you-go stream.
       let type = eventName ?? (object["type"] as? String)
       if type == "error" || type == "response.failed" || object["error"] is [String: Any] {
-        return (nil, false)
+        return (nil, false, streamErrorMessage(in: object) ?? type)
       }
       sawRecognizablePayload = true
 
       if type == "response.subscription_usage", let snapshot = snapshotDict(in: object) {
-        return (snapshot, true)
+        return (snapshot, true, nil)
       }
       if (type == "response.completed" || type == "response.incomplete"),
          let responseObject = object["response"] as? [String: Any],
          let snapshot = snapshotDict(in: responseObject) {
-        return (snapshot, true)
+        return (snapshot, true, nil)
       }
     }
 
     guard
       let object = try? JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any]
-    else { return (nil, sawRecognizablePayload) }
+    else { return (nil, sawRecognizablePayload, nil) }
     if (object["type"] as? String) == "error" || object["error"] is [String: Any] {
-      return (nil, false)
+      return (nil, false, streamErrorMessage(in: object) ?? object["type"] as? String)
     }
-    return (snapshotDict(in: object), true)
+    return (snapshotDict(in: object), true, nil)
+  }
+
+  /// Reads the human explanation out of a stream error event or error
+  /// envelope: `error.message`, then the flat fields the envelopes use.
+  private func streamErrorMessage(in object: [String: Any]) -> String? {
+    if let error = object["error"] as? [String: Any], let message = nonEmptyString(error["message"]) {
+      return message
+    }
+    return nonEmptyString(object["message"]) ?? nonEmptyString(object["detail"]) ?? nonEmptyString(object["title"])
   }
 
   /// The snapshot's nesting varies with where it was carried: the dedicated

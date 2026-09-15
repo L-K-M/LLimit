@@ -141,11 +141,22 @@ final class MetaMuseClientTests: XCTestCase {
     }
   }
 
-  // Stream-level errors arrive as HTTP 200 events — not pay-as-you-go.
+  // Stream-level errors arrive as HTTP 200 events — not pay-as-you-go, and
+  // the thrown error headlines the API's own message.
   func testStreamErrorEventThrowsAPI() async {
     let body = sse("error", #"{"type":"error","code":"invalid_api_key","message":"bad key"}"#)
     let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 200, body: body))
-    await assertThrows(kind: .api) {
+    await assertThrows(kind: .api, messageContains: "bad key") {
+      try await client.fetchUsage(configuration: self.config(), now: self.now)
+    }
+  }
+
+  // A healthy event before the error must not read as pay-as-you-go either.
+  func testStreamErrorAfterHealthyEventThrowsAPI() async {
+    let body = sse("response.created", #"{"type":"response.created","response":{"id":"r6"}}"#)
+      + sse("error", #"{"type":"error","code":"invalid_api_key","message":"bad key"}"#)
+    let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 200, body: body))
+    await assertThrows(kind: .api, messageContains: "bad key") {
       try await client.fetchUsage(configuration: self.config(), now: self.now)
     }
   }
@@ -153,7 +164,7 @@ final class MetaMuseClientTests: XCTestCase {
   // Same for a 200 whose whole body is an error envelope.
   func testJSONErrorBodyThrowsAPI() async {
     let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 200, body: #"{"error":{"message":"bad key"}}"#))
-    await assertThrows(kind: .api) {
+    await assertThrows(kind: .api, messageContains: "bad key") {
       try await client.fetchUsage(configuration: self.config(), now: self.now)
     }
   }
