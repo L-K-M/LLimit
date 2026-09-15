@@ -161,6 +161,15 @@ final class MetaMuseClientTests: XCTestCase {
     }
   }
 
+  // response.failed nests its error under response.error.
+  func testStreamFailedEventThrowsAPI() async {
+    let body = sse("response.failed", #"{"type":"response.failed","response":{"id":"r7","error":{"code":"server_error","message":"upstream unavailable"}}}"#)
+    let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 200, body: body))
+    await assertThrows(kind: .api, messageContains: "upstream unavailable") {
+      try await client.fetchUsage(configuration: self.config(), now: self.now)
+    }
+  }
+
   // Same for a 200 whose whole body is an error envelope.
   func testJSONErrorBodyThrowsAPI() async {
     let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 200, body: #"{"error":{"message":"bad key"}}"#))

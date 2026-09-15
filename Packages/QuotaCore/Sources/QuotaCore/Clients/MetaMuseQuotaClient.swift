@@ -218,9 +218,15 @@ public struct MetaMuseQuotaClient: QuotaProviderClient {
   }
 
   /// Reads the human explanation out of a stream error event or error
-  /// envelope: `error.message`, then the flat fields the envelopes use.
+  /// envelope: `error.message`, the `response.error.message` a
+  /// `response.failed` event nests it under, then flat fields.
   private func streamErrorMessage(in object: [String: Any]) -> String? {
     if let error = object["error"] as? [String: Any], let message = nonEmptyString(error["message"]) {
+      return message
+    }
+    if let response = object["response"] as? [String: Any],
+       let error = response["error"] as? [String: Any],
+       let message = nonEmptyString(error["message"]) {
       return message
     }
     return nonEmptyString(object["message"]) ?? nonEmptyString(object["detail"]) ?? nonEmptyString(object["title"])
