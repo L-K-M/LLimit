@@ -95,7 +95,57 @@ final class MetaMuseClientTests: XCTestCase {
     let usage = try await client.fetchUsage(configuration: config(), now: now)
 
     XCTAssertEqual(usage.metrics.map(\.id), ["empty"])
+    XCTAssertEqual(usage.metrics.first?.label, "Pay-as-you-go — no subscription quota")
     XCTAssertEqual(usage.maxUsagePercent, 0)
+  }
+
+  // SSE permits CRLF; without normalization a multi-event body never splits.
+  func testParsesCRLFDelimitedStream() async throws {
+    let body = "event: response.subscription_usage\r\ndata: {\"type\":\"response.subscription_usage\",\"weekly\":{\"used_percent\":50}}\r\n\r\nevent: response.completed\r\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r5\"}}\r\n\r\n"
+    let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 200, body: body))
+
+    let usage = try await client.fetchUsage(configuration: config(), now: now)
+
+    XCTAssertEqual(usage.metrics.first { $0.id == "weekly" }?.remainingPercent, 50)
+  }
+
+  // A window without window_duration_mins falls back to a session label.
+  func testWindowWithoutDurationUsesSessionLabel() async throws {
+    let body = sse("response.subscription_usage", #"{"type":"response.subscription_usage","window":{"used_percent":10}}"#)
+    let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 200, body: body))
+
+    let usage = try await client.fetchUsage(configuration: config(), now: now)
+
+    let window = try XCTUnwrap(usage.metrics.first { $0.id == "window" })
+    XCTAssertEqual(window.label, "Session window")
+    XCTAssertEqual(QuotaWindowKind.classify(metricID: window.id, label: window.label), .session)
+  }
+
+  // Over-100% used must never surface as a negative remaining percent.
+  func testOveragePercentClampsToZeroRemaining() async throws {
+    let body = sse("response.subscription_usage", #"{"type":"response.subscription_usage","weekly":{"used_percent":150}}"#)
+    let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 200, body: body))
+
+    let usage = try await client.fetchUsage(configuration: config(), now: now)
+
+    XCTAssertEqual(usage.metrics.first { $0.id == "weekly" }?.remainingPercent, 0)
+    XCTAssertEqual(usage.warning, "Quota exhausted")
+  }
+
+  // A 200 that parses into nothing recognizable is a protocol break, not a
+  // healthy pay-as-you-go answer — it must fail loudly.
+  func testUnrecognizableBodyThrowsAPI() async {
+    let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 200, body: "<html>not a stream</html>"))
+    await assertThrows(kind: .api, messageContains: "no recognizable usage payload") {
+      try await client.fetchUsage(configuration: self.config(), now: self.now)
+    }
+  }
+
+  func testServerErrorThrowsAPI() async {
+    let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 503, body: "upstream unavailable"))
+    await assertThrows(kind: .api, messageContains: "unavailable") {
+      try await client.fetchUsage(configuration: self.config(), now: self.now)
+    }
   }
 
   func testSendsMinimalStreamingProbe() async throws {
@@ -115,6 +165,9 @@ final class MetaMuseClientTests: XCTestCase {
     let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
     XCTAssertEqual(json["stream"] as? Bool, true)
     XCTAssertNotNil(json["model"])
+    XCTAssertEqual(json["store"] as? Bool, false)
+    XCTAssertEqual(json["max_output_tokens"] as? Int, 16, "quota probe must cap paid generation")
+    XCTAssertEqual(json["input"] as? String, "ping")
   }
 
   func testMissingKeyThrowsNotConfigured() async {
@@ -190,7 +243,13 @@ private struct MuseMockHTTP: HTTPClient {
 private final class MuseCapturingHTTP: HTTPClient, @unchecked Sendable {
   let status: Int
   let body: String
-  private(set) var lastRequest: URLRequest?
+  private let lock = NSLock()
+  private var _lastRequest: URLRequest?
+  var lastRequest: URLRequest? {
+    lock.lock()
+    defer { lock.unlock() }
+    return _lastRequest
+  }
 
   init(status: Int, body: String) {
     self.status = status
@@ -198,7 +257,9 @@ private final class MuseCapturingHTTP: HTTPClient, @unchecked Sendable {
   }
 
   func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
-    lastRequest = request
+    lock.lock()
+    _lastRequest = request
+    lock.unlock()
     let response = HTTPURLResponse(
       url: request.url!,
       statusCode: status,

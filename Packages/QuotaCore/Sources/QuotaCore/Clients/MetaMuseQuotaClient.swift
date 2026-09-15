@@ -77,7 +77,8 @@ public struct MetaMuseQuotaClient: QuotaProviderClient {
     }
 
     let body = String(data: data, encoding: .utf8) ?? ""
-    let snapshot = subscriptionUsageSnapshot(in: body)
+    let parsed = subscriptionUsageSnapshot(in: body)
+    let snapshot = parsed.snapshot
 
     var metrics: [UsageMetric] = []
 
@@ -110,7 +111,16 @@ public struct MetaMuseQuotaClient: QuotaProviderClient {
     }
 
     if metrics.isEmpty {
-      metrics.append(UsageMetric(id: "empty", label: "No subscription quota reported"))
+      // A recognizable stream without a snapshot is a pay-as-you-go key;
+      // an unrecognizable body means the undocumented frame moved — fail
+      // loudly instead of wearing a green placeholder.
+      guard parsed.sawRecognizablePayload else {
+        throw ProviderClientError(
+          kind: .api,
+          message: "Meta API response contained no recognizable usage payload — stream format may have changed"
+        )
+      }
+      metrics.append(UsageMetric(id: "empty", label: "Pay-as-you-go — no subscription quota"))
     }
 
     let maxUsagePercent = metrics.compactMap(\.remainingPercent).map { 100 - $0 }.max() ?? 0
@@ -141,9 +151,15 @@ public struct MetaMuseQuotaClient: QuotaProviderClient {
   /// `response.subscription_usage` event is checked first; the same snapshot
   /// can also ride inside the `response` object of a terminal event. If the
   /// body isn't SSE at all (server ignored `stream`), it is tried as a plain
-  /// JSON response.
-  private func subscriptionUsageSnapshot(in body: String) -> [String: Any]? {
-    for block in body.components(separatedBy: "\n\n") {
+  /// JSON response. `sawRecognizablePayload` distinguishes a healthy stream
+  /// that simply carries no snapshot (pay-as-you-go) from an undecodable
+  /// body, which is a protocol break worth surfacing as an error.
+  private func subscriptionUsageSnapshot(in body: String) -> (snapshot: [String: Any]?, sawRecognizablePayload: Bool) {
+    var sawRecognizablePayload = false
+
+    // SSE permits CRLF line endings; normalize or multi-event bodies stay one
+    // unsplittable block and their concatenated data: lines fail JSON parsing.
+    for block in body.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n\n") {
       var eventName: String?
       var dataLines: [String] = []
       for line in block.components(separatedBy: .newlines) {
@@ -155,25 +171,31 @@ public struct MetaMuseQuotaClient: QuotaProviderClient {
         }
       }
       guard !dataLines.isEmpty else { continue }
+      let joined = dataLines.joined(separator: "\n")
+      guard joined != "[DONE]" else {
+        sawRecognizablePayload = true
+        continue
+      }
       guard
-        let object = try? JSONSerialization.jsonObject(with: Data(dataLines.joined(separator: "\n").utf8)) as? [String: Any]
+        let object = try? JSONSerialization.jsonObject(with: Data(joined.utf8)) as? [String: Any]
       else { continue }
+      sawRecognizablePayload = true
 
       let type = eventName ?? (object["type"] as? String)
       if type == "response.subscription_usage", let snapshot = snapshotDict(in: object) {
-        return snapshot
+        return (snapshot, true)
       }
       if (type == "response.completed" || type == "response.incomplete"),
          let responseObject = object["response"] as? [String: Any],
          let snapshot = snapshotDict(in: responseObject) {
-        return snapshot
+        return (snapshot, true)
       }
     }
 
     guard
       let object = try? JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any]
-    else { return nil }
-    return snapshotDict(in: object)
+    else { return (nil, sawRecognizablePayload) }
+    return (snapshotDict(in: object), true)
   }
 
   /// The snapshot's nesting varies with where it was carried: the dedicated
