@@ -83,6 +83,7 @@ public struct CredentialDiscovery: Sendable {
 
     candidates += scanDevin(diagnostics: &diagnostics)
     candidates += scanMuse(diagnostics: &diagnostics)
+    candidates += scanMimoCode(diagnostics: &diagnostics)
 
     return CredentialDiscoveryResult(credentials: dedupe(candidates), diagnostics: diagnostics)
   }
@@ -364,6 +365,14 @@ public struct CredentialDiscovery: Sendable {
         results.append(make("kimi:opencode", .kimi, "Kimi", url, [CredentialField.kimiAPIKey: key]))
       }
 
+      for entry in mimoTokenPlanEntries(in: object) {
+        var credentials = [CredentialField.mimoAPIKey: entry.key]
+        if let base = entry.baseURL {
+          credentials[CredentialField.mimoAPIBaseURL] = base
+        }
+        results.append(make("mimo:opencode:\(entry.providerID)", .mimo, "MiMo Token Plan", url, credentials))
+      }
+
       if let copilot = object["github-copilot"] as? [String: Any],
          (copilot["type"] as? String) == "oauth",
          let oauth = nonEmptyString(copilot["refresh"]) ?? nonEmptyString(copilot["access"]) {
@@ -530,6 +539,49 @@ public struct CredentialDiscovery: Sendable {
     return results
   }
 
+  /// MiMo Code (Xiaomi's OpenCode fork, the `mimo` CLI) stores credentials in
+  /// the OpenCode auth.json shape at `mimocode/auth.json` in the data dir:
+  /// `$XDG_DATA_HOME/mimocode` on Linux, `~/.local/share/mimocode` by default,
+  /// `~/Library/Application Support/mimocode` on macOS. Token Plan logins land
+  /// under provider ids like `xiaomi-token-plan-sgp` with `tp-…` keys.
+  private func scanMimoCode(diagnostics: inout [String]) -> [DiscoveredCredential] {
+    var urls: [URL] = []
+    if let xdgDataHome, !xdgDataHome.isEmpty {
+      urls.append(URL(fileURLWithPath: xdgDataHome).appendingPathComponent("mimocode/auth.json"))
+    }
+    for home in homeDirectories {
+      urls.append(path(home, ".local", "share", "mimocode", "auth.json"))
+      urls.append(path(home, "Library", "Application Support", "mimocode", "auth.json"))
+    }
+
+    var results: [DiscoveredCredential] = []
+    for url in urls {
+      guard let object = readJSON(at: url, label: "MiMo Code", diagnostics: &diagnostics) else { continue }
+      var found = false
+      for entry in mimoTokenPlanEntries(in: object) {
+        var credentials = [CredentialField.mimoAPIKey: entry.key]
+        if let base = entry.baseURL {
+          credentials[CredentialField.mimoAPIBaseURL] = base
+        }
+        results.append(
+          DiscoveredCredential(
+            stableID: "mimo:mimocode:\(entry.providerID)",
+            provider: .mimo,
+            suggestedName: "MiMo Token Plan",
+            sourceLabel: "MiMo Code (\(shortPath(url)))",
+            credentials: credentials
+          )
+        )
+        found = true
+      }
+      if found {
+        diagnostics.append("MiMo Code: found Token Plan key (\(shortPath(url)))")
+      }
+    }
+
+    return results
+  }
+
   // MARK: - Helpers
 
   private func make(
@@ -583,6 +635,44 @@ public struct CredentialDiscovery: Sendable {
     var credentials = [CredentialField.copilotOAuthToken: oauth]
     if let username { credentials[CredentialField.copilotUsername] = username }
     return credentials
+  }
+
+  /// Every `{ "type": "api", "key": … }` entry in an OpenCode-shaped auth.json
+  /// that names a MiMo Token Plan provider. Regional ids
+  /// (`xiaomi-token-plan-{cn,sgp,ams}`, the models.dev spellings) also pin the
+  /// account's base URL to that cluster; un-suffixed `…-token-plan` ids import
+  /// without one. Generic `xiaomi`/`mimo` entries are the pay-as-you-go
+  /// provider and only import when the stored key is a `tp-…` Token Plan key.
+  private func mimoTokenPlanEntries(in object: [String: Any]) -> [(providerID: String, key: String, baseURL: String?)] {
+    let clusters = [
+      "cn": "https://token-plan-cn.xiaomimimo.com/v1",
+      "sgp": "https://token-plan-sgp.xiaomimimo.com/v1",
+      "ams": "https://token-plan-ams.xiaomimimo.com/v1"
+    ]
+
+    var results: [(providerID: String, key: String, baseURL: String?)] = []
+    for (providerID, value) in object.sorted(by: { $0.key < $1.key }) {
+      guard
+        let entry = value as? [String: Any],
+        (entry["type"] as? String) == "api",
+        let key = nonEmptyString(entry["key"])
+      else { continue }
+
+      let pid = providerID.lowercased()
+      let isMiMo = pid.contains("xiaomi") || pid.contains("mimo")
+      var baseURL: String?
+      if isMiMo {
+        for (suffix, url) in clusters where pid.hasSuffix("-\(suffix)") {
+          baseURL = url
+        }
+      }
+
+      let isTokenPlan = isMiMo && (pid.contains("token-plan") || baseURL != nil || (pid == "xiaomi" || pid == "mimo") && key.hasPrefix("tp-"))
+      guard isTokenPlan else { continue }
+
+      results.append((providerID: providerID, key: key, baseURL: baseURL))
+    }
+    return results
   }
 
   private func apiKey(in object: [String: Any], provider: String) -> String? {

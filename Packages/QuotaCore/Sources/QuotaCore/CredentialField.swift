@@ -20,6 +20,9 @@ public enum CredentialField {
 
   public static let metaMuseAPIKey = "meta-muse.api_key"
 
+  public static let mimoAPIKey = "mimo.api_key"
+  public static let mimoAPIBaseURL = "mimo.api_base_url"
+
   public static let copilotOAuthToken = "copilot.oauth_token"
   public static let copilotPATToken = "copilot.pat_token"
   public static let copilotUsername = "copilot.username"

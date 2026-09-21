@@ -26,6 +26,10 @@ public func defaultRingMetrics(for usage: ProviderUsage) -> [UsageMetric] {
     preferredIDs = ["quota-daily", "quota-weekly"]
   case .metaMuse:
     preferredIDs = ["window", "weekly"]
+  case .mimo:
+    // tokenPlan/usage names its items server-side ("month_total_token");
+    // "monthly-credits" is the user/balance fallback's id.
+    preferredIDs = ["month-total-token", "monthly-credits"]
   }
 
   var selected: [UsageMetric] = []

@@ -1268,6 +1268,8 @@ private struct ProviderMark: View {
       return "terminal.fill"
     case .metaMuse:
       return "wand.and.stars"
+    case .mimo:
+      return "flame.fill"
     }
   }
 }

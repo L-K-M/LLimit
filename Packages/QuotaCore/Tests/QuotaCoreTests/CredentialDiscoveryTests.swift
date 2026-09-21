@@ -404,4 +404,62 @@ final class CredentialDiscoveryTests: XCTestCase {
     XCTAssertTrue(result.credentials.filter { $0.provider == .metaMuse }.isEmpty)
     XCTAssertTrue(result.diagnostics.contains { $0.contains("no providers.meta.api_key") })
   }
+
+  // MARK: - MiMo Token Plan
+
+  func testDiscoversMiMoCodeTokenPlanKey() throws {
+    try write(#"{"xiaomi-token-plan-sgp":{"type":"api","key":"tp-mimocode-1"}}"#,
+              to: ".local", "share", "mimocode", "auth.json")
+
+    let mimo = discover().first { $0.provider == .mimo }
+    XCTAssertEqual(mimo?.stableID, "mimo:mimocode:xiaomi-token-plan-sgp")
+    XCTAssertEqual(mimo?.credentials[CredentialField.mimoAPIKey], "tp-mimocode-1")
+    XCTAssertEqual(mimo?.credentials[CredentialField.mimoAPIBaseURL], "https://token-plan-sgp.xiaomimimo.com/v1")
+    XCTAssertEqual(mimo?.suggestedName, "MiMo Token Plan")
+  }
+
+  func testDiscoversMiMoCodeUnderXDGDataHome() throws {
+    let xdg = home.appendingPathComponent("xdg-data")
+    let file = xdg.appendingPathComponent("mimocode/auth.json")
+    try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try #"{"xiaomi-token-plan-cn":{"type":"api","key":"tp-xdg-key"}}"#.data(using: .utf8)!.write(to: file)
+
+    let result = CredentialDiscovery(
+      homeDirectories: [home],
+      environment: ["XDG_DATA_HOME": xdg.path]
+    ).discover()
+
+    let mimo = result.credentials.filter { $0.provider == .mimo }
+    XCTAssertEqual(mimo.count, 1)
+    XCTAssertEqual(mimo.first?.credentials[CredentialField.mimoAPIKey], "tp-xdg-key")
+    XCTAssertEqual(mimo.first?.credentials[CredentialField.mimoAPIBaseURL], "https://token-plan-cn.xiaomimimo.com/v1")
+  }
+
+  func testDiscoversOpenCodeTokenPlanProvider() throws {
+    try write(#"{"xiaomi-token-plan-ams":{"type":"api","key":"tp-oc-ams"}}"#,
+              to: ".local", "share", "opencode", "auth.json")
+
+    let mimo = discover().first { $0.provider == .mimo }
+    XCTAssertEqual(mimo?.stableID, "mimo:opencode:xiaomi-token-plan-ams")
+    XCTAssertEqual(mimo?.credentials[CredentialField.mimoAPIKey], "tp-oc-ams")
+    XCTAssertEqual(mimo?.credentials[CredentialField.mimoAPIBaseURL], "https://token-plan-ams.xiaomimimo.com/v1")
+  }
+
+  func testImportsGenericMiMoProviderOnlyWithTokenPlanKey() throws {
+    // The generic "mimo" provider id is pay-as-you-go; an sk- key there is not
+    // a Token Plan credential, but a tp- key still is.
+    try write(#"{"mimo":{"type":"api","key":"tp-generic"}}"#,
+              to: ".local", "share", "opencode", "auth.json")
+
+    let mimo = discover().first { $0.provider == .mimo }
+    XCTAssertEqual(mimo?.credentials[CredentialField.mimoAPIKey], "tp-generic")
+    XCTAssertNil(mimo?.credentials[CredentialField.mimoAPIBaseURL])
+  }
+
+  func testSkipsPayAsYouGoMiMoKey() throws {
+    try write(#"{"xiaomi":{"type":"api","key":"sk-payg-1"}}"#,
+              to: ".local", "share", "opencode", "auth.json")
+
+    XCTAssertTrue(discover().filter { $0.provider == .mimo }.isEmpty)
+  }
 }

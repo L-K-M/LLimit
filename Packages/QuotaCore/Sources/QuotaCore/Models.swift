@@ -10,6 +10,7 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
   case googleAntigravity = "google-antigravity"
   case devin = "devin"
   case metaMuse = "meta-muse"
+  case mimo = "mimo"
 
   public var displayName: String {
     switch self {
@@ -31,6 +32,8 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
       return "Devin"
     case .metaMuse:
       return "Meta Muse"
+    case .mimo:
+      return "MiMo Token Plan"
     }
   }
 }
@@ -173,6 +176,21 @@ public extension QuotaProvider {
           key: CredentialField.metaMuseAPIKey,
           label: "API key",
           help: "Auto-detected from Muse Code (~/.config/muse/auth.json), or the META_API_KEY value."
+        )
+      ]
+    case .mimo:
+      return [
+        CredentialFieldDescriptor(
+          key: CredentialField.mimoAPIKey,
+          label: "API key",
+          help: "Token Plan key (tp-…) from platform.xiaomimimo.com/token-plan. Auto-detected from MiMo Code or OpenCode."
+        ),
+        CredentialFieldDescriptor(
+          key: CredentialField.mimoAPIBaseURL,
+          label: "Base URL",
+          isSecret: false,
+          isRequired: false,
+          help: "Optional regional OpenAI-compatible base URL shown on the Token Plan page. All regions are tried when unset."
         )
       ]
     }

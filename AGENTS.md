@@ -11,12 +11,12 @@ does not depend on any other tool at runtime.
 
 `CredentialDiscovery` exists only as an *optional import shortcut* — it can detect a
 login from a locally installed tool (Claude Code, Codex, Copilot, Antigravity,
-OpenCode, Devin CLI, Muse Code) so the
+OpenCode, Devin CLI, Muse Code, MiMo Code) so the
 user can one-click create a pre-filled account instead of pasting a token. Once
 imported, the account is copied into and owned by LLimit.
 
 Providers: Claude (Anthropic), OpenAI/ChatGPT, GitHub Copilot, Zhipu, Z.ai, Kimi,
-Google Antigravity, Devin, Meta Muse.
+Google Antigravity, Devin, Meta Muse, Xiaomi MiMo (Token Plan).
 
 ## Layout
 
@@ -87,7 +87,8 @@ Linux:
   `AppSettings.redactedCredentials()` — the display surfaces never need credentials.
 - The host app is **not sandboxed** (the import shortcut reads `~/.claude`, `~/.codex`,
   `~/.config/github-copilot`, `~/.kimi`, `~/.kimi-code`, `~/.gemini`,
-  `~/.local/share/opencode`, `~/.local/share/devin`, `~/.config/muse`, and the Keychain). The widget extension **stays sandboxed**; it only reads the App
+  `~/.local/share/opencode`, `~/.local/share/devin`, `~/.config/muse`,
+  `~/.local/share/mimocode`, and the Keychain). The widget extension **stays sandboxed**; it only reads the App
   Group container.
 - Adding a `QuotaProvider` case is a breaking change for exhaustive `switch`es: update
   `Models.displayName`, `Models.credentialFields`, and the widget's `compactProviderName`.
@@ -158,6 +159,20 @@ Linux:
   `~/.config/muse/auth.json` (`$XDG_CONFIG_HOME/muse`), `providers.meta.api_key`
   — browser sign-in mints the same key `muse auth set` stores; `muse logout`
   empties `providers` without deleting the file.
+- **Xiaomi MiMo (Token Plan)**: `GET {cluster}/v1/tokenPlan/usage` with
+  `Authorization: Bearer <tp-…>` on the regional gateways
+  (`token-plan-cn|sgp|ams.xiaomimimo.com`) returns
+  `data.monthUsage.items[]` (`name` like `month_total_token`, `used`, `limit`,
+  `percent` as a used fraction). A `tp-` key only authenticates against its own
+  cluster, so the client probes all three unless `mimo.api_base_url` pins one.
+  `GET {cluster}/v1/user/balance` (`data.token_balance`/`token_limit`,
+  `plan_name`) is the fallback shape. Undocumented; response layout inferred
+  from third-party quota trackers. The platform dashboard's
+  `platform.xiaomimimo.com/api/v1/tokenPlan/usage` takes Xiaomi session cookies,
+  not the tp- key, and is not used. Credentials: MiMo Code (`mimo`, an OpenCode
+  fork) writes OpenCode-shaped `auth.json` at `$XDG_DATA_HOME/mimocode`
+  (`~/.local/share/mimocode`, `~/Library/Application Support/mimocode`) under
+  provider ids `xiaomi-token-plan-{cn,sgp,ams}`; OpenCode uses the same ids.
 
 ## Build
 
