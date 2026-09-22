@@ -19,7 +19,7 @@ jobs:
     name: Build & Test
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Run QuotaCore tests
         working-directory: Packages/QuotaCore
         run: swift test
@@ -58,7 +58,7 @@ jobs:
     name: Linux (SwiftPM)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Swift 6.2.3
         # Direct tarball: swift-actions/setup-swift@v2 tops out at 6.2.1, and the
         # static Linux SDK used for releases must match the toolchain version.
@@ -83,7 +83,7 @@ jobs:
     name: Linux (tray)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # The menu model is pure Python with no GTK import, so these run without
       # a display, a session bus or a panel.
       - name: Test tray menu model
