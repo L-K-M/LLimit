@@ -24,7 +24,7 @@ final class CredentialDiscoveryTests: XCTestCase {
   }
 
   func testDiscoversClaudeCodeNestedToken() throws {
-    try write(#"{"claudeAiOauth":{"accessToken":"sk-claude-abc","refreshToken":"r","expiresAt":1}}"#,
+    try write(#"{"claudeAiOauth":{"accessToken":"sk-claude-abc","refreshToken":"r","expiresAt":4102444800000}}"#,
               to: ".claude", ".credentials.json")
 
     let claude = discover().first { $0.provider == .anthropic }
@@ -35,6 +35,28 @@ final class CredentialDiscoveryTests: XCTestCase {
   func testDiscoversClaudeCodeFlatToken() throws {
     try write(#"{"accessToken":"sk-flat-123"}"#, to: ".claude", ".credentials.json")
     XCTAssertEqual(discover().first?.credentials[CredentialField.anthropicAccessToken], "sk-flat-123")
+  }
+
+  func testSkipsExpiredClaudeCodeTokenWithMillisecondEpoch() throws {
+    try write(#"{"claudeAiOauth":{"accessToken":"sk-claude-expired","expiresAt":1000000000000}}"#,
+              to: ".claude", ".credentials.json")
+
+    let result = CredentialDiscovery(homeDirectories: [home], environment: [:]).discover()
+    XCTAssertFalse(result.credentials.contains { $0.provider == .anthropic })
+    XCTAssertTrue(result.diagnostics.contains { $0.contains("Claude Code: token expired") })
+    XCTAssertFalse(result.diagnostics.contains { $0.contains("sk-claude-expired") })
+  }
+
+  func testSkipsExpiredClaudeCodeFlatTokenWithSnakeCaseExpiry() throws {
+    try write(#"{"access_token":"sk-claude-expired","expires_at":"1000000000"}"#,
+              to: ".claude", ".credentials.json")
+    XCTAssertFalse(discover().contains { $0.provider == .anthropic })
+  }
+
+  func testKeepsClaudeCodeTokenWithZeroExpiry() throws {
+    try write(#"{"claudeAiOauth":{"accessToken":"sk-claude-unknown","expiresAt":0}}"#,
+              to: ".claude", ".credentials.json")
+    XCTAssertEqual(discover().first?.credentials[CredentialField.anthropicAccessToken], "sk-claude-unknown")
   }
 
   func testDiscoversCodexWithAccountID() throws {

@@ -100,6 +100,15 @@ public struct CredentialDiscovery: Sendable {
       return []
     }
 
+    // A stale file export must not hide the live macOS Keychain token. Claude
+    // Code uses epoch milliseconds; also accept seconds and string variants.
+    if let expiresAt = parseDateValue(oauth["expiresAt"] ?? oauth["expires_at"]),
+       expiresAt.timeIntervalSince1970 > 0,
+       expiresAt <= Date() {
+      diagnostics.append("Claude Code: token expired (\(shortPath(url)))")
+      return []
+    }
+
     diagnostics.append("Claude Code: found OAuth token (\(shortPath(url)))")
     return [
       DiscoveredCredential(

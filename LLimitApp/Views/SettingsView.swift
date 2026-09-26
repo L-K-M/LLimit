@@ -1035,12 +1035,13 @@ struct SettingsView: View {
       return ("No snapshot available", false)
     }
 
-    if accountUsage(for: accountID) != nil {
-      return ("Data loaded", true)
+    if let failure = accountFailure(for: accountID) {
+      let cachedDataNote = accountUsage(for: accountID) != nil ? "\nShowing cached data." : ""
+      return ("Refresh failed: \(failure.message)\(cachedDataNote)", false)
     }
 
-    if let failure = accountFailure(for: accountID) {
-      return ("Refresh failed: \(failure.message)", false)
+    if accountUsage(for: accountID) != nil {
+      return ("Data loaded", true)
     }
 
     if !account.isEnabled {

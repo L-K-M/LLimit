@@ -413,7 +413,7 @@ final class AppModel: ObservableObject {
       let summary = services.isEmpty
         ? "no generic-password items were visible"
         : "scanned \(services.count) keychain items, none mention ‘claude’"
-      return (nil, "no Claude item in Keychain (\(summary)). Sign in with `claude`, or run: security find-generic-password -s 'Claude Code-credentials' -w > ~/.claude/.credentials.json")
+      return (nil, "no Claude item in Keychain (\(summary)). Sign in with Claude Code, then scan again.")
     }
     return (nil, "Claude Keychain item(s) found (\(claudeServices.joined(separator: ", "))) but no readable token")
   }
