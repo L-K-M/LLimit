@@ -87,6 +87,9 @@ Claude Keychain import are macOS-only. Linux Claude Code writes
   with private directory permissions. Their refresh tokens remain in Claude Code's
   profile-specific Keychain or credential file. LLimit stores an access-token cache
   and account identity, and never stores Claude refresh tokens in its settings.
+  An interrupted renewal must be verified by refreshing or reconnecting before
+  removing the account. Reconnecting preserves an uncertain old profile rather
+  than deleting credentials that a surviving Claude Code process may still use.
 - Each account can have its own widget styling on macOS; on Linux the bar module
   shows every enabled account.
 

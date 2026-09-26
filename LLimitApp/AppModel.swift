@@ -50,6 +50,7 @@ final class AppModel: ObservableObject {
   private var claudeSessions: [String: ClaudeTerminalSession] = [:]
   private var claudeLoginProfiles: [String: ClaudeCodeProfile] = [:]
   private var claudeCredentialFailures: Set<String> = []
+  private var claudeUsageReceipts: [String: ClaudeCodeUsageReceipt] = [:]
   private let claudeProfiles = ClaudeProfileService()
   private let claudeProcess = ClaudeCodeProcess()
 
@@ -188,6 +189,7 @@ final class AppModel: ObservableObject {
 
     do {
       var refreshed = try await refreshService.refresh(configurations: enabledConfigs, credentialFailures: claudeFailures)
+      recordClaudeUsage(in: refreshed, configurations: enabledConfigs)
 
       // Reactive recovery: if an enabled OpenAI account failed authentication (a token
       // revoked before its JWT exp, or a Codex rotation that landed mid-cycle), refresh
@@ -215,6 +217,7 @@ final class AppModel: ObservableObject {
           // keeps the last-known usage, then splice only these accounts' results back in.
           let retrySnapshot = await refreshService.fetch(configurations: retryConfigs)
             .mergingStaleUsage(from: refreshed)
+          recordClaudeUsage(in: retrySnapshot, configurations: retryConfigs)
           refreshed = refreshed.replacingResults(forAccountIDs: retriedIDs, from: retrySnapshot)
           try? refreshService.save(refreshed)
         }
@@ -250,13 +253,35 @@ final class AppModel: ObservableObject {
     }
   }
 
-  /// A completed login needs an immediate fetch, even if another refresh was
-  /// already running. Poll only that account so healthy Claude accounts do not
-  /// hit the provider's short-interval rate limit.
-  private func refreshClaudeAccountAfterCurrentCycle(_ id: String) async {
-    while isRefreshing { try? await Task.sleep(for: .seconds(1)) }
+  /// Bind each successful result to the profile actually queried. A timestamp
+  /// alone cannot distinguish an old imported login from its replacement.
+  private func recordClaudeUsage(in result: QuotaSnapshot, configurations: [ProviderRuntimeConfiguration]) {
+    for configuration in configurations where configuration.provider == .anthropic {
+      let id = configuration.accountID
+      guard !result.failures.contains(where: { $0.accountID == id }),
+            let usage = result.providers.first(where: { $0.accountID == id }),
+            let profile = ClaudeCodeProfile.profile(from: configuration.credentials) else {
+        claudeUsageReceipts[id] = nil
+        continue
+      }
+      claudeUsageReceipts[id] = ClaudeCodeUsageReceipt(profileID: profile.id, fetchedAt: usage.fetchedAt)
+    }
+  }
+
+  /// A completed login needs fresh usage. Reuse a concurrent cycle's successful
+  /// result only if it queried this new profile after login completed.
+  private func refreshClaudeAccountAfterCurrentCycle(_ id: String, requestedAt: Date) async {
+    while isRefreshing {
+      do { try await Task.sleep(for: .seconds(1)) }
+      catch { return }
+    }
+    guard !Task.isCancelled else { return }
     guard let account = account(withID: id), account.isEnabled,
-          ClaudeCodeProfile.profile(from: account.credentials) != nil else { return }
+          let profile = ClaudeCodeProfile.profile(from: account.credentials) else { return }
+    if snapshot?.failures.contains(where: { $0.accountID == id }) == false,
+       claudeUsageReceipts[id]?.satisfies(profileID: profile.id, since: requestedAt) == true {
+      return
+    }
     isRefreshing = true
     defer { isRefreshing = false }
     let failure = await prepareClaudeAccount(id: id)
@@ -266,16 +291,16 @@ final class AppModel: ObservableObject {
     } else {
       let configurations = runtimeConfigurations().filter { $0.accountID == id && $0.isEnabled }
       partial = await refreshService.fetch(configurations: configurations)
+      recordClaudeUsage(in: partial, configurations: configurations)
     }
     partial = partial.mergingStaleUsage(from: snapshot)
     var refreshed = snapshot?.replacingResults(forAccountIDs: [id], from: partial) ?? partial
     refreshed.generatedAt = partial.generatedAt
-    do {
-      try refreshService.save(refreshed)
-      publishSnapshot(refreshed)
-    } catch {
-      statusMessage = "Could not save the updated Claude usage. Refresh this account again."
-    }
+    var saveFailed = false
+    do { try refreshService.save(refreshed) }
+    catch { saveFailed = true }
+    publishSnapshot(refreshed)
+    if saveFailed { statusMessage = "The Claude refresh result could not be saved locally. Check LLimit’s storage permissions." }
   }
 
   func reloadAccountStatuses() {
@@ -331,6 +356,13 @@ final class AppModel: ObservableObject {
   func removeProviderAccount(accountID: String) {
     guard !isRefreshing, !claudeAccountIsBusy(accountID) else { return }
     let removedAccount = providerAccounts.first { $0.id == accountID }
+    if let removedAccount, ClaudeCodeProfile.isRemovalBlocked(for: removedAccount.credentials) {
+      // A renewal from an earlier app instance may still be rotating this grant.
+      // Its auth-login command does not hold the CLI's automatic-refresh locks.
+      claudeAccountMessages[accountID] = "Renewal is not verified yet. Refresh to check it, or reconnect before removing this account."
+      reloadAccountStatuses()
+      return
+    }
     if let profile = removedAccount.flatMap({ ClaudeCodeProfile.profile(from: $0.credentials) }) {
       do { try claudeProfiles.remove(profile) }
       catch {
@@ -342,6 +374,7 @@ final class AppModel: ObservableObject {
     claudeSessions[accountID] = nil
     claudeAccountMessages[accountID] = nil
     claudeCredentialFailures.remove(accountID)
+    claudeUsageReceipts[accountID] = nil
     providerAccounts.removeAll { $0.id == accountID }
     providerStyleSettings.removeValue(forKey: accountID)
     // Deleting the account is an explicit choice, so its tile slots fall back to
@@ -695,7 +728,8 @@ final class AppModel: ObservableObject {
       claudeCredentialFailures.remove(accountID)
       claudeAccountMessages[accountID] = "Connected. Credentials renew automatically."
       reloadAccountStatuses()
-      Task { await refreshClaudeAccountAfterCurrentCycle(accountID) }
+      let completedAt = Date()
+      Task { await refreshClaudeAccountAfterCurrentCycle(accountID, requestedAt: completedAt) }
     } catch {
       try? claudeProfiles.remove(profile)
       claudeAccountMessages[accountID] = claudeErrorMessage(error)
@@ -802,7 +836,7 @@ final class AppModel: ObservableObject {
         while self.isRefreshing { try? await Task.sleep(for: .seconds(1)) }
         // A concurrent manual refresh may already have adopted and fetched it.
         guard self.account(withID: id)?.credentials[CredentialField.anthropicRenewalPending] != nil else { return }
-        await self.refreshClaudeAccountAfterCurrentCycle(id)
+        await self.refreshClaudeAccountAfterCurrentCycle(id, requestedAt: Date())
       }
       return false
     }

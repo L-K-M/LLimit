@@ -34,6 +34,18 @@ To verify the real sign-in flow manually:
    with **Send Control-C**. Confirm its original credentials still work and the
    **Import or paste a token** controls remain available. A canceled sign-in must
    leave the existing credentials dictionary unchanged.
+7. Finish sign-in while a global refresh is waiting on another provider. If that
+   cycle fetches the new profile, confirm the queued login refresh reuses its
+   successful result. An earlier result from an imported token or another profile
+   must not suppress the new profile's first fetch. The core receipt tests cover
+   profile isolation and the login-completion time boundary.
+8. If LLimit exits during renewal, relaunch it and try removing the account before
+   renewal is verified. Removal must preserve the profile and explain that you
+   need to refresh or reconnect first. A missing CLI lock is not proof that its
+   renewal process has exited. The core removal-policy test covers this state.
+9. With a controlled snapshot-store write failure, complete a login and confirm
+   fresh usage remains visible alongside a local-save warning. Do not re-poll
+   Claude just to retry local persistence.
 
 These manual checks involve real accounts and are separate from the synthetic
 regression suite. The synthetic suite does not establish live OAuth compatibility.
