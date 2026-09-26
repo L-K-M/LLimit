@@ -82,6 +82,47 @@ final class QuotaDaemonTests: XCTestCase {
     XCTAssertFalse(snapshot.providers.contains { $0.accountID == disabled.id || $0.accountID == unconfigured.id })
   }
 
+  // MARK: - OpenAI account isolation
+
+  func testManagedOpenAIAccountsDoNotAdoptGlobalLoginDuringRefreshOrAuthRecovery() async throws {
+    let codexDirectory = tempDirectory.appendingPathComponent(".codex", isDirectory: true)
+    try FileManager.default.createDirectory(at: codexDirectory, withIntermediateDirectories: true)
+    let oldAccess = fakeAccessToken(expiresAt: Date().addingTimeInterval(3_600))
+    let globalAccess = fakeAccessToken(expiresAt: Date().addingTimeInterval(7_200))
+    // No refresh grant is supplied: even a regression must stay fully offline.
+    try JSONSerialization.data(withJSONObject: ["tokens": ["access_token": globalAccess, "account_id": "workspace"]])
+      .write(to: codexDirectory.appendingPathComponent("auth.json"))
+    let client = RecordingOpenAIAuthFailure()
+    let daemon = makeDaemon(coordinator: QuotaCoordinator(clients: [client]))
+    var managedCredentials = CodexAccountProfile().credentials(identity: CodexAccountIdentity(accountID: "workspace", userID: "member"))
+    managedCredentials[CredentialField.openAIAccessToken] = oldAccess
+    let managed = daemon.addAccount(provider: .openAI, credentials: managedCredentials)
+    var malformedCredentials = managedCredentials
+    malformedCredentials[CredentialField.openAICodexProfileID] = "malformed"
+    let malformed = daemon.addAccount(provider: .openAI, credentials: malformedCredentials)
+    let imported = daemon.addAccount(provider: .openAI, credentials: [
+      CredentialField.openAIAccessToken: oldAccess, CredentialField.openAIAccountID: "workspace"
+    ])
+
+    await daemon.refreshNow()
+
+    XCTAssertEqual(daemon.settings.accounts.first { $0.id == managed.id }?.credentials, managedCredentials)
+    XCTAssertEqual(daemon.settings.accounts.first { $0.id == malformed.id }?.credentials, malformedCredentials)
+    XCTAssertEqual(daemon.settings.accounts.first { $0.id == imported.id }?.credentials[CredentialField.openAIAccessToken], globalAccess)
+    XCTAssertEqual(makeDaemon().settings.accounts, daemon.settings.accounts)
+    let calls = await client.configurations
+    XCTAssertEqual(calls.count, 2)
+    XCTAssertEqual(calls.first { $0.accountID == managed.id }?.credentials, managedCredentials)
+    XCTAssertEqual(Set(daemon.snapshot?.failures.map(\.accountID) ?? []), [managed.id, imported.id])
+    XCTAssertTrue(daemon.snapshot?.failures.allSatisfy { $0.kind == .auth } == true)
+  }
+
+  private func fakeAccessToken(expiresAt date: Date) -> String {
+    let payload = try! JSONSerialization.data(withJSONObject: ["exp": date.timeIntervalSince1970]).base64EncodedString()
+      .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+    return "header.\(payload).fake-signature"
+  }
+
   // MARK: - Settings mutations (the CLI's accounts surface)
 
   func testAddAccountPersistsWithMode0600() throws {
@@ -234,6 +275,16 @@ final class QuotaDaemonTests: XCTestCase {
     await daemon.refreshNow()
     XCTAssertNil(daemon.snapshot)
     XCTAssertTrue(daemon.statusMessage.contains("No enabled provider accounts"))
+  }
+}
+
+private actor RecordingOpenAIAuthFailure: QuotaProviderClient {
+  let provider: QuotaProvider = .openAI
+  private(set) var configurations: [ProviderRuntimeConfiguration] = []
+
+  func fetchUsage(configuration: ProviderRuntimeConfiguration, now: Date) async throws -> ProviderUsage {
+    configurations.append(configuration)
+    throw ProviderClientError(kind: .auth, message: "Reconnect OpenAI")
   }
 }
 

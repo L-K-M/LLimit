@@ -18,6 +18,15 @@ struct ProviderAccountStatus: Identifiable, Hashable {
   var id: String { accountID }
 }
 
+struct CodexLoginPresentation: Identifiable {
+  let id: UUID
+  let accountID: String
+  var title: String
+  var message: String
+  var authURL: URL?
+  var isBusy: Bool
+}
+
 @MainActor
 final class AppModel: ObservableObject {
   @Published var refreshIntervalMinutes: Int = 30
@@ -54,6 +63,14 @@ final class AppModel: ObservableObject {
   private let claudeProfiles = ClaudeProfileService()
   private let claudeProcess = ClaudeCodeProcess()
 
+  @Published var codexLogin: CodexLoginPresentation?
+  @Published private(set) var codexAccountMessages: [String: String] = [:]
+  @Published private var codexBusyAccounts: Set<String> = []
+  private var codexLoginHandles: [UUID: CodexLoginHandle] = [:]
+  private var codexLoginIDs: [String: UUID] = [:]
+  private var codexUsageReceipts: [String: (profile: UUID, fetchedAt: Date)] = [:]
+  private let codexAccounts: CodexAccountService
+
   private let settingsStore: SettingsStore
   private let snapshotStore: SnapshotStore
   private let historyStore: QuotaHistoryStore
@@ -80,11 +97,13 @@ final class AppModel: ObservableObject {
     let snapshotStore = SnapshotStore(fileURL: urls.snapshot)
     let historyStore = QuotaHistoryStore(fileURL: urls.history)
 
+    let codexAccounts = CodexAccountService(root: baseDirectory.appendingPathComponent("CodexProfiles", isDirectory: true))
+    self.codexAccounts = codexAccounts
     self.settingsStore = settingsStore
     self.snapshotStore = snapshotStore
     self.historyStore = historyStore
     self.refreshService = RefreshService(
-      coordinator: QuotaCoordinator.live(),
+      coordinator: QuotaCoordinator.live(managedOpenAI: codexAccounts),
       snapshotStore: snapshotStore
     )
     self.launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -166,7 +185,7 @@ final class AppModel: ObservableObject {
   }
 
   func refreshNow() async {
-    guard !isRefreshing else {
+    guard !isRefreshing, codexBusyAccounts.isEmpty else {
       return
     }
 
@@ -190,6 +209,7 @@ final class AppModel: ObservableObject {
     do {
       var refreshed = try await refreshService.refresh(configurations: enabledConfigs, credentialFailures: claudeFailures)
       recordClaudeUsage(in: refreshed, configurations: enabledConfigs)
+      recordCodexUsage(in: refreshed, configurations: enabledConfigs)
 
       // Reactive recovery: if an enabled OpenAI account failed authentication (a token
       // revoked before its JWT exp, or a Codex rotation that landed mid-cycle), refresh
@@ -245,6 +265,7 @@ final class AppModel: ObservableObject {
     }
 
     snapshot = refreshed
+    reloadAccountStatuses()
 
     if widgetSyncReady && historySyncReady {
       statusMessage = "Refreshed \(refreshed.providers.count) account(s), \(refreshed.failures.count) failure(s)"
@@ -306,12 +327,18 @@ final class AppModel: ObservableObject {
   func reloadAccountStatuses() {
     accountStatuses = providerAccounts.map { account in
       let missing = account.missingCredentialLabels
-      let failed = claudeCredentialFailures.contains(account.id)
+      let codexFailure = CodexAccountProfile.isManaged(account.credentials)
+        ? snapshot?.failures.first(where: { $0.accountID == account.id }) : nil
+      let failed = claudeCredentialFailures.contains(account.id) || codexFailure != nil
       let pending = account.credentials[CredentialField.anthropicRenewalPending] != nil
       let needsRenewal = ClaudeCodeProfile.profile(from: account.credentials) != nil
         && ClaudeCodeProfile.readiness(for: ClaudeCodeProfile.credentials(from: account.credentials)) != .ready
       let detail: String
-      if failed, let message = claudeAccountMessages[account.id] {
+      if codexBusyAccounts.contains(account.id) {
+        detail = "Connecting OpenAI…"
+      } else if let codexFailure {
+        detail = codexFailure.message
+      } else if failed, let message = claudeAccountMessages[account.id] {
         detail = message
       } else if pending {
         detail = "Renewal needs verification. Reconnect if it does not finish."
@@ -354,7 +381,7 @@ final class AppModel: ObservableObject {
   }
 
   func removeProviderAccount(accountID: String) {
-    guard !isRefreshing, !claudeAccountIsBusy(accountID),
+    guard !isRefreshing, !claudeAccountIsBusy(accountID), !codexAccountIsBusy(accountID),
           let removedAccount = account(withID: accountID) else { return }
     var updated = currentSettings()
     updated.accounts.removeAll { $0.id == accountID }
@@ -377,6 +404,17 @@ final class AppModel: ObservableObject {
       reloadAccountStatuses()
       return
     }
+    if let codexProfile = CodexAccountProfile.profile(from: removedAccount.credentials) {
+      // Account removal is already durable. A live or uncertain namespace stays
+      // private and detached; never delete credentials underneath its writer.
+      Task {
+        if !(await codexAccounts.remove(codexProfile)) {
+          statusMessage = "Account removed. Local OpenAI login cleanup is pending; credentials may still be stored on this Mac."
+        }
+      }
+    }
+    codexAccountMessages[accountID] = nil
+    codexUsageReceipts[accountID] = nil
     claudeSessions[accountID] = nil
     claudeAccountMessages[accountID] = nil
     claudeCredentialFailures.remove(accountID)
@@ -432,6 +470,7 @@ final class AppModel: ObservableObject {
   func autofillCredentials(forAccountID accountID: String) -> Bool {
     guard let index = providerAccounts.firstIndex(where: { $0.id == accountID }) else { return false }
     let provider = providerAccounts[index].provider
+    guard !codexAccountIsManaged(accountID), !codexAccountIsBusy(accountID) else { return false }
 
     scanForDetectedCredentials()
 
@@ -533,7 +572,7 @@ final class AppModel: ObservableObject {
   private func refreshExpiringChatGPTTokens() async {
     // Only enabled accounts: refreshing a disabled account would keep rotating the shared
     // Codex refresh token and log the user's Codex CLI out of an account they turned off.
-    let openAIAccountIDs = providerAccounts.filter { $0.provider == .openAI && $0.isEnabled }.map(\.id)
+    let openAIAccountIDs = providerAccounts.filter { $0.provider == .openAI && $0.isEnabled && !CodexAccountProfile.isManaged($0.credentials) }.map(\.id)
     guard !openAIAccountIDs.isEmpty else { return }
 
     var didChange = false
@@ -591,10 +630,13 @@ final class AppModel: ObservableObject {
   /// token as a last resort. Returns whether the account's credentials changed.
   @discardableResult
   private func refreshOpenAIAccount(id accountID: String, refreshToken: String) async -> Bool {
+    guard let previous = account(withID: accountID)?.credentials,
+          !CodexAccountProfile.isManaged(previous) else { return false }
     do {
       let result = try await ChatGPTOAuth.refresh(refreshToken: refreshToken)
-      // Re-resolve the index across the await — the account list may have changed.
-      guard let index = providerAccounts.firstIndex(where: { $0.id == accountID }) else { return false }
+      // A reconnect or credential edit must not be replaced by an older refresh.
+      guard let index = providerAccounts.firstIndex(where: { $0.id == accountID }),
+            providerAccounts[index].credentials == previous else { return false }
       providerAccounts[index].credentials[CredentialField.openAIAccessToken] = result.accessToken
       if let newRefresh = result.refreshToken {
         providerAccounts[index].credentials[CredentialField.openAIRefreshToken] = newRefresh
@@ -628,7 +670,8 @@ final class AppModel: ObservableObject {
       guard
         let index = providerAccounts.firstIndex(where: { $0.id == accountID }),
         providerAccounts[index].provider == .openAI,
-        providerAccounts[index].isEnabled
+        providerAccounts[index].isEnabled,
+        !CodexAccountProfile.isManaged(providerAccounts[index].credentials)
       else { continue }
 
       // Prefer adopting Codex's own fresher token — that recovers the account without
@@ -649,6 +692,170 @@ final class AppModel: ObservableObject {
       saveConfiguration()
     }
     return recovered
+  }
+
+  // MARK: - Independent Codex accounts
+
+  func codexAccountIsManaged(_ id: String) -> Bool {
+    account(withID: id).map { CodexAccountProfile.isManaged($0.credentials) } ?? false
+  }
+
+  func codexAccountEmail(_ id: String) -> String? {
+    account(withID: id).flatMap { CodexAccountProfile.identity(from: $0.credentials)?.email }
+  }
+
+  func codexAccountIsBusy(_ id: String) -> Bool { codexBusyAccounts.contains(id) }
+  func codexLoginIsOpen(_ id: String) -> Bool { codexLoginIDs[id] != nil }
+
+  func connectCodexAccount(_ accountID: String) {
+    if codexLoginIDs[accountID] != nil { reopenCodexLoginBrowser(); return }
+    guard !isRefreshing, codexBusyAccounts.isEmpty, !configurationLoadFailed,
+          let account = account(withID: accountID), account.provider == .openAI else { return }
+    let profile = CodexAccountProfile()
+    codexLoginIDs[accountID] = profile.id
+    codexBusyAccounts.insert(accountID)
+    codexLogin = CodexLoginPresentation(id: profile.id, accountID: accountID, title: "Connect OpenAI",
+                                       message: "Starting secure browser sign-in…", authURL: nil, isBusy: true)
+    Task {
+      do {
+        let handle = try await codexAccounts.beginLogin(profile: profile)
+        guard codexLoginIDs[accountID] == profile.id else {
+          await codexAccounts.cancelLogin(handle)
+          _ = await codexAccounts.remove(profile)
+          return
+        }
+        codexLoginHandles[profile.id] = handle
+        codexLogin?.authURL = handle.authURL
+        codexLogin?.message = "Complete sign-in in your browser. LLimit will show the connected account here."
+        reopenCodexLoginBrowser()
+        let identity = try await codexAccounts.finishLogin(handle)
+        guard codexLoginIDs[accountID] == profile.id,
+              let current = self.account(withID: accountID), current.credentials == account.credentials else {
+          _ = await codexAccounts.remove(profile)
+          return
+        }
+        let others = providerAccounts.filter { $0.id != accountID && $0.provider == .openAI }
+          .compactMap { CodexAccountProfile.identity(from: $0.credentials) }
+        let credentials = try profile.loginCredentials(for: current.credentials, identity: identity, existingIdentities: others)
+        try persistCodexCredentials(credentials, accountID: accountID)
+        codexLoginIDs[accountID] = nil
+        codexLoginHandles[profile.id] = nil
+        if codexLogin?.id == profile.id { codexLogin = nil }
+        // From this point the new login is committed. Failure to retire the old
+        // profile is a cleanup notice, never a reason to delete the new login.
+        var retained = false
+        if let previous = CodexAccountProfile.profile(from: current.credentials) {
+          retained = !(await codexAccounts.remove(previous))
+        }
+        codexAccountMessages[accountID] = retained
+          ? "Connected. Previous login cleanup is pending; its credentials may still be stored on this Mac."
+          : "Connected. Codex keeps this account signed in automatically."
+        codexLoginIDs[accountID] = nil
+        codexLoginHandles[profile.id] = nil
+        codexBusyAccounts.remove(accountID)
+        if codexLogin?.id == profile.id { codexLogin = nil }
+        reloadAccountStatuses()
+        await refreshCodexAccountAfterCurrentCycle(accountID, profileID: profile.id, requestedAt: Date())
+      } catch {
+        let removed = await codexAccounts.remove(profile)
+        guard codexLoginIDs[accountID] == profile.id else { return }
+        codexLoginIDs[accountID] = nil
+        codexLoginHandles[profile.id] = nil
+        codexBusyAccounts.remove(accountID)
+        let message = codexErrorMessage(error) + (removed ? "" : " Local login cleanup is pending.")
+        codexAccountMessages[accountID] = message
+        if codexLogin?.id == profile.id {
+          codexLogin?.message = message
+          codexLogin?.authURL = nil
+          codexLogin?.isBusy = false
+        }
+        reloadAccountStatuses()
+      }
+    }
+  }
+
+  func reopenCodexLoginBrowser() {
+    guard let url = codexLogin?.authURL else { return }
+    if !NSWorkspace.shared.open(url) {
+      codexLogin?.message = "The browser could not be opened. Open your default browser, then try Open Browser Again."
+    }
+  }
+
+  func dismissCodexLogin() {
+    guard codexLogin?.isBusy != true else { return }
+    codexLogin = nil
+  }
+
+  func cancelCodexLogin() {
+    guard let login = codexLogin, codexLoginIDs[login.accountID] == login.id else { dismissCodexLogin(); return }
+    // Invalidate first: a completion arriving during cancellation cannot commit.
+    codexLoginIDs[login.accountID] = nil
+    codexLogin?.message = "Canceling sign-in…"
+    Task {
+      if let handle = codexLoginHandles.removeValue(forKey: login.id) {
+        await codexAccounts.cancelLogin(handle)
+      }
+      let removed = await codexAccounts.remove(CodexAccountProfile(id: login.id))
+      codexBusyAccounts.remove(login.accountID)
+      codexAccountMessages[login.accountID] = removed
+        ? "Sign-in canceled. Your previous connection is unchanged."
+        : "Sign-in canceled. Your previous connection is unchanged. Local login cleanup is pending."
+      if codexLogin?.id == login.id { codexLogin = nil }
+      reloadAccountStatuses()
+    }
+  }
+
+  private func persistCodexCredentials(_ credentials: [String: String], accountID: String) throws {
+    guard !configurationLoadFailed, let index = providerAccounts.firstIndex(where: { $0.id == accountID }) else {
+      throw CodexConnectionError.storage
+    }
+    let previous = providerAccounts[index].credentials
+    providerAccounts[index].credentials = credentials
+    do { try settingsStore.save(currentSettings()) }
+    catch { providerAccounts[index].credentials = previous; throw CodexConnectionError.storage }
+    codexUsageReceipts[accountID] = nil
+    if syncSettingsToWidgetStore(currentSettings().redactedCredentials()) { reloadWidgetTimelines() }
+  }
+
+  private func codexErrorMessage(_ error: Error) -> String {
+    if let error = error as? CodexConnectionError { return error.localizedDescription }
+    // Profile policy errors have fixed copy and contain no credentials.
+    if let error = error as? CodexAccountProfileError { return error.localizedDescription }
+    return "Could not connect this OpenAI account. Try signing in again."
+  }
+
+  private func recordCodexUsage(in result: QuotaSnapshot, configurations: [ProviderRuntimeConfiguration]) {
+    for config in configurations where config.provider == .openAI {
+      guard let profile = CodexAccountProfile.profile(from: config.credentials),
+            !result.failures.contains(where: { $0.accountID == config.accountID }),
+            let usage = result.providers.first(where: { $0.accountID == config.accountID }) else {
+        codexUsageReceipts[config.accountID] = nil
+        continue
+      }
+      codexUsageReceipts[config.accountID] = (profile.id, usage.fetchedAt)
+    }
+  }
+
+  private func refreshCodexAccountAfterCurrentCycle(_ id: String, profileID: UUID, requestedAt: Date) async {
+    while isRefreshing || !codexBusyAccounts.isEmpty {
+      do { try await Task.sleep(for: .seconds(1)) } catch { return }
+    }
+    guard let account = account(withID: id), account.isEnabled,
+          CodexAccountProfile.profile(from: account.credentials)?.id == profileID else { return }
+    if let receipt = codexUsageReceipts[id], receipt.profile == profileID, receipt.fetchedAt >= requestedAt,
+       snapshot?.failures.contains(where: { $0.accountID == id }) == false { return }
+    isRefreshing = true
+    defer { isRefreshing = false }
+    let configurations = runtimeConfigurations().filter { $0.accountID == id && $0.isEnabled }
+    var partial = await refreshService.fetch(configurations: configurations)
+    recordCodexUsage(in: partial, configurations: configurations)
+    partial = partial.mergingStaleUsage(from: snapshot)
+    var refreshed = snapshot?.replacingResults(forAccountIDs: [id], from: partial) ?? partial
+    refreshed.generatedAt = partial.generatedAt
+    var saveFailed = false
+    do { try refreshService.save(refreshed) } catch { saveFailed = true }
+    publishSnapshot(refreshed)
+    if saveFailed { statusMessage = "The OpenAI refresh result could not be saved locally. Check LLimit’s storage permissions." }
   }
 
   // MARK: - Independent Claude Code profiles
@@ -911,6 +1118,7 @@ final class AppModel: ObservableObject {
     Binding(
       get: { self.account(withID: accountID)?.credentials[fieldKey] ?? "" },
       set: { newValue in
+        guard !self.codexAccountIsManaged(accountID), !self.codexAccountIsBusy(accountID) else { return }
         self.claudeAccountMessages[accountID] = nil
         self.claudeCredentialFailures.remove(accountID)
         self.updateAccount(accountID: accountID) { account in

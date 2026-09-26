@@ -3,15 +3,27 @@ import Foundation
 import FoundationNetworking
 #endif
 
+public protocol ManagedOpenAIUsageSource: Sendable {
+  func fetchUsage(configuration: ProviderRuntimeConfiguration, now: Date) async throws -> ProviderUsage
+}
+
 public struct OpenAIClient: QuotaProviderClient {
   public let provider: QuotaProvider = .openAI
   private let httpClient: any HTTPClient
+  private let managedSource: (any ManagedOpenAIUsageSource)?
 
-  public init(httpClient: any HTTPClient) {
+  public init(httpClient: any HTTPClient, managedSource: (any ManagedOpenAIUsageSource)? = nil) {
     self.httpClient = httpClient
+    self.managedSource = managedSource
   }
 
   public func fetchUsage(configuration: ProviderRuntimeConfiguration, now: Date) async throws -> ProviderUsage {
+    if CodexAccountProfile.isManaged(configuration.credentials) {
+      guard let managedSource else {
+        throw ProviderClientError(kind: .notConfigured, message: "Connect this OpenAI account in LLimit on macOS to read its Codex usage.")
+      }
+      return try await managedSource.fetchUsage(configuration: configuration, now: now)
+    }
     guard let accessToken = configuration.credentials[CredentialField.openAIAccessToken], !accessToken.isEmpty else {
       throw ProviderClientError(kind: .notConfigured, message: "OpenAI access token is not configured")
     }

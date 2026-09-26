@@ -49,6 +49,9 @@ struct SettingsView: View {
         message: "Sign in with the Claude account you want to track. Each LLimit account has its own login. Your usual Claude Code login stays separate.",
         onClose: { model.dismissClaudeTerminal() })
     }
+    .sheet(item: $model.codexLogin, onDismiss: { model.dismissCodexLogin() }) { _ in
+      CodexLoginView(model: model)
+    }
     .onAppear {
       if model.detectedCredentials.isEmpty {
         model.scanForDetectedCredentials()
@@ -156,7 +159,7 @@ struct SettingsView: View {
             }
           }
           .buttonStyle(.borderedProminent)
-          .disabled(model.isRefreshing)
+          .disabled(model.isRefreshing || model.providerAccounts.contains { model.codexAccountIsBusy($0.id) })
         }
 
         if model.providerAccounts.isEmpty {
@@ -198,7 +201,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
           Text("Add Account")
             .font(.title2.weight(.semibold))
-          Text("Add an account manually, or import one detected on this Mac. You can add the same provider more than once to track multiple subscriptions.")
+          Text("Connect an account, enter credentials, or import a login detected on this Mac. You can add the same provider more than once to track multiple subscriptions.")
             .font(.subheadline)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
@@ -212,16 +215,22 @@ struct SettingsView: View {
             .pickerStyle(.menu)
             .frame(minWidth: 220, alignment: .leading)
 
-            Button(providerToAdd == .anthropic ? "Connect Claude" : "Add Account") {
+            Button(addAccountButtonTitle) {
               let account = model.addProviderAccount(provider: providerToAdd)
               selection = .account(account.id)
               if providerToAdd == .anthropic { model.connectClaudeAccount(account.id) }
+              if providerToAdd == .openAI { model.connectCodexAccount(account.id) }
             }
             .buttonStyle(.borderedProminent)
-            .disabled(providerToAdd == .anthropic && model.isRefreshing)
+            .disabled((providerToAdd == .anthropic || providerToAdd == .openAI) && model.isRefreshing)
           }
           if providerToAdd == .anthropic {
             Text("Sign in inside LLimit with Claude Code installed on this Mac. Add another Claude account to connect a second subscription. Credentials renew automatically.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          } else if providerToAdd == .openAI {
+            Text("Sign in with ChatGPT in your browser, using Codex installed on this Mac. Add another OpenAI account to connect a second subscription. Each account stays signed in separately.")
               .font(.caption)
               .foregroundStyle(.secondary)
               .fixedSize(horizontal: false, vertical: true)
@@ -234,6 +243,14 @@ struct SettingsView: View {
       }
       .frame(maxWidth: .infinity, alignment: .leading)
       .padding(24)
+    }
+  }
+
+  private var addAccountButtonTitle: String {
+    switch providerToAdd {
+    case .anthropic: return "Connect Claude"
+    case .openAI: return "Connect OpenAI"
+    default: return "Add Account"
     }
   }
 
@@ -251,7 +268,7 @@ struct SettingsView: View {
         .buttonStyle(.bordered)
       }
 
-      Text("Optional shortcut: import a login from a tool you're already signed in to (Claude Code, Codex, GitHub Copilot, OpenCode) instead of pasting a token. Imported accounts are copied into LLimit. Claude imports need to be imported again when they expire; use Connect Claude for automatic renewal.")
+      Text("Optional shortcut: import a login from a tool you're already signed in to (Claude Code, Codex, GitHub Copilot, OpenCode) instead of pasting a token. Imported accounts are copied into LLimit. Connect Claude or Connect OpenAI gives each account its own login and automatic renewal. Claude imports need to be imported again when they expire.")
         .font(.subheadline)
         .foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
@@ -724,6 +741,42 @@ struct SettingsView: View {
 
   // MARK: - Account detail
 
+  private func codexCredentials(for account: ProviderAccount) -> some View {
+    VStack(alignment: .leading, spacing: 10) {
+      let managed = model.codexAccountIsManaged(account.id)
+      Button(model.codexLoginIsOpen(account.id) ? "Continue Sign-In" : managed ? "Reconnect OpenAI" : "Connect OpenAI") {
+        model.connectCodexAccount(account.id)
+      }
+      .buttonStyle(.borderedProminent)
+      .disabled(model.isRefreshing || (model.codexAccountIsBusy(account.id) && !model.codexLoginIsOpen(account.id)))
+
+      if let email = model.codexAccountEmail(account.id) {
+        Text(email).font(.subheadline).textSelection(.enabled)
+      }
+      Text("Each account signs in separately in your browser. Keep Codex installed to renew the login and load usage automatically.")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+
+      if let message = model.codexAccountMessages[account.id] {
+        Text(message)
+          .font(.caption)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+      if !managed {
+        DisclosureGroup("Import or paste a token") {
+          VStack(alignment: .leading, spacing: 10) {
+            Text("Importing copies the current credentials into LLimit. To sign in independently of your usual Codex account, connect above.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+            manualCredentials(for: account)
+          }
+          .padding(.top, 8)
+        }
+      }
+    }
+  }
+
   private func claudeCredentials(for account: ProviderAccount) -> some View {
     VStack(alignment: .leading, spacing: 10) {
       let managed = ClaudeCodeProfile.profile(from: account.credentials) != nil
@@ -830,6 +883,8 @@ struct SettingsView: View {
           settingsRow(title: "Credentials") {
             if account.provider == .anthropic {
               claudeCredentials(for: account)
+            } else if account.provider == .openAI {
+              codexCredentials(for: account)
             } else {
               manualCredentials(for: account)
             }
@@ -900,13 +955,13 @@ struct SettingsView: View {
                 }
               }
               .buttonStyle(.borderedProminent)
-              .disabled(model.isRefreshing)
+              .disabled(model.isRefreshing || model.codexAccountIsBusy(accountID))
 
               Button("Remove Account", role: .destructive) {
                 model.removeProviderAccount(accountID: accountID)
               }
               .buttonStyle(.bordered)
-              .disabled(model.isRefreshing || model.claudeAccountIsBusy(accountID))
+              .disabled(model.isRefreshing || model.claudeAccountIsBusy(accountID) || model.codexAccountIsBusy(accountID))
             }
           }
           if model.claudeRemovalRetainsLogin(accountID) {

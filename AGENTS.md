@@ -8,8 +8,8 @@ headless **Linux** daemon + CLI (`llimit`) with status-bar modules. On both, **t
 app owns account management**: the user adds/edits/removes accounts inside LLimit,
 including multiple accounts per provider, and credentials are stored by LLimit.
 Manual and imported accounts do not require the source tool at runtime. Optional
-managed Claude Code connections on macOS depend on the installed official CLI for
-login and renewal, with a private profile for each account.
+managed Claude Code and Codex connections on macOS depend on the installed official
+CLI for login and renewal, with a private profile for each account.
 
 `CredentialDiscovery` exists only as an *optional import shortcut* — it can detect a
 login from a locally installed tool (Claude Code, Codex, Copilot, Antigravity,
@@ -22,6 +22,13 @@ Managed Claude connections use the embedded terminal and an account-specific
 Claude Code remains the sole owner of refresh-token rotation and storage. LLimit
 caches the access token and verified account/organization identity; it never saves
 Claude refresh tokens in its settings or alters the user's normal CLI login.
+
+Managed OpenAI connections use browser sign-in through Codex's app-server and an
+account-specific `CODEX_HOME` under
+`~/Library/Application Support/LLimit/CodexProfiles/`. Codex owns credential storage
+and renewal, and provides usage through app-server. LLimit stores the profile
+reference and verified account identity, without copying Codex tokens into its
+settings. The user's normal Codex login and existing imported accounts stay separate.
 
 Providers: Claude (Anthropic), OpenAI/ChatGPT, GitHub Copilot, Zhipu, Z.ai, Kimi,
 Google Antigravity, Devin, Meta Muse.
@@ -73,6 +80,8 @@ macOS:
    plus the macOS Keychain for Claude → `[DiscoveredCredential]`; `importAccount(from:)`
    copies one into a new owned account. Managed Claude accounts instead connect
    through the embedded terminal and refresh from their own profile's namespace.
+   Managed OpenAI accounts connect through Codex browser sign-in and fetch usage
+   through their profile's app-server process.
 3. `QuotaCoordinator` fetches usage from each enabled account's provider in parallel.
 4. The `QuotaSnapshot` is written to the App Group container; settings + history too.
 5. `WidgetCenter.reloadAllTimelines()` triggers the widgets, which read the snapshot.
@@ -106,6 +115,16 @@ Linux:
 - Never replace every Claude account with the current global CLI token. Managed
   profiles must match profile UUID plus verified account and organization UUIDs;
   imports without verified identity remain unchanged until explicit reimport.
+- Managed Codex credentials are another exception to settings-only storage: the
+  official CLI owns them in each private `CODEX_HOME`. Keep profile directories
+  mode `700` and credential files mode `600`. LLimit must not adopt tokens from
+  global Codex/OpenCode files into managed accounts or rotate their refresh tokens
+  itself. Verify account identity before committing a login or publishing usage;
+  never copy app-server authentication material to logs, snapshots, or widgets.
+  Acquire an exclusive durable operation record before launching app-server;
+  remove it only after its child has exited. Timeouts keep the child and record.
+  An orphaned record requires reconnecting into a fresh profile, not replaying
+  a possibly rotated grant. Never remove a namespace with a pending operation.
 - The host app is **not sandboxed** (the import shortcut reads `~/.claude`, `~/.codex`,
   `~/.config/github-copilot`, `~/.kimi`, `~/.kimi-code`, `~/.gemini`,
   `~/.local/share/opencode`, `~/.local/share/devin`, `~/.config/muse`, and the Keychain). The widget extension **stays sandboxed**; it only reads the App
@@ -135,7 +154,9 @@ Linux:
   `seven_day`, `seven_day_opus` windows with `utilization` (0–100) + `resets_at`.
   Poll no faster than ~3 min; LLimit's ≥15 min interval is safe.
 - **OpenAI**: ChatGPT web endpoint `https://chatgpt.com/backend-api/wham/usage` with the
-  Codex/OpenCode OAuth access token + `ChatGPT-Account-Id`.
+  Codex/OpenCode OAuth access token + `ChatGPT-Account-Id` for imported/manual accounts.
+  Managed macOS accounts use the official Codex app-server account authentication
+  and rate-limit interfaces in an isolated profile instead.
 - **Copilot**: GitHub internal `copilot_internal/user` (OAuth) or the public premium-
   request billing API (PAT + username).
 - **Kimi**: `GET https://api.kimi.com/coding/v1/usages` with `Authorization: Bearer`
@@ -422,4 +443,3 @@ may waive review; report that waiver rather than claiming review passed.
   status, review rounds completed, and whether it is merged.
 
 <!-- shared-rules:end -->
-

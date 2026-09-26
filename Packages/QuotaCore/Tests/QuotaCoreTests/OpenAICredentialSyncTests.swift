@@ -41,6 +41,15 @@ final class OpenAICredentialSyncTests: XCTestCase {
     XCTAssertNil(OpenAICredentialSync.adoption(for: stored, among: live, expiry: { _ in nil }))
   }
 
+  func testManagedProfilesNeverAdoptGlobalLoginIncludingMalformedProfileMetadata() {
+    let live = [creds(access: "global", refresh: "global-refresh", account: "acct_A")]
+    for profileID in [UUID().uuidString, "", "invalid-profile"] {
+      var stored = creds(access: "old", account: "acct_A")
+      stored[CredentialField.openAICodexProfileID] = profileID
+      XCTAssertNil(OpenAICredentialSync.adoption(for: stored, among: live, expiry: { _ in nil }))
+    }
+  }
+
   // MARK: - freshness gate (the brick-prevention fix)
 
   func testDoesNotDowngradeToStaleFileToken() {

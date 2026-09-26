@@ -17,8 +17,8 @@
 You manage your accounts **inside LLimit** — add as many as you like, including
 several accounts for the same provider (e.g. two separate OpenAI accounts), each
 tracked independently. Manual and imported accounts do not require the source tool
-to remain installed. The optional managed Claude Code connection on macOS uses
-the installed Claude Code CLI to maintain each account's login.
+to remain installed. Optional managed Claude Code and Codex connections on macOS
+use the installed official CLI to maintain each account's login.
 
 To make setup painless, LLimit can **optionally detect** logins from AI tools you're
 already signed in to (Claude Code, Codex, GitHub Copilot, Kimi, OpenCode, Devin, Muse Code) and import
@@ -48,8 +48,8 @@ Everything in depth: [`Packages/LLimitd/README.md`](Packages/LLimitd/README.md).
 
 ## Supported providers
 
-The same providers work on both platforms. Managed Claude Code connections and
-Claude Keychain import are macOS-only. Linux Claude Code writes
+The same providers work on both platforms. Managed Claude Code and Codex connections,
+and Claude Keychain import, are macOS-only. Linux Claude Code writes
 `~/.claude/.credentials.json` directly, which LLimit reads on both platforms.
 
 | Provider | Credential it needs | One-click import from |
@@ -76,6 +76,12 @@ Claude Keychain import are macOS-only. Linux Claude Code writes
   Complete Claude Code's sign-in flow, then repeat for another account. Each login
   has a private profile, so your usual CLI login stays unchanged. Keep Claude Code
   installed for these managed connections: it handles login and token renewal.
+- **Connect OpenAI** on macOS opens ChatGPT sign-in in your browser. Choose the
+  account you want to track, then repeat for another subscription. Each account
+  uses its own private Codex profile, separate from your usual Codex login. Keep
+  Codex installed: it owns the credentials, renews them, and provides usage to
+  LLimit through its app-server interface. Existing imported accounts stay separate
+  until you explicitly connect them.
 - Imported or manually entered Claude tokens are not replaced with whichever
   account is currently signed in to the CLI. If one expires, reconnect that account
   or explicitly import its updated credentials.
@@ -93,6 +99,16 @@ Claude Keychain import are macOS-only. Linux Claude Code writes
   Private records in `ClaudeProfiles/RetainedProfiles/` identify these namespaces;
   they are not imported, polled, or automatically deleted. Cleanup must first
   establish that no account references the profile and no process is using it.
+- Managed Codex profiles use a separate `CODEX_HOME` under
+  `~/Library/Application Support/LLimit/CodexProfiles/`. Codex stores credentials
+  within each private profile. LLimit stores the profile reference and verified
+  account identity, without copying Codex tokens into its settings or the widget
+  store. Managed accounts are excluded from global credential imports and token
+  renewal by LLimit. Exclusive operation records prevent two processes from
+  opening the same profile. If LLimit exits during an operation whose outcome
+  cannot be verified, reconnect the account to create a new login. Removing or
+  reconnecting an account can retain an uncertain old profile, with a cleanup
+  notice; these profiles are not automatically deleted or imported.
 - Each account can have its own widget styling on macOS; on Linux the bar module
   shows every enabled account.
 
@@ -104,6 +120,7 @@ Claude Keychain import are macOS-only. Linux Claude Code writes
 - Xcode 16+ (only to build; releases run with no Xcode GUI)
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 - Claude Code installed for the optional managed Claude connection
+- Codex CLI 0.144.4 or later installed for the optional managed OpenAI connection
 
 **Linux**
 
@@ -122,7 +139,8 @@ open LLimit.xcodeproj
 1. Select your Apple Developer **signing team** for both targets (`LLimit` and
    `LLimitWidgetExtension`). The App Group is `$(TeamIdentifierPrefix)group.ch.lkmc.llimit`.
 2. Run the `LLimit` target — it lives in the menu bar (no Dock icon).
-3. Add an account (manually, via **Import**, or **Connect Claude**), then **Refresh Now**.
+3. Add an account (manually, via **Import**, **Connect Claude**, or **Connect OpenAI**),
+   then **Refresh Now**.
 4. Add the widget from the desktop / Notification Center gallery.
 
 The first time LLimit reads a Claude login from Keychain, macOS asks you to allow

@@ -26,6 +26,9 @@ public enum OpenAICredentialSync {
     among live: [[String: String]],
     expiry: (String) -> Date?
   ) -> [String: String]? {
+    // Managed accounts belong exclusively to their isolated app-server. Even a
+    // malformed marker must not make an account eligible for global imports.
+    guard !CodexAccountProfile.isManaged(stored) else { return nil }
     let storedAccountID = (stored[CredentialField.openAIAccountID] ?? "")
       .trimmingCharacters(in: .whitespacesAndNewlines)
     guard !storedAccountID.isEmpty else { return nil }

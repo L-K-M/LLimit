@@ -179,6 +179,10 @@ public extension QuotaProvider {
   }
 
   func missingCredentialLabels(in credentials: [String: String]) -> [String] {
+    if self == .openAI, CodexAccountProfile.isManaged(credentials) {
+      return CodexAccountProfile.profile(from: credentials) != nil
+        && CodexAccountProfile.identity(from: credentials) != nil ? [] : ["Reconnect OpenAI"]
+    }
     switch self {
     case .gitHubCopilot:
       let oauth = trimmedCredential(credentials[CredentialField.copilotOAuthToken])

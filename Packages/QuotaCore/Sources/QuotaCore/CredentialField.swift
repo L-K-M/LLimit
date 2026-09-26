@@ -11,6 +11,9 @@ public enum CredentialField {
   public static let openAIAccessToken = "openai.access_token"
   public static let openAIAccountID = "openai.account_id"
   public static let openAIRefreshToken = "openai.refresh_token"
+  public static let openAICodexProfileID = "openai.codex_profile_id"
+  public static let openAICodexUserID = "openai.codex_user_id"
+  public static let openAICodexEmail = "openai.codex_email"
 
   public static let zhipuAPIKey = "zhipu.api_key"
   public static let zaiAPIKey = "zai.api_key"

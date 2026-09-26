@@ -1,0 +1,103 @@
+import XCTest
+@testable import QuotaCore
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+
+final class OpenAIClientTests: XCTestCase {
+  private let now = Date(timeIntervalSince1970: 1_700_000_000)
+
+  func testManagedAccountUsesItsSourceWithoutHTTPOrCopiedTokens() async throws {
+    let http = RecordingOpenAIHTTP()
+    let source = RecordingManagedSource()
+    let client = OpenAIClient(httpClient: http, managedSource: source)
+    let credentials = CodexAccountProfile().credentials(identity: CodexAccountIdentity(accountID: "workspace", userID: "member"))
+    let configuration = config(credentials: credentials)
+    let usage = try await client.fetchUsage(configuration: configuration, now: now)
+
+    XCTAssertEqual(usage.accountID, configuration.accountID)
+    XCTAssertEqual(usage.metrics[0].remainingPercent, 72)
+    let calls = await source.configurations
+    let requests = await http.requests
+    XCTAssertEqual(calls, [configuration])
+    XCTAssertTrue(requests.isEmpty)
+  }
+
+  func testManagedFailureNeverFallsBackToHTTPWithStaleCopiedTokens() async {
+    let http = RecordingOpenAIHTTP()
+    let source = RecordingManagedSource(error: ProviderClientError(kind: .auth, message: "Reconnect OpenAI"))
+    let client = OpenAIClient(httpClient: http, managedSource: source)
+    do {
+      _ = try await client.fetchUsage(configuration: config(credentials: [
+        CredentialField.openAICodexProfileID: UUID().uuidString,
+        CredentialField.openAIAccessToken: "stale-copy"
+      ]), now: now)
+      XCTFail("Expected managed source failure")
+    } catch let error as ProviderClientError {
+      XCTAssertEqual(error.kind, .auth)
+    } catch { XCTFail("Unexpected error: \(error)") }
+    let requests = await http.requests
+    XCTAssertTrue(requests.isEmpty)
+  }
+
+  func testMissingManagedSourceFailsClosedEvenWithMalformedMarkerAndToken() async {
+    for marker in [UUID().uuidString, "", "malformed"] {
+      let http = RecordingOpenAIHTTP()
+      let client = OpenAIClient(httpClient: http)
+      do {
+        _ = try await client.fetchUsage(configuration: config(credentials: [
+          CredentialField.openAICodexProfileID: marker, CredentialField.openAIAccessToken: "stale-copy"
+        ]), now: now)
+        XCTFail("Expected missing managed source error")
+      } catch let error as ProviderClientError {
+        XCTAssertEqual(error.kind, .notConfigured)
+      } catch { XCTFail("Unexpected error: \(error)") }
+      let requests = await http.requests
+      XCTAssertTrue(requests.isEmpty)
+    }
+  }
+
+  func testManualAccountUsesHTTPAndDoesNotStartManagedSource() async throws {
+    let http = RecordingOpenAIHTTP()
+    let source = RecordingManagedSource()
+    let client = OpenAIClient(httpClient: http, managedSource: source)
+    let usage = try await client.fetchUsage(configuration: config(credentials: [
+      CredentialField.openAIAccessToken: "manual-access", CredentialField.openAIAccountID: "workspace"
+    ]), now: now)
+    XCTAssertEqual(usage.metrics[0].remainingPercent, 80)
+    let calls = await source.configurations
+    let requests = await http.requests
+    XCTAssertTrue(calls.isEmpty)
+    XCTAssertEqual(requests.count, 1)
+    XCTAssertEqual(requests[0].value(forHTTPHeaderField: "Authorization"), "Bearer manual-access")
+    XCTAssertEqual(requests[0].value(forHTTPHeaderField: "ChatGPT-Account-Id"), "workspace")
+  }
+
+  private func config(credentials: [String: String]) -> ProviderRuntimeConfiguration {
+    ProviderRuntimeConfiguration(accountID: "llimit-account", provider: .openAI, displayName: "OpenAI Work", isEnabled: true, credentials: credentials)
+  }
+}
+
+private actor RecordingManagedSource: ManagedOpenAIUsageSource {
+  private(set) var configurations: [ProviderRuntimeConfiguration] = []
+  private let error: ProviderClientError?
+
+  init(error: ProviderClientError? = nil) { self.error = error }
+
+  func fetchUsage(configuration: ProviderRuntimeConfiguration, now: Date) async throws -> ProviderUsage {
+    configurations.append(configuration)
+    if let error { throw error }
+    return ProviderUsage(accountID: configuration.accountID, provider: .openAI, title: configuration.displayName,
+      metrics: [UsageMetric(id: "primary", label: "5-hour limit", remainingPercent: 72)], fetchedAt: now)
+  }
+}
+
+private actor RecordingOpenAIHTTP: HTTPClient {
+  private(set) var requests: [URLRequest] = []
+
+  func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+    requests.append(request)
+    let body = #"{"plan_type":"plus","rate_limit":{"limit_reached":false,"primary_window":{"used_percent":20,"limit_window_seconds":18000,"reset_after_seconds":3600}}}"#
+    return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+  }
+}

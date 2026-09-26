@@ -57,3 +57,57 @@ To verify the real sign-in flow manually:
 
 These manual checks involve real accounts and are separate from the synthetic
 regression suite. The synthetic suite does not establish live OAuth compatibility.
+
+# Codex browser sign-in integration checks
+
+Run `swift test --package-path Packages/QuotaCore --filter Codex` for the isolated
+Codex transport, profile store, service, identity, and rate-limit regressions.
+`OpenAIClientTests` and `OpenAICredentialSyncTests` additionally cover routing and
+keeping managed accounts out of global token adoption and renewal. The complete
+QuotaCore suite runs these checks on macOS and Linux; the account-management UI
+is macOS-only.
+
+The transport tests launch temporary shell fixtures, not Codex. They verify the
+initialize/initialized handshake, literal arguments, isolated environment and
+working directory, interleaved notifications, concurrent responses, sanitized
+errors, bounded message queues, cancellation, late replies after timeout, and
+closing a pipe when the child has already exited. A timed-out operation must stay
+tracked until its reply or process exit. The service tests exercise separate
+profiles, identity checks around renewal, failed/canceled login, and durable
+operation markers. Store tests cover private permissions, exclusive ownership,
+symlink rejection, and refusal to delete an uncertain profile. These tests never
+open a browser, contact OpenAI, or use real credentials.
+
+A separate no-authentication smoke check on September 26, 2026 used the installed
+Homebrew Codex 0.144.4 executable with a fresh temporary `CODEX_HOME`, file-backed
+credential storage, and the ChatGPT-only login override. The official app-server
+accepted initialize/initialized and `account/read` with `refreshToken: false`,
+reported a null account, and exited with status 0 after stdin closed. This checks
+protocol compatibility and that the normal Codex login was not inherited. It did
+not start sign-in, read quota, or verify OAuth renewal.
+
+To verify the real flow manually:
+
+1. In Settings, add OpenAI and choose **Connect OpenAI**. Complete browser sign-in
+   and confirm the intended email, account, and usage appear. Repeat with a second
+   account and confirm your ordinary Codex CLI login is unchanged.
+2. Cancel once while Codex is starting and once while browser sign-in is open.
+   Confirm an existing account keeps its previous connection. Try a different
+   identity during reconnect and a duplicate identity in a second row; both must
+   be rejected without replacing either saved connection.
+3. Refresh after the managed login needs renewal. Confirm the official Codex
+   process updates only that account's private profile, while LLimit settings
+   contain profile/identity metadata and no copied access or refresh token.
+4. Disable one account, refresh all accounts, and confirm the disabled profile is
+   not launched or changed. Re-enable it and confirm usage can refresh normally.
+5. Interrupt a controlled fixture during renewal, then restart LLimit. Its durable
+   pending marker must prevent reopening or deleting the uncertain profile. A
+   reconnect uses a fresh profile; account removal may detach the old login with
+   an explicit cleanup notice. Do not clear a marker merely because it is old or
+   the original app process is no longer running.
+6. Make the CLI unavailable or simulate a failed request. Confirm the last good
+   usage stays visible with an error. A failed snapshot save after sign-in must
+   retain fresh in-memory usage and show a local-storage warning.
+
+Live browser sign-in, multiple real accounts, and expiry-driven renewal have not
+been verified by the synthetic suite or the no-authentication smoke check.

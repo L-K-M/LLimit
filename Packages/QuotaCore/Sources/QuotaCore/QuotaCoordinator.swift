@@ -7,11 +7,12 @@ public struct QuotaCoordinator: Sendable {
     self.clientsByProvider = Dictionary(uniqueKeysWithValues: clients.map { ($0.provider, $0) })
   }
 
-  public static func live(httpClient: any HTTPClient = URLSessionHTTPClient()) -> QuotaCoordinator {
+  public static func live(httpClient: any HTTPClient = URLSessionHTTPClient(),
+                          managedOpenAI: (any ManagedOpenAIUsageSource)? = nil) -> QuotaCoordinator {
     QuotaCoordinator(
       clients: [
         AnthropicClient(httpClient: httpClient),
-        OpenAIClient(httpClient: httpClient),
+        OpenAIClient(httpClient: httpClient, managedSource: managedOpenAI),
         ZhipuQuotaClient(
           provider: .zhipu,
           endpoint: URL(string: "https://bigmodel.cn/api/monitor/usage/quota/limit")!,

@@ -385,7 +385,7 @@ public final class QuotaDaemon {
   private func refreshExpiringChatGPTTokens() async -> Bool {
     // Only enabled accounts: refreshing a disabled account would keep rotating the
     // shared Codex refresh token and log the user's Codex CLI out.
-    let openAIAccountIDs = settings.accounts.filter { $0.provider == .openAI && $0.isEnabled }.map(\.id)
+    let openAIAccountIDs = settings.accounts.filter { $0.provider == .openAI && $0.isEnabled && !CodexAccountProfile.isManaged($0.credentials) }.map(\.id)
     guard !openAIAccountIDs.isEmpty else { return false }
 
     var didChange = adoptLiveOpenAITokens(forAccountIDs: openAIAccountIDs)
@@ -433,9 +433,12 @@ public final class QuotaDaemon {
   /// re-reads the live Codex file and adopts its token as a last resort.
   @discardableResult
   private func refreshOpenAIAccount(id accountID: String, refreshToken: String) async -> Bool {
+    guard let previous = settings.accounts.first(where: { $0.id == accountID })?.credentials,
+          !CodexAccountProfile.isManaged(previous) else { return false }
     do {
       let result = try await ChatGPTOAuth.refresh(refreshToken: refreshToken)
-      guard let index = settings.accounts.firstIndex(where: { $0.id == accountID }) else { return false }
+      guard let index = settings.accounts.firstIndex(where: { $0.id == accountID }),
+            settings.accounts[index].credentials == previous else { return false }
       settings.accounts[index].credentials[CredentialField.openAIAccessToken] = result.accessToken
       if let newRefresh = result.refreshToken {
         settings.accounts[index].credentials[CredentialField.openAIRefreshToken] = newRefresh
@@ -467,7 +470,8 @@ public final class QuotaDaemon {
       guard
         let index = settings.accounts.firstIndex(where: { $0.id == accountID }),
         settings.accounts[index].provider == .openAI,
-        settings.accounts[index].isEnabled
+        settings.accounts[index].isEnabled,
+        !CodexAccountProfile.isManaged(settings.accounts[index].credentials)
       else { continue }
 
       if adoptLiveOpenAITokens(forAccountIDs: [accountID]) {

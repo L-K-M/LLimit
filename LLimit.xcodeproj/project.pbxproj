@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		CDACCF16212E46E899C75F01 /* CodexLoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDACCF16212E46E899C75F02 /* CodexLoginView.swift */; };
 		90D9D53D985F3F47F8B0E80E /* ClaudeProfileService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B3F60D8AF12A17811395014 /* ClaudeProfileService.swift */; };
 		2D98F2F1CE89C1FB3DFE15BF /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = EE6A1797238B5E85DDF52167 /* SwiftTerm */; };
 		6DB81FD14DEEF4F20D7D09DA /* ClaudeTerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F28142772B4697E21774DC0 /* ClaudeTerminalView.swift */; };
@@ -55,6 +56,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		CDACCF16212E46E899C75F02 /* CodexLoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexLoginView.swift; sourceTree = "<group>"; };
 		6B3F60D8AF12A17811395014 /* ClaudeProfileService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeProfileService.swift; sourceTree = "<group>"; };
 		0F28142772B4697E21774DC0 /* ClaudeTerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeTerminalView.swift; sourceTree = "<group>"; };
 		C70211A98D88A5AEA8688233 /* ClaudeTerminalSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeTerminalSession.swift; sourceTree = "<group>"; };
@@ -129,6 +131,7 @@
 			isa = PBXGroup;
 			children = (
 				0F28142772B4697E21774DC0 /* ClaudeTerminalView.swift */,
+				CDACCF16212E46E899C75F02 /* CodexLoginView.swift */,
 				660DB1B9EAE3B8BCD47F312A /* SettingsView.swift */,
 			);
 			path = Views;
@@ -308,6 +311,7 @@
 				3A11C01DE4B02FBA9D01AA02 /* LimitKindColorScheme.swift in Sources */,
 				FC1C8D8802949AC17AA24E39 /* RefreshService.swift in Sources */,
 				6DB81FD14DEEF4F20D7D09DA /* ClaudeTerminalView.swift in Sources */,
+				CDACCF16212E46E899C75F01 /* CodexLoginView.swift in Sources */,
 				90D9D53D985F3F47F8B0E80E /* ClaudeProfileService.swift in Sources */,
 				77317877EF8EEB273F9978B7 /* ClaudeTerminalSession.swift in Sources */,
 				7B4652AC8FCA0CBC5B22B5B9 /* SettingsView.swift in Sources */,
@@ -335,7 +339,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 24;
+				CURRENT_PROJECT_VERSION = 25;
 				DEVELOPMENT_TEAM = 293A48LC7B;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LLimitApp/Info.plist;
@@ -480,7 +484,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 24;
+				CURRENT_PROJECT_VERSION = 25;
 				DEVELOPMENT_TEAM = 293A48LC7B;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LLimitApp/Info.plist;
@@ -505,7 +509,7 @@
 				CODE_SIGN_ENTITLEMENTS = LLimitWidgetExtension/LLimitWidgetExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 24;
+				CURRENT_PROJECT_VERSION = 25;
 				DEVELOPMENT_TEAM = 293A48LC7B;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LLimitWidgetExtension/Info.plist;
@@ -531,7 +535,7 @@
 				CODE_SIGN_ENTITLEMENTS = LLimitWidgetExtension/LLimitWidgetExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 24;
+				CURRENT_PROJECT_VERSION = 25;
 				DEVELOPMENT_TEAM = 293A48LC7B;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LLimitWidgetExtension/Info.plist;
