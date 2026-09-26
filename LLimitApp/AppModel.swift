@@ -354,36 +354,45 @@ final class AppModel: ObservableObject {
   }
 
   func removeProviderAccount(accountID: String) {
-    guard !isRefreshing, !claudeAccountIsBusy(accountID) else { return }
-    let removedAccount = providerAccounts.first { $0.id == accountID }
-    if let removedAccount, ClaudeCodeProfile.isRemovalBlocked(for: removedAccount.credentials) {
-      // A renewal from an earlier app instance may still be rotating this grant.
-      // Its auth-login command does not hold the CLI's automatic-refresh locks.
-      claudeAccountMessages[accountID] = "Renewal is not verified yet. Refresh to check it, or reconnect before removing this account."
+    guard !isRefreshing, !claudeAccountIsBusy(accountID),
+          let removedAccount = account(withID: accountID) else { return }
+    var updated = currentSettings()
+    updated.accounts.removeAll { $0.id == accountID }
+    updated.providerStyleSettings.removeAll { $0.accountID == accountID }
+    updated.providerTileSlots = updated.providerTileSlots.map { $0 == accountID ? "" : $0 }
+    let outcome: ClaudeCodeProfileRetirement.Outcome
+    do {
+      guard !configurationLoadFailed else { throw ClaudeProfileService.Failure.settingsUnavailable }
+      let profile = ClaudeCodeProfile.profile(from: removedAccount.credentials)
+      outcome = try ClaudeCodeProfileRetirement.commit(
+        stored: removedAccount.credentials,
+        refreshLocked: profile.map { claudeProfiles.isRefreshLocked($0) } ?? false,
+        retain: { try claudeProfiles.retain($0) },
+        commitAccountChange: { try settingsStore.save(updated) },
+        deleteProfile: { try claudeProfiles.remove($0) })
+    } catch {
+      let message = "Could not remove this account safely. Check LLimit’s storage permissions and try again."
+      claudeAccountMessages[accountID] = message
+      statusMessage = message
       reloadAccountStatuses()
       return
-    }
-    if let profile = removedAccount.flatMap({ ClaudeCodeProfile.profile(from: $0.credentials) }) {
-      do { try claudeProfiles.remove(profile) }
-      catch {
-        claudeAccountMessages[accountID] = "Could not remove this Claude profile. Close its terminal and unlock Keychain, then try again."
-        reloadAccountStatuses()
-        return
-      }
     }
     claudeSessions[accountID] = nil
     claudeAccountMessages[accountID] = nil
     claudeCredentialFailures.remove(accountID)
     claudeUsageReceipts[accountID] = nil
-    providerAccounts.removeAll { $0.id == accountID }
+    providerAccounts = updated.accounts
     providerStyleSettings.removeValue(forKey: accountID)
     // Deleting the account is an explicit choice, so its tile slots fall back to
     // automatic (visibly badged on the tile) instead of a dead "reassign" state.
-    providerTileSlots = providerTileSlots.map { $0 == accountID ? "" : $0 }
+    providerTileSlots = updated.providerTileSlots
     reconcileSnapshotWithCurrentAccounts()
     purgeHistory(for: removedAccount)
     reloadAccountStatuses()
-    saveConfiguration(showSuccessMessage: true)
+    if syncSettingsToWidgetStore(updated.redactedCredentials()) { reloadWidgetTimelines() }
+    statusMessage = outcome == .retained
+      ? "Account removed. Local Claude login cleanup is pending; credentials may still be stored on this Mac."
+      : "Account removed."
   }
 
   // MARK: - Detect & import (convenience)
@@ -657,6 +666,13 @@ final class AppModel: ObservableObject {
     return true
   }
 
+  func claudeRemovalRetainsLogin(_ accountID: String) -> Bool {
+    guard let account = account(withID: accountID),
+          let profile = ClaudeCodeProfile.profile(from: account.credentials) else { return false }
+    return account.credentials[CredentialField.anthropicRenewalPending] != nil
+      || claudeProfiles.isRefreshLocked(profile)
+  }
+
   func dismissClaudeTerminal() {
     if let session = claudeTerminalSession, case .exited = session.state {
       claudeSessions = claudeSessions.filter { $0.value.id != session.id }
@@ -717,16 +733,17 @@ final class AppModel: ObservableObject {
       let credentials = try ClaudeCodeProfile.loginCredentials(
         for: account.credentials, credentials: login.credentials, identity: login.identity,
         profileID: profile.id, existingIdentities: otherIdentities)
-      try persistClaudeCredentials(credentials, accountID: accountID)
-      if let previous = ClaudeCodeProfile.profile(from: account.credentials) {
-        // A persisted pending marker can belong to a still-running orphan child.
-        // Keep that old namespace intact; it is never reused by the new login.
-        if account.credentials[CredentialField.anthropicRenewalPending] == nil {
-          try? claudeProfiles.remove(previous)
-        }
-      }
+      let previous = ClaudeCodeProfile.profile(from: account.credentials)
+      let retired = try ClaudeCodeProfileRetirement.commit(
+        stored: account.credentials,
+        refreshLocked: previous.map { claudeProfiles.isRefreshLocked($0) } ?? false,
+        retain: { try claudeProfiles.retain($0) },
+        commitAccountChange: { try persistClaudeCredentials(credentials, accountID: accountID) },
+        deleteProfile: { try claudeProfiles.remove($0) })
       claudeCredentialFailures.remove(accountID)
-      claudeAccountMessages[accountID] = "Connected. Credentials renew automatically."
+      claudeAccountMessages[accountID] = retired == .retained
+        ? "Connected. Previous login cleanup is pending; its credentials may still be stored on this Mac."
+        : "Connected. Credentials renew automatically."
       reloadAccountStatuses()
       let completedAt = Date()
       Task { await refreshClaudeAccountAfterCurrentCycle(accountID, requestedAt: completedAt) }
@@ -799,8 +816,9 @@ final class AppModel: ObservableObject {
           guard let self else { throw ClaudeProfileService.Failure.settingsUnavailable }
           return try await self.renewClaudeAccount(id: id, profile: profile, material: material)
         })
-      claudeAccountMessages[id] = nil
-      claudeCredentialFailures.remove(id)
+      // A credential check resolves credential errors, not action notices such
+      // as a previous login whose cleanup is still pending after reconnect.
+      if claudeCredentialFailures.remove(id) != nil { claudeAccountMessages[id] = nil }
       reloadAccountStatuses()
       return nil
     } catch {
@@ -829,11 +847,15 @@ final class AppModel: ObservableObject {
       // Keep observing a slow child without killing it or replaying its grant.
       Task { [weak self, claudeProcess] in
         while case .running = await claudeProcess.status(id: operation) {
-          try? await Task.sleep(for: .seconds(2))
+          do { try await Task.sleep(for: .seconds(2)) }
+          catch { return }
         }
         guard let self, self.claudeRenewals[id] == operation else { return }
         self.claudeRenewals[id] = nil
-        while self.isRefreshing { try? await Task.sleep(for: .seconds(1)) }
+        while self.isRefreshing {
+          do { try await Task.sleep(for: .seconds(1)) }
+          catch { return }
+        }
         // A concurrent manual refresh may already have adopted and fetched it.
         guard self.account(withID: id)?.credentials[CredentialField.anthropicRenewalPending] != nil else { return }
         await self.refreshClaudeAccountAfterCurrentCycle(id, requestedAt: Date())

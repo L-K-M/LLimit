@@ -13,6 +13,10 @@ The harness opens two fake CLI sessions in separate temporary profiles. It check
 the actual PTY, command arguments, filtered environment, working directory,
 independent credential files, Unicode keyboard input, completion callbacks,
 process exit codes, cancellation, and hiding a terminal without terminating login.
+It also runs the production profile-retention service with an injected temporary
+root: separate records must have private permissions, contain no credentials,
+preserve profile files, and reject symbolic-link markers without modifying their
+targets.
 It never launches Claude Code, accesses Keychain, or uses real credentials.
 
 Run `swift test --package-path Packages/QuotaCore` for the renewal sequence,
@@ -39,10 +43,14 @@ To verify the real sign-in flow manually:
    successful result. An earlier result from an imported token or another profile
    must not suppress the new profile's first fetch. The core receipt tests cover
    profile isolation and the login-completion time boundary.
-8. If LLimit exits during renewal, relaunch it and try removing the account before
-   renewal is verified. Removal must preserve the profile and explain that you
-   need to refresh or reconnect first. A missing CLI lock is not proof that its
-   renewal process has exited. The core removal-policy test covers this state.
+8. If LLimit exits during renewal, relaunch it and remove the account before
+   renewal is verified, including while offline or without Claude Code installed.
+   The account and cached token must leave settings; its CLI profile and Keychain
+   item must remain intact, with a private `RetainedProfiles/<profile UUID>.json`
+   record. Confirm the UI reports pending login cleanup. A missing or old CLI lock
+   is not proof that renewal exited. Repeat with a settings-save failure: the
+   account must remain and its profile must not be deleted. Core retirement tests
+   cover callback ordering and failures; the host harness checks private records.
 9. With a controlled snapshot-store write failure, complete a login and confirm
    fresh usage remains visible alongside a local-save warning. Do not re-poll
    Claude just to retry local persistence.

@@ -131,12 +131,6 @@ public struct ClaudeCodeProfile: Equatable, Sendable {
     return ClaudeCodeProfile(id: id)
   }
 
-  /// An unresolved renewal may still be writing credentials in another process.
-  /// Removing its profile would race that write and discard the recovery state.
-  public static func isRemovalBlocked(for stored: [String: String]) -> Bool {
-    profile(from: stored) != nil && stored[CredentialField.anthropicRenewalPending] != nil
-  }
-
   public static func identity(from stored: [String: String]) -> ClaudeCodeIdentity? {
     guard let accountID = uuid(stored[CredentialField.anthropicAccountID]),
           let organizationID = uuid(stored[CredentialField.anthropicOrganizationID])

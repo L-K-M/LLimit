@@ -32,32 +32,4 @@ final class ClaudeCodeUsageReceiptTests: XCTestCase {
     XCTAssertFalse(first.satisfies(profileID: secondProfile, since: completedAt))
     XCTAssertFalse(second.satisfies(profileID: firstProfile, since: completedAt))
   }
-
-  func testUnresolvedManagedRenewalBlocksRemovalUntilAdoptionClearsMarker() throws {
-    let identity = ClaudeCodeIdentity(accountID: firstProfile, organizationID: secondProfile)
-    var pending = ClaudeCodeProfile.storedCredentials(
-      token: ClaudeCodeCredentials(accessToken: "old", expiresAt: completedAt.addingTimeInterval(-1)),
-      identity: identity, profileID: firstProfile)
-    pending[CredentialField.anthropicRenewalPending] = "true"
-    XCTAssertTrue(ClaudeCodeProfile.isRemovalBlocked(for: pending))
-
-    let adopted = try XCTUnwrap(ClaudeCodeProfile.adoption(
-      for: pending,
-      credentials: ClaudeCodeCredentials(accessToken: "new", expiresAt: completedAt.addingTimeInterval(3600)),
-      identity: identity, profileID: firstProfile, now: completedAt))
-    XCTAssertFalse(ClaudeCodeProfile.isRemovalBlocked(for: adopted))
-  }
-
-  func testManagedProfileWithoutPendingMarkerAndManualTokenDoNotBlockRemoval() {
-    let identity = ClaudeCodeIdentity(accountID: firstProfile, organizationID: secondProfile)
-    let managed = ClaudeCodeProfile.storedCredentials(
-      token: ClaudeCodeCredentials(accessToken: "token", expiresAt: completedAt),
-      identity: identity, profileID: firstProfile)
-    XCTAssertFalse(ClaudeCodeProfile.isRemovalBlocked(for: managed))
-    XCTAssertFalse(ClaudeCodeProfile.isRemovalBlocked(for: [CredentialField.anthropicAccessToken: "manual"]))
-    // A stray marker cannot turn a manual token into a managed profile.
-    XCTAssertFalse(ClaudeCodeProfile.isRemovalBlocked(for: [
-      CredentialField.anthropicAccessToken: "manual", CredentialField.anthropicRenewalPending: "true"
-    ]))
-  }
 }

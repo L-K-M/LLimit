@@ -5,7 +5,7 @@ struct RefreshService {
   let coordinator: QuotaCoordinator
   let snapshotStore: SnapshotStore
 
-  func refresh(configurations: [ProviderRuntimeConfiguration], credentialFailures: [ProviderFailure] = []) async throws -> QuotaSnapshot {
+  func refresh(configurations: [ProviderRuntimeConfiguration], credentialFailures: [ProviderFailure]) async throws -> QuotaSnapshot {
     // Read the previous snapshot before overwriting it so accounts that fail this cycle
     // can keep showing their last-known usage instead of vanishing from the widgets.
     let previous = try? snapshotStore.load()

@@ -90,7 +90,8 @@ struct ClaudeTerminalTests {
         cancelled.interrupt()
         waitForExit(cancelled, label: "cancellation")
         precondition(cancelled.state == .exited(130), "Control-C did not cancel the child")
-        print("Claude terminal integration checks passed: independent profiles, isolated environment, argv, PTY, Unicode input, hidden-session lifetime, exits, and cancellation.")
+        try verifyRetainedProfiles(under: fixture)
+        print("Claude integration checks passed: independent profiles, isolated environment, argv, PTY, Unicode input, hidden-session lifetime, exits, cancellation, and private retention records.")
     }
 
     @MainActor private static func session(
@@ -116,6 +117,79 @@ struct ClaudeTerminalTests {
             preconditionFailure("Fake CLI did not persist a readable credential bundle")
         }
         return credentials
+    }
+
+    private static func verifyRetainedProfiles(under fixture: URL) throws {
+        let files = FileManager.default
+        let root = fixture.appendingPathComponent("retention fixtures", isDirectory: true)
+        try files.createDirectory(at: root, withIntermediateDirectories: true)
+        let service = ClaudeProfileService(root: root)
+        let profiles = [ClaudeCodeProfile(), ClaudeCodeProfile()]
+        var originals: [URL: Data] = [:]
+        for (index, profile) in profiles.enumerated() {
+            let directory = profile.directory(under: root)
+            try files.createDirectory(at: directory, withIntermediateDirectories: true)
+            let credentialFile = directory.appendingPathComponent(".credentials.json")
+            let sentinel = Data("{\"accessToken\":\"fixture-access-\(index)\",\"refreshToken\":\"fixture-refresh-\(index)\"}".utf8)
+            try sentinel.write(to: credentialFile)
+            originals[credentialFile] = sentinel
+            try service.retain(profile)
+        }
+
+        let records = root.appendingPathComponent("RetainedProfiles", isDirectory: true)
+        let directoryPermissions = try files.attributesOfItem(atPath: records.path)[.posixPermissions] as? NSNumber
+        precondition(directoryPermissions?.intValue == 0o700, "Retention records directory is not private")
+        var recordedIDs: Set<String> = []
+        for profile in profiles {
+            let marker = records.appendingPathComponent(profile.id.uuidString.lowercased() + ".json")
+            let data = try Data(contentsOf: marker)
+            let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            precondition(Set(object?.keys.map { $0 } ?? []) == ["version", "profile_id", "recorded_at"],
+                         "Retention record contains unexpected fields")
+            precondition(object?["version"] as? Int == 1)
+            precondition(object?["profile_id"] as? String == profile.id.uuidString.lowercased())
+            precondition(ISO8601DateFormatter().date(from: object?["recorded_at"] as? String ?? "") != nil)
+            recordedIDs.insert(object?["profile_id"] as? String ?? "")
+            let markerPermissions = try files.attributesOfItem(atPath: marker.path)[.posixPermissions] as? NSNumber
+            precondition(markerPermissions?.intValue == 0o600, "Retention record is not private")
+            let text = String(decoding: data, as: UTF8.self)
+            precondition(!text.contains("fixture-access-") && !text.contains("fixture-refresh-"),
+                         "Retention record contains credential values")
+            precondition(!files.fileExists(atPath: profile.directory(under: root).appendingPathComponent(".llimit-retained.json").path),
+                         "Retention marker was written inside a potentially active profile")
+        }
+        precondition(recordedIDs.count == 2, "Retaining one profile overwrote another profile's marker")
+        try service.retain(profiles[0])
+        let recordNames = try files.contentsOfDirectory(atPath: records.path)
+        precondition(recordNames.count == 2,
+                     "Retaining a profile twice created a duplicate marker")
+        for (url, original) in originals {
+            let current = try Data(contentsOf: url)
+            precondition(current == original, "Retention changed a profile's credential file")
+        }
+
+        let unsafeProfile = ClaudeCodeProfile()
+        let target = fixture.appendingPathComponent("retention-symlink-target.json")
+        let sentinel = Data("do not change this file".utf8)
+        try sentinel.write(to: target)
+        try files.setAttributes([.posixPermissions: 0o640], ofItemAtPath: target.path)
+        let unsafeMarker = records.appendingPathComponent(unsafeProfile.id.uuidString.lowercased() + ".json")
+        try files.createSymbolicLink(at: unsafeMarker, withDestinationURL: target)
+        var rejected = false
+        do {
+            try service.retain(unsafeProfile)
+        } catch ClaudeProfileService.Failure.unsafeDirectory {
+            rejected = true
+        }
+        precondition(rejected, "Retention accepted a symbolic-link marker")
+        let targetContents = try Data(contentsOf: target)
+        precondition(targetContents == sentinel, "Retention overwrote a symbolic-link target")
+        let targetPermissions = try files.attributesOfItem(atPath: target.path)[.posixPermissions] as? NSNumber
+        precondition(targetPermissions?.intValue == 0o640, "Retention changed symbolic-link target permissions")
+        let markerType = try files.attributesOfItem(atPath: unsafeMarker.path)[.type] as? FileAttributeType
+        precondition(markerType == .typeSymbolicLink, "Retention replaced a symbolic-link marker")
+        precondition(!files.fileExists(atPath: unsafeProfile.directory(under: root).path),
+                     "Retention unexpectedly created a profile directory")
     }
 
     private static let fakeCLI = #"""

@@ -87,9 +87,12 @@ Claude Keychain import are macOS-only. Linux Claude Code writes
   with private directory permissions. Their refresh tokens remain in Claude Code's
   profile-specific Keychain or credential file. LLimit stores an access-token cache
   and account identity, and never stores Claude refresh tokens in its settings.
-  An interrupted renewal must be verified by refreshing or reconnecting before
-  removing the account. Reconnecting preserves an uncertain old profile rather
-  than deleting credentials that a surviving Claude Code process may still use.
+  Removing an account always removes its cached token from LLimit's settings.
+  If renewal or cleanup is uncertain, LLimit keeps the local Claude login and
+  reports that cleanup is pending. Reconnecting can also retain the previous login.
+  Private records in `ClaudeProfiles/RetainedProfiles/` identify these namespaces;
+  they are not imported, polled, or automatically deleted. Cleanup must first
+  establish that no account references the profile and no process is using it.
 - Each account can have its own widget styling on macOS; on Linux the bar module
   shows every enabled account.
 

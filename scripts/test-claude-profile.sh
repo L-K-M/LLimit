@@ -40,6 +40,7 @@ fi
 xcrun swiftc -parse-as-library -swift-version 5 \
   -target "$(uname -m)-apple-macos14.0" -I "$products" \
   "$repo_root/LLimitApp/Services/ClaudeTerminalSession.swift" \
+  "$repo_root/LLimitApp/Services/ClaudeProfileService.swift" \
   "$repo_root/scripts/tests/ClaudeTerminalTests.swift" \
   "$products/SwiftTerm.o" "$products/QuotaCore.o" \
   -o "$build_dir/claude-terminal-tests"

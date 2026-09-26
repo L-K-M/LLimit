@@ -909,6 +909,11 @@ struct SettingsView: View {
               .disabled(model.isRefreshing || model.claudeAccountIsBusy(accountID))
             }
           }
+          if model.claudeRemovalRetainsLogin(accountID) {
+            Text("Removing this account will keep its local Claude login because renewal may still be running. LLimit will stop tracking the account.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(24)
