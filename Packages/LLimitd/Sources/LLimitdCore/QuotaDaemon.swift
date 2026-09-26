@@ -14,7 +14,8 @@ import QuotaCore
 ///  - OpenAI/ChatGPT token hygiene: adopt Codex's live on-disk tokens, refresh expired
 ///    ones, and reactively recover accounts that failed auth this cycle, then re-fetch
 ///    only those accounts;
-///  - Claude token adoption: re-read Claude Code's live local token before refreshing;
+///  - Claude accounts use their saved credentials; the current CLI login must never
+///    replace another account's token;
 ///  - account removal purges that account's history and reconciles the snapshot.
 ///
 /// Fetch errors never propagate out of `refreshNow()` — provider APIs are undocumented
@@ -256,8 +257,7 @@ public final class QuotaDaemon {
   /// which re-reads the file under the lock and merges instead of overwriting.
   public func refreshNow() async {
     let openAITokensChanged = await refreshExpiringChatGPTTokens()
-    let claudeTokensChanged = refreshLiveClaudeTokens()
-    if openAITokensChanged || claudeTokensChanged {
+    if openAITokensChanged {
       // Persist promptly: OpenAI rotates refresh tokens, so the stored grant is
       // dead the moment a refresh succeeds — losing this save can orphan the
       // account on machines without a live Codex file to re-adopt from.
@@ -482,40 +482,6 @@ public final class QuotaDaemon {
     }
 
     return recovered
-  }
-
-  /// Claude Code refreshes its own OAuth token (in `~/.claude/.credentials.json`)
-  /// roughly every 8 hours; LLimit's imported copy goes stale and 401s within hours.
-  /// Re-read the live local token before refreshing and adopt it for enabled Claude
-  /// accounts. Only accounts whose stored token is empty or is itself a Claude Code
-  /// OAuth token (`sk-ant-oat…`) are updated, so a hand-entered token is never
-  /// clobbered. On Linux there is no Keychain fallback — the file is the source.
-  /// Returns whether any credentials changed (in memory; the caller saves via
-  /// `mergeAndSaveSettings()`).
-  private func refreshLiveClaudeTokens() -> Bool {
-    let claudeAccountIDs = settings.accounts
-      .filter { $0.provider == .anthropic && $0.isEnabled }
-      .map(\.id)
-    guard !claudeAccountIDs.isEmpty else { return false }
-
-    guard let liveToken = makeDiscovery().discover().credentials
-      .first(where: { $0.provider == .anthropic })?
-      .credentials[CredentialField.anthropicAccessToken],
-      !liveToken.isEmpty
-    else { return false }
-
-    var didChange = false
-    for accountID in claudeAccountIDs {
-      guard let index = settings.accounts.firstIndex(where: { $0.id == accountID }) else { continue }
-      let stored = settings.accounts[index].credentials[CredentialField.anthropicAccessToken] ?? ""
-      let isClaudeCodeToken = stored.isEmpty || stored.hasPrefix("sk-ant-oat")
-      if isClaudeCodeToken, stored != liveToken {
-        settings.accounts[index].credentials[CredentialField.anthropicAccessToken] = liveToken
-        didChange = true
-      }
-    }
-
-    return didChange
   }
 
   // MARK: - Internals

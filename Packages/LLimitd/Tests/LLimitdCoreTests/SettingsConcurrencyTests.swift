@@ -32,12 +32,23 @@ final class SettingsConcurrencyTests: XCTestCase {
     )
   }
 
-  /// Writes a Claude Code credentials file the daemon will adopt (T0 -> T1).
-  private func plantLiveClaudeToken(_ token: String) throws {
-    let claudeDir = tempDirectory.appendingPathComponent(".claude", isDirectory: true)
-    try FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
-    try "{\"claudeAiOauth\":{\"accessToken\":\"\(token)\"}}"
-      .write(to: claudeDir.appendingPathComponent(".credentials.json"), atomically: true, encoding: .utf8)
+  /// Writes a newer Codex token with the same verified account identity.
+  private func plantLiveOpenAIToken(_ token: String) throws {
+    let codexDirectory = tempDirectory.appendingPathComponent(".codex", isDirectory: true)
+    try FileManager.default.createDirectory(at: codexDirectory, withIntermediateDirectories: true)
+    let data = try JSONSerialization.data(withJSONObject: [
+      "tokens": ["access_token": token, "account_id": "account-under-test"]
+    ])
+    try data.write(to: codexDirectory.appendingPathComponent("auth.json"), options: .atomic)
+  }
+
+  private func openAIToken(expiresAt: Int) throws -> String {
+    let data = try JSONSerialization.data(withJSONObject: ["exp": expiresAt])
+    let payload = data.base64EncodedString()
+      .replacingOccurrences(of: "+", with: "-")
+      .replacingOccurrences(of: "/", with: "_")
+      .replacingOccurrences(of: "=", with: "")
+    return "e30.\(payload).test-signature"
   }
 
   /// A CLI-style edit from a second process: lock, reload, mutate, save.
@@ -60,15 +71,20 @@ final class SettingsConcurrencyTests: XCTestCase {
   /// never across the fetch. A CLI edit during an in-flight fetch must complete
   /// immediately AND survive the daemon's token-adoption save.
   func testCLIEditDuringInFlightFetchIsNeitherBlockedNorClobbered() async throws {
-    try plantLiveClaudeToken("sk-ant-oat-T1")
+    let originalToken = try openAIToken(expiresAt: 4_070_908_800)
+    let renewedToken = try openAIToken(expiresAt: 4_102_444_800)
+    try plantLiveOpenAIToken(renewedToken)
 
     let gate = FetchGate()
     let daemon = makeDaemon(coordinator: QuotaCoordinator(clients: [
-      GatedClient(provider: .anthropic, gate: gate)
+      GatedClient(provider: .openAI, gate: gate)
     ]))
     daemon.addAccount(
-      provider: .anthropic,
-      credentials: [CredentialField.anthropicAccessToken: "sk-ant-oat-T0"]
+      provider: .openAI,
+      credentials: [
+        CredentialField.openAIAccessToken: originalToken,
+        CredentialField.openAIAccountID: "account-under-test"
+      ]
     )
 
     let cycle = Task { await daemon.refreshCycle(bootstrap: false) }
@@ -97,8 +113,8 @@ final class SettingsConcurrencyTests: XCTestCase {
     let midFetch = try onDiskSettings()
     XCTAssertTrue(midFetch.accounts.contains { $0.provider == .kimi }, "CLI account missing mid-fetch")
     XCTAssertEqual(
-      midFetch.accounts.first { $0.provider == .anthropic }?.credentials[CredentialField.anthropicAccessToken],
-      "sk-ant-oat-T1"
+      midFetch.accounts.first { $0.provider == .openAI }?.credentials[CredentialField.openAIAccessToken],
+      renewedToken
     )
 
     await gate.release()
@@ -110,8 +126,8 @@ final class SettingsConcurrencyTests: XCTestCase {
     let final = try onDiskSettings()
     XCTAssertTrue(final.accounts.contains { $0.provider == .kimi }, "CLI edit was clobbered by the daemon's save")
     XCTAssertEqual(
-      final.accounts.first { $0.provider == .anthropic }?.credentials[CredentialField.anthropicAccessToken],
-      "sk-ant-oat-T1"
+      final.accounts.first { $0.provider == .openAI }?.credentials[CredentialField.openAIAccessToken],
+      renewedToken
     )
     XCTAssertNotNil(daemon.snapshot)
   }

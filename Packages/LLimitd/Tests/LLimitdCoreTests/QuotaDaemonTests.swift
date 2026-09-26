@@ -31,6 +31,57 @@ final class QuotaDaemonTests: XCTestCase {
     return daemon
   }
 
+  // MARK: - Claude account isolation
+
+  func testRefreshKeepsClaudeAccountsSeparateFromGlobalCLILogin() async throws {
+    let claudeDirectory = tempDirectory.appendingPathComponent(".claude", isDirectory: true)
+    try FileManager.default.createDirectory(at: claudeDirectory, withIntermediateDirectories: true)
+    try Data(#"{"claudeAiOauth":{"accessToken":"sk-ant-oat-global"}}"#.utf8)
+      .write(to: claudeDirectory.appendingPathComponent(".credentials.json"))
+
+    let daemon = makeDaemon(coordinator: QuotaCoordinator(clients: [ClaudeAccountClient()]))
+    let imported = daemon.importAccount(from: DiscoveredCredential(
+      stableID: "anthropic:previous-login",
+      provider: .anthropic,
+      suggestedName: "Personal Claude",
+      sourceLabel: "Previously imported login",
+      credentials: [CredentialField.anthropicAccessToken: "sk-ant-oat-personal"]
+    ))
+    let manual = daemon.addAccount(
+      provider: .anthropic,
+      displayName: "Work Claude",
+      credentials: [CredentialField.anthropicAccessToken: "sk-ant-oat-work"]
+    )
+    let managed = daemon.addAccount(
+      provider: .anthropic,
+      displayName: "Profile Claude",
+      credentials: [
+        CredentialField.anthropicAccessToken: "sk-ant-oat-profile",
+        CredentialField.anthropicProfileID: UUID().uuidString,
+        CredentialField.anthropicCredentialSource: ClaudeCodeCredentialSource.managedProfile.rawValue
+      ]
+    )
+    let disabled = daemon.addAccount(
+      provider: .anthropic,
+      credentials: [CredentialField.anthropicAccessToken: "sk-ant-oat-disabled"]
+    )
+    try daemon.setAccountEnabled(disabled.id, false)
+    let unconfigured = daemon.addAccount(provider: .anthropic)
+    let originalAccounts = daemon.settings.accounts
+
+    await daemon.refreshNow()
+
+    XCTAssertEqual(daemon.settings.accounts, originalAccounts)
+    XCTAssertEqual(makeDaemon().settings.accounts, originalAccounts)
+    let snapshot = try XCTUnwrap(daemon.snapshot)
+    XCTAssertTrue(snapshot.failures.isEmpty)
+    XCTAssertEqual(Set(snapshot.providers.map(\.accountID)), [imported.id, manual.id, managed.id])
+    XCTAssertEqual(snapshot.providers.first { $0.accountID == imported.id }?.metrics.first?.remainingPercent, 73)
+    XCTAssertEqual(snapshot.providers.first { $0.accountID == manual.id }?.metrics.first?.remainingPercent, 41)
+    XCTAssertEqual(snapshot.providers.first { $0.accountID == managed.id }?.metrics.first?.remainingPercent, 62)
+    XCTAssertFalse(snapshot.providers.contains { $0.accountID == disabled.id || $0.accountID == unconfigured.id })
+  }
+
   // MARK: - Settings mutations (the CLI's accounts surface)
 
   func testAddAccountPersistsWithMode0600() throws {
@@ -183,6 +234,22 @@ final class QuotaDaemonTests: XCTestCase {
     await daemon.refreshNow()
     XCTAssertNil(daemon.snapshot)
     XCTAssertTrue(daemon.statusMessage.contains("No enabled provider accounts"))
+  }
+}
+
+private struct ClaudeAccountClient: QuotaProviderClient {
+  let provider: QuotaProvider = .anthropic
+
+  func fetchUsage(configuration: ProviderRuntimeConfiguration, now: Date) async throws -> ProviderUsage {
+    let remainingByToken = ["sk-ant-oat-personal": 73, "sk-ant-oat-work": 41, "sk-ant-oat-profile": 62]
+    let token = configuration.credentials[CredentialField.anthropicAccessToken] ?? ""
+    return ProviderUsage(
+      accountID: configuration.accountID,
+      provider: provider,
+      title: configuration.displayName,
+      metrics: [UsageMetric(id: "weekly", label: "Weekly limit", remainingPercent: remainingByToken[token] ?? 0)],
+      fetchedAt: now
+    )
   }
 }
 

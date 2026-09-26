@@ -5,7 +5,7 @@
 > [!IMPORTANT]
 > LLM disclosure: This codebase was written with substantial help from large language models: AI coding agents working from the [`AGENTS.md`](AGENTS.md) brief in this repo.
 
-- **macOS** — a self-contained menu-bar app + desktop widgets.
+- **macOS** — a menu-bar app + desktop widgets.
 - **Linux** — a headless `llimit` daemon + CLI, with ready-made status-bar modules
   (waybar, polybar, eww) and a `.deb` package.
 
@@ -16,7 +16,9 @@
 
 You manage your accounts **inside LLimit** — add as many as you like, including
 several accounts for the same provider (e.g. two separate OpenAI accounts), each
-tracked independently. LLimit doesn't depend on any other tool being installed.
+tracked independently. Manual and imported accounts do not require the source tool
+to remain installed. The optional managed Claude Code connection on macOS uses
+the installed Claude Code CLI to maintain each account's login.
 
 To make setup painless, LLimit can **optionally detect** logins from AI tools you're
 already signed in to (Claude Code, Codex, GitHub Copilot, Kimi, OpenCode, Devin, Muse Code) and import
@@ -46,8 +48,8 @@ Everything in depth: [`Packages/LLimitd/README.md`](Packages/LLimitd/README.md).
 
 ## Supported providers
 
-The same providers and import sources work on both platforms, with one difference:
-the Claude Keychain import is macOS-only — Linux Claude Code writes
+The same providers work on both platforms. Managed Claude Code connections and
+Claude Keychain import are macOS-only. Linux Claude Code writes
 `~/.claude/.credentials.json` directly, which LLimit reads on both platforms.
 
 | Provider | Credential it needs | One-click import from |
@@ -70,10 +72,21 @@ the Claude Keychain import is macOS-only — Linux Claude Code writes
 - **Detected on this machine** lists logins LLimit found locally; import creates a
   pre-filled account. This is just a shortcut — imported accounts are copied into
   LLimit and stored locally; the source tool can be removed.
+- **Connect Claude** on macOS opens an embedded terminal for that account.
+  Complete Claude Code's sign-in flow, then repeat for another account. Each login
+  has a private profile, so your usual CLI login stays unchanged. Keep Claude Code
+  installed for these managed connections: it handles login and token renewal.
+- Imported or manually entered Claude tokens are not replaced with whichever
+  account is currently signed in to the CLI. If one expires, reconnect that account
+  or explicitly import its updated credentials.
 - Credentials are stored in LLimit's own settings file (mode `600`;
   `~/Library/Application Support/LLimit/` on macOS, `$XDG_CONFIG_HOME/LLimit/` on
   Linux) and are **redacted before anything is shared** with the widgets or the
   status-bar JSON — those only ever see usage numbers.
+- Managed Claude profiles live under `~/Library/Application Support/LLimit/ClaudeProfiles/`
+  with private directory permissions. Their refresh tokens remain in Claude Code's
+  profile-specific Keychain or credential file. LLimit stores an access-token cache
+  and account identity, and never stores Claude refresh tokens in its settings.
 - Each account can have its own widget styling on macOS; on Linux the bar module
   shows every enabled account.
 
@@ -82,8 +95,9 @@ the Claude Keychain import is macOS-only — Linux Claude Code writes
 **macOS**
 
 - macOS 14+
-- Xcode 15+ (only to build; releases run with no Xcode GUI)
+- Xcode 16+ (only to build; releases run with no Xcode GUI)
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen)
+- Claude Code installed for the optional managed Claude connection
 
 **Linux**
 
@@ -102,12 +116,11 @@ open LLimit.xcodeproj
 1. Select your Apple Developer **signing team** for both targets (`LLimit` and
    `LLimitWidgetExtension`). The App Group is `$(TeamIdentifierPrefix)group.ch.lkmc.llimit`.
 2. Run the `LLimit` target — it lives in the menu bar (no Dock icon).
-3. Add an account (manually or via **Import**), then **Refresh Now**.
+3. Add an account (manually, via **Import**, or **Connect Claude**), then **Refresh Now**.
 4. Add the widget from the desktop / Notification Center gallery.
 
-The first time you import Claude from the Keychain, macOS asks you to allow access —
-click **Always Allow**. (To avoid the prompt you can export the token once:
-`security find-generic-password -s "Claude Code-credentials" -w > ~/.claude/.credentials.json`.)
+The first time LLimit reads a Claude login from Keychain, macOS asks you to allow
+access. Choose **Always Allow** to let background refreshes read that login.
 
 ## Build & run (Linux)
 

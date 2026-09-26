@@ -40,8 +40,12 @@ jobs:
             -scheme "$SCHEME" \
             -destination 'platform=macOS' \
             -resultBundlePath TestResults.xcresult \
+            -derivedDataPath "$RUNNER_TEMP/LLimitBuild" \
             CODE_SIGNING_ALLOWED=NO \
             clean build | xcbeautify
+
+      - name: Test Claude embedded terminal
+        run: scripts/test-claude-profile.sh --skip-build "$RUNNER_TEMP/LLimitBuild"
 
       - name: Test QuotaCore package
         run: swift test --package-path Packages/QuotaCore

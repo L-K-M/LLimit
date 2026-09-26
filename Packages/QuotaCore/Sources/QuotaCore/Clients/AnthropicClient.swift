@@ -44,7 +44,7 @@ public struct AnthropicClient: QuotaProviderClient {
       if response.statusCode == 401 || response.statusCode == 403 {
         throw ProviderClientError(
           kind: .auth,
-          message: "Claude authentication failed (\(response.statusCode)). Sign in again with Claude Code.",
+          message: "Claude authentication failed (\(response.statusCode)). Reconnect this account or import its credentials again.",
           statusCode: response.statusCode
         )
       }

@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		90D9D53D985F3F47F8B0E80E /* ClaudeProfileService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B3F60D8AF12A17811395014 /* ClaudeProfileService.swift */; };
+		2D98F2F1CE89C1FB3DFE15BF /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = EE6A1797238B5E85DDF52167 /* SwiftTerm */; };
+		6DB81FD14DEEF4F20D7D09DA /* ClaudeTerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F28142772B4697E21774DC0 /* ClaudeTerminalView.swift */; };
+		77317877EF8EEB273F9978B7 /* ClaudeTerminalSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = C70211A98D88A5AEA8688233 /* ClaudeTerminalSession.swift */; };
 		0076043CC71CC09BFF9DE74A /* LLimitQuotaWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B4155FC0F0418AB20A7F600 /* LLimitQuotaWidget.swift */; };
 		386963A9990480361B221F1C /* SharedConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CA36F027D77628AAB911B4F /* SharedConstants.swift */; };
 		3A11C01DE4B02FBA9D01AA02 /* LimitKindColorScheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A11C01DE4B02FBA9D01AA01 /* LimitKindColorScheme.swift */; };
@@ -51,6 +55,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		6B3F60D8AF12A17811395014 /* ClaudeProfileService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeProfileService.swift; sourceTree = "<group>"; };
+		0F28142772B4697E21774DC0 /* ClaudeTerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeTerminalView.swift; sourceTree = "<group>"; };
+		C70211A98D88A5AEA8688233 /* ClaudeTerminalSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeTerminalSession.swift; sourceTree = "<group>"; };
 		0F5E31A2797200183F69625A /* RefreshService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RefreshService.swift; sourceTree = "<group>"; };
 		1D80DFE1041003A3DBEC1B17 /* LLimitApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LLimitApp.entitlements; sourceTree = "<group>"; };
 		2CA36F027D77628AAB911B4F /* SharedConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedConstants.swift; sourceTree = "<group>"; };
@@ -84,6 +91,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				C603BA56702B204283583CE3 /* QuotaCore in Frameworks */,
+				2D98F2F1CE89C1FB3DFE15BF /* SwiftTerm in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -120,6 +128,7 @@
 		52F914E8DE30DE6489408458 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				0F28142772B4697E21774DC0 /* ClaudeTerminalView.swift */,
 				660DB1B9EAE3B8BCD47F312A /* SettingsView.swift */,
 			);
 			path = Views;
@@ -172,6 +181,8 @@
 		AFE05ADAB087FC3F7B7E52D9 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				6B3F60D8AF12A17811395014 /* ClaudeProfileService.swift */,
+				C70211A98D88A5AEA8688233 /* ClaudeTerminalSession.swift */,
 				0F5E31A2797200183F69625A /* RefreshService.swift */,
 			);
 			path = Services;
@@ -197,6 +208,7 @@
 			name = LLimitApp;
 			packageProductDependencies = (
 				6E84F97B9AB96085556C0709 /* QuotaCore */,
+				EE6A1797238B5E85DDF52167 /* SwiftTerm */,
 			);
 			productName = LLimitApp;
 			productReference = C51630B1379FDA77A0391D81 /* LLimit.app */;
@@ -248,6 +260,7 @@
 			mainGroup = 1A8535194C049687A141AEB4;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				26B1CF24668B52622659C60F /* XCRemoteSwiftPackageReference "SwiftTerm" */,
 				DA84857A4CCEB4981D999B55 /* XCLocalSwiftPackageReference "Packages/QuotaCore" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -294,6 +307,9 @@
 				4A4AC618CDAE0C085BE6E421 /* LLimitApp.swift in Sources */,
 				3A11C01DE4B02FBA9D01AA02 /* LimitKindColorScheme.swift in Sources */,
 				FC1C8D8802949AC17AA24E39 /* RefreshService.swift in Sources */,
+				6DB81FD14DEEF4F20D7D09DA /* ClaudeTerminalView.swift in Sources */,
+				90D9D53D985F3F47F8B0E80E /* ClaudeProfileService.swift in Sources */,
+				77317877EF8EEB273F9978B7 /* ClaudeTerminalSession.swift in Sources */,
 				7B4652AC8FCA0CBC5B22B5B9 /* SettingsView.swift in Sources */,
 				386963A9990480361B221F1C /* SharedConstants.swift in Sources */,
 				EA5557D6A936ABC4284A9B90 /* WidgetStylePreset.swift in Sources */,
@@ -319,7 +335,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 20;
+				CURRENT_PROJECT_VERSION = 22;
 				DEVELOPMENT_TEAM = 293A48LC7B;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LLimitApp/Info.plist;
@@ -464,7 +480,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 20;
+				CURRENT_PROJECT_VERSION = 22;
 				DEVELOPMENT_TEAM = 293A48LC7B;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LLimitApp/Info.plist;
@@ -489,7 +505,7 @@
 				CODE_SIGN_ENTITLEMENTS = LLimitWidgetExtension/LLimitWidgetExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 20;
+				CURRENT_PROJECT_VERSION = 22;
 				DEVELOPMENT_TEAM = 293A48LC7B;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LLimitWidgetExtension/Info.plist;
@@ -515,7 +531,7 @@
 				CODE_SIGN_ENTITLEMENTS = LLimitWidgetExtension/LLimitWidgetExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 20;
+				CURRENT_PROJECT_VERSION = 22;
 				DEVELOPMENT_TEAM = 293A48LC7B;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LLimitWidgetExtension/Info.plist;
@@ -573,6 +589,17 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		26B1CF24668B52622659C60F /* XCRemoteSwiftPackageReference "SwiftTerm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/migueldeicaza/SwiftTerm.git";
+			requirement = {
+				kind = exactVersion;
+				version = 1.18.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		6E84F97B9AB96085556C0709 /* QuotaCore */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -581,6 +608,11 @@
 		B7684F158085874850334FB2 /* QuotaCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = QuotaCore;
+		};
+		EE6A1797238B5E85DDF52167 /* SwiftTerm */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 26B1CF24668B52622659C60F /* XCRemoteSwiftPackageReference "SwiftTerm" */;
+			productName = SwiftTerm;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

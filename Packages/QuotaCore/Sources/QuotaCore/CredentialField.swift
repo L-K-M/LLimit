@@ -1,5 +1,12 @@
 public enum CredentialField {
   public static let anthropicAccessToken = "anthropic.access_token"
+  public static let anthropicProfileID = "anthropic.profile_id"
+  public static let anthropicAccountID = "anthropic.account_id"
+  public static let anthropicOrganizationID = "anthropic.organization_id"
+  public static let anthropicEmail = "anthropic.email"
+  public static let anthropicExpiresAt = "anthropic.expires_at"
+  public static let anthropicCredentialSource = "anthropic.credential_source"
+  public static let anthropicRenewalPending = "anthropic.renewal_pending"
 
   public static let openAIAccessToken = "openai.access_token"
   public static let openAIAccountID = "openai.account_id"

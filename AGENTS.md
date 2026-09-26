@@ -3,17 +3,25 @@
 ## What this is
 
 **LLimit** tracks remaining LLM subscription quota across multiple providers on two
-platforms: a self-contained **macOS** menu-bar app + WidgetKit widgets, and a
+platforms: a **macOS** menu-bar app + WidgetKit widgets, and a
 headless **Linux** daemon + CLI (`llimit`) with status-bar modules. On both, **the
 app owns account management**: the user adds/edits/removes accounts inside LLimit,
-including multiple accounts per provider, and credentials are stored by LLimit. It
-does not depend on any other tool at runtime.
+including multiple accounts per provider, and credentials are stored by LLimit.
+Manual and imported accounts do not require the source tool at runtime. Optional
+managed Claude Code connections on macOS depend on the installed official CLI for
+login and renewal, with a private profile for each account.
 
 `CredentialDiscovery` exists only as an *optional import shortcut* — it can detect a
 login from a locally installed tool (Claude Code, Codex, Copilot, Antigravity,
 OpenCode, Devin CLI, Muse Code) so the
 user can one-click create a pre-filled account instead of pasting a token. Once
 imported, the account is copied into and owned by LLimit.
+
+Managed Claude connections use the embedded terminal and an account-specific
+`CLAUDE_CONFIG_DIR` under `~/Library/Application Support/LLimit/ClaudeProfiles/`.
+Claude Code remains the sole owner of refresh-token rotation and storage. LLimit
+caches the access token and verified account/organization identity; it never saves
+Claude refresh tokens in its settings or alters the user's normal CLI login.
 
 Providers: Claude (Anthropic), OpenAI/ChatGPT, GitHub Copilot, Zhipu, Z.ai, Kimi,
 Google Antigravity, Devin, Meta Muse.
@@ -24,6 +32,8 @@ Google Antigravity, Devin, Meta Muse.
   AppKit / WidgetKit. **Compiles and is unit-tested on Linux** (`swift test`), so put
   all non-UI logic here.
   - `CredentialDiscovery.swift` — scans local config files for credentials.
+  - `ClaudeCodeProfile.swift`, `ClaudeCodeProcess.swift` — profile identity/adoption
+    rules and isolated CLI renewal execution; macOS Keychain access stays in the app.
   - `Clients/*.swift` — one `QuotaProviderClient` per provider API.
   - `QuotaCoordinator.swift` — fans out client calls in parallel into a `QuotaSnapshot`.
   - `Models.swift`, `*Store.swift`, `Utilities.swift`.
@@ -61,7 +71,8 @@ macOS:
    remove, multiple per provider, credentials entered or imported).
 2. `AppModel.scanForDetectedCredentials()` (optional) runs `CredentialDiscovery().discover()`
    plus the macOS Keychain for Claude → `[DiscoveredCredential]`; `importAccount(from:)`
-   copies one into a new owned account.
+   copies one into a new owned account. Managed Claude accounts instead connect
+   through the embedded terminal and refresh from their own profile's namespace.
 3. `QuotaCoordinator` fetches usage from each enabled account's provider in parallel.
 4. The `QuotaSnapshot` is written to the App Group container; settings + history too.
 5. `WidgetCenter.reloadAllTimelines()` triggers the widgets, which read the snapshot.
@@ -71,8 +82,9 @@ Linux:
 1. The user manages accounts via `llimit accounts …` (a separate process from the
    daemon; `SettingsLock` serializes their writes).
 2. `llimit daemon` (systemd user service or timer) reloads settings each cycle and
-   runs the same `QuotaCoordinator` fetch, including token adoption/refresh for
-   Claude Code and Codex on-disk credentials.
+   runs the same `QuotaCoordinator` fetch, including identity-matched token
+   adoption/refresh for Codex. Claude accounts use their saved access tokens;
+   expired imports/manual tokens require explicit reimport or replacement.
 3. The snapshot lands in `$XDG_DATA_HOME/LLimit/quota-snapshot.json`.
 4. Bars poll `llimit status --json`, which renders the snapshot — never the
    settings file — into the waybar-style JSON contract. The example bar modules
@@ -80,11 +92,20 @@ Linux:
 
 ## Hard constraints
 
-- Credentials are stored **locally only** in the app's own settings file
+- LLimit account credentials are stored **locally only** in the app's own settings file
   (`~/Library/Application Support/LLimit/` on macOS, `$XDG_CONFIG_HOME/LLimit/` on
   Linux, mode `600`). Anything written to the App Group / widget store, the
   snapshot/history files, `llimit status` output, or logs must be redacted via
   `AppSettings.redactedCredentials()` — the display surfaces never need credentials.
+- Managed Claude profiles are the exception to settings-only credential storage:
+  the official CLI owns their refresh tokens in its profile-specific Keychain or
+  credential file. Keep profile directories mode `700` and credential files mode
+  `600`. Pass renewal material only to that CLI process; never log it or persist
+  it in LLimit settings. A timed-out renewal may still be rotating its grant:
+  retain the process, preserve the pending marker, and never replay the old token.
+- Never replace every Claude account with the current global CLI token. Managed
+  profiles must match profile UUID plus verified account and organization UUIDs;
+  imports without verified identity remain unchanged until explicit reimport.
 - The host app is **not sandboxed** (the import shortcut reads `~/.claude`, `~/.codex`,
   `~/.config/github-copilot`, `~/.kimi`, `~/.kimi-code`, `~/.gemini`,
   `~/.local/share/opencode`, `~/.local/share/devin`, `~/.config/muse`, and the Keychain). The widget extension **stays sandboxed**; it only reads the App
@@ -161,7 +182,7 @@ Linux:
 
 ## Build
 
-Requires macOS 14+, Xcode 15+, [XcodeGen](https://github.com/yonaskolb/XcodeGen).
+Requires macOS 14+, Xcode 16+, [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 
 ### Widget registration
 

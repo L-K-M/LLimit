@@ -43,6 +43,12 @@ struct SettingsView: View {
       window.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
     })
     .navigationTitle("LLimit")
+    .sheet(item: $model.claudeTerminalSession) { session in
+      ClaudeTerminalSheet(
+        session: session, title: "Connect Claude",
+        message: "Sign in with the Claude account you want to track. Each LLimit account has its own login. Your usual Claude Code login stays separate.",
+        onClose: { model.dismissClaudeTerminal() })
+    }
     .onAppear {
       if model.detectedCredentials.isEmpty {
         model.scanForDetectedCredentials()
@@ -206,11 +212,19 @@ struct SettingsView: View {
             .pickerStyle(.menu)
             .frame(minWidth: 220, alignment: .leading)
 
-            Button("Add Account") {
+            Button(providerToAdd == .anthropic ? "Connect Claude" : "Add Account") {
               let account = model.addProviderAccount(provider: providerToAdd)
               selection = .account(account.id)
+              if providerToAdd == .anthropic { model.connectClaudeAccount(account.id) }
             }
             .buttonStyle(.borderedProminent)
+            .disabled(providerToAdd == .anthropic && model.isRefreshing)
+          }
+          if providerToAdd == .anthropic {
+            Text("Sign in inside LLimit with Claude Code installed on this Mac. Add another Claude account to connect a second subscription. Credentials renew automatically.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
           }
         }
 
@@ -237,7 +251,7 @@ struct SettingsView: View {
         .buttonStyle(.bordered)
       }
 
-      Text("Optional shortcut: import a login from a tool you're already signed in to (Claude Code, Codex, GitHub Copilot, OpenCode) instead of pasting a token. Imported accounts are copied into and owned by LLimit.")
+      Text("Optional shortcut: import a login from a tool you're already signed in to (Claude Code, Codex, GitHub Copilot, OpenCode) instead of pasting a token. Imported accounts are copied into LLimit. Claude imports need to be imported again when they expire; use Connect Claude for automatic renewal.")
         .font(.subheadline)
         .foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
@@ -710,6 +724,61 @@ struct SettingsView: View {
 
   // MARK: - Account detail
 
+  private func claudeCredentials(for account: ProviderAccount) -> some View {
+    VStack(alignment: .leading, spacing: 10) {
+      let managed = ClaudeCodeProfile.profile(from: account.credentials) != nil
+      Button(model.claudeLoginIsOpen(account.id) ? "Open Login Terminal" : managed ? "Reconnect Claude" : "Connect Claude") {
+        model.connectClaudeAccount(account.id)
+      }
+      .buttonStyle(.borderedProminent)
+      .disabled(model.isRefreshing || (model.claudeAccountIsBusy(account.id) && !model.claudeLoginIsOpen(account.id)))
+
+      if let email = ClaudeCodeProfile.identity(from: account.credentials)?.email {
+        Text(email).font(.subheadline).textSelection(.enabled)
+      }
+      Text("Each account signs in separately in an embedded terminal. Claude Code must stay installed for automatic renewal.")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+
+      if let message = model.claudeAccountMessages[account.id] {
+        Text(message)
+          .font(.caption)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+      if !managed {
+        DisclosureGroup("Import or paste a token") {
+          VStack(alignment: .leading, spacing: 10) {
+            Text("Tokens imported here are not renewed automatically. Reimport them when they expire, or connect above.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+            manualCredentials(for: account)
+          }
+          .padding(.top, 8)
+        }
+      }
+    }
+  }
+
+  private func manualCredentials(for account: ProviderAccount) -> some View {
+    VStack(alignment: .leading, spacing: 12) {
+      HStack(spacing: 10) {
+        Button {
+          model.autofillCredentials(forAccountID: account.id)
+        } label: {
+          Label("Auto-fill from this Mac", systemImage: "sparkles")
+        }
+        .buttonStyle(.bordered)
+        Text("Detects a \(account.provider.displayName) login from a local tool.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+      ForEach(account.provider.credentialFields) { field in
+        credentialField(field, accountID: account.id)
+      }
+    }
+  }
+
   @ViewBuilder
   private func accountTab(for accountID: String) -> some View {
     if let account = model.account(withID: accountID) {
@@ -759,23 +828,10 @@ struct SettingsView: View {
           Divider()
 
           settingsRow(title: "Credentials") {
-            VStack(alignment: .leading, spacing: 12) {
-              HStack(spacing: 10) {
-                Button {
-                  model.autofillCredentials(forAccountID: accountID)
-                } label: {
-                  Label("Auto-fill from this Mac", systemImage: "sparkles")
-                }
-                .buttonStyle(.bordered)
-
-                Text("Detects a \(account.provider.displayName) login from a local tool.")
-                  .font(.caption)
-                  .foregroundStyle(.secondary)
-              }
-
-              ForEach(account.provider.credentialFields) { field in
-                credentialField(field, accountID: accountID)
-              }
+            if account.provider == .anthropic {
+              claudeCredentials(for: account)
+            } else {
+              manualCredentials(for: account)
             }
           }
 
@@ -850,6 +906,7 @@ struct SettingsView: View {
                 model.removeProviderAccount(accountID: accountID)
               }
               .buttonStyle(.bordered)
+              .disabled(model.isRefreshing || model.claudeAccountIsBusy(accountID))
             }
           }
         }
