@@ -78,6 +78,11 @@ operation markers. Store tests cover private permissions, exclusive ownership,
 symlink rejection, and refusal to delete an uncertain profile. These tests never
 open a browser, contact OpenAI, or use real credentials.
 
+The login fixture also reproduces Codex 0.144.4's notification ordering: browser
+completion arrives before the auth cache reload and `account/updated`. Early
+account reads return null. LLimit must wait for both successful completion and
+the ChatGPT account update, in either order, without forcing token renewal.
+
 A separate no-authentication smoke check on September 26, 2026 used the installed
 Homebrew Codex 0.144.4 executable with a fresh temporary `CODEX_HOME`, file-backed
 credential storage, and the ChatGPT-only login override. The official app-server

@@ -47,6 +47,35 @@ final class CodexAccountServiceTests: XCTestCase {
     XCTAssertEqual((requests[2]["params"] as? [String: Any])?["refreshToken"] as? Bool, true)
   }
 
+  func testLoginWaitsForAccountStateAfterBrowserCompletion() async throws {
+    let profile = try prepare(mode: "delayed-account-update")
+    let service = makeService()
+    let login = try await service.beginLogin(profile: profile)
+    let identity = try await service.finishLogin(login)
+    XCTAssertEqual(identity.userID, "user-one")
+    XCTAssertFalse(store.hasPendingOperation(profile))
+    XCTAssertFalse(FileManager.default.fileExists(atPath: store.directory(for: profile).appendingPathComponent("work/read-before-ready").path))
+  }
+
+  func testLoginAcceptsAccountUpdateBeforeMatchingCompletion() async throws {
+    let profile = try prepare(mode: "account-update-first")
+    let service = makeService()
+    let login = try await service.beginLogin(profile: profile)
+    let identity = try await service.finishLogin(login)
+    XCTAssertEqual(identity.accountID, "workspace-one")
+    XCTAssertFalse(store.hasPendingOperation(profile))
+  }
+
+  func testAccountUpdateCannotOverrideFailedLoginCompletion() async throws {
+    let profile = try prepare(mode: "failed-login")
+    let service = makeService()
+    let login = try await service.beginLogin(profile: profile)
+    do { _ = try await service.finishLogin(login); XCTFail("Failed login must not be accepted") }
+    catch { XCTAssertEqual(error as? CodexConnectionError, .signInFailed) }
+    XCTAssertFalse(store.hasPendingOperation(profile))
+    XCTAssertFalse(try requestLog(profile).contains { $0["method"] as? String == "account/read" })
+  }
+
   func testInheritedCredentialsAndConfigurationCannotReachProfileProcess() async throws {
     let profile = try prepare()
     let service = makeService(environment: [
@@ -224,13 +253,20 @@ final class CodexAccountServiceTests: XCTestCase {
 
   private static let fixture = #"""
     #!/usr/bin/env python3
-    import json, os, pathlib, sys, time
+    import json, os, pathlib, sys, threading, time
     root = pathlib.Path(os.environ['CODEX_HOME'])
     mode = pathlib.Path('mode').read_text()
     pathlib.Path('environment.json').write_text(json.dumps(dict(os.environ)))
     pathlib.Path('arguments.json').write_text(json.dumps(sys.argv[1:]))
     def send(value):
         print(json.dumps(value), flush=True)
+    account_ready = mode != 'delayed-account-update'
+    def update_account():
+        global account_ready
+        if mode == 'delayed-account-update':
+            time.sleep(0.5)
+        account_ready = True
+        send({'method': 'account/updated', 'params': {'authMode': 'chatgpt', 'planType': 'plus'}})
     for line in sys.stdin:
         request = json.loads(line)
         with open('requests.jsonl', 'a') as log:
@@ -248,12 +284,19 @@ final class CodexAccountServiceTests: XCTestCase {
             if mode == 'change-identity':
                 (root / 'auth.json').write_bytes(pathlib.Path('different-auth.json').read_bytes())
             result = {'account': {'type': 'chatgpt', 'email': 'test@example.invalid', 'planType': 'plus'}}
+            if not account_ready:
+                pathlib.Path('read-before-ready').write_text('early read')
+                result = {'account': None, 'requiresOpenaiAuth': True}
         elif method == 'account/rateLimits/read':
             result = {'rateLimits': {'primary': {'usedPercent': 37, 'windowDurationMins': 300, 'resetsAt': 1800001000}, 'planType': 'plus'}}
         send({'id': request['id'], 'result': result})
         if method == 'account/login/start' and mode != 'wait-login':
+            if mode in ('account-update-first', 'failed-login'):
+                update_account()
             send({'method': 'account/login/completed', 'params': {'loginId': 'unrelated', 'success': True}})
-            send({'method': 'account/login/completed', 'params': {'loginId': 'test-login', 'success': True}})
+            send({'method': 'account/login/completed', 'params': {'loginId': 'test-login', 'success': mode != 'failed-login'}})
+            if mode not in ('account-update-first', 'failed-login'):
+                threading.Thread(target=update_account, daemon=True).start()
     pathlib.Path('exited').write_text('graceful')
     """#
 }

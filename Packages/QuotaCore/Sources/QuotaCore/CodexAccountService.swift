@@ -46,11 +46,21 @@ public actor CodexAccountService: ManagedOpenAIUsageSource {
     guard sessions[login.profile.id] === session else { throw CodexConnectionError.cancelled }
     do {
       let deadline = Date().addingTimeInterval(600)
+      var loginCompleted = false
+      var accountReady = false
       while Date() < deadline {
         let notification = try await session.nextNotification(timeout: max(1, deadline.timeIntervalSinceNow))
-        guard notification.method == "account/login/completed",
-              notification.params["loginId"]?.stringValue == login.loginID else { continue }
-        guard notification.params["success"]?.boolValue == true else { throw CodexConnectionError.signInFailed }
+        if notification.method == "account/login/completed",
+           notification.params["loginId"]?.stringValue == login.loginID {
+          guard notification.params["success"]?.boolValue == true else { throw CodexConnectionError.signInFailed }
+          loginCompleted = true
+        } else if notification.method == "account/updated" {
+          accountReady = notification.params["authMode"]?.stringValue == "chatgpt"
+        }
+        // Codex reports browser completion before reloading its auth cache.
+        // The account update marks that reload complete; reading sooner can
+        // return a signed-out account even though the browser login succeeded.
+        guard loginCompleted, accountReady else { continue }
         let result = try await session.request(method: "account/read", params: .object(["refreshToken": .bool(false)]))
         guard result["account"]?["type"]?.stringValue == "chatgpt" else { throw CodexConnectionError.invalidProfile }
         let identity = try store.identity(login.profile)
