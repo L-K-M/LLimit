@@ -1368,6 +1368,52 @@ final class AppModel: ObservableObject {
     saveConfiguration()
   }
 
+  var primaryColorsByAccountID: [String: String] {
+    let settings = currentSettings()
+    let identifiers = providerAccounts.map(\.id) + QuotaProvider.allCases.map(\.rawValue)
+    return identifiers.reduce(into: [:]) { result, accountID in
+      result[accountID] = settings.primaryHexColor(for: accountID)
+    }
+  }
+
+  func providerPrimaryColorBinding(for accountID: String) -> Binding<Color> {
+    Binding(
+      get: {
+        if let custom = LimitKindColorScheme.color(hex: self.providerStyle(for: accountID).primaryHexColor) {
+          return custom
+        }
+        let account = self.account(withID: accountID)
+        let usage = self.snapshot?.providers.first { $0.accountID == accountID }
+          ?? self.snapshot?.providers.first {
+            $0.provider == account?.provider && $0.accountID == $0.provider.rawValue
+              && self.providerAccounts.filter { $0.provider == account?.provider }.count == 1
+          }
+        let slot = usage.flatMap { primaryLimitSlot(for: $0.metrics) }
+          ?? LimitSeriesSlot(kind: Self.defaultPrimaryKind(for: account?.provider))
+        return LimitKindColorScheme.steppedColor(
+          hex: self.widgetStyle.limitKindColors.hexColor(for: slot),
+          step: accountColorStep(forAccountID: accountID, in: self.providerAccounts)
+        ) ?? .white
+      },
+      set: { newValue in
+        guard let hex = Self.hexColor(from: newValue, allowTransparency: false) else { return }
+        self.updateProviderStyle(for: accountID) { $0.primaryHexColor = hex }
+      }
+    )
+  }
+
+  func resetProviderPrimaryColor(for accountID: String) {
+    updateProviderStyle(for: accountID) { $0.primaryHexColor = nil }
+  }
+
+  private static func defaultPrimaryKind(for provider: QuotaProvider?) -> QuotaWindowKind {
+    switch provider {
+    case .gitHubCopilot, .zhipu, .zai: return .monthly
+    case .googleAntigravity: return .other
+    default: return .weekly
+    }
+  }
+
   func providerStyle(for accountID: String) -> ProviderStyleSettings {
     providerStyleSettings[accountID]
       ?? ProviderStyleSettings.defaultValue(

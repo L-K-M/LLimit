@@ -609,7 +609,7 @@ struct SettingsView: View {
 
         settingsRow(title: "Limit colors") {
           VStack(alignment: .leading, spacing: 6) {
-            Text("Each limit window keeps one color everywhere — rings, bars, sparklines, and the trend chart.")
+            Text("Default colors for limit windows in rings, bars, sparklines, and the trend chart. You can choose a primary color in each account's settings.")
               .font(.caption)
               .foregroundStyle(.secondary)
 
@@ -892,6 +892,27 @@ struct SettingsView: View {
 
           Divider()
 
+          settingsRow(title: "Primary color") {
+            VStack(alignment: .leading, spacing: 6) {
+              HStack(spacing: 12) {
+                ColorPicker("Primary color", selection: model.providerPrimaryColorBinding(for: accountID), supportsOpacity: false)
+                  .labelsHidden()
+                  .frame(width: 48)
+                Button("Reset to automatic") {
+                  model.resetProviderPrimaryColor(for: accountID)
+                }
+                .buttonStyle(.link)
+                .disabled(providerStyle.primaryHexColor == nil)
+              }
+              Text("Colors this account's longest limit in its ring and chart line. Other limits keep their window colors.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+          }
+
+          Divider()
+
           settingsRow(title: "Override global styling") {
             Toggle("", isOn: model.providerOverrideEnabledBinding(for: accountID))
               .labelsHidden()
@@ -913,7 +934,7 @@ struct SettingsView: View {
                 .labelsHidden()
                 .pickerStyle(.menu)
 
-                Text("Choose a preset or set a background below. Unmatched combinations show as Custom. Ring colors follow the global Limit colors.")
+                Text("Choose a preset or set a background below. Unmatched combinations show as Custom. Your primary color is kept when you change presets.")
                   .font(.caption)
                   .foregroundStyle(.secondary)
                   .fixedSize(horizontal: false, vertical: true)

@@ -332,6 +332,7 @@ private struct OverviewSmallQuotaView: View {
             usage: usage,
             kindColors: entry.settings.widgetStyle.limitKindColors,
             colorStep: accountColorStep(forAccountID: usage.accountID, in: entry.settings.accounts),
+            primaryHexColor: entry.settings.primaryHexColor(for: usage.accountID),
             showProgressBar: true,
             showPercentages: entry.settings.widgetVisibility.showPercentageValues,
             showDualLimitPercentages: entry.settings.widgetVisibility.showDualLimitPercentagesInDashboard
@@ -413,6 +414,7 @@ private struct MediumCompactQuotaView: View {
             usage: usage,
             kindColors: entry.settings.widgetStyle.limitKindColors,
             colorStep: accountColorStep(forAccountID: usage.accountID, in: entry.settings.accounts),
+            primaryHexColor: entry.settings.primaryHexColor(for: usage.accountID),
             showProgressBar: entry.settings.widgetVisibility.showMediumProgressBars,
             showPercentages: entry.settings.widgetVisibility.showPercentageValues,
             showDualLimitPercentages: entry.settings.widgetVisibility.showDualLimitPercentagesInDashboard
@@ -455,6 +457,7 @@ private struct CompactProviderUsageRow: View {
   let usage: ProviderUsage
   let kindColors: LimitKindColors
   let colorStep: Int
+  let primaryHexColor: String?
   let showProgressBar: Bool
   let showPercentages: Bool
   let showDualLimitPercentages: Bool
@@ -475,8 +478,8 @@ private struct CompactProviderUsageRow: View {
         MiniProgressBar(
           percent: basePercent,
           unlimited: unlimited,
-          tint: LimitKindColorScheme.accountAccent(for: usage.metrics, colors: kindColors, step: colorStep),
-          stops: dashboardBarStops(for: usage, kindColors: kindColors, step: colorStep),
+          tint: LimitKindColorScheme.accountAccent(for: usage.metrics, colors: kindColors, step: colorStep, primaryHexColor: primaryHexColor),
+          stops: dashboardBarStops(for: usage, kindColors: kindColors, step: colorStep, primaryHexColor: primaryHexColor),
           showDualStops: showDualLimitPercentages
         )
           .frame(height: 5)
@@ -626,8 +629,8 @@ private func dashboardBarMetrics(for usage: ProviderUsage) -> [UsageMetric] {
   )
 }
 
-private func dashboardBarStops(for usage: ProviderUsage, kindColors: LimitKindColors, step: Int) -> [DashboardBarStop] {
-  let metricColors = LimitKindColorScheme.colors(for: usage.metrics, colors: kindColors, step: step)
+private func dashboardBarStops(for usage: ProviderUsage, kindColors: LimitKindColors, step: Int, primaryHexColor: String?) -> [DashboardBarStop] {
+  let metricColors = LimitKindColorScheme.colors(for: usage.metrics, colors: kindColors, step: step, primaryHexColor: primaryHexColor)
 
   return dashboardBarMetrics(for: usage).compactMap { metric in
     guard let index = usage.metrics.firstIndex(of: metric) else {
@@ -758,6 +761,8 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
     // Resolve color slots against the account's full metric list so the chart
     // agrees with the rings and the dashboard about which color a metric owns.
     let accountSlots = limitSeriesSlots(for: usage.metrics)
+    let primarySlot = primaryLimitSlot(for: usage.metrics)
+    let primaryHexColor = entry.settings.primaryHexColor(for: usage.accountID)
     // Lines wear the account's color-scheme variant — the same colors as the
     // account's tile rings, which act as the chart's legend.
     let accountStep = accountColorStep(forAccountID: usage.accountID, in: entry.settings.accounts)
@@ -800,10 +805,13 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
         displayLabel = compactProviderName(for: usage)
       }
 
-      let baseHex = kindColors.hexColor(for: slot)
+      let baseHex = (slot == primarySlot ? primaryHexColor : nil) ?? kindColors.hexColor(for: slot)
       let duplicateOrdinal = duplicateOrdinalByHex[baseHex, default: 0]
       duplicateOrdinalByHex[baseHex] = duplicateOrdinal + 1
-      let lineColor = LimitKindColorScheme.steppedColor(hex: baseHex, step: accountStep) ?? .white
+      let lineColor = LimitKindColorScheme.color(
+        for: slot, colors: kindColors, step: accountStep,
+        primarySlot: primarySlot, primaryHexColor: primaryHexColor
+      )
 
       let style = seriesStyle(for: slot.kind)
       let dashPattern: [CGFloat]

@@ -131,6 +131,7 @@ struct ProviderQuotaEntry: TimelineEntry {
   /// rings double as the trend chart's legend, so tiles for different
   /// accounts must never share an exact scheme.
   var accountColorStep = 0
+  var primaryHexColor: String?
 }
 
 struct ProviderTileTimelineProvider: TimelineProvider {
@@ -179,7 +180,8 @@ struct ProviderTileTimelineProvider: TimelineProvider {
         failure: entry.failure,
         style: entry.style,
         refreshIntervalMinutes: entry.refreshIntervalMinutes,
-        accountColorStep: entry.accountColorStep
+        accountColorStep: entry.accountColorStep,
+        primaryHexColor: entry.primaryHexColor
       )
     }
     completion(Timeline(entries: entries, policy: .after(nextRefresh)))
@@ -254,7 +256,8 @@ struct ProviderTileTimelineProvider: TimelineProvider {
       failure: failure,
       style: style,
       refreshIntervalMinutes: refreshMinutes,
-      accountColorStep: colorStep
+      accountColorStep: colorStep,
+      primaryHexColor: selection.flatMap { settings.primaryHexColor(for: $0.id) }
     )
   }
 
@@ -530,7 +533,8 @@ private struct ProviderQuotaTileView: View {
     let metricColors = LimitKindColorScheme.colors(
       for: usage.metrics,
       colors: entry.style.limitKindColors,
-      step: entry.accountColorStep
+      step: entry.accountColorStep,
+      primaryHexColor: entry.primaryHexColor
     )
 
     return metrics.map { metric in

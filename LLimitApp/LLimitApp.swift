@@ -24,6 +24,7 @@ struct LLimitApp: App {
       MenuBarIcon(
         snapshot: model.snapshot,
         kindColors: model.widgetStyle.limitKindColors,
+        primaryColors: model.primaryColorsByAccountID,
         accounts: model.providerAccounts
       )
     }
@@ -136,6 +137,7 @@ final class DashboardWindowController {
 private struct MenuBarIcon: View {
   let snapshot: QuotaSnapshot?
   let kindColors: LimitKindColors
+  let primaryColors: [String: String]
   let accounts: [ProviderAccount]
 
   var body: some View {
@@ -171,7 +173,8 @@ private struct MenuBarIcon: View {
         let accent = LimitKindColorScheme.accountAccent(
           for: provider.metrics,
           colors: kindColors,
-          step: accountColorStep(forAccountID: provider.accountID, in: accounts)
+          step: accountColorStep(forAccountID: provider.accountID, in: accounts),
+          primaryHexColor: primaryColors[provider.accountID]
         )
         NSColor(accent).setFill()
         barPath.fill()
@@ -591,6 +594,7 @@ private struct MenuBarContent: View {
                 failureCount: snapshot.failures.count,
                 tint: summaryTint(for: providers),
                 kindColors: model.widgetStyle.limitKindColors,
+                primaryColors: model.primaryColorsByAccountID,
                 accounts: model.providerAccounts,
                 onSelect: { accountID in
                   withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
@@ -611,6 +615,7 @@ private struct MenuBarContent: View {
                   failure: failuresByAccount[provider.accountID],
                   kindColors: model.widgetStyle.limitKindColors,
                   colorStep: accountColorStep(forAccountID: provider.accountID, in: model.providerAccounts),
+                  primaryHexColor: model.primaryColorsByAccountID[provider.accountID],
                   now: now,
                   sparkBuilder: sparkBuilder
                 )
@@ -861,7 +866,8 @@ private struct MenuBarContent: View {
     return LimitKindColorScheme.accountAccent(
       for: provider.metrics,
       colors: model.widgetStyle.limitKindColors,
-      step: accountColorStep(forAccountID: provider.accountID, in: model.providerAccounts)
+      step: accountColorStep(forAccountID: provider.accountID, in: model.providerAccounts),
+      primaryHexColor: model.primaryColorsByAccountID[provider.accountID]
     )
   }
 
@@ -960,6 +966,7 @@ private struct OverviewCard: View {
   let failureCount: Int
   let tint: Color
   let kindColors: LimitKindColors
+  let primaryColors: [String: String]
   let accounts: [ProviderAccount]
   let onSelect: (String) -> Void
 
@@ -994,7 +1001,8 @@ private struct OverviewCard: View {
                   tint: LimitKindColorScheme.accountAccent(
                     for: provider.metrics,
                     colors: kindColors,
-                    step: accountColorStep(forAccountID: provider.accountID, in: accounts)
+                    step: accountColorStep(forAccountID: provider.accountID, in: accounts),
+                    primaryHexColor: primaryColors[provider.accountID]
                   ),
                   diameter: 40,
                   lineWidth: 4.5
@@ -1105,13 +1113,14 @@ private struct ProviderQuotaCard: View {
   let failure: ProviderFailure?
   let kindColors: LimitKindColors
   let colorStep: Int
+  let primaryHexColor: String?
   let now: Date
   let sparkBuilder: SparkSeriesBuilder
 
   @State private var isHovered = false
 
   private var accent: Color {
-    LimitKindColorScheme.accountAccent(for: usage.metrics, colors: kindColors, step: colorStep)
+    LimitKindColorScheme.accountAccent(for: usage.metrics, colors: kindColors, step: colorStep, primaryHexColor: primaryHexColor)
   }
 
   private var displayName: String {
@@ -1156,7 +1165,7 @@ private struct ProviderQuotaCard: View {
         )
       }
 
-      let metricColors = LimitKindColorScheme.colors(for: usage.metrics, colors: kindColors, step: colorStep)
+      let metricColors = LimitKindColorScheme.colors(for: usage.metrics, colors: kindColors, step: colorStep, primaryHexColor: primaryHexColor)
 
       VStack(spacing: 10) {
         ForEach(Array(usage.metrics.enumerated()), id: \.element.id) { index, metric in

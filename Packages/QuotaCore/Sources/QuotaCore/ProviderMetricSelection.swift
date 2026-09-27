@@ -72,6 +72,24 @@ public func limitSeriesSlots(for metrics: [UsageMetric]) -> [LimitSeriesSlot] {
   }
 }
 
+/// The longest available window owns the primary color. Unknown windows take
+/// precedence over short windows; ties retain the full metric list's slot order.
+/// Missing numeric usage does not move the color off a known or resetting window.
+public func primaryLimitSlot(for metrics: [UsageMetric]) -> LimitSeriesSlot? {
+  let slots = limitSeriesSlots(for: metrics)
+  let candidates = zip(metrics, slots).compactMap { metric, slot -> LimitSeriesSlot? in
+    guard !metric.isUnlimited else { return nil }
+    // Placeholder messages, counts and balances are not quota windows.
+    guard slot.kind != .other || metric.remainingPercent != nil || metric.resetAt != nil else { return nil }
+    return slot
+  }
+  let preferredKinds: [QuotaWindowKind] = [.monthly, .weekly, .other, .daily, .session]
+  for kind in preferredKinds {
+    if let slot = candidates.first(where: { $0.kind == kind }) { return slot }
+  }
+  return nil
+}
+
 public extension LimitKindColors {
   func hexColor(for slot: LimitSeriesSlot) -> String {
     hexColor(for: slot.kind, otherSlot: slot.otherSlot)

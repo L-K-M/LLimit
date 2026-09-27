@@ -111,3 +111,17 @@ To verify the real flow manually:
 
 Live browser sign-in, multiple real accounts, and expiry-driven renewal have not
 been verified by the synthetic suite or the no-authentication smoke check.
+
+# Limit color integration checks
+
+On macOS, run `scripts/test-limit-colors.sh [DerivedData directory]`. The script
+builds the app, then links its QuotaCore object with the shared SwiftUI color
+resolver. To reuse a current Debug build, run
+`scripts/test-limit-colors.sh --skip-build <DerivedData directory>`.
+
+The harness checks resolved sRGB components: an account's chosen primary color
+renders exactly for every account variant, ring and trend colors agree, and
+session colors, unlimited colors, and missing or invalid overrides preserve
+their defaults. Account accents follow the most constrained metric. These checks
+exercise the production metric-selection helper and color resolver; they do not
+render widget layouts or automate the Settings color picker.
