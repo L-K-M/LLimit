@@ -71,6 +71,19 @@ final class ProviderMetricSelectionTests: XCTestCase {
     XCTAssertTrue(defaultRingMetrics(for: makeUsage(provider: .openAI, metrics: [empty])).isEmpty)
   }
 
+  func testOpenCodeGoShowsShortestAndLongestWindows() {
+    let usage = makeUsage(
+      provider: .openCodeGo,
+      metrics: [metric("weekly"), metric("monthly"), metric("session-rolling")]
+    )
+
+    XCTAssertEqual(defaultRingMetrics(for: usage).map(\.id), ["session-rolling", "monthly"])
+    XCTAssertEqual(primaryLimitSlot(for: usage.metrics)?.kind, .monthly)
+
+    let withoutMonthly = makeUsage(provider: .openCodeGo, metrics: [metric("weekly"), metric("session-rolling")])
+    XCTAssertEqual(defaultRingMetrics(for: withoutMonthly).map(\.id), ["session-rolling", "weekly"])
+  }
+
   func testShortTermKindsCoverSubDailyWindows() {
     XCTAssertTrue(QuotaWindowKind.session.isShortTerm)
     XCTAssertTrue(QuotaWindowKind.daily.isShortTerm)

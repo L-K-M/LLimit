@@ -980,6 +980,8 @@ private func compactProviderName(for provider: QuotaProvider) -> String {
     return "Devin"
   case .metaMuse:
     return "Muse"
+  case .openCodeGo:
+    return "Go"
   }
 }
 

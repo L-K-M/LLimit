@@ -48,7 +48,7 @@ public struct CredentialDiscoveryResult: Sendable {
 public struct CredentialDiscovery: Sendable {
   private let homeDirectories: [URL]
   private let fileManager: FileManager
-  /// XDG data dir, when set — the Devin CLI honors it for credentials.toml.
+  /// XDG data dir, when set — OpenCode and the Devin CLI store credentials here.
   private let xdgDataHome: String?
   /// XDG config dir, when set — Muse Code honors it for auth.json.
   private let xdgConfigHome: String?
@@ -334,10 +334,14 @@ public struct CredentialDiscovery: Sendable {
   private func scanOpenCode(home: URL, diagnostics: inout [String]) -> [DiscoveredCredential] {
     var results: [DiscoveredCredential] = []
 
-    let authURLs = [
+    var authURLs = [
       path(home, ".local", "share", "opencode", "auth.json"),
       path(home, ".config", "opencode", "auth.json")
     ]
+    if let xdgDataHome, (xdgDataHome as NSString).isAbsolutePath {
+      let xdgURL = URL(fileURLWithPath: xdgDataHome).appendingPathComponent("opencode/auth.json")
+      if !authURLs.contains(xdgURL) { authURLs.insert(xdgURL, at: 0) }
+    }
 
     for url in authURLs {
       guard let object = readJSON(at: url, label: "OpenCode", diagnostics: &diagnostics) else { continue }
@@ -371,6 +375,11 @@ public struct CredentialDiscovery: Sendable {
 
       if let key = apiKey(in: object, provider: "kimi-for-coding") {
         results.append(make("kimi:opencode", .kimi, "Kimi", url, [CredentialField.kimiAPIKey: key]))
+      }
+
+      if let key = apiKey(in: object, provider: "opencode-go") {
+        results.append(make("opencode-go:opencode", .openCodeGo, "OpenCode Go", url,
+                            [CredentialField.openCodeGoAPIKey: key]))
       }
 
       if let copilot = object["github-copilot"] as? [String: Any],

@@ -26,6 +26,8 @@ public func defaultRingMetrics(for usage: ProviderUsage) -> [UsageMetric] {
     preferredIDs = ["quota-daily", "quota-weekly"]
   case .metaMuse:
     preferredIDs = ["window", "weekly"]
+  case .openCodeGo:
+    preferredIDs = ["session-rolling", "monthly", "weekly"]
   }
 
   var selected: [UsageMetric] = []

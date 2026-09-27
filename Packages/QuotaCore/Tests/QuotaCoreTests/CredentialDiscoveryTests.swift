@@ -90,6 +90,36 @@ final class CredentialDiscoveryTests: XCTestCase {
     XCTAssertNotNil(result.first { $0.stableID == "openai:opencode" })
   }
 
+  func testDiscoversOpenCodeGoWithoutTreatingZenKeyAsGo() throws {
+    try write(#"{"opencode-go":{"type":"api","key":"go-fixture"},"opencode":{"type":"api","key":"zen-fixture"}}"#,
+              to: ".local", "share", "opencode", "auth.json")
+    let go = try XCTUnwrap(discover().first { $0.provider == .openCodeGo })
+    XCTAssertEqual(go.stableID, "opencode-go:opencode")
+    XCTAssertEqual(go.credentials, [CredentialField.openCodeGoAPIKey: "go-fixture"])
+    XCTAssertTrue(go.provider.hasRequiredCredentials(go.credentials))
+    XCTAssertEqual(discover().filter { $0.provider == .openCodeGo }.count, 1)
+  }
+
+  func testDiscoversOpenCodeGoFromXDGDataHome() throws {
+    try write(#"{"opencode-go":{"type":"api","key":"xdg-go-fixture"}}"#,
+              to: "custom-data", "opencode", "auth.json")
+    let result = CredentialDiscovery(homeDirectories: [home], environment: [
+      "XDG_DATA_HOME": home.appendingPathComponent("custom-data").path
+    ]).discover()
+    XCTAssertEqual(result.credentials.first { $0.provider == .openCodeGo }?.credentials,
+                   [CredentialField.openCodeGoAPIKey: "xdg-go-fixture"])
+    XCTAssertFalse(result.diagnostics.joined().contains("xdg-go-fixture"))
+  }
+
+  func testDoesNotImportZenOnlyOrInvalidOpenCodeGoCredentials() throws {
+    for entry in [#"{"type":"oauth","access":"oauth-fixture"}"#,
+                  #"{"type":"api","key":"   "}"#, "null"] {
+      try write("{\"opencode-go\":\(entry),\"opencode\":{\"type\":\"api\",\"key\":\"zen-fixture\"}}",
+                to: ".local", "share", "opencode", "auth.json")
+      XCTAssertFalse(discover().contains { $0.provider == .openCodeGo })
+    }
+  }
+
   func testDiscoversCopilotEditorHostsFile() throws {
     try write(#"{"github.com":{"oauth_token":"gho_editor","user":"octocat"}}"#,
               to: ".config", "github-copilot", "hosts.json")

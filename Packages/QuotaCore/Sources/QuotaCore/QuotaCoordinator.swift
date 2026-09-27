@@ -29,7 +29,8 @@ public struct QuotaCoordinator: Sendable {
         GoogleAntigravityClient(httpClient: httpClient),
         CopilotClient(httpClient: httpClient),
         DevinQuotaClient(httpClient: httpClient),
-        MetaMuseQuotaClient(httpClient: httpClient)
+        MetaMuseQuotaClient(httpClient: httpClient),
+        OpenCodeGoQuotaClient(httpClient: httpClient)
       ]
     )
   }

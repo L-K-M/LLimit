@@ -1294,6 +1294,8 @@ private struct ProviderMark: View {
       return "terminal.fill"
     case .metaMuse:
       return "wand.and.stars"
+    case .openCodeGo:
+      return "chevron.left.forwardslash.chevron.right"
     }
   }
 }

@@ -31,7 +31,7 @@ reference and verified account identity, without copying Codex tokens into its
 settings. The user's normal Codex login and existing imported accounts stay separate.
 
 Providers: Claude (Anthropic), OpenAI/ChatGPT, GitHub Copilot, Zhipu, Z.ai, Kimi,
-Google Antigravity, Devin, Meta Muse.
+Google Antigravity, Devin, Meta Muse, OpenCode Go.
 
 ## Layout
 
@@ -148,6 +148,14 @@ Linux:
 
 ## Provider API notes
 
+- **OpenCode Go**: read-only `GET https://opencode.ai/zen/go/v1/usage` with
+  `Authorization: Bearer <API key>`. `usage.rolling`, `.weekly`, and `.monthly`
+  each contain `status` (`ok` or `rate-limited`), integer used `percent`, and ISO
+  `resetsAt`. Preserve server resets; the monthly window follows the subscription
+  anniversary, not the calendar month. Import only the `opencode-go` API entry in
+  OpenCode's `auth.json`, honoring absolute `XDG_DATA_HOME`; a Zen-only key entry
+  does not establish a Go subscription. This endpoint also proxies migrated keys.
+  Source: [official usage handler](https://github.com/anomalyco/opencode/blob/b471c2b4495747353af768fbf2e0790c9d820ce2/packages/console/app/src/routes/zen/go/v1/usage.ts).
 - **Anthropic**: `GET https://api.anthropic.com/api/oauth/usage` with `Authorization:
   Bearer`, `anthropic-beta: oauth-2025-04-20`, and a `User-Agent: claude-code/<ver>`
   (mandatory — without it the endpoint hard rate-limits). Returns `five_hour`,

@@ -10,6 +10,7 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
   case googleAntigravity = "google-antigravity"
   case devin = "devin"
   case metaMuse = "meta-muse"
+  case openCodeGo = "opencode-go"
 
   public var displayName: String {
     switch self {
@@ -31,6 +32,8 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
       return "Devin"
     case .metaMuse:
       return "Meta Muse"
+    case .openCodeGo:
+      return "OpenCode Go"
     }
   }
 }
@@ -173,6 +176,14 @@ public extension QuotaProvider {
           key: CredentialField.metaMuseAPIKey,
           label: "API key",
           help: "Auto-detected from Muse Code (~/.config/muse/auth.json), or the META_API_KEY value."
+        )
+      ]
+    case .openCodeGo:
+      return [
+        CredentialFieldDescriptor(
+          key: CredentialField.openCodeGoAPIKey,
+          label: "API key",
+          help: "OpenCode API key for a workspace with an active Go subscription. You can import it from OpenCode."
         )
       ]
     }

@@ -63,6 +63,18 @@ and Claude Keychain import, are macOS-only. Linux Claude Code writes
 | **Google Antigravity** | Refresh token + project id | Antigravity IDE / CLI (`~/.gemini`), OpenCode (`antigravity-accounts.json`) |
 | **Devin** (Cognition) | Session API key | Devin CLI (`~/.local/share/devin/credentials.toml`) |
 | **Meta Muse** | Meta API key | Muse Code (`~/.config/muse/auth.json`) |
+| **OpenCode Go** | API key for a Go subscription | OpenCode (`opencode-go` in `auth.json`) |
+
+For OpenCode Go, choose **Settings → Add Account → OpenCode Go** and enter your
+OpenCode API key, or scan for a saved Go key. LLimit shows the rolling, weekly,
+and monthly subscription limits and their server-provided reset times. Rings show
+the rolling and monthly limits; the monthly limit uses the account's primary color.
+The usage check does not generate tokens or consume model credits.
+
+Go key import reads `opencode-go` entries in `$XDG_DATA_HOME/opencode/auth.json`
+(default `~/.local/share/opencode/auth.json`), with `~/.config/opencode/auth.json`
+as a compatibility fallback. If your OpenCode version stores credentials elsewhere,
+add the API key manually. Imported accounts work without OpenCode running.
 
 ## How accounts work
 
