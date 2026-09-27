@@ -233,6 +233,12 @@ Requires macOS 14+, Xcode 16+, [XcodeGen](https://github.com/yonaskolb/XcodeGen)
   geometry (arc, bar, line height); danger is the reserved status accents
   (warning chips, low-value text). `WidgetRingColors` survives only for
   stored-settings compatibility — nothing renders from it.
+- An account can set `ProviderStyleSettings.primaryHexColor` independently of
+  its background override. `primaryLimitSlot` selects its longest bounded window
+  from the full metric list; the chosen color renders exactly as selected on
+  that slot across rings, bars, sparklines, and trend lines. Other slots retain
+  automatic window colors and account variants. Unlimited and warning colors
+  remain reserved. A missing override preserves the automatic palette.
 - The default `LimitKindColors` palette is validator-checked (CVD all-pairs
   ΔE >= 12 for the six base hues, >= 8 with secondary encoding for the
   base+deep twelve; chroma >= 0.10; >= 3:1 contrast on the dropdown

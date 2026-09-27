@@ -81,6 +81,19 @@ final class DevinClientTests: XCTestCase {
     XCTAssertEqual(usage.metrics.first { $0.id == "quota-weekly" }?.remainingPercent, 90)
   }
 
+  func testDailyQuotaKeepsPrimaryColorWhenExtraBalanceIsPresent() async throws {
+    let json = #"""
+    {"userStatus": {"planStatus": {"dailyQuotaRemainingPercent": 42, "usageBalance": 15}}}
+    """#
+    let client = DevinQuotaClient(httpClient: MockHTTP(status: 200, body: json))
+
+    let usage = try await client.fetchUsage(configuration: config(), now: now)
+
+    XCTAssertEqual(usage.metrics.map(\.id), ["quota-daily", "balance"])
+    XCTAssertEqual(defaultRingMetrics(for: usage).map(\.id), ["quota-daily"])
+    XCTAssertEqual(primaryLimitSlot(for: usage.metrics), LimitSeriesSlot(kind: .daily))
+  }
+
   func testShowsPromptCreditsOnlyOnCreditBilledPlans() async throws {
     let json = #"""
     {"userStatus": {"planStatus": {

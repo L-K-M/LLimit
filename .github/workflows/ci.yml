@@ -44,6 +44,9 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             clean build | xcbeautify
 
+      - name: Test primary limit colors
+        run: scripts/test-limit-colors.sh --skip-build "$RUNNER_TEMP/LLimitBuild"
+
       - name: Test Claude embedded terminal
         run: scripts/test-claude-profile.sh --skip-build "$RUNNER_TEMP/LLimitBuild"
 

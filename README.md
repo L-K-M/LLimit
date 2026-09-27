@@ -95,6 +95,10 @@ Claude Keychain import are macOS-only. Linux Claude Code writes
   establish that no account references the profile and no process is using it.
 - Each account can have its own widget styling on macOS; on Linux the bar module
   shows every enabled account.
+- In an account's settings, **Primary color** sets the color of its longest limit
+  in the ring and matching chart line. You can change it without enabling the
+  background styling override, or choose **Reset to automatic** to restore the
+  default window color. Other limits keep their existing colors.
 
 ## Requirements
 

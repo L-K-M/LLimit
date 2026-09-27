@@ -1063,17 +1063,21 @@ public struct ProviderStyleSettings: Codable, Hashable, Sendable {
   public var provider: QuotaProvider?
   public var useCustomStyle: Bool
   public var style: WidgetStyleSettings
+  /// An account's primary limit color, independent of background overrides.
+  public var primaryHexColor: String?
 
   public init(
     accountID: String,
     provider: QuotaProvider? = nil,
     useCustomStyle: Bool = false,
-    style: WidgetStyleSettings = .default
+    style: WidgetStyleSettings = .default,
+    primaryHexColor: String? = nil
   ) {
     self.accountID = accountID
     self.provider = provider
     self.useCustomStyle = useCustomStyle
     self.style = style
+    self.primaryHexColor = normalizeHexColor(primaryHexColor)
   }
 
   public static func defaultValue(
@@ -1089,6 +1093,7 @@ public struct ProviderStyleSettings: Codable, Hashable, Sendable {
     case provider
     case useCustomStyle
     case style
+    case primaryHexColor
   }
 
   public init(from decoder: Decoder) throws {
@@ -1099,6 +1104,7 @@ public struct ProviderStyleSettings: Codable, Hashable, Sendable {
       ?? UUID().uuidString
     useCustomStyle = (try? container.decodeIfPresent(Bool.self, forKey: .useCustomStyle)) ?? false
     style = (try? container.decodeIfPresent(WidgetStyleSettings.self, forKey: .style)) ?? .default
+    primaryHexColor = normalizeHexColor(try? container.decodeIfPresent(String.self, forKey: .primaryHexColor))
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -1107,6 +1113,7 @@ public struct ProviderStyleSettings: Codable, Hashable, Sendable {
     try container.encodeIfPresent(provider, forKey: .provider)
     try container.encode(useCustomStyle, forKey: .useCustomStyle)
     try container.encode(style, forKey: .style)
+    try container.encodeIfPresent(normalizeHexColor(primaryHexColor), forKey: .primaryHexColor)
   }
 }
 
@@ -1354,6 +1361,18 @@ public struct AppSettings: Codable, Hashable, Sendable {
     )
   }
 
+  /// Legacy snapshots use the provider ID for a sole account. Never assign an
+  /// ambiguous legacy usage to one of several accounts with different colors.
+  public func primaryHexColor(for accountID: String) -> String? {
+    if let account = account(withID: accountID) {
+      return normalizeHexColor(styleOverride(for: account.id).primaryHexColor)
+    }
+    guard let provider = QuotaProvider(rawValue: accountID) else { return nil }
+    let matches = accounts.filter { $0.provider == provider }
+    guard matches.count == 1, let account = matches.first else { return nil }
+    return normalizeHexColor(styleOverride(for: account.id).primaryHexColor)
+  }
+
   /// The account ID assigned to a provider-tile slot, or nil for automatic.
   public func providerTileAssignment(forSlot index: Int) -> String? {
     guard providerTileSlots.indices.contains(index) else { return nil }
@@ -1491,6 +1510,11 @@ public struct AppSettings: Codable, Hashable, Sendable {
       }
 
       if var legacy = values.first(where: { $0.accountID == account.provider.rawValue || $0.provider == account.provider }) {
+        // Keep provider-keyed migration, but do not copy a sibling account's
+        // chosen color along with the historical background-style fallback.
+        let isProviderKeyed = legacy.accountID == account.provider.rawValue
+          && !accounts.contains(where: { $0.id == legacy.accountID })
+        if !isProviderKeyed { legacy.primaryHexColor = nil }
         legacy.accountID = account.id
         legacy.provider = account.provider
         return legacy

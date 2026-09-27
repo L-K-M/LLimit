@@ -3,7 +3,7 @@ import QuotaCore
 
 /// Resolves quota metrics to their identity colors. Color encodes exactly one
 /// thing everywhere in LLimit: WHICH limit a mark belongs to (its reset-window
-/// kind, assigned by `limitSeriesSlots(for:)` in QuotaCore). How much is left
+/// kind, with an optional account-specific primary color). How much is left
 /// is carried by geometry (arc length, bar length, line height), and danger by
 /// the reserved status accents — never by repainting an identity hue.
 enum LimitKindColorScheme {
@@ -11,25 +11,27 @@ enum LimitKindColorScheme {
   /// Resolve once per view body and index into the result — the slot
   /// assignment depends on the FULL metric list, and per-metric lookups would
   /// re-classify the whole account each time. `step` is the account's color
-  /// variant (`accountColorStep`), applied to every hue so no two accounts
-  /// share an exact scheme and the tile rings can act as the chart's legend.
-  static func colors(for metrics: [UsageMetric], colors: LimitKindColors, step: Int) -> [Color] {
+  /// variant (`accountColorStep`), applied to automatic hues. An explicit
+  /// primary color is shared unchanged by the tile rings and chart lines.
+  static func colors(for metrics: [UsageMetric], colors: LimitKindColors, step: Int, primaryHexColor: String? = nil) -> [Color] {
     let slots = limitSeriesSlots(for: metrics)
+    let primarySlot = primaryLimitSlot(for: metrics)
     return zip(metrics, slots).map { metric, slot in
-      metricColor(metric: metric, slot: slot, colors: colors, step: step)
+      metricColor(metric: metric, slot: slot, colors: colors, step: step, primarySlot: primarySlot, primaryHexColor: primaryHexColor)
     }
   }
 
   /// Account-level accent: the identity color of the account's most
   /// constrained bounded metric, i.e. the limit that currently matters most.
   /// Neutral when no metric is attributable (identity unknown is not a color).
-  static func accountAccent(for metrics: [UsageMetric], colors: LimitKindColors, step: Int) -> Color {
+  static func accountAccent(for metrics: [UsageMetric], colors: LimitKindColors, step: Int, primaryHexColor: String? = nil) -> Color {
     let slots = limitSeriesSlots(for: metrics)
     let bounded = metrics.enumerated().filter { !$0.element.isUnlimited && $0.element.remainingPercent != nil }
     if let worst = bounded.min(by: {
       ($0.element.remainingPercent ?? Int.max) < ($1.element.remainingPercent ?? Int.max)
     }) {
-      return metricColor(metric: worst.element, slot: slots[worst.offset], colors: colors, step: step)
+      return metricColor(metric: worst.element, slot: slots[worst.offset], colors: colors, step: step,
+                         primarySlot: primaryLimitSlot(for: metrics), primaryHexColor: primaryHexColor)
     }
 
     if metrics.contains(where: \.isUnlimited) {
@@ -37,6 +39,18 @@ enum LimitKindColorScheme {
     }
 
     return Color.white.opacity(0.55)
+  }
+
+  /// Explicit account colors render as selected. Automatic window colors keep
+  /// their account variant; the same resolver also serves historical chart slots.
+  static func color(
+    for slot: LimitSeriesSlot, colors: LimitKindColors, step: Int,
+    primarySlot: LimitSeriesSlot?, primaryHexColor: String?
+  ) -> Color {
+    if slot == primarySlot, let custom = color(hex: primaryHexColor) {
+      return custom
+    }
+    return steppedColor(hex: colors.hexColor(for: slot), step: step) ?? .white
   }
 
   /// Variant `step` of a hue: 0 = the base color, 1 = a deep re-saturated
@@ -71,11 +85,14 @@ enum LimitKindColorScheme {
 
   // MARK: - Private
 
-  private static func metricColor(metric: UsageMetric, slot: LimitSeriesSlot, colors: LimitKindColors, step: Int) -> Color {
+  private static func metricColor(
+    metric: UsageMetric, slot: LimitSeriesSlot, colors: LimitKindColors, step: Int,
+    primarySlot: LimitSeriesSlot?, primaryHexColor: String?
+  ) -> Color {
     if metric.isUnlimited {
       return steppedColor(hex: colors.unlimitedHexColor, step: step) ?? .white
     }
-    return steppedColor(hex: colors.hexColor(for: slot), step: step) ?? .white
+    return color(for: slot, colors: colors, step: step, primarySlot: primarySlot, primaryHexColor: primaryHexColor)
   }
 
   private static func deepVariant(
