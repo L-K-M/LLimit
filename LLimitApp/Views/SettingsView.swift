@@ -77,6 +77,15 @@ struct SettingsView: View {
         ForEach(model.providerAccounts) { account in
           accountSidebarRow(account)
             .tag(SettingsItem.account(account.id))
+            .contextMenu {
+              Button("Move Up") { model.moveProviderAccount(account.id, direction: .up) }
+                .disabled(model.providerAccounts.first?.id == account.id)
+              Button("Move Down") { model.moveProviderAccount(account.id, direction: .down) }
+                .disabled(model.providerAccounts.last?.id == account.id)
+            }
+        }
+        .onMove { offsets, destination in
+          model.moveProviderAccounts(fromOffsets: offsets, toOffset: destination)
         }
         Label("Add Account…", systemImage: "plus.circle")
           .tag(SettingsItem.addAccount)
@@ -108,8 +117,14 @@ struct SettingsView: View {
           .foregroundStyle(.secondary)
           .lineLimit(1)
       }
+      Spacer(minLength: 4)
+      Image(systemName: "line.3.horizontal")
+        .font(.caption2)
+        .foregroundStyle(.tertiary)
+        .accessibilityHidden(true)
     }
     .padding(.vertical, 2)
+    .help("Drag to reorder accounts and their menu bar bars, or use Move Up and Move Down in the context menu.")
   }
 
   // MARK: - Detail router

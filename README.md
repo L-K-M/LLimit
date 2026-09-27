@@ -69,6 +69,12 @@ and Claude Keychain import, are macOS-only. Linux Claude Code writes
 - **Settings → Accounts** (macOS) / **`llimit accounts …`** (Linux) is where you
   add/rename/enable/remove accounts and enter credentials. Add the same provider
   multiple times for multiple subscriptions.
+- Drag account rows in the macOS Settings sidebar to reorder them, or use their
+  **Move Up** and **Move Down** context-menu commands. The menu-bar bars follow
+  that order and use each account's primary color. Automatic widget assignments
+  and account color variants stay stable when you reorder the rows.
+- While Settings is open, LLimit appears in the Dock and Cmd-Tab so you can return
+  after browser sign-in. Closing Settings restores its menu-bar-only behavior.
 - **Detected on this machine** lists logins LLimit found locally; import creates a
   pre-filled account. This is just a shortcut — imported accounts are copied into
   LLimit and stored locally; the source tool can be removed.

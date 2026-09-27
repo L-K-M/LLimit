@@ -79,6 +79,12 @@ if [[ "$INSTALL" == true && -x "$LSREGISTER" && -d "$INSTALLED_APP" ]]; then
     echo "error: installed widget binary is missing" >&2
     exit 1
   fi
+  if ! /usr/bin/grep -aFq "LLimit Dashboard" "$WIDGET_BINARY" \
+    || ! /usr/bin/grep -aFq "ch.lkmc.llimit.widget.trend" "$WIDGET_BINARY" \
+    || ! /usr/bin/grep -aFq "QuotaTrendChartWidget" "$WIDGET_BINARY"; then
+    echo "error: installed widget is missing the dashboard or trend chart" >&2
+    exit 1
+  fi
   for slot in 1 2 3 4 5 6 7 8; do
     if ! /usr/bin/grep -aFq "ch.lkmc.llimit.widget.provider-tile.slot$slot" "$WIDGET_BINARY" \
       || ! /usr/bin/grep -aFq "ProviderTileSlot${slot}Widget" "$WIDGET_BINARY"; then
@@ -140,7 +146,10 @@ if [[ "$INSTALL" == true && -x "$LSREGISTER" && -d "$INSTALLED_APP" ]]; then
     "$PLUGINKIT" -a "$INSTALLED_WIDGET"
     "$PLUGINKIT" -e use -i "$WIDGET_BUNDLE_ID"
   fi
-  killall chronod >/dev/null 2>&1 || true
+  # The gallery lives in Notification Center. Keeping that process alive across
+  # replacement can leave it displaying discarded previews from the old build,
+  # even after chronod has registered and rendered the new widget catalog.
+  killall chronod NotificationCenter >/dev/null 2>&1 || true
   DEREGISTERED=false
 
   echo "Registered $WIDGET_BUNDLE_ID build $WIDGET_BUILD from $INSTALLED_WIDGET"

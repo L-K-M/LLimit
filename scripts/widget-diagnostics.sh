@@ -78,6 +78,11 @@ fi
 if [[ ! -f "$WIDGET_BINARY" ]]; then
   printf 'MISSING: %s\n' "$WIDGET_BINARY"
 else
+  if ! /usr/bin/grep -aFq "LLimit Dashboard" "$WIDGET_BINARY" \
+    || ! /usr/bin/grep -aFq "ch.lkmc.llimit.widget.trend" "$WIDGET_BINARY" \
+    || ! /usr/bin/grep -aFq "QuotaTrendChartWidget" "$WIDGET_BINARY"; then
+    printf 'ERROR: dashboard or trend chart is absent from the installed extension binary\n'
+  fi
   for slot in 1 2 3 4 5 6 7 8; do
     if ! /usr/bin/grep -aFq "ch.lkmc.llimit.widget.provider-tile.slot$slot" "$WIDGET_BINARY" \
       || ! /usr/bin/grep -aFq "ProviderTileSlot${slot}Widget" "$WIDGET_BINARY"; then

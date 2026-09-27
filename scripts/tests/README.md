@@ -127,6 +127,44 @@ resolver. To reuse a current Debug build, run
 The harness checks resolved sRGB components: an account's chosen primary color
 renders exactly for every account variant, ring and trend colors agree, and
 session colors, unlimited colors, and missing or invalid overrides preserve
-their defaults. Account accents follow the most constrained metric. These checks
+their defaults. They also verify that the menu bar keeps the primary window's color
+when a shorter window becomes more constrained or the primary window temporarily
+has no value.
+Dashboard accents continue to follow the most constrained metric. These checks
 exercise the production metric-selection helper and color resolver; they do not
 render widget layouts or automate the Settings color picker.
+
+# Settings window activation
+
+Run these checks with an installed build and a graphical macOS session:
+
+1. Launch LLimit with Settings closed. Confirm it remains menu-bar-only.
+2. Open Settings. Confirm LLimit now appears in the Dock and Cmd-Tab switcher.
+3. Open a browser from Settings, switch to another app, and use Cmd-Tab to return.
+   Confirm Settings comes forward and remains usable.
+4. Hide LLimit, then select it in Cmd-Tab. Minimize Settings, then click the LLimit
+   Dock icon or reopen Settings from the menu bar. Confirm the existing window is
+   restored rather than a second window being created.
+5. Close Settings with its close button, then repeat using Cmd-W. Confirm LLimit
+   returns to menu-bar-only operation each time, including with the floating
+   dashboard open. Reopening Settings must restore Dock and Cmd-Tab presence.
+
+The activation policy follows the open window's lifetime, not focus or visibility:
+browser sign-in, hiding, and minimizing must not switch it back to accessory mode.
+The command-line color harness cannot verify Dock or Cmd-Tab behavior.
+
+# Widget gallery after installation
+
+1. Open the macOS widget gallery and select LLimit, then close the gallery.
+2. Install a newer build with `scripts/build.sh --install --run --no-reveal`.
+   The install must validate the dashboard, trend chart, and all eight provider
+   tiles before registering the extension and restarting the gallery host.
+3. Reopen the gallery and confirm **Quota Trend Chart** offers small and medium
+   previews, alongside **LLimit Dashboard** and **Provider Tile 1** through **8**.
+   Confirm already placed widgets remain assigned and render normally.
+
+The gallery can retain previews rejected after an app version change even when
+the newly registered extension renders timelines successfully. A successful
+install therefore restarts Notification Center as well as chronod. Binary
+presence checks and shell syntax checks do not prove the gallery previews are
+visible; this procedure requires a graphical macOS session.

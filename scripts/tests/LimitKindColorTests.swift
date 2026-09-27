@@ -54,11 +54,30 @@ private struct LimitKindColorTests {
         for: sessionConstrained, colors: palette, step: step, primaryHexColor: customHex)
       try assertColor(sessionAccent, equals: NSColor(defaults[0]), "Constrained session accent must keep its color at step \(step)")
 
+      let menuBarAccent = LimitKindColorScheme.primaryAccountAccent(
+        for: sessionConstrained, colors: palette, step: step, primaryHexColor: customHex)
+      try assertColor(menuBarAccent, equals: expectedCustom,
+                      "Menu bar must use the selected primary color even when the session is lower at step \(step)")
+      let automaticMenuBarAccent = LimitKindColorScheme.primaryAccountAccent(
+        for: sessionConstrained, colors: palette, step: step)
+      try assertColor(automaticMenuBarAccent, equals: NSColor(defaults[1]),
+                      "Automatic menu bar color must identify the primary window at step \(step)")
+      var unavailablePrimary = sessionConstrained
+      unavailablePrimary[1].remainingPercent = nil
+      let unavailableAccent = LimitKindColorScheme.primaryAccountAccent(
+        for: unavailablePrimary, colors: palette, step: step, primaryHexColor: customHex)
+      try assertColor(unavailableAccent, equals: expectedCustom,
+                      "Missing primary usage must not recolor the account at step \(step)")
+
       let unlimitedOnly = [metrics[2]]
       let unlimitedAccent = LimitKindColorScheme.accountAccent(
         for: unlimitedOnly, colors: palette, step: step, primaryHexColor: customHex)
       let defaultUnlimitedAccent = LimitKindColorScheme.accountAccent(for: unlimitedOnly, colors: palette, step: step)
       try assertColor(unlimitedAccent, equals: NSColor(defaultUnlimitedAccent), "Unlimited accent must ignore custom color at step \(step)")
+      let unlimitedMenuBarAccent = LimitKindColorScheme.primaryAccountAccent(
+        for: unlimitedOnly, colors: palette, step: step, primaryHexColor: customHex)
+      try assertColor(unlimitedMenuBarAccent, equals: NSColor(defaultUnlimitedAccent),
+                      "Unlimited menu bar accent must keep its reserved color at step \(step)")
     }
 
     print("Passed \(checksPassed) limit color integration checks.")

@@ -7,6 +7,16 @@ import QuotaCore
 /// is carried by geometry (arc length, bar length, line height), and danger by
 /// the reserved status accents — never by repainting an identity hue.
 enum LimitKindColorScheme {
+  /// The menu bar represents the whole account with one color. Keep it matched
+  /// to the longest bounded window, even when a shorter limit is more constrained.
+  static func primaryAccountAccent(for metrics: [UsageMetric], colors: LimitKindColors, step: Int, primaryHexColor: String? = nil) -> Color {
+    guard let primarySlot = primaryLimitSlot(for: metrics) else {
+      return accountAccent(for: metrics, colors: colors, step: step, primaryHexColor: primaryHexColor)
+    }
+    return color(for: primarySlot, colors: colors, step: step,
+                 primarySlot: primarySlot, primaryHexColor: primaryHexColor)
+  }
+
   /// Identity colors for an account's metrics, parallel to `metrics`.
   /// Resolve once per view body and index into the result — the slot
   /// assignment depends on the FULL metric list, and per-metric lookups would

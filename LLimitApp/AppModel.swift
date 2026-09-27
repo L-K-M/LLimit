@@ -433,6 +433,42 @@ final class AppModel: ObservableObject {
       : "Account removed."
   }
 
+  func moveProviderAccounts(fromOffsets offsets: IndexSet, toOffset destination: Int) {
+    guard !configurationLoadFailed else {
+      statusMessage = "Could not reorder accounts because the settings file could not be read. Relaunch LLimit after fixing the file."
+      return
+    }
+    let reordered = reorderedAccounts(providerAccounts, fromOffsets: offsets, toOffset: destination)
+    guard reordered != providerAccounts else { return }
+
+    var settings = currentSettings()
+    settings.accounts = reordered
+    do {
+      // Commit the display order before publishing it so a failed save leaves
+      // the sidebar and menu bar aligned with the order restored on relaunch.
+      try settingsStore.save(settings)
+    } catch {
+      statusMessage = "Could not save the account order. Check LLimit’s storage permissions and try again."
+      return
+    }
+    providerAccounts = reordered
+    reloadAccountStatuses()
+    if syncSettingsToWidgetStore(settings.redactedCredentials()) {
+      reloadWidgetTimelines()
+      statusMessage = "Account order saved."
+    } else {
+      statusMessage = "Account order saved locally. Widget sync unavailable."
+    }
+  }
+
+  enum AccountMoveDirection { case up, down }
+
+  func moveProviderAccount(_ accountID: String, direction: AccountMoveDirection) {
+    guard let index = providerAccounts.firstIndex(where: { $0.id == accountID }) else { return }
+    let destination = direction == .up ? index - 1 : index + 2
+    moveProviderAccounts(fromOffsets: IndexSet(integer: index), toOffset: destination)
+  }
+
   // MARK: - Detect & import (convenience)
 
   /// Scans local AI tools for credentials you could import into a new LLimit account.

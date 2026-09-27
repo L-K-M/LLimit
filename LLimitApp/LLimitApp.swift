@@ -6,6 +6,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
     false
   }
+
+  func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+    !SettingsWindowController.shared.restoreOpenWindow()
+  }
 }
 
 @main
@@ -40,9 +44,10 @@ private enum DashboardPresentation {
 /// Hosts `SettingsView` in a standard resizable AppKit window, created on first use and
 /// reused thereafter. Avoids the SwiftUI `Settings` scene (non-resizable) entirely.
 @MainActor
-final class SettingsWindowController {
+final class SettingsWindowController: NSObject, NSWindowDelegate {
   static let shared = SettingsWindowController()
   private var window: NSWindow?
+  private var isOpen = false
 
   func show(model: AppModel) {
     if window == nil {
@@ -53,6 +58,7 @@ final class SettingsWindowController {
       window.title = "LLimit"
       window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
       window.isReleasedWhenClosed = false
+      window.delegate = self
       window.setContentSize(NSSize(width: 960, height: 680))
       window.contentMinSize = NSSize(width: 720, height: 480)
       window.setFrameAutosaveName("LLimitSettingsWindow")
@@ -60,8 +66,28 @@ final class SettingsWindowController {
       self.window = window
     }
 
+    isOpen = true
+    restoreOpenWindow()
+  }
+
+  /// A Settings window stays discoverable in Cmd-Tab and the Dock until it is
+  /// closed. Losing focus to browser sign-in, hiding, or minimizing is not closing.
+  @discardableResult
+  func restoreOpenWindow() -> Bool {
+    guard isOpen, let window else { return false }
+    NSApp.setActivationPolicy(.regular)
+    if window.isMiniaturized {
+      window.deminiaturize(nil)
+    }
     NSApp.activate(ignoringOtherApps: true)
-    window?.makeKeyAndOrderFront(nil)
+    window.makeKeyAndOrderFront(nil)
+    return true
+  }
+
+  func windowWillClose(_ notification: Notification) {
+    guard let closedWindow = notification.object as? NSWindow, closedWindow === window else { return }
+    isOpen = false
+    NSApp.setActivationPolicy(.accessory)
   }
 }
 
@@ -168,9 +194,9 @@ private struct MenuBarIcon: View {
         let barRect = NSRect(x: x, y: 0, width: barWidth, height: barHeight)
         let barPath = NSBezierPath(roundedRect: barRect, xRadius: cornerRadius, yRadius: cornerRadius)
 
-        // Height carries the level; color identifies the account — the same
-        // scheme accent as its tile rings, dropdown gauge, and chart lines.
-        let accent = LimitKindColorScheme.accountAccent(
+        // Height carries the level; color matches the account's primary ring
+        // and chart line regardless of which limit is most constrained.
+        let accent = LimitKindColorScheme.primaryAccountAccent(
           for: provider.metrics,
           colors: kindColors,
           step: accountColorStep(forAccountID: provider.accountID, in: accounts),
@@ -191,16 +217,7 @@ private struct MenuBarIcon: View {
       return []
     }
 
-    return snapshot.providers.sorted { lhs, rhs in
-      let lhsRemaining = MenuBarQuotaStyling.remainingPercent(for: lhs) ?? Int.max
-      let rhsRemaining = MenuBarQuotaStyling.remainingPercent(for: rhs) ?? Int.max
-
-      if lhsRemaining != rhsRemaining {
-        return lhsRemaining < rhsRemaining
-      }
-
-      return lhs.title < rhs.title
-    }
+    return orderedUsageForAccounts(snapshot.providers, accounts: accounts)
   }
 
   private func fallbackIcon() -> NSImage {
