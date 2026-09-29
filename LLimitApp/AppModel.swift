@@ -1446,6 +1446,7 @@ final class AppModel: ObservableObject {
     switch provider {
     case .gitHubCopilot, .zhipu, .zai: return .monthly
     case .googleAntigravity: return .other
+    case .venice: return .daily
     default: return .weekly
     }
   }

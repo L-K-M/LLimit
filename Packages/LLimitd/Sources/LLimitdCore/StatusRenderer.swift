@@ -43,6 +43,9 @@ public enum StatusRenderer {
       }
       let suffix = metrics.isEmpty ? "" : ": " + metrics.joined(separator: " · ")
       lines.append("\(usage.title)\(suffix)")
+      if let warning = warningText(for: usage) {
+        lines.append("\(usage.title): WARNING \(warning)")
+      }
     }
 
     for failure in snapshot.failures.sorted(by: { $0.accountID < $1.accountID }) {
@@ -54,7 +57,8 @@ public enum StatusRenderer {
 
   /// Waybar `custom`-module JSON. `percentage` is the lowest remaining percent across
   /// accounts (the number a bar would color on); `class` is `ok`/`warning`/`critical`
-  /// from that same minimum, `error` when every account failed, `empty` with no data.
+  /// from that same minimum, with provider warnings elevating `ok` to `warning`;
+  /// `error` when every account failed, `empty` with no data.
   public static func waybarJSON(snapshot: QuotaSnapshot?, now: Date = Date()) -> String {
     let object = waybarObject(snapshot: snapshot, now: now)
     guard
@@ -111,7 +115,7 @@ public enum StatusRenderer {
       if let remaining {
         remainingPercents.append(remaining)
       }
-      accounts.append([
+      var account: [String: Any] = [
         "id": usage.accountID,
         "provider": usage.provider.rawValue,
         "name": usage.title,
@@ -121,7 +125,11 @@ public enum StatusRenderer {
         // worst metric; a popup (the tray) needs every limit as its own row.
         // Additive: bars that read only the older keys are unaffected.
         "metrics": usage.metrics.map(metricObject)
-      ])
+      ]
+      if let warning = warningText(for: usage) {
+        account["warning"] = warning
+      }
+      accounts.append(account)
     }
 
     let text: String
@@ -132,11 +140,15 @@ public enum StatusRenderer {
         if let remaining = usage.metrics.compactMap(\.remainingPercent).min() {
           return "\(usage.title) \(remaining)%"
         }
-        return usage.title
+        let balances = usage.metrics.compactMap { metric -> String? in
+          guard !metric.isUnlimited, let value = metric.usageLine else { return nil }
+          return "\(metric.label) \(value)"
+        }
+        return balances.isEmpty ? usage.title : "\(usage.title) \(balances.joined(separator: " / "))"
       }.joined(separator: " · ")
     }
 
-    let statusClass: StatusClass
+    var statusClass: StatusClass
     if providers.isEmpty && !snapshot.failures.isEmpty {
       statusClass = .error
     } else if providers.isEmpty {
@@ -152,6 +164,9 @@ public enum StatusRenderer {
       }
     } else {
       statusClass = .ok
+    }
+    if statusClass == .ok, providers.contains(where: { warningText(for: $0) != nil }) {
+      statusClass = .warning
     }
 
     var tooltipLines = ["Updated \(relativeAge(snapshot.generatedAt, now: now))"]
@@ -193,5 +208,11 @@ public enum StatusRenderer {
       return lhs.provider.rawValue < rhs.provider.rawValue
     }
     return lhs.title < rhs.title
+  }
+
+  private static func warningText(for usage: ProviderUsage) -> String? {
+    guard let warning = usage.warning?.trimmingCharacters(in: .whitespacesAndNewlines),
+          !warning.isEmpty else { return nil }
+    return warning
   }
 }

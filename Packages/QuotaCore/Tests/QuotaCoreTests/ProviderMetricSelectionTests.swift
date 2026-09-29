@@ -92,6 +92,25 @@ final class ProviderMetricSelectionTests: XCTestCase {
     XCTAssertFalse(QuotaWindowKind.other.isShortTerm)
   }
 
+  func testVeniceUsesDailyDIEMForRingsAndPrimaryColor() {
+    let usage = makeUsage(provider: .venice, metrics: [
+      UsageMetric(id: "usd-balance", label: "USD balance", usedDisplay: "$12.50"),
+      UsageMetric(id: "daily-diem", label: "Daily DIEM remaining", remainingPercent: 65),
+      UsageMetric(id: "bundled-credits", label: "Bundled credits", usedDisplay: "$5.00")
+    ])
+    XCTAssertEqual(defaultRingMetrics(for: usage).map(\.id), ["daily-diem"])
+    XCTAssertEqual(primaryLimitSlot(for: usage.metrics)?.kind, .daily)
+    XCTAssertTrue(chartsAsLongTermLimit(.daily, accountKinds: [.daily]))
+  }
+
+  func testVeniceBalancesNeverInventQuotaRings() {
+    let usage = makeUsage(provider: .venice, metrics: [
+      UsageMetric(id: "daily-diem", label: "Daily DIEM remaining", usedDisplay: "25 DIEM"),
+      UsageMetric(id: "usd-balance", label: "USD balance", usedDisplay: "$12.50")
+    ])
+    XCTAssertTrue(defaultRingMetrics(for: usage).isEmpty)
+  }
+
   func testLongTermFilterDropsShortWindowsWhenALongerOneExists() {
     // Claude's 5-hour window goes, both weeklies stay.
     let claude: [QuotaWindowKind] = [.session, .weekly, .weekly]

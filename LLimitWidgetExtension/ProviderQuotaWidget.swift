@@ -369,7 +369,7 @@ private struct ProviderQuotaTileView: View {
       if
         let account = entry.account,
         let usage = entry.usage,
-        !defaultRingMetrics(for: usage).isEmpty
+        !defaultRingMetrics(for: usage).isEmpty || usage.metrics.contains(where: { $0.usageLine != nil })
       {
         loadedContent(account: account, usage: usage)
       } else if let account = entry.account {
@@ -401,20 +401,25 @@ private struct ProviderQuotaTileView: View {
     let tints = ringTints(for: metrics, in: usage)
 
     return VStack(spacing: 5) {
-      ProviderConcentricRings(
-        metrics: metrics,
-        name: account.displayName,
-        tints: tints
-      )
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      if metrics.isEmpty {
+        balanceContent(account: account, usage: usage)
+          .padding(.top, entry.accountState == .autoSelected || isStale(usage) || usage.warning?.isEmpty == false ? 14 : 0)
+      } else {
+        ProviderConcentricRings(
+          metrics: metrics,
+          name: account.displayName,
+          tints: tints
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-      resetFooter(metrics: metrics, tints: tints)
+        resetFooter(metrics: metrics, tints: tints)
+      }
     }
     .padding(.horizontal, 14)
     .padding(.top, 13)
     .padding(.bottom, 12)
     .overlay(alignment: .topTrailing) {
-      if isStale(usage) {
+      if isStale(usage) || usage.warning?.isEmpty == false {
         Image(systemName: "exclamationmark.circle.fill")
           .font(.caption)
           .foregroundStyle(.orange, .black.opacity(0.35))
@@ -437,6 +442,31 @@ private struct ProviderQuotaTileView: View {
           .accessibilityHidden(true)
       }
     }
+  }
+
+  private func balanceContent(account: ProviderTileSelection, usage: ProviderUsage) -> some View {
+    VStack(alignment: .leading, spacing: 10) {
+      Text(account.displayName)
+        .font(.headline)
+        .lineLimit(2)
+        .minimumScaleFactor(0.8)
+
+      ForEach(Array(usage.metrics.filter { $0.usageLine != nil }.prefix(3))) { metric in
+        VStack(alignment: .leading, spacing: 1) {
+          Text(metric.label)
+            .font(.system(size: 9))
+            .foregroundStyle(.white.opacity(0.72))
+            .lineLimit(1)
+          Text(metric.usageLine ?? "")
+            .font(.caption.weight(.semibold))
+            .monospacedDigit()
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+        }
+      }
+    }
+    .foregroundStyle(.white)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
   }
 
   private func unavailableContent(
@@ -547,7 +577,9 @@ private struct ProviderQuotaTileView: View {
 
   private func isStale(_ usage: ProviderUsage) -> Bool {
     if entry.failure != nil { return true }
-    if defaultRingMetrics(for: usage).contains(where: { metric in
+    let rings = defaultRingMetrics(for: usage)
+    let displayedMetrics = rings.isEmpty ? usage.metrics : rings
+    if displayedMetrics.contains(where: { metric in
       guard let resetAt = metric.resetAt else { return false }
       return resetAt <= entry.date
     }) {
@@ -582,29 +614,32 @@ private struct ProviderQuotaTileView: View {
     }
 
     let metrics = defaultRingMetrics(for: usage)
-    guard !metrics.isEmpty else {
+    let readableMetrics = metrics.isEmpty ? usage.metrics.filter { $0.usageLine != nil } : metrics
+    guard !readableMetrics.isEmpty else {
       if let failure = entry.failure {
         return "\(account.displayName). Quota unavailable. \(failure.kind.rawValue)."
       }
       return "\(account.displayName). Quota percentage unavailable."
     }
 
-    let metricSummary = metrics.map { metric in
+    let metricSummary = readableMetrics.map { metric in
       let quota: String
       if metric.isUnlimited {
         quota = "unlimited"
       } else if let remaining = metric.remainingPercent {
         quota = "\(remaining) percent remaining"
       } else {
-        quota = "remaining quota unknown"
+        quota = metric.usageLine ?? "remaining quota unknown"
       }
-      let reset = resetSummary(for: metric, expanded: true)
-      return "\(metric.label), \(quota), \(reset)"
+      let reset = metric.resetAt != nil || metric.resetIn != nil
+        ? ", \(resetSummary(for: metric, expanded: true))" : ""
+      return "\(metric.label), \(quota)\(reset)"
     }.joined(separator: ". ")
 
     let freshness = isStale(usage) ? "Data is stale." : "Data is current."
     let failureState = entry.failure == nil ? "" : " Latest refresh failed."
-    return "\(account.displayName). \(metricSummary). \(freshness)\(failureState)"
+    let warningState = usage.warning.map { " \($0)" } ?? ""
+    return "\(account.displayName). \(metricSummary). \(freshness)\(failureState)\(warningState)"
   }
 
   private func resetSummary(for metric: UsageMetric, expanded: Bool = false) -> String {
@@ -790,6 +825,8 @@ private struct ProviderTileBackground: View {
       return [Color(red: 0.10, green: 0.42, blue: 0.95), Color(red: 0.05, green: 0.18, blue: 0.45)]
     case .openCodeGo:
       return [Color(red: 0.35, green: 0.36, blue: 0.39), Color(red: 0.13, green: 0.14, blue: 0.16)]
+    case .venice:
+      return [Color(red: 0.28, green: 0.42, blue: 0.45), Color(red: 0.10, green: 0.20, blue: 0.24)]
     case nil:
       return [Color(red: 0.32, green: 0.39, blue: 0.52), Color(red: 0.16, green: 0.2, blue: 0.29)]
     }

@@ -106,6 +106,33 @@ final class StatusRendererTests: XCTestCase {
     XCTAssertEqual(object["class"] as? String, "empty")
   }
 
+  func testBalanceOnlyAccountShowsAmountsWithoutInventingPercentage() throws {
+    let usage = ProviderUsage(
+      accountID: "balance-account",
+      provider: .venice,
+      title: "Balance account",
+      metrics: [
+        UsageMetric(id: "daily-diem", label: "Daily DIEM remaining", usedDisplay: "12.50 DIEM"),
+        UsageMetric(id: "usd-balance", label: "USD balance", usedDisplay: "$3.25")
+      ],
+      fetchedAt: now
+    )
+    let snapshot = QuotaSnapshot(generatedAt: now, providers: [usage], failures: [])
+    let object = try decodedWaybar(snapshot)
+
+    XCTAssertEqual(object["text"] as? String,
+                   "Balance account Daily DIEM remaining 12.50 DIEM / USD balance $3.25")
+    XCTAssertNil(object["percentage"])
+    XCTAssertEqual(object["class"] as? String, "ok")
+    let account = try XCTUnwrap((object["accounts"] as? [[String: Any]])?.first)
+    XCTAssertTrue(account["remainingPercent"] is NSNull)
+    let metrics = try XCTUnwrap(account["metrics"] as? [[String: Any]])
+    XCTAssertTrue(metrics.allSatisfy { $0["remainingPercent"] == nil })
+    XCTAssertEqual(metrics[1]["usageLine"] as? String, "$3.25")
+    XCTAssertTrue(StatusRenderer.humanReadable(snapshot: snapshot, now: now)
+      .contains("Daily DIEM remaining 12.50 DIEM · USD balance $3.25"))
+  }
+
   func testWaybarWithOnlyFailuresIsError() throws {
     let failed = QuotaSnapshot(
       generatedAt: now,
@@ -114,6 +141,46 @@ final class StatusRendererTests: XCTestCase {
     )
     let object = try decodedWaybar(failed)
     XCTAssertEqual(object["class"] as? String, "error")
+  }
+
+  func testBalanceWarningReachesHumanAndJSONStatus() throws {
+    let warning = "API key spending unavailable. Check its limits in Venice."
+    let usage = ProviderUsage(
+      accountID: "capped-key", provider: .venice, title: "Venice",
+      metrics: [UsageMetric(id: "usd-balance", label: "USD balance", usedDisplay: "$5.00")],
+      warning: warning, fetchedAt: now
+    )
+    let snapshot = QuotaSnapshot(generatedAt: now, providers: [usage], failures: [])
+    let object = try decodedWaybar(snapshot)
+
+    XCTAssertEqual(object["class"] as? String, "warning")
+    XCTAssertNil(object["percentage"])
+    XCTAssertTrue(StatusRenderer.humanReadable(snapshot: snapshot, now: now).contains(warning))
+    XCTAssertTrue((object["tooltip"] as? String)?.contains(warning) == true)
+    let account = try XCTUnwrap((object["accounts"] as? [[String: Any]])?.first)
+    XCTAssertEqual(account["warning"] as? String, warning)
+  }
+
+  func testWarningElevatesHealthyQuotaWithoutMaskingCriticalQuota() throws {
+    for (remaining, expectedClass) in [(80, "warning"), (25, "warning"), (5, "critical")] {
+      var snapshot = snapshot(remaining: [remaining])
+      snapshot.providers[0].warning = "Account needs attention"
+      let object = try decodedWaybar(snapshot)
+      XCTAssertEqual(object["class"] as? String, expectedClass)
+      XCTAssertEqual(object["percentage"] as? Int, remaining)
+    }
+  }
+
+  func testEmptyWarningsDoNotChangeHealthyStatusOrJSONContract() throws {
+    for warning in [nil, "", " \n "] as [String?] {
+      var snapshot = snapshot(remaining: [80])
+      snapshot.providers[0].warning = warning
+      let object = try decodedWaybar(snapshot)
+      XCTAssertEqual(object["class"] as? String, "ok")
+      let account = try XCTUnwrap((object["accounts"] as? [[String: Any]])?.first)
+      XCTAssertNil(account["warning"])
+      XCTAssertFalse(StatusRenderer.humanReadable(snapshot: snapshot, now: now).contains("WARNING"))
+    }
   }
 
   func testWaybarJSONIsValidAndCredentialFree() throws {

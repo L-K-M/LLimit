@@ -13,7 +13,7 @@ CLI for login and renewal, with a private profile for each account.
 
 `CredentialDiscovery` exists only as an *optional import shortcut* — it can detect a
 login from a locally installed tool (Claude Code, Codex, Copilot, Antigravity,
-OpenCode, Devin CLI, Muse Code) so the
+OpenCode, Devin CLI, Muse Code, Venice CLI) so the
 user can one-click create a pre-filled account instead of pasting a token. Once
 imported, the account is copied into and owned by LLimit.
 
@@ -31,7 +31,7 @@ reference and verified account identity, without copying Codex tokens into its
 settings. The user's normal Codex login and existing imported accounts stay separate.
 
 Providers: Claude (Anthropic), OpenAI/ChatGPT, GitHub Copilot, Zhipu, Z.ai, Kimi,
-Google Antigravity, Devin, Meta Muse, OpenCode Go.
+Google Antigravity, Devin, Meta Muse, OpenCode Go, Venice.
 
 ## Layout
 
@@ -127,7 +127,8 @@ Linux:
   a possibly rotated grant. Never remove a namespace with a pending operation.
 - The host app is **not sandboxed** (the import shortcut reads `~/.claude`, `~/.codex`,
   `~/.config/github-copilot`, `~/.kimi`, `~/.kimi-code`, `~/.gemini`,
-  `~/.local/share/opencode`, `~/.local/share/devin`, `~/.config/muse`, and the Keychain). The widget extension **stays sandboxed**; it only reads the App
+  `~/.local/share/opencode`, `~/.local/share/devin`, `~/.config/muse`, `~/.venice`,
+  and the Keychain). The widget extension **stays sandboxed**; it only reads the App
   Group container.
 - Adding a `QuotaProvider` case is a breaking change for exhaustive `switch`es: update
   `Models.displayName`, `Models.credentialFields`, and the widget's `compactProviderName`.
@@ -148,6 +149,16 @@ Linux:
 
 ## Provider API notes
 
+- **Venice**: read-only `GET https://api.venice.ai/api/v1/api_keys/rate_limits`
+  accepts either key type and reports key balances (`DIEM`, `USD`,
+  `BUNDLED_CREDITS`), `accessPermitted`, and `nextEpochBegins` under `data`.
+  `GET /api/v1/billing/balance` requires an Admin key and supplies the account's
+  `balances.diem` plus `diemEpochAllocation`; use that same response's numerator
+  and denominator for daily DIEM percentage. Inference keys retain balance-only
+  data. USD and bundled credits have no reported total/reset; never fabricate
+  percentages. A key spending cap can deny access despite positive account funds.
+  Import `~/.venice/config.json` (`api_key`) or OpenCode's exact `venice` API entry.
+  Source: [official OpenAPI schema](https://github.com/veniceai/api-docs/blob/855f04bf1538383d8f00cdac24b9383ad7094d26/swagger.yaml).
 - **OpenCode Go**: read-only `GET https://opencode.ai/zen/go/v1/usage` with
   `Authorization: Bearer <API key>`. `usage.rolling`, `.weekly`, and `.monthly`
   each contain `status` (`ok` or `rate-limited`), integer used `percent`, and ISO

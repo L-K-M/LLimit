@@ -187,13 +187,6 @@ private struct MenuBarIcon: View {
     let image = NSImage(size: NSSize(width: totalWidth, height: iconHeight), flipped: false) { _ in
       for (index, provider) in providers.enumerated() {
         let x = CGFloat(index) * (barWidth + barSpacing)
-        let remaining = MenuBarQuotaStyling.remainingPercent(for: provider) ?? 0
-        let normalized = CGFloat(max(0, min(100, remaining))) / 100.0
-        let barHeight = max(2, normalized * iconHeight)
-
-        let barRect = NSRect(x: x, y: 0, width: barWidth, height: barHeight)
-        let barPath = NSBezierPath(roundedRect: barRect, xRadius: cornerRadius, yRadius: cornerRadius)
-
         // Height carries the level; color matches the account's primary ring
         // and chart line regardless of which limit is most constrained.
         let accent = LimitKindColorScheme.primaryAccountAccent(
@@ -202,8 +195,20 @@ private struct MenuBarIcon: View {
           step: accountColorStep(forAccountID: provider.accountID, in: accounts),
           primaryHexColor: primaryColors[provider.accountID]
         )
-        NSColor(accent).setFill()
-        barPath.fill()
+        if let remaining = MenuBarQuotaStyling.remainingPercent(for: provider) {
+          let normalized = CGFloat(max(0, min(100, remaining))) / 100.0
+          let barHeight = max(2, normalized * iconHeight)
+          let barRect = NSRect(x: x, y: 0, width: barWidth, height: barHeight)
+          let barPath = NSBezierPath(roundedRect: barRect, xRadius: cornerRadius, yRadius: cornerRadius)
+          NSColor(accent).setFill()
+          barPath.fill()
+        } else {
+          // A balance without a quota total has no meaningful bar height.
+          let marker = NSBezierPath(ovalIn: NSRect(x: x + 0.5, y: 6.5, width: barWidth - 1, height: 3))
+          marker.lineWidth = 1
+          NSColor(accent).setStroke()
+          marker.stroke()
+        }
       }
       return true
     }
@@ -1012,18 +1017,28 @@ private struct OverviewCard: View {
               onSelect(provider.accountID)
             } label: {
               VStack(spacing: 5) {
-                GlossRing(
-                  remaining: MenuBarQuotaStyling.remainingPercent(for: provider),
-                  unlimited: provider.metrics.allSatisfy(\.isUnlimited) && !provider.metrics.isEmpty,
-                  tint: LimitKindColorScheme.accountAccent(
-                    for: provider.metrics,
-                    colors: kindColors,
-                    step: accountColorStep(forAccountID: provider.accountID, in: accounts),
-                    primaryHexColor: primaryColors[provider.accountID]
-                  ),
-                  diameter: 40,
-                  lineWidth: 4.5
-                )
+                if MenuBarQuotaStyling.remainingPercent(for: provider) == nil,
+                   let balance = provider.metrics.compactMap(\.usageLine).first {
+                  Text(balance)
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .frame(height: 40)
+                } else {
+                  GlossRing(
+                    remaining: MenuBarQuotaStyling.remainingPercent(for: provider),
+                    unlimited: provider.metrics.allSatisfy(\.isUnlimited) && !provider.metrics.isEmpty,
+                    tint: LimitKindColorScheme.accountAccent(
+                      for: provider.metrics,
+                      colors: kindColors,
+                      step: accountColorStep(forAccountID: provider.accountID, in: accounts),
+                      primaryHexColor: primaryColors[provider.accountID]
+                    ),
+                    diameter: 40,
+                    lineWidth: 4.5
+                  )
+                }
                 Text(provider.title)
                   .font(.system(size: 9, weight: .medium))
                   .foregroundStyle(DashboardPalette.secondaryText)
@@ -1094,6 +1109,12 @@ private struct OverviewCard: View {
     }
     if let remaining = MenuBarQuotaStyling.remainingPercent(for: provider) {
       return "\(provider.title), \(remaining) percent remaining. Jump to card."
+    }
+    let balances = provider.metrics.compactMap { metric in
+      metric.usageLine.map { "\(metric.label) \($0)" }
+    }
+    if !balances.isEmpty {
+      return "\(provider.title), \(balances.joined(separator: ", ")). Jump to card."
     }
     return "\(provider.title), quota unavailable. Jump to card."
   }
@@ -1175,11 +1196,14 @@ private struct ProviderQuotaCard: View {
 
         Spacer(minLength: 8)
 
-        GlossRing(
-          remaining: MenuBarQuotaStyling.remainingPercent(for: usage),
-          unlimited: usage.metrics.allSatisfy(\.isUnlimited) && !usage.metrics.isEmpty,
-          tint: accent
-        )
+        if MenuBarQuotaStyling.remainingPercent(for: usage) != nil
+          || usage.metrics.allSatisfy({ $0.usageLine == nil }) {
+          GlossRing(
+            remaining: MenuBarQuotaStyling.remainingPercent(for: usage),
+            unlimited: usage.metrics.allSatisfy(\.isUnlimited) && !usage.metrics.isEmpty,
+            tint: accent
+          )
+        }
       }
 
       let metricColors = LimitKindColorScheme.colors(for: usage.metrics, colors: kindColors, step: colorStep, primaryHexColor: primaryHexColor)
@@ -1296,6 +1320,8 @@ private struct ProviderMark: View {
       return "wand.and.stars"
     case .openCodeGo:
       return "chevron.left.forwardslash.chevron.right"
+    case .venice:
+      return "water.waves"
     }
   }
 }
@@ -1337,7 +1363,9 @@ private struct MetricQuotaRow: View {
           .foregroundStyle(valueColor)
       }
 
-      GlossBar(progress: barProgress, tint: tint)
+      if remaining != nil || metric.isUnlimited {
+        GlossBar(progress: barProgress, tint: tint)
+      }
 
       if secondaryUsageLine != nil || resetCountdown != nil {
         HStack(spacing: 8) {

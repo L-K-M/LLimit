@@ -32,6 +32,8 @@ public enum CredentialField {
 
   public static let openCodeGoAPIKey = "opencode-go.api_key"
 
+  public static let veniceAPIKey = "venice.api_key"
+
   public static let copilotOAuthToken = "copilot.oauth_token"
   public static let copilotPATToken = "copilot.pat_token"
   public static let copilotUsername = "copilot.username"

@@ -11,6 +11,7 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
   case devin = "devin"
   case metaMuse = "meta-muse"
   case openCodeGo = "opencode-go"
+  case venice = "venice"
 
   public var displayName: String {
     switch self {
@@ -34,6 +35,8 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
       return "Meta Muse"
     case .openCodeGo:
       return "OpenCode Go"
+    case .venice:
+      return "Venice"
     }
   }
 }
@@ -184,6 +187,14 @@ public extension QuotaProvider {
           key: CredentialField.openCodeGoAPIKey,
           label: "API key",
           help: "OpenCode API key for a workspace with an active Go subscription. You can import it from OpenCode."
+        )
+      ]
+    case .venice:
+      return [
+        CredentialFieldDescriptor(
+          key: CredentialField.veniceAPIKey,
+          label: "API key",
+          help: "Create a key at venice.ai/settings/api. An Admin key enables daily DIEM percentage charts; an Inference key shows balances only."
         )
       ]
     }

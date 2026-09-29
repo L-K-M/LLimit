@@ -42,6 +42,7 @@ resolved locations.
 llimit accounts list
 llimit accounts add --provider anthropic        # prompts for that provider's fields
 llimit accounts add --provider opencode-go      # prompts for your OpenCode Go API key
+llimit accounts add --provider venice           # prompts for your Venice API key
 llimit accounts import                          # list discovered local logins, import one
 llimit accounts enable|disable|remove <id>      # id may be a unique prefix
 llimit refresh                                  # one-shot fetch, writes the snapshot
@@ -60,6 +61,12 @@ OpenCode Go reports rolling, weekly, and monthly subscription limits. Add it wit
 `auth.json` under `$XDG_DATA_HOME/opencode` (default `~/.local/share/opencode`).
 The key is copied into LLimit's local settings. No OpenCode process is required
 after import, and usage polling does not make inference requests.
+
+Venice tracks daily DIEM and USD-denominated API credit balances. An Admin key
+enables daily DIEM percentages; an Inference key shows balances only. Import reads
+`~/.venice/config.json` (`api_key`) or OpenCode's `venice` entry in `auth.json`.
+Balances with no reported allocation remain amounts in status output, with no
+fabricated percentage. These are API balances, not web-app message/image quotas.
 
 ## systemd
 

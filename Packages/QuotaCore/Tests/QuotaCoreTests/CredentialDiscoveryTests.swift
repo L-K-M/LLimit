@@ -120,6 +120,63 @@ final class CredentialDiscoveryTests: XCTestCase {
     }
   }
 
+  func testDiscoversVeniceAPIKeyFromOpenCode() throws {
+    try write(#"{"venice":{"type":"api","key":"venice-fixture"},"openai":{"type":"api","key":"unrelated-fixture"}}"#,
+              to: ".local", "share", "opencode", "auth.json")
+    let venice = try XCTUnwrap(discover().first { $0.provider == .venice })
+    XCTAssertEqual(venice.stableID, "venice:opencode")
+    XCTAssertEqual(venice.credentials, [CredentialField.veniceAPIKey: "venice-fixture"])
+    XCTAssertTrue(venice.provider.hasRequiredCredentials(venice.credentials))
+  }
+
+  func testDiscoversVeniceFromXDGDataHomeWithoutLeakingKey() throws {
+    try write(#"{"venice":{"type":"api","key":"xdg-venice-fixture"}}"#,
+              to: "custom-data", "opencode", "auth.json")
+    let result = CredentialDiscovery(homeDirectories: [home], environment: [
+      "XDG_DATA_HOME": home.appendingPathComponent("custom-data").path
+    ]).discover()
+    XCTAssertEqual(result.credentials.first { $0.provider == .venice }?.credentials,
+                   [CredentialField.veniceAPIKey: "xdg-venice-fixture"])
+    XCTAssertFalse(result.diagnostics.joined().contains("xdg-venice-fixture"))
+  }
+
+  func testDoesNotImportInvalidVeniceCredentials() throws {
+    for entry in [#"{"type":"oauth","access":"oauth-fixture"}"#,
+                  #"{"type":"api","key":"   "}"#, "null"] {
+      try write("{\"venice\":\(entry)}", to: ".local", "share", "opencode", "auth.json")
+      XCTAssertFalse(discover().contains { $0.provider == .venice })
+    }
+  }
+
+  func testDiscoversVeniceCLIAndDeduplicatesMatchingOpenCodeKey() throws {
+    try write(#"{"api_key":"venice-cli-fixture"}"#, to: ".venice", "config.json")
+    try write(#"{"venice":{"type":"api","key":"venice-cli-fixture"}}"#,
+              to: ".local", "share", "opencode", "auth.json")
+    let result = CredentialDiscovery(homeDirectories: [home], environment: [:]).discover()
+    let venice = result.credentials.filter { $0.provider == .venice }
+    XCTAssertEqual(venice.count, 1)
+    XCTAssertEqual(venice.first?.stableID, "venice:venice-cli")
+    XCTAssertEqual(venice.first?.credentials, [CredentialField.veniceAPIKey: "venice-cli-fixture"])
+    XCTAssertFalse(result.diagnostics.joined().contains("venice-cli-fixture"))
+  }
+
+  func testVeniceCLIRejectsMissingOrMalformedKey() throws {
+    for body in ["{}", #"{"api_key":null}"#, #"{"api_key":true}"#, #"{"api_key":" "}"#] {
+      try write(body, to: ".venice", "config.json")
+      XCTAssertFalse(discover().contains { $0.provider == .venice })
+    }
+  }
+
+  func testVeniceImportsDistinctCLIAndOpenCodeAccounts() throws {
+    try write(#"{"api_key":"venice-cli-fixture"}"#, to: ".venice", "config.json")
+    try write(#"{"venice":{"type":"api","key":"venice-opencode-fixture"}}"#,
+              to: ".local", "share", "opencode", "auth.json")
+    let venice = discover().filter { $0.provider == .venice }
+    XCTAssertEqual(venice.count, 2)
+    XCTAssertEqual(Set(venice.compactMap { $0.credentials[CredentialField.veniceAPIKey] }),
+                   ["venice-cli-fixture", "venice-opencode-fixture"])
+  }
+
   func testDiscoversCopilotEditorHostsFile() throws {
     try write(#"{"github.com":{"oauth_token":"gho_editor","user":"octocat"}}"#,
               to: ".config", "github-copilot", "hosts.json")

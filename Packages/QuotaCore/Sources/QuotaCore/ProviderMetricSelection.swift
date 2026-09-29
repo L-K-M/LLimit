@@ -28,6 +28,8 @@ public func defaultRingMetrics(for usage: ProviderUsage) -> [UsageMetric] {
     preferredIDs = ["window", "weekly"]
   case .openCodeGo:
     preferredIDs = ["session-rolling", "monthly", "weekly"]
+  case .venice:
+    preferredIDs = ["daily-diem"]
   }
 
   var selected: [UsageMetric] = []

@@ -474,7 +474,7 @@ private struct CompactProviderUsageRow: View {
         .lineLimit(1)
         .frame(width: 58, alignment: .leading)
 
-      if showProgressBar {
+      if showProgressBar, basePercent != nil || unlimited {
         MiniProgressBar(
           percent: basePercent,
           unlimited: unlimited,
@@ -487,7 +487,7 @@ private struct CompactProviderUsageRow: View {
         Spacer(minLength: 0)
       }
 
-      if showPercentages {
+      if showPercentages || (basePercent == nil && metric?.usageLine != nil) {
         // Single mode labels the SAME metric the bar fills with
         // (dashboardPrimaryMetric), so the number can never contradict the bar.
         Text(dualPercent ?? percentText(for: metric))
@@ -495,7 +495,7 @@ private struct CompactProviderUsageRow: View {
           .monospacedDigit()
           .lineLimit(1)
           .minimumScaleFactor(0.8)
-          .frame(width: dualPercent == nil ? 40 : 72, alignment: .trailing)
+          .frame(width: basePercent == nil && !unlimited ? nil : (dualPercent == nil ? 40 : 72), alignment: .trailing)
       }
     }
   }
@@ -982,6 +982,8 @@ private func compactProviderName(for provider: QuotaProvider) -> String {
     return "Muse"
   case .openCodeGo:
     return "Go"
+  case .venice:
+    return "Venice"
   }
 }
 
@@ -1008,7 +1010,7 @@ private func percentText(for metric: UsageMetric?) -> String {
   if let remaining = metric.remainingPercent {
     return "\(remaining)%"
   }
-  return "--"
+  return metric.usageLine ?? "--"
 }
 
 private func backgroundBaseColor(from hexColor: String?) -> Color? {

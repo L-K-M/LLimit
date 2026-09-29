@@ -78,6 +78,7 @@ public struct CredentialDiscovery: Sendable {
       candidates += scanCopilotEditor(home: home, diagnostics: &diagnostics)
       candidates += scanKimi(home: home, diagnostics: &diagnostics)
       candidates += scanAntigravity(home: home, diagnostics: &diagnostics)
+      candidates += scanVenice(home: home, diagnostics: &diagnostics)
       candidates += scanOpenCode(home: home, diagnostics: &diagnostics)
     }
 
@@ -382,6 +383,11 @@ public struct CredentialDiscovery: Sendable {
                             [CredentialField.openCodeGoAPIKey: key]))
       }
 
+      if let key = apiKey(in: object, provider: "venice") {
+        results.append(make("venice:opencode", .venice, "Venice", url,
+                            [CredentialField.veniceAPIKey: key]))
+      }
+
       if let copilot = object["github-copilot"] as? [String: Any],
          (copilot["type"] as? String) == "oauth",
          let oauth = nonEmptyString(copilot["refresh"]) ?? nonEmptyString(copilot["access"]) {
@@ -459,6 +465,25 @@ public struct CredentialDiscovery: Sendable {
     }
 
     return results
+  }
+
+  /// The official Venice CLI stores its saved API key in ~/.venice/config.json.
+  /// Import copies the key; later refreshes never require the CLI or this file.
+  private func scanVenice(home: URL, diagnostics: inout [String]) -> [DiscoveredCredential] {
+    let url = path(home, ".venice", "config.json")
+    guard let object = readJSON(at: url, label: "Venice CLI", diagnostics: &diagnostics) else { return [] }
+    guard let key = nonEmptyString(object["api_key"]) else {
+      diagnostics.append("Venice CLI: file found but no API key")
+      return []
+    }
+    diagnostics.append("Venice CLI: found API key (\(shortPath(url)))")
+    return [DiscoveredCredential(
+      stableID: "venice:venice-cli",
+      provider: .venice,
+      suggestedName: "Venice",
+      sourceLabel: "Venice CLI (\(shortPath(url)))",
+      credentials: [CredentialField.veniceAPIKey: key]
+    )]
   }
 
   /// `devin auth login` writes a flat `credentials.toml` in the CLI's data
