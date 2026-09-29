@@ -144,7 +144,10 @@ final class ClaudeCodeProcessTests: XCTestCase {
       )
       XCTFail("Missing executable should fail to start")
     } catch {
-      XCTAssertFalse(error is CancellationError)
+      guard let failure = error as? ClaudeCodeProcess.StartFailure else {
+        return XCTFail("A launch failure must prove that no child started")
+      }
+      XCTAssertFalse(failure.underlyingError is CancellationError)
     }
   }
 

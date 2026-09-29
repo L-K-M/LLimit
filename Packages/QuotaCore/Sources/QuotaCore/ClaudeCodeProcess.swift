@@ -13,6 +13,17 @@ public actor ClaudeCodeProcess {
     case invalidTimeout
   }
 
+  /// Proof that no child was launched and no refresh grant could be consumed.
+  /// Callers may also wrap executable/profile preparation failures in this type,
+  /// but must never use it for a launched child's exit, timeout, or cancellation.
+  public struct StartFailure: Error {
+    public let underlyingError: any Error
+
+    public init(_ underlyingError: any Error) {
+      self.underlyingError = underlyingError
+    }
+  }
+
   private struct RunningOperation {
     let process: Process
     var waiter: CheckedContinuation<Result, Never>?
@@ -51,8 +62,8 @@ public actor ClaudeCodeProcess {
   /// to the null device. The caller must persist its renewal-in-progress marker
   /// before invoking this method, because the app may exit while the CLI is running.
   ///
-  /// Cancellation before launch throws. After launch it never kills the child:
-  /// interrupting a rotating grant could lose the only usable replacement token.
+  /// Every prelaunch error is wrapped in `StartFailure`. After launch it never
+  /// kills the child: interrupting a rotating grant could lose its replacement.
   /// The wait is bounded by timeout; a running result stays tracked until exit.
   public func run(
     executable: URL,
@@ -61,9 +72,13 @@ public actor ClaudeCodeProcess {
     workingDirectory: URL,
     timeout: TimeInterval
   ) async throws -> Result {
-    try Task.checkCancellation()
-    guard timeout.isFinite, timeout >= 0, timeout <= 3_600 else {
-      throw RunError.invalidTimeout
+    do {
+      try Task.checkCancellation()
+      guard timeout.isFinite, timeout >= 0, timeout <= 3_600 else {
+        throw RunError.invalidTimeout
+      }
+    } catch {
+      throw StartFailure(error)
     }
 
     let id = UUID()
@@ -86,7 +101,7 @@ public actor ClaudeCodeProcess {
     } catch {
       operations.removeValue(forKey: id)
       process.terminationHandler = nil
-      throw error
+      throw StartFailure(error)
     }
 
     return await withCheckedContinuation { continuation in

@@ -170,6 +170,134 @@ final class ClaudeCodeRenewalTests: XCTestCase {
     XCTAssertEqual(saved.last?[CredentialField.anthropicRenewalPending], "true")
   }
 
+  func testMissingExecutableRestoresCredentialsWithoutPendingMarker() async {
+    let fixture = RenewalFixture(logins: [login("old", remaining: 60)])
+    let runner = ClaudeCodeProcess()
+    let original = stored()
+    let directory = FileManager.default.temporaryDirectory
+    do {
+      _ = try await ClaudeCodeRenewal.prepare(
+        stored: original, now: now,
+        read: { await fixture.read() }, persist: { try await fixture.persist($0) },
+        renew: { _ in
+          _ = try await runner.run(
+            executable: directory.appendingPathComponent(UUID().uuidString), arguments: [], environment: [:],
+            workingDirectory: directory, timeout: 5)
+          return true
+        })
+      XCTFail("A missing executable cannot start renewal")
+    } catch {
+      XCTAssertFalse(error is ClaudeCodeProcess.StartFailure)
+    }
+    let saved = await fixture.saved
+    XCTAssertEqual(saved.count, 2)
+    XCTAssertEqual(saved.last, original)
+  }
+
+  func testCancellationBeforeLaunchRestoresCredentialsWithoutPendingMarker() async {
+    let fixture = RenewalFixture(logins: [login("old", remaining: 60)])
+    let runner = ClaudeCodeProcess()
+    let original = stored()
+    let now = self.now
+    let directory = FileManager.default.temporaryDirectory
+    let operation = Task {
+      try await ClaudeCodeRenewal.prepare(
+        stored: original, now: now,
+        read: { await fixture.read() }, persist: { try await fixture.persist($0) },
+        renew: { _ in
+          withUnsafeCurrentTask { $0?.cancel() }
+          _ = try await runner.run(
+            executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "exit 0"], environment: [:],
+            workingDirectory: directory, timeout: 5)
+          return true
+        })
+    }
+    do {
+      _ = try await operation.value
+      XCTFail("Cancellation before launch must propagate")
+    } catch {
+      XCTAssertTrue(error is CancellationError)
+    }
+    let saved = await fixture.saved
+    XCTAssertEqual(saved.count, 2)
+    XCTAssertEqual(saved.last, original)
+  }
+
+  func testPreparationFailureRestoresCredentialsAndPreservesItsError() async {
+    let fixture = RenewalFixture(logins: [login("old", remaining: 60)])
+    let original = stored()
+    do {
+      _ = try await ClaudeCodeRenewal.prepare(
+        stored: original, now: now,
+        read: { await fixture.read() }, persist: { try await fixture.persist($0) },
+        renew: { _ in throw ClaudeCodeProcess.StartFailure(RenewalFixture.Failure.subprocess) })
+      XCTFail("Preparation failure must propagate")
+    } catch {
+      XCTAssertEqual(error as? RenewalFixture.Failure, .subprocess)
+    }
+    let saved = await fixture.saved
+    XCTAssertEqual(saved.count, 2)
+    XCTAssertEqual(saved.last, original)
+  }
+
+  func testFailedRollbackKeepsPendingMarkerAndReportsPersistenceFailure() async {
+    let fixture = RenewalFixture(logins: [login("old", remaining: 60)], failRollback: true)
+    do {
+      _ = try await ClaudeCodeRenewal.prepare(
+        stored: stored(), now: now,
+        read: { await fixture.read() }, persist: { try await fixture.persist($0) },
+        renew: { _ in throw ClaudeCodeProcess.StartFailure(RenewalFixture.Failure.subprocess) })
+      XCTFail("Rollback failure must propagate")
+    } catch {
+      XCTAssertEqual(error as? RenewalFixture.Failure, .persistence)
+    }
+    let saved = await fixture.saved
+    XCTAssertEqual(saved.count, 1)
+    XCTAssertEqual(saved.last?[CredentialField.anthropicRenewalPending], "true")
+    let events = await fixture.events
+    XCTAssertEqual(events, ["read", "persist-pending", "persist-ready"])
+  }
+
+  func testNonzeroChildExitLeavesDurablePendingMarker() async {
+    let fixture = RenewalFixture(logins: [login("old", remaining: 60)])
+    let runner = ClaudeCodeProcess()
+    let directory = FileManager.default.temporaryDirectory
+    do {
+      _ = try await ClaudeCodeRenewal.prepare(
+        stored: stored(), now: now,
+        read: { await fixture.read() }, persist: { try await fixture.persist($0) },
+        renew: { _ in
+          let result = try await runner.run(
+            executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "exit 7"], environment: [:],
+            workingDirectory: directory, timeout: 5)
+          XCTAssertEqual(result, .completed(status: 7))
+          throw ClaudeCodeRenewalError.renewalIncomplete
+        })
+      XCTFail("An exited child may already have consumed its grant")
+    } catch {
+      XCTAssertEqual(error as? ClaudeCodeRenewalError, .renewalIncomplete)
+    }
+    let saved = await fixture.saved
+    XCTAssertEqual(saved.count, 1)
+    XCTAssertEqual(saved.last?[CredentialField.anthropicRenewalPending], "true")
+  }
+
+  func testCancellationWithoutLaunchProofLeavesDurablePendingMarker() async {
+    let fixture = RenewalFixture(logins: [login("old", remaining: 60)])
+    do {
+      _ = try await ClaudeCodeRenewal.prepare(
+        stored: stored(), now: now,
+        read: { await fixture.read() }, persist: { try await fixture.persist($0) },
+        renew: { _ in throw CancellationError() })
+      XCTFail("Cancellation alone does not prove that a child never started")
+    } catch {
+      XCTAssertTrue(error is CancellationError)
+    }
+    let saved = await fixture.saved
+    XCTAssertEqual(saved.count, 1)
+    XCTAssertEqual(saved.last?[CredentialField.anthropicRenewalPending], "true")
+  }
+
   func testUnmanagedAccountIsRejectedBeforeReadingProfile() async {
     let fixture = RenewalFixture(logins: [login("old", remaining: 60)])
     do {
@@ -184,16 +312,19 @@ final class ClaudeCodeRenewalTests: XCTestCase {
 }
 
 private actor RenewalFixture {
-  enum Failure: Error { case persistence, subprocess }
+  enum Failure: Error, Equatable { case persistence, subprocess }
   private var logins: [ClaudeCodeLogin]
   private let failPersistence: Bool
+  private let failRollback: Bool
   private let renewalCompleted: Bool
   private(set) var events: [String] = []
   private(set) var saved: [[String: String]] = []
 
-  init(logins: [ClaudeCodeLogin], failPersistence: Bool = false, renewalCompleted: Bool = true) {
+  init(logins: [ClaudeCodeLogin], failPersistence: Bool = false, renewalCompleted: Bool = true,
+       failRollback: Bool = false) {
     self.logins = logins
     self.failPersistence = failPersistence
+    self.failRollback = failRollback
     self.renewalCompleted = renewalCompleted
   }
 
@@ -204,7 +335,7 @@ private actor RenewalFixture {
 
   func persist(_ credentials: [String: String]) throws {
     events.append(credentials[CredentialField.anthropicRenewalPending] == nil ? "persist-ready" : "persist-pending")
-    if failPersistence { throw Failure.persistence }
+    if failPersistence || (failRollback && !saved.isEmpty) { throw Failure.persistence }
     saved.append(credentials)
   }
 

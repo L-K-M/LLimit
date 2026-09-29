@@ -1075,9 +1075,16 @@ final class AppModel: ObservableObject {
 
   private func renewClaudeAccount(id: String, profile: ClaudeCodeProfile,
                                  material: ClaudeCodeRenewalMaterial) async throws -> Bool {
-    let directory = try claudeProfiles.prepare(profile)
+    let directory: URL
+    let executable: URL
+    do {
+      directory = try claudeProfiles.prepare(profile)
+      executable = try claudeProfiles.executable()
+    } catch {
+      throw ClaudeCodeProcess.StartFailure(error)
+    }
     let result = try await claudeProcess.run(
-      executable: claudeProfiles.executable(), arguments: ["auth", "login", "--claudeai"],
+      executable: executable, arguments: ["auth", "login", "--claudeai"],
       environment: ClaudeCodeProcess.environment(parent: ProcessInfo.processInfo.environment,
                                                   profileDirectory: directory, renewal: material),
       workingDirectory: directory.appendingPathComponent("work", isDirectory: true), timeout: 45)

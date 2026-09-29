@@ -75,11 +75,19 @@ public enum ClaudeCodeRenewal {
     guard let material = login.renewal else { throw ClaudeCodeRenewalError.missingRenewalMaterial }
 
     // Never replay a potentially consumed refresh token after a crash, timeout,
-    // or uncertain subprocess error. Only a newly persisted token clears this.
+    // or uncertain subprocess error. A launched child's marker clears only after
+    // adopting its newly persisted token.
     var pending = stored
     pending[CredentialField.anthropicRenewalPending] = "true"
     try await persist(pending)
-    guard try await renew(material) else { throw ClaudeCodeRenewalError.inProgress }
+    do {
+      guard try await renew(material) else { throw ClaudeCodeRenewalError.inProgress }
+    } catch let failure as ClaudeCodeProcess.StartFailure {
+      // A failed launch cannot consume the grant. Undo only this attempt's
+      // marker; uncertain outcomes and markers inherited from a restart stay.
+      try await persist(stored)
+      throw failure.underlyingError
+    }
 
     let completed = try await read()
     try requireIdentity(completed.identity, matches: stored)
