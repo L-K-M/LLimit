@@ -94,7 +94,7 @@ public struct VeniceQuotaClient: QuotaProviderClient {
       warning = "API key spending unavailable. Check its limits in Venice."
     } else if billing?.canConsume == false {
       warning = "API spending unavailable. Check Venice billing."
-    } else if maxUsagePercent == 100 {
+    } else if maxUsagePercent == 100, let diem = billing?.balances.diem, diem <= 0 {
       warning = "Daily DIEM exhausted"
     } else if let maxUsagePercent, maxUsagePercent >= 80 {
       warning = "High DIEM usage"

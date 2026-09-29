@@ -119,6 +119,14 @@ final class VeniceQuotaClientTests: XCTestCase {
     XCTAssertEqual(usage.maxUsagePercent, 0)
   }
 
+  func testSmallPositiveDIEMBalanceIsNotReportedAsExhausted() async throws {
+    let billing = billingBody.replacingOccurrences(of: "\"diem\":40", with: "\"diem\":0.4")
+    let usage = try await fetch(billing: billing)
+    XCTAssertEqual(usage.metrics[0].remainingPercent, 0)
+    XCTAssertEqual(usage.metrics[0].usedDisplay, "0.4 DIEM")
+    XCTAssertEqual(usage.warning, "High DIEM usage")
+  }
+
   func testSmallNonzeroCreditsAreNotDisplayedAsZero() async throws {
     let rates = usageBody.replacingOccurrences(of: "\"USD\":7.5", with: "\"USD\":0.00000001")
     let billing = billingBody.replacingOccurrences(of: "\"diemEpochAllocation\":100", with: "\"diemEpochAllocation\":1e-300")
