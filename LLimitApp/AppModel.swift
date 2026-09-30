@@ -207,7 +207,10 @@ final class AppModel: ObservableObject {
     }
 
     do {
-      var refreshed = try await refreshService.refresh(configurations: enabledConfigs, credentialFailures: claudeFailures)
+      var refreshed = await refreshService.refresh(configurations: enabledConfigs, credentialFailures: claudeFailures)
+      refreshed = removingChangedVeniceResults(from: refreshed, configurations: enabledConfigs)
+      try refreshService.save(refreshed)
+      let initiallySaved = refreshed
       recordClaudeUsage(in: refreshed, configurations: enabledConfigs)
       recordCodexUsage(in: refreshed, configurations: enabledConfigs)
 
@@ -239,14 +242,33 @@ final class AppModel: ObservableObject {
             .mergingStaleUsage(from: refreshed)
           recordClaudeUsage(in: retrySnapshot, configurations: retryConfigs)
           refreshed = refreshed.replacingResults(forAccountIDs: retriedIDs, from: retrySnapshot)
-          try? refreshService.save(refreshed)
         }
       }
 
+      // Other providers' recovery can suspend this cycle while a Venice key is
+      // edited. Validate again before its result reaches history and widgets.
+      refreshed = removingChangedVeniceResults(from: refreshed, configurations: enabledConfigs)
+      if refreshed != initiallySaved { try refreshService.save(refreshed) }
       publishSnapshot(refreshed)
     } catch {
       statusMessage = "Refresh failed: \(error.localizedDescription)"
     }
+  }
+
+  private func removingChangedVeniceResults(
+    from result: QuotaSnapshot,
+    configurations: [ProviderRuntimeConfiguration]
+  ) -> QuotaSnapshot {
+    let changedIDs = Set(configurations.compactMap { configuration -> String? in
+      guard configuration.provider == .venice else { return nil }
+      guard let current = account(withID: configuration.accountID), current.isEnabled,
+            current.credentials[CredentialField.veniceAPIKey] == configuration.credentials[CredentialField.veniceAPIKey] else {
+        return configuration.accountID
+      }
+      return nil
+    })
+    let empty = QuotaSnapshot(generatedAt: result.generatedAt, providers: [], failures: [])
+    return result.replacingResults(forAccountIDs: changedIDs, from: empty)
   }
 
   private func publishSnapshot(_ refreshed: QuotaSnapshot) {
@@ -515,11 +537,16 @@ final class AppModel: ObservableObject {
       return false
     }
 
-    providerAccounts[index].credentials = match.credentials
     claudeAccountMessages[accountID] = nil
     claudeCredentialFailures.remove(accountID)
-    reloadAccountStatuses()
-    saveConfiguration()
+    if provider == .venice {
+      updateAccount(accountID: accountID) { $0.credentials = match.credentials }
+      guard account(withID: accountID)?.credentials == match.credentials else { return false }
+    } else {
+      providerAccounts[index].credentials = match.credentials
+      reloadAccountStatuses()
+      saveConfiguration()
+    }
     statusMessage = "Filled “\(providerAccounts[index].resolvedDisplayName)” from \(match.sourceLabel)."
     return true
   }
@@ -1531,9 +1558,26 @@ final class AppModel: ObservableObject {
     }
 
     let previousAccount = providerAccounts[index]
-    mutate(&providerAccounts[index])
+    var updatedAccount = previousAccount
+    mutate(&updatedAccount)
 
-    let updatedAccount = providerAccounts[index]
+    if previousAccount.provider == .venice,
+       previousAccount.credentials[CredentialField.veniceAPIKey] != updatedAccount.credentials[CredentialField.veniceAPIKey] {
+      guard !configurationLoadFailed else {
+        statusMessage = "Could not change this key because the settings file could not be read."
+        return
+      }
+      do {
+        // The observed DIEM denominator belongs to this key. Clear it durably
+        // before accepting a replacement key, including Auto-fill replacements.
+        try invalidateVeniceUsage(for: previousAccount)
+      } catch {
+        statusMessage = "Could not clear this account's previous usage. Check LLimit's storage permissions and try again."
+        return
+      }
+    }
+    providerAccounts[index] = updatedAccount
+
     let wasActive = previousAccount.isEnabled && previousAccount.hasRequiredCredentials
     let isActive = updatedAccount.isEnabled && updatedAccount.hasRequiredCredentials
     if wasActive != isActive || previousAccount.resolvedDisplayName != updatedAccount.resolvedDisplayName {
@@ -1541,6 +1585,19 @@ final class AppModel: ObservableObject {
     }
     reloadAccountStatuses()
     saveConfiguration()
+  }
+
+  private func invalidateVeniceUsage(for account: ProviderAccount) throws {
+    let current = try snapshotStore.load() ?? snapshot
+      ?? QuotaSnapshot(generatedAt: Date(), providers: [], failures: [])
+    let empty = QuotaSnapshot(generatedAt: current.generatedAt, providers: [], failures: [])
+    let cleared = current.replacingResults(forAccountIDs: [account.id], from: empty)
+    try snapshotStore.save(cleared)
+    try historyStore.remove(accountIDs: [account.id])
+    snapshot = cleared
+    reloadRecentHistory()
+    if syncSnapshotToWidgetStore(cleared) { reloadWidgetTimelines() }
+    purgeHistory(for: account)
   }
 
   private func updateProviderStyle(

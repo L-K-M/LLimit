@@ -36,7 +36,8 @@ public struct QuotaCoordinator: Sendable {
     )
   }
 
-  public func refresh(configurations: [ProviderRuntimeConfiguration], now: Date = Date()) async -> QuotaSnapshot {
+  public func refresh(configurations: [ProviderRuntimeConfiguration], now: Date = Date(),
+                      previousSnapshot: QuotaSnapshot? = nil) async -> QuotaSnapshot {
     let targets = configurations
       .filter { $0.isEnabled }
       .filter { clientsByProvider[$0.provider] != nil }
@@ -96,7 +97,13 @@ public struct QuotaCoordinator: Sendable {
       return lhs.accountID < rhs.accountID
     }
 
-    let usages = ordered.compactMap(\.usage)
+    let previousByID = Dictionary(
+      (previousSnapshot?.providers ?? []).filter { $0.provider == .venice }.map { ($0.accountID, $0) },
+      uniquingKeysWith: { $0.fetchedAt >= $1.fetchedAt ? $0 : $1 }
+    )
+    let usages = ordered.compactMap(\.usage).map {
+      VeniceQuotaEstimate.applying(to: $0, previous: previousByID[$0.accountID])
+    }
     let failures = ordered.compactMap(\.failure)
     return QuotaSnapshot(generatedAt: now, providers: usages, failures: failures)
   }

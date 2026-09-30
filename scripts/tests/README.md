@@ -134,6 +134,29 @@ Dashboard accents continue to follow the most constrained metric. These checks
 exercise the production metric-selection helper and color resolver; they do not
 render widget layouts or automate the Settings color picker.
 
+# Venice daily DIEM estimates
+
+Run `swift test --package-path Packages/QuotaCore --filter Venice` and
+`swift test --package-path Packages/LLimitd --filter Venice` for synthetic
+coverage of balance increases, consumption, server resets, persistence across
+restarts, exact allocation precedence, and account isolation. Renderer and tray
+tests verify estimate labels. These fixtures never use real Venice keys.
+
+For manual macOS validation, use a controlled Venice account and confirm:
+
+1. With no reported allocation, the first positive DIEM balance starts a ring
+   marked **ESTIMATED**. A lower balance reduces its percentage, including after
+   relaunching LLimit. An Admin allocation removes the estimate label.
+2. Replace the Venice key through Settings or Auto-fill. Its previous usage and
+   history must disappear and the next reading must establish a fresh bound.
+3. Replace the key while Refresh is waiting for a response, including while a
+   different provider is recovering its login. The old response must not restore
+   the previous Venice usage in the snapshot, history, or widgets.
+
+Live key replacement during an active request has not been verified by the
+synthetic suite. Widget layout was checked using an offscreen render of the real
+SwiftUI tile at estimated 100%, 50%, and 0%, with a long account name and badges.
+
 # Settings window activation
 
 Run these checks with an installed build and a graphical macOS session:

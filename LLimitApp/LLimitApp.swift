@@ -308,6 +308,7 @@ private struct GlossRing: View {
   let remaining: Int?
   let unlimited: Bool
   let tint: Color
+  var isEstimated: Bool = false
   var diameter: CGFloat = 46
   var lineWidth: CGFloat = 5
 
@@ -354,13 +355,13 @@ private struct GlossRing: View {
   private var centerText: String {
     if unlimited { return "∞" }
     guard let remaining else { return "--" }
-    return "\(max(0, min(100, remaining)))%"
+    return "\(isEstimated ? "≈" : "")\(max(0, min(100, remaining)))%"
   }
 
   private var accessibilityText: String {
     if unlimited { return "Unlimited" }
     guard let remaining else { return "Quota unavailable" }
-    return "\(max(0, min(100, remaining))) percent remaining"
+    return "\(isEstimated ? "Estimated " : "")\(max(0, min(100, remaining))) percent remaining"
   }
 }
 
@@ -1035,6 +1036,7 @@ private struct OverviewCard: View {
                       step: accountColorStep(forAccountID: provider.accountID, in: accounts),
                       primaryHexColor: primaryColors[provider.accountID]
                     ),
+                    isEstimated: MenuBarQuotaStyling.isPercentageEstimated(for: provider),
                     diameter: 40,
                     lineWidth: 4.5
                   )
@@ -1080,7 +1082,13 @@ private struct OverviewCard: View {
       HStack(spacing: 0) {
         StatCell(
           label: "LOWEST",
-          value: lowestRemaining.map { "\($0)%" } ?? "--",
+          value: lowestRemaining.map { remaining in
+            let estimated = providers.contains {
+              MenuBarQuotaStyling.remainingPercent(for: $0) == remaining
+                && MenuBarQuotaStyling.isPercentageEstimated(for: $0)
+            }
+            return "\(estimated ? "≈" : "")\(remaining)%"
+          } ?? "--",
           tint: tint
         )
         statDivider
@@ -1108,7 +1116,8 @@ private struct OverviewCard: View {
       return "\(provider.title), unlimited. Jump to card."
     }
     if let remaining = MenuBarQuotaStyling.remainingPercent(for: provider) {
-      return "\(provider.title), \(remaining) percent remaining. Jump to card."
+      let qualifier = MenuBarQuotaStyling.isPercentageEstimated(for: provider) ? "estimated " : ""
+      return "\(provider.title), \(qualifier)\(remaining) percent remaining. Jump to card."
     }
     let balances = provider.metrics.compactMap { metric in
       metric.usageLine.map { "\(metric.label) \($0)" }
@@ -1201,7 +1210,8 @@ private struct ProviderQuotaCard: View {
           GlossRing(
             remaining: MenuBarQuotaStyling.remainingPercent(for: usage),
             unlimited: usage.metrics.allSatisfy(\.isUnlimited) && !usage.metrics.isEmpty,
-            tint: accent
+            tint: accent,
+            isEstimated: MenuBarQuotaStyling.isPercentageEstimated(for: usage)
           )
         }
       }
@@ -1361,6 +1371,7 @@ private struct MetricQuotaRow: View {
           .monospacedDigit()
           .contentTransition(.numericText())
           .foregroundStyle(valueColor)
+          .accessibilityLabel(valueAccessibilityText)
       }
 
       if remaining != nil || metric.isUnlimited {
@@ -1398,7 +1409,12 @@ private struct MetricQuotaRow: View {
   private var valueText: String {
     if metric.isUnlimited { return "Unlimited" }
     guard let remaining else { return metric.usageLine ?? "Unavailable" }
-    return "\(remaining)% left"
+    return "\(metric.isPercentageEstimated ? "≈" : "")\(remaining)% left"
+  }
+
+  private var valueAccessibilityText: String {
+    guard let remaining, !metric.isUnlimited else { return valueText }
+    return "\(metric.isPercentageEstimated ? "Estimated " : "")\(remaining) percent remaining"
   }
 
   /// Row colors carry identity (which limit), so danger gets its own channel:
@@ -1460,6 +1476,13 @@ private struct ProviderFailureCard: View {
 }
 
 private enum MenuBarQuotaStyling {
+  static func isPercentageEstimated(for provider: ProviderUsage) -> Bool {
+    guard let remaining = remainingPercent(for: provider) else { return false }
+    return provider.metrics.contains {
+      !$0.isUnlimited && $0.remainingPercent == remaining && $0.isPercentageEstimated
+    }
+  }
+
   static func remainingPercent(for provider: ProviderUsage) -> Int? {
     let boundedRemaining = provider.metrics
       .filter { !$0.isUnlimited }

@@ -64,7 +64,7 @@ and Claude Keychain import, are macOS-only. Linux Claude Code writes
 | **Devin** (Cognition) | Session API key | Devin CLI (`~/.local/share/devin/credentials.toml`) |
 | **Meta Muse** | Meta API key | Muse Code (`~/.config/muse/auth.json`) |
 | **OpenCode Go** | API key for a Go subscription | OpenCode (`opencode-go` in `auth.json`) |
-| **Venice** | API key; Admin key for daily DIEM percentages | Venice CLI (`~/.venice/config.json`), OpenCode (`venice` in `auth.json`) |
+| **Venice** | API key; Admin key for reported daily DIEM allocation | Venice CLI (`~/.venice/config.json`), OpenCode (`venice` in `auth.json`) |
 
 For OpenCode Go, choose **Settings → Add Account → OpenCode Go** and enter your
 OpenCode API key, or scan for a saved Go key. LLimit shows the rolling, weekly,
@@ -81,7 +81,12 @@ For Venice, choose **Settings → Add Account → Venice** and enter an API key 
 [Venice API settings](https://venice.ai/settings/api), or import a saved Venice CLI
 or OpenCode key. LLimit shows daily DIEM, USD, and bundled credit balances. An Admin
 key also provides the daily DIEM allocation for rings, trend lines, and menu-bar
-percentages. Inference keys show amounts without inventing a quota percentage.
+percentages. When that allocation is unavailable, LLimit estimates a daily upper
+bound from the first positive balance, each balance increase, or the first balance
+in a new server reset period. Later balances show a percentage against that bound,
+marked as estimated. The first reading may already be partly spent. The bound
+survives restarts and is cleared when you replace the key. A reported allocation
+always takes precedence.
 Bundled credits are USD-denominated balances; the API does not expose their total
 allowance or reset date. This tracks API credits, not web-app message/image limits.
 Polling only reads balances and does not make inference requests. Imported keys

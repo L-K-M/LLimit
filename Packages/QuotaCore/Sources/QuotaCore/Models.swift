@@ -194,7 +194,7 @@ public extension QuotaProvider {
         CredentialFieldDescriptor(
           key: CredentialField.veniceAPIKey,
           label: "API key",
-          help: "Create a key at venice.ai/settings/api. An Admin key enables daily DIEM percentage charts; an Inference key shows balances only."
+          help: "Create a key at venice.ai/settings/api. An Admin key reports the daily DIEM allocation; other keys use a clearly marked estimate from observed balances."
         )
       ]
     }
@@ -247,6 +247,10 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
   public let id: String
   public var label: String
   public var remainingPercent: Int?
+  /// Raw remaining units, independent of rounded display text.
+  public var remainingAmount: Double?
+  /// An observed balance used as the denominator when the server supplies no total.
+  public var estimatedTotal: Double?
   public var usedDisplay: String?
   public var totalDisplay: String?
   public var resetAt: Date?
@@ -258,6 +262,8 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
     id: String,
     label: String,
     remainingPercent: Int? = nil,
+    remainingAmount: Double? = nil,
+    estimatedTotal: Double? = nil,
     usedDisplay: String? = nil,
     totalDisplay: String? = nil,
     resetAt: Date? = nil,
@@ -268,6 +274,8 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
     self.id = id
     self.label = label
     self.remainingPercent = remainingPercent
+    self.remainingAmount = remainingAmount
+    self.estimatedTotal = estimatedTotal
     self.usedDisplay = usedDisplay
     self.totalDisplay = totalDisplay
     self.resetAt = resetAt
@@ -289,6 +297,10 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
       return "\(usedDisplay) / \(totalDisplay)"
     }
     return usedDisplay
+  }
+
+  public var isPercentageEstimated: Bool {
+    remainingPercent != nil && estimatedTotal != nil
   }
 }
 

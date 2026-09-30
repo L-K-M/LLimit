@@ -63,10 +63,13 @@ The key is copied into LLimit's local settings. No OpenCode process is required
 after import, and usage polling does not make inference requests.
 
 Venice tracks daily DIEM and USD-denominated API credit balances. An Admin key
-enables daily DIEM percentages; an Inference key shows balances only. Import reads
+provides the daily DIEM allocation; other keys use an estimated upper bound from
+the first positive balance, a balance increase, or a new server reset period.
+The bound survives daemon restarts; percentages are marked `≈` and metrics expose
+`estimated: true` in JSON. The first reading may already be partly spent. Import reads
 `~/.venice/config.json` (`api_key`) or OpenCode's `venice` entry in `auth.json`.
-Balances with no reported allocation remain amounts in status output, with no
-fabricated percentage. These are API balances, not web-app message/image quotas.
+USD and bundled credits remain amounts without percentages. These are API
+balances, not web-app message/image quotas.
 
 ## systemd
 

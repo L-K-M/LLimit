@@ -5,7 +5,8 @@ import FoundationNetworking
 
 /// Reads API credit balances without making a paid inference request. Any
 /// Venice API key can read balances; an admin key also supplies the daily DIEM
-/// allocation needed for a percentage. USD and bundled credits have no quota.
+/// allocation for an exact percentage. The coordinator estimates missing daily
+/// totals from observed balances. USD and bundled credits have no quota.
 public struct VeniceQuotaClient: QuotaProviderClient {
   public let provider: QuotaProvider = .venice
   private let usageEndpoint: URL
@@ -70,12 +71,12 @@ public struct VeniceQuotaClient: QuotaProviderClient {
         remainingPercent = roundedPercent((boundedBalance / billing.diemEpochAllocation) * 100)
         detail = "Account daily allocation: \(Self.amount(billing.diemEpochAllocation)) DIEM"
       } else if billing == nil {
-        detail = "Available to this API key. An admin API key is needed to show the account's daily allocation and percentage."
+        detail = "Available to this API key. An admin API key reports the account's daily allocation."
       } else {
         detail = "Daily allocation is unavailable; showing the remaining balance."
       }
       metrics.append(UsageMetric(
-        id: "daily-diem", label: "Daily DIEM remaining", remainingPercent: remainingPercent,
+        id: "daily-diem", label: "Daily DIEM remaining", remainingPercent: remainingPercent, remainingAmount: diem,
         usedDisplay: "\(Self.amount(diem)) DIEM", resetAt: resetAt,
         resetIn: formatResetCountdown(to: resetAt, now: now), detail: detail
       ))

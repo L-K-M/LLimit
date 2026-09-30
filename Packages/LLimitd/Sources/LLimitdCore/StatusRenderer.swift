@@ -30,7 +30,11 @@ public enum StatusRenderer {
     for usage in snapshot.providers.sorted(by: titleOrder) {
       let metrics = usage.metrics.compactMap { metric -> String? in
         if let remaining = metric.remainingPercent {
-          var text = "\(metric.label) \(remaining)% left"
+          let qualifier = metric.isPercentageEstimated ? "≈" : ""
+          var text = "\(metric.label) \(qualifier)\(remaining)% left"
+          if metric.isPercentageEstimated {
+            text += " (estimated)"
+          }
           if let reset = metric.resetIn {
             text += " (resets in \(reset))"
           }
@@ -82,6 +86,9 @@ public enum StatusRenderer {
     if let remaining = metric.remainingPercent {
       object["remainingPercent"] = remaining
     }
+    if metric.isPercentageEstimated {
+      object["estimated"] = true
+    }
     if let resetIn = metric.resetIn {
       object["resetIn"] = resetIn
     }
@@ -129,6 +136,9 @@ public enum StatusRenderer {
       if let warning = warningText(for: usage) {
         account["warning"] = warning
       }
+      if headlineIsEstimated(for: usage) {
+        account["estimated"] = true
+      }
       accounts.append(account)
     }
 
@@ -138,7 +148,8 @@ public enum StatusRenderer {
     } else {
       text = providers.map { usage in
         if let remaining = usage.metrics.compactMap(\.remainingPercent).min() {
-          return "\(usage.title) \(remaining)%"
+          let qualifier = headlineIsEstimated(for: usage) ? "≈" : ""
+          return "\(usage.title) \(qualifier)\(remaining)%"
         }
         let balances = usage.metrics.compactMap { metric -> String? in
           guard !metric.isUnlimited, let value = metric.usageLine else { return nil }
@@ -183,6 +194,11 @@ public enum StatusRenderer {
     ]
     if let minimum = remainingPercents.min() {
       object["percentage"] = minimum
+      if providers.contains(where: {
+        $0.metrics.compactMap(\.remainingPercent).min() == minimum && headlineIsEstimated(for: $0)
+      }) {
+        object["estimated"] = true
+      }
     }
     return object
   }
@@ -214,5 +230,12 @@ public enum StatusRenderer {
     guard let warning = usage.warning?.trimmingCharacters(in: .whitespacesAndNewlines),
           !warning.isEmpty else { return nil }
     return warning
+  }
+
+  private static func headlineIsEstimated(for usage: ProviderUsage) -> Bool {
+    guard let remaining = usage.metrics.compactMap(\.remainingPercent).min() else { return false }
+    return usage.metrics.contains {
+      $0.remainingPercent == remaining && $0.isPercentageEstimated
+    }
   }
 }

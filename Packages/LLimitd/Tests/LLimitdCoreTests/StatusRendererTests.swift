@@ -133,6 +133,93 @@ final class StatusRendererTests: XCTestCase {
       .contains("Daily DIEM remaining 12.50 DIEM · USD balance $3.25"))
   }
 
+  func testEstimatedDailyBalanceIsMarkedInTextAndJSON() throws {
+    let usage = ProviderUsage(
+      accountID: "estimated-account", provider: .venice, title: "Venice",
+      metrics: [UsageMetric(
+        id: "daily-diem", label: "Daily DIEM remaining", remainingPercent: 50,
+        remainingAmount: 20, estimatedTotal: 40, usedDisplay: "20.00 DIEM", resetIn: "3h"
+      )],
+      fetchedAt: now
+    )
+    let snapshot = QuotaSnapshot(generatedAt: now, providers: [usage], failures: [])
+    let object = try decodedWaybar(snapshot)
+
+    XCTAssertEqual(object["text"] as? String, "Venice ≈50%")
+    XCTAssertEqual(object["percentage"] as? Int, 50)
+    XCTAssertEqual(object["estimated"] as? Bool, true)
+    let account = try XCTUnwrap((object["accounts"] as? [[String: Any]])?.first)
+    let metric = try XCTUnwrap((account["metrics"] as? [[String: Any]])?.first)
+    XCTAssertEqual(account["estimated"] as? Bool, true)
+    XCTAssertEqual(metric["estimated"] as? Bool, true)
+    let expected = "Daily DIEM remaining ≈50% left (estimated) (resets in 3h)"
+    XCTAssertTrue(StatusRenderer.humanReadable(snapshot: snapshot, now: now).contains(expected))
+    XCTAssertTrue((object["tooltip"] as? String)?.contains(expected) == true)
+  }
+
+  func testOfficialPercentageHasNoEstimatedFlag() throws {
+    let object = try decodedWaybar(snapshot(remaining: [73]))
+    let account = try XCTUnwrap((object["accounts"] as? [[String: Any]])?.first)
+    let metric = try XCTUnwrap((account["metrics"] as? [[String: Any]])?.first)
+
+    XCTAssertNil(object["estimated"])
+    XCTAssertNil(account["estimated"])
+    XCTAssertNil(metric["estimated"])
+    XCTAssertFalse((object["text"] as? String)?.contains("≈") == true)
+    XCTAssertFalse((object["tooltip"] as? String)?.contains("estimated") == true)
+  }
+
+  func testNonHeadlineEstimateDoesNotMarkOfficialHeadline() throws {
+    let usage = ProviderUsage(
+      accountID: "mixed-account", provider: .venice, title: "Venice",
+      metrics: [
+        UsageMetric(id: "official", label: "Official", remainingPercent: 25),
+        UsageMetric(id: "daily-diem", label: "Daily DIEM remaining", remainingPercent: 75,
+                    estimatedTotal: 40)
+      ],
+      fetchedAt: now
+    )
+    let object = try decodedWaybar(QuotaSnapshot(generatedAt: now, providers: [usage], failures: []))
+    let account = try XCTUnwrap((object["accounts"] as? [[String: Any]])?.first)
+    let metrics = try XCTUnwrap(account["metrics"] as? [[String: Any]])
+
+    XCTAssertEqual(object["text"] as? String, "Venice 25%")
+    XCTAssertNil(object["estimated"])
+    XCTAssertNil(account["estimated"])
+    XCTAssertNil(metrics[0]["estimated"])
+    XCTAssertEqual(metrics[1]["estimated"] as? Bool, true)
+  }
+
+  func testTopLevelEstimatedFlagFollowsLowestAccount() throws {
+    var snapshot = snapshot(remaining: [25, 75])
+    snapshot.providers[1].metrics[0].estimatedTotal = 100
+    let object = try decodedWaybar(snapshot)
+    let accounts = try XCTUnwrap(object["accounts"] as? [[String: Any]])
+
+    XCTAssertEqual(object["text"] as? String, "Claude 1 25% · Claude 2 ≈75%")
+    XCTAssertNil(object["estimated"])
+    XCTAssertNil(accounts[0]["estimated"])
+    XCTAssertEqual(accounts[1]["estimated"] as? Bool, true)
+  }
+
+  func testEstimatedFlagSurvivesEqualOfficialMinimum() throws {
+    var snapshot = snapshot(remaining: [25, 25])
+    snapshot.providers[1].metrics[0].estimatedTotal = 100
+    let object = try decodedWaybar(snapshot)
+
+    XCTAssertEqual(object["estimated"] as? Bool, true)
+    XCTAssertEqual(object["percentage"] as? Int, 25)
+  }
+
+  func testEstimateWithoutPercentageDoesNotClaimEstimatedPercentage() {
+    let metric = UsageMetric(id: "daily-diem", label: "Daily DIEM remaining",
+                             estimatedTotal: 40, usedDisplay: "0.00 DIEM")
+    let object = StatusRenderer.metricObject(metric)
+
+    XCTAssertNil(object["remainingPercent"])
+    XCTAssertNil(object["estimated"])
+  }
+
   func testWaybarWithOnlyFailuresIsError() throws {
     let failed = QuotaSnapshot(
       generatedAt: now,

@@ -75,7 +75,9 @@ def format_metric(metric: dict[str, Any]) -> str:
     if metric.get("unlimited"):
         body = "unlimited"
     elif isinstance(metric.get("remainingPercent"), int):
-        body = f"{metric['remainingPercent']}% left"
+        prefix = "≈" if metric.get("estimated") is True else ""
+        suffix = " (estimated)" if metric.get("estimated") is True else ""
+        body = f"{prefix}{metric['remainingPercent']}% left{suffix}"
     elif metric.get("usageLine"):
         body = str(metric["usageLine"])
     else:
@@ -95,7 +97,9 @@ def format_account_header(account: dict[str, Any]) -> str:
 
     remaining = account.get("remainingPercent")
     if isinstance(remaining, int):
-        parts.append(f"{remaining}% left")
+        prefix = "≈" if account.get("estimated") is True else ""
+        suffix = " (estimated)" if account.get("estimated") is True else ""
+        parts.append(f"{prefix}{remaining}% left{suffix}")
     elif all(m.get("unlimited") for m in account.get("metrics") or [{}]):
         parts.append("unlimited")
 

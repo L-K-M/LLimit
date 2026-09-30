@@ -281,7 +281,7 @@ public final class QuotaDaemon {
     // Read the previous snapshot before overwriting it so accounts that fail this
     // cycle keep showing their last-known usage instead of vanishing.
     let previous = (try? snapshotStore.load()) ?? snapshot
-    var refreshed = await coordinator.refresh(configurations: enabledConfigs)
+    var refreshed = await coordinator.refresh(configurations: enabledConfigs, previousSnapshot: previous)
       .mergingStaleUsage(from: previous)
 
     // Reactive recovery: if an enabled OpenAI account failed authentication (a token

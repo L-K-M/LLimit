@@ -113,6 +113,19 @@ private struct TrendLineChartWidgetView: View {
       }
     }
     .padding(family == .systemSmall ? 7 : 9)
+    .accessibilityLabel(trendAccessibilityLabel(days: days))
+  }
+
+  private func trendAccessibilityLabel(days: Int) -> String {
+    let start = entry.date.addingTimeInterval(-Double(days) * 86_400)
+    let snapshots = entry.history + [entry.snapshot].compactMap { $0 }
+    let includesEstimates = snapshots.contains { snapshot in
+      snapshot.generatedAt >= start && snapshot.generatedAt <= entry.date
+        && snapshot.providers.contains { $0.metrics.contains(where: \.isPercentageEstimated) }
+    }
+    return includesEstimates
+      ? "Quota trend chart. Includes estimated remaining percentages."
+      : "Quota trend chart."
   }
 }
 
@@ -469,7 +482,7 @@ private struct CompactProviderUsageRow: View {
     let unlimited = metric?.isUnlimited ?? usage.metrics.contains(where: \.isUnlimited)
 
     HStack(spacing: 6) {
-      Text(shortName)
+      Text(shortName + (!showPercentages && metric?.isPercentageEstimated == true ? " ≈" : ""))
         .font(.caption2.weight(.semibold))
         .lineLimit(1)
         .frame(width: 58, alignment: .leading)
@@ -496,8 +509,12 @@ private struct CompactProviderUsageRow: View {
           .lineLimit(1)
           .minimumScaleFactor(0.8)
           .frame(width: basePercent == nil && !unlimited ? nil : (dualPercent == nil ? 40 : 72), alignment: .trailing)
+          .accessibilityLabel(dualPercent == nil
+            ? percentageAccessibilityText(for: metric)
+            : dualLimitAccessibilityText(for: usage))
       }
     }
+    .accessibilityElement(children: .combine)
   }
 
   private var shortName: String {
@@ -651,13 +668,22 @@ private func dashboardBarPercents(for usage: ProviderUsage) -> [Int] {
 }
 
 private func dualLimitPercentText(for usage: ProviderUsage) -> String? {
-  let boundedPercentages = dashboardBarPercents(for: usage)
+  let boundedMetrics = dashboardBarMetrics(for: usage)
+    .sorted { ($0.remainingPercent ?? 0) < ($1.remainingPercent ?? 0) }
 
-  guard boundedPercentages.count >= 2 else {
+  guard boundedMetrics.count >= 2 else {
     return nil
   }
 
-  return "\(boundedPercentages[0])% / \(boundedPercentages[1])%"
+  return boundedMetrics.prefix(2).map { percentText(for: $0) }.joined(separator: " / ")
+}
+
+private func dualLimitAccessibilityText(for usage: ProviderUsage) -> String {
+  dashboardBarMetrics(for: usage)
+    .sorted { ($0.remainingPercent ?? 0) < ($1.remainingPercent ?? 0) }
+    .prefix(2)
+    .map { "\($0.label), \(percentageAccessibilityText(for: $0))" }
+    .joined(separator: ". ")
 }
 
 private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData {
@@ -1008,9 +1034,16 @@ private func percentText(for metric: UsageMetric?) -> String {
     return "INF"
   }
   if let remaining = metric.remainingPercent {
-    return "\(remaining)%"
+    return "\(metric.isPercentageEstimated ? "≈" : "")\(remaining)%"
   }
   return metric.usageLine ?? "--"
+}
+
+private func percentageAccessibilityText(for metric: UsageMetric?) -> String {
+  guard let metric, let remaining = metric.remainingPercent, !metric.isUnlimited else {
+    return percentText(for: metric)
+  }
+  return "\(metric.isPercentageEstimated ? "Estimated " : "")\(remaining) percent remaining"
 }
 
 private func backgroundBaseColor(from hexColor: String?) -> Color? {

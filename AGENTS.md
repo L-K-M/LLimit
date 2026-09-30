@@ -154,8 +154,12 @@ Linux:
   `BUNDLED_CREDITS`), `accessPermitted`, and `nextEpochBegins` under `data`.
   `GET /api/v1/billing/balance` requires an Admin key and supplies the account's
   `balances.diem` plus `diemEpochAllocation`; use that same response's numerator
-  and denominator for daily DIEM percentage. Inference keys retain balance-only
-  data. USD and bundled credits have no reported total/reset; never fabricate
+  and denominator for daily DIEM percentage. When no allocation is reported,
+  estimate a daily DIEM upper bound from the first positive balance, each increase,
+  or a new server reset period. Persist it per account in the snapshot, clear it
+  on key replacement, and label estimated percentages on display surfaces. The
+  first observation may already be spent; reported allocations always win.
+  USD and bundled credits have no reported total/reset; never fabricate
   percentages. A key spending cap can deny access despite positive account funds.
   Import `~/.venice/config.json` (`api_key`) or OpenCode's exact `venice` API entry.
   Source: [official OpenAPI schema](https://github.com/veniceai/api-docs/blob/855f04bf1538383d8f00cdac24b9383ad7094d26/swagger.yaml).

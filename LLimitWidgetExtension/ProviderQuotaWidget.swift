@@ -430,17 +430,25 @@ private struct ProviderQuotaTileView: View {
     .overlay(alignment: .topLeading) {
       // Number badge only while the tile is auto-mapped, so users can match
       // desktop tiles to the numbered rows in Settings → Widgets.
-      if entry.accountState == .autoSelected {
-        Text("#\(entry.slotIndex + 1) AUTO")
-          .font(.system(size: 7, weight: .bold))
-          .tracking(0.5)
-          .foregroundStyle(.white.opacity(0.6))
-          .padding(.horizontal, 5)
-          .padding(.vertical, 2)
-          .background(.black.opacity(0.25), in: Capsule())
-          .padding(10)
-          .accessibilityHidden(true)
+      HStack(spacing: 4) {
+        if entry.accountState == .autoSelected {
+          Text("#\(entry.slotIndex + 1) AUTO")
+            .tracking(0.5)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(.black.opacity(0.25), in: Capsule())
+        }
+        if metrics.contains(where: \.isPercentageEstimated) {
+          Text("ESTIMATED")
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(.black.opacity(0.25), in: Capsule())
+        }
       }
+      .font(.system(size: 7, weight: .bold))
+      .foregroundStyle(.white.opacity(0.6))
+      .padding(10)
+      .accessibilityHidden(true)
     }
   }
 
@@ -627,7 +635,7 @@ private struct ProviderQuotaTileView: View {
       if metric.isUnlimited {
         quota = "unlimited"
       } else if let remaining = metric.remainingPercent {
-        quota = "\(remaining) percent remaining"
+        quota = "\(metric.isPercentageEstimated ? "estimated " : "")\(remaining) percent remaining"
       } else {
         quota = metric.usageLine ?? "remaining quota unknown"
       }

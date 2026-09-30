@@ -39,6 +39,15 @@ class FormatMetricTests(unittest.TestCase):
     def test_metric_without_reset_omits_the_clause(self):
         self.assertEqual(format_metric({"label": "Weekly", "remainingPercent": 8}), "Weekly — 8% left")
 
+    def test_estimated_metric_marks_percentage_and_keeps_reset(self):
+        text = format_metric({"label": "Daily DIEM", "remainingPercent": 50,
+                              "estimated": True, "resetIn": "3h"})
+        self.assertEqual(text, "Daily DIEM — ≈50% left (estimated) · resets in 3h")
+
+    def test_estimate_flag_without_percentage_keeps_amount(self):
+        text = format_metric({"label": "Daily DIEM", "usageLine": "0.00 DIEM", "estimated": True})
+        self.assertEqual(text, "Daily DIEM — 0.00 DIEM")
+
     def test_unlimited_metric_never_shows_a_reset(self):
         text = format_metric({"label": "Plan", "unlimited": True, "resetIn": "3h"})
         self.assertEqual(text, "Plan — unlimited")
@@ -58,6 +67,11 @@ class FormatAccountHeaderTests(unittest.TestCase):
     def test_stale_accounts_are_marked(self):
         text = format_account_header({"name": "Claude", "remainingPercent": 8, "stale": True})
         self.assertEqual(text, "Claude — 8% left · stale")
+
+    def test_estimated_headline_is_marked_alongside_stale(self):
+        text = format_account_header({"name": "Venice", "remainingPercent": 50,
+                                      "estimated": True, "stale": True})
+        self.assertEqual(text, "Venice — ≈50% left (estimated) · stale")
 
     def test_all_unlimited_account_reads_as_unlimited(self):
         text = format_account_header({"name": "Zhipu AI", "remainingPercent": None, "metrics": [{"unlimited": True}]})
