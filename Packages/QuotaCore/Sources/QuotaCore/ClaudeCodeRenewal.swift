@@ -52,6 +52,16 @@ public enum ClaudeCodeRenewal {
     guard let profile = ClaudeCodeProfile.profile(from: stored) else {
       throw ClaudeCodeRenewalError.missingProfile
     }
+    // Completed logins already cache verified identity and a usable access
+    // token. Read the CLI's protected store only when renewal may be needed.
+    // Pending rotations still require its authoritative result before reuse.
+    if !force, stored[CredentialField.anthropicRenewalPending] == nil,
+       ClaudeCodeProfile.identity(from: stored) != nil,
+       let cached = ClaudeCodeProfile.credentials(from: stored),
+       let expiry = cached.expiresAt, expiry.timeIntervalSince1970.isFinite,
+       ClaudeCodeProfile.readiness(for: cached, now: now) == .ready {
+      return stored
+    }
     let login = try await read()
     try requireIdentity(login.identity, matches: stored)
 

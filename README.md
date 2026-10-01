@@ -183,6 +183,11 @@ open LLimit.xcodeproj
 
 The first time LLimit reads a Claude login from Keychain, macOS asks you to allow
 access. Choose **Always Allow** to let background refreshes read that login.
+Opening Settings does not scan credentials. Use **Scan** or Claude **Auto-fill**
+to request an import; other providers' **Auto-fill** does not request Claude
+Keychain access. Managed Claude accounts reuse their verified cached token until
+it approaches expiry, unless a renewal is pending or authentication requires a
+fresh profile check.
 
 ## Build & run (Linux)
 

@@ -21,6 +21,15 @@ It never launches Claude Code, accesses Keychain, or uses real credentials.
 
 Run `swift test --package-path Packages/QuotaCore` for the renewal sequence,
 credential identity checks, failure recovery, and subprocess timeout regressions.
+The renewal regressions also verify that a cached token with known expiry and a
+verified identity avoids profile reads while it has more than five minutes left.
+Forced renewal, unknown expiry, and pending operations still read the profile.
+
+Keychain prompts are a separate manual check: reopen Settings and confirm it does
+not scan credentials automatically. On Add Account, click **Scan** to explicitly
+search for CLI logins. Auto-fill a non-Claude account and confirm it does not ask
+for the ordinary Claude Code Keychain entry. Claude **Scan**, **Auto-fill**, and
+**Connect Claude** may still request access to the relevant CLI-owned entry.
 
 To verify the real sign-in flow manually:
 

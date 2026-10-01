@@ -52,11 +52,6 @@ struct SettingsView: View {
     .sheet(item: $model.codexLogin, onDismiss: { model.dismissCodexLogin() }) { _ in
       CodexLoginView(model: model)
     }
-    .onAppear {
-      if model.detectedCredentials.isEmpty {
-        model.scanForDetectedCredentials()
-      }
-    }
     .onChange(of: model.providerAccounts.map(\.id)) { _, accountIDs in
       if case .account(let accountID) = selection, !accountIDs.contains(accountID) {
         selection = .overview

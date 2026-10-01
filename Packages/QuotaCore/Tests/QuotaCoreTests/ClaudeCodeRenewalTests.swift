@@ -123,12 +123,67 @@ final class ClaudeCodeRenewalTests: XCTestCase {
     let result = try await prepare(stored(remaining: 3600), fixture: fixture)
     XCTAssertEqual(result, stored(remaining: 3600))
     let events = await fixture.events
-    XCTAssertEqual(events, ["read"])
+    XCTAssertTrue(events.isEmpty)
 
     let forced = RenewalFixture(logins: [fresh, login("new", remaining: 7200)])
     _ = try await prepare(stored(remaining: 3600), fixture: forced, force: true)
     let forcedEvents = await forced.events
     XCTAssertTrue(forcedEvents.contains("renew"))
+  }
+
+  func testVerifiedFreshCacheDoesNotNeedProfileAccess() async throws {
+    let original = stored(remaining: 301)
+    let result = try await ClaudeCodeRenewal.prepare(
+      stored: original, now: now,
+      read: { throw RenewalFixture.Failure.profileUnavailable },
+      persist: { _ in XCTFail("A usable cache must not be rewritten") },
+      renew: { _ in XCTFail("A usable cache must not rotate its grant"); return true })
+    XCTAssertEqual(result, original)
+  }
+
+  func testCacheWithoutKnownExpiryStillReadsProfile() async throws {
+    for expiry in [nil, "invalid", "nan", "inf"] as [String?] {
+      var original = stored(remaining: 3600)
+      original[CredentialField.anthropicExpiresAt] = expiry
+      let fixture = RenewalFixture(logins: [login("old", remaining: 3600)])
+      let result = try await prepare(original, fixture: fixture)
+      XCTAssertEqual(result, original)
+      let events = await fixture.events
+      XCTAssertEqual(events, ["read"])
+    }
+  }
+
+  func testCacheWithoutVerifiedIdentityStillReadsProfileAndFails() async {
+    for key in [CredentialField.anthropicAccountID, CredentialField.anthropicOrganizationID] {
+      var original = stored(remaining: 3600)
+      original[key] = "invalid"
+      let fixture = RenewalFixture(logins: [login("old", remaining: 3600)])
+      do {
+        _ = try await prepare(original, fixture: fixture)
+        XCTFail("A profile cache needs its verified account and organization")
+      } catch {
+        XCTAssertEqual(error as? ClaudeCodeRenewalError, .identityMismatch)
+      }
+      let events = await fixture.events
+      XCTAssertEqual(events, ["read"])
+    }
+  }
+
+  func testExpiringCacheReadsProfileAndRenewsAtLeadTime() async throws {
+    let fixture = RenewalFixture(logins: [login("old", remaining: 300), login("new", remaining: 3600)])
+    let result = try await prepare(stored(remaining: 300), fixture: fixture)
+    XCTAssertEqual(result[CredentialField.anthropicAccessToken], "new")
+    let events = await fixture.events
+    XCTAssertEqual(events, ["read", "persist-pending", "renew", "read", "persist-ready"])
+  }
+
+  func testFreshCacheWithPendingMarkerMustReadAuthoritativeProfile() async throws {
+    let fixture = RenewalFixture(logins: [login("new", remaining: 7200)])
+    let result = try await prepare(stored(remaining: 3600, pending: true), fixture: fixture)
+    XCTAssertEqual(result[CredentialField.anthropicAccessToken], "new")
+    XCTAssertNil(result[CredentialField.anthropicRenewalPending])
+    let events = await fixture.events
+    XCTAssertEqual(events, ["read", "persist-ready"])
   }
 
   func testMissingRenewalMaterialRequiresReconnectWithoutPersisting() async {
@@ -312,7 +367,7 @@ final class ClaudeCodeRenewalTests: XCTestCase {
 }
 
 private actor RenewalFixture {
-  enum Failure: Error, Equatable { case persistence, subprocess }
+  enum Failure: Error, Equatable { case persistence, subprocess, profileUnavailable }
   private var logins: [ClaudeCodeLogin]
   private let failPersistence: Bool
   private let failRollback: Bool

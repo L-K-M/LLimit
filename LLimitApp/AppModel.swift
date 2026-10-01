@@ -496,11 +496,14 @@ final class AppModel: ObservableObject {
   /// Scans local AI tools for credentials you could import into a new LLimit account.
   /// Optional convenience so you don't have to hunt for tokens — nothing here is a
   /// runtime dependency; imported accounts are copied into LLimit and stored locally.
-  func scanForDetectedCredentials() {
+  func scanForDetectedCredentials(for provider: QuotaProvider? = nil) {
     var result = CredentialDiscovery().discover()
 
     #if canImport(Security)
-    if !result.credentials.contains(where: { $0.provider == .anthropic }) {
+    // Explicit scans may request Claude access. Auto-fill for another provider
+    // must not ask permission for an unrelated Claude Code login.
+    if (provider == nil || provider == .anthropic),
+       !result.credentials.contains(where: { $0.provider == .anthropic }) {
       let keychain = Self.readClaudeKeychainToken()
       result.diagnostics.append("Claude Code Keychain: \(keychain.diagnostic)")
       if let token = keychain.token {
@@ -530,7 +533,7 @@ final class AppModel: ObservableObject {
     let provider = providerAccounts[index].provider
     guard !codexAccountIsManaged(accountID), !codexAccountIsBusy(accountID) else { return false }
 
-    scanForDetectedCredentials()
+    scanForDetectedCredentials(for: provider)
 
     guard let match = detectedCredentials.first(where: { $0.provider == provider }) else {
       statusMessage = "No \(provider.displayName) login detected on this Mac. Sign in to a supported tool, or paste the credentials manually."
