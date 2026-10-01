@@ -10,6 +10,7 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
   case googleAntigravity = "google-antigravity"
   case devin = "devin"
   case metaMuse = "meta-muse"
+  case stepfun = "stepfun"
 
   public var displayName: String {
     switch self {
@@ -31,6 +32,8 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
       return "Devin"
     case .metaMuse:
       return "Meta Muse"
+    case .stepfun:
+      return "StepFun"
     }
   }
 }
@@ -175,6 +178,27 @@ public extension QuotaProvider {
           help: "Auto-detected from Muse Code (~/.config/muse/auth.json), or the META_API_KEY value."
         )
       ]
+    case .stepfun:
+      return [
+        CredentialFieldDescriptor(
+          key: CredentialField.stepfunToken,
+          label: "Oasis-Token",
+          isRequired: false,
+          help: "The Oasis-Token cookie value from a platform.stepfun.com browser session. Expires; add username + password for automatic re-login."
+        ),
+        CredentialFieldDescriptor(
+          key: CredentialField.stepfunUsername,
+          label: "Username",
+          isSecret: false,
+          isRequired: false,
+          help: "Platform username or phone number. With the password, used to mint a session token."
+        ),
+        CredentialFieldDescriptor(
+          key: CredentialField.stepfunPassword,
+          label: "Password",
+          isRequired: false
+        )
+      ]
     }
   }
 
@@ -190,6 +214,16 @@ public extension QuotaProvider {
       }
 
       return ["OAuth token or PAT plus username"]
+    case .stepfun:
+      let token = trimmedCredential(credentials[CredentialField.stepfunToken])
+      let username = trimmedCredential(credentials[CredentialField.stepfunUsername])
+      let password = trimmedCredential(credentials[CredentialField.stepfunPassword])
+
+      if !token.isEmpty || (!username.isEmpty && !password.isEmpty) {
+        return []
+      }
+
+      return ["Oasis-Token or username plus password"]
     default:
       return credentialFields
         .filter(\.isRequired)

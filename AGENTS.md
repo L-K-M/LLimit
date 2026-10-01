@@ -11,12 +11,12 @@ does not depend on any other tool at runtime.
 
 `CredentialDiscovery` exists only as an *optional import shortcut* — it can detect a
 login from a locally installed tool (Claude Code, Codex, Copilot, Antigravity,
-OpenCode, Devin CLI, Muse Code) so the
+OpenCode, Devin CLI, Muse Code, platform-cli) so the
 user can one-click create a pre-filled account instead of pasting a token. Once
 imported, the account is copied into and owned by LLimit.
 
 Providers: Claude (Anthropic), OpenAI/ChatGPT, GitHub Copilot, Zhipu, Z.ai, Kimi,
-Google Antigravity, Devin, Meta Muse.
+Google Antigravity, Devin, Meta Muse, StepFun.
 
 ## Layout
 
@@ -158,6 +158,25 @@ Linux:
   `~/.config/muse/auth.json` (`$XDG_CONFIG_HOME/muse`), `providers.meta.api_key`
   — browser sign-in mints the same key `muse auth set` stores; `muse logout`
   empties `providers` without deleting the file.
+- **StepFun**: the Step Plan API key cannot read quota (`api.stepfun.com`
+  `/step_plan/v1` is billing-only) — usage lives behind the console backend,
+  `POST https://platform.stepfun.com/api/step.openapi.devcenter.Dashboard/QueryStepPlanRateLimit`
+  with `Cookie: Oasis-Token=<access...refresh>; Oasis-Webid=<device_id>` where
+  the webid must equal the token's `device_id` JWT claim (read from the
+  refresh half) or the server rejects the session as embezzled. Accounts hold
+  either a pasted Oasis-Token (browser cookie) or username+password, which run
+  the console's own login: `GET platform.stepfun.com` (INGRESSCOOKIE) →
+  `PassportService/RegisterDevice` → `SignInByPassword`; a stored token that
+  fails is retried once through the password login. The response covers two
+  billing shapes: legacy windowed plans report `five_hour_usage_left_rate` /
+  `weekly_usage_left_rate` (fractions remaining; a `reset_time` of 0 means "no
+  window configured", not "used up"), while current Credit plans
+  (`plan_family: 2`) carry `plan_credit_rate_limit` with
+  `subscription_credit_left_rate` + `credit_buckets[]` (string int64s).
+  `GetStepPlanStatus` on the same path supplies the plan name. Discovery reads
+  `~/.platform-cli/config.json` (official `platform-cli`); the token key is
+  undocumented so the scan is tolerant — but never import a Step API key, it
+  cannot authenticate this endpoint.
 
 ## Build
 

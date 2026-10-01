@@ -26,6 +26,11 @@ public func defaultRingMetrics(for usage: ProviderUsage) -> [UsageMetric] {
     preferredIDs = ["quota-daily", "quota-weekly"]
   case .metaMuse:
     preferredIDs = ["window", "weekly"]
+  case .stepfun:
+    // Rate-window plans carry window-5-hour + weekly; Credit plans carry only
+    // credit-monthly (plus an optional credit-topup), so ordering by
+    // preference covers both shapes.
+    preferredIDs = ["window-5-hour", "weekly", "credit-monthly", "credit-topup"]
   }
 
   var selected: [UsageMetric] = []

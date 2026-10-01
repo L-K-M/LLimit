@@ -404,4 +404,35 @@ final class CredentialDiscoveryTests: XCTestCase {
     XCTAssertTrue(result.credentials.filter { $0.provider == .metaMuse }.isEmpty)
     XCTAssertTrue(result.diagnostics.contains { $0.contains("no providers.meta.api_key") })
   }
+
+  // MARK: - StepFun
+
+  func testDiscoversPlatformCLISessionToken() throws {
+    try write(#"{"apiUser":"u","apiSecret":"s","accessToken":"eyJhbGciOiJub25lIn0.eyJkZXZpY2VfaWQiOiJkMSJ9.sig"}"#,
+              to: ".platform-cli", "config.json")
+
+    let stepfun = discover().first { $0.provider == .stepfun }
+    XCTAssertEqual(stepfun?.credentials[CredentialField.stepfunToken], "eyJhbGciOiJub25lIn0.eyJkZXZpY2VfaWQiOiJkMSJ9.sig")
+    XCTAssertEqual(stepfun?.suggestedName, "StepFun")
+    XCTAssertEqual(stepfun?.sourceLabel, "platform-cli (~/.platform-cli/config.json)")
+  }
+
+  func testDiscoversNestedPlatformCLIToken() throws {
+    try write(#"{"auth":{"token":"access.jwt...refresh.jwt"}}"#,
+              to: ".platform-cli", "config.json")
+
+    let stepfun = discover().first { $0.provider == .stepfun }
+    XCTAssertEqual(stepfun?.credentials[CredentialField.stepfunToken], "access.jwt...refresh.jwt")
+  }
+
+  func testSkipsPlatformCLIConfigWithoutSessionToken() throws {
+    // apiUser/apiSecret are SMS signing credentials, not the Oasis session —
+    // and a dotless value can't be the JWT cookie, so neither imports.
+    try write(#"{"apiUser":"u","apiSecret":"secret","token":"sk-not-a-session"}"#,
+              to: ".platform-cli", "config.json")
+
+    let result = CredentialDiscovery(homeDirectories: [home], environment: [:]).discover()
+    XCTAssertTrue(result.credentials.filter { $0.provider == .stepfun }.isEmpty)
+    XCTAssertTrue(result.diagnostics.contains { $0.contains("platform-cli: config.json found but no session token") })
+  }
 }

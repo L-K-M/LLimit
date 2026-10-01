@@ -77,6 +77,7 @@ public struct CredentialDiscovery: Sendable {
       candidates += scanCodex(home: home, diagnostics: &diagnostics)
       candidates += scanCopilotEditor(home: home, diagnostics: &diagnostics)
       candidates += scanKimi(home: home, diagnostics: &diagnostics)
+      candidates += scanStepFun(home: home, diagnostics: &diagnostics)
       candidates += scanAntigravity(home: home, diagnostics: &diagnostics)
       candidates += scanOpenCode(home: home, diagnostics: &diagnostics)
     }
@@ -239,6 +240,47 @@ public struct CredentialDiscovery: Sendable {
     }
 
     return results
+  }
+
+  /// StepFun's official `platform-cli` keeps its console login under
+  /// `~/.platform-cli/config.json` (`platform-cli auth login`). Which key the
+  /// Oasis session token lands on is not documented — the public docs only
+  /// name `apiUser`/`apiSecret` (SMS signing credentials, NOT the session) —
+  /// so the scan accepts plausible token spellings at the top level and one
+  /// level into auth-ish containers, and requires the value to look like the
+  /// JWT ("."-separated) the Oasis-Token cookie holds.
+  ///
+  /// The Step API key is deliberately NOT imported: other tools store it
+  /// (`~/.stepfun/config.yaml` from the third-party stepfun-cli, OpenCode's
+  /// `stepfun` provider entry), but it authenticates `api.stepfun.com` model
+  /// calls only — quota is reported solely by the console's Oasis session.
+  private func scanStepFun(home: URL, diagnostics: inout [String]) -> [DiscoveredCredential] {
+    let url = path(home, ".platform-cli", "config.json")
+    guard let object = readJSON(at: url, label: "StepFun platform-cli", diagnostics: &diagnostics) else { return [] }
+
+    let nested = ["auth", "session", "credential", "credentials", "login", "account", "tokens", "token", "oauth"]
+      .compactMap { object[$0] as? [String: Any] }
+    let keys = [
+      "oasisToken", "oasis_token", "oasis-token",
+      "accessToken", "access_token", "sessionToken", "session_token",
+      "token", "raw"
+    ]
+
+    guard let token = firstValue(keys, in: [object] + nested), token.contains(".") else {
+      diagnostics.append("StepFun platform-cli: config.json found but no session token (\(shortPath(url))) — sign in with `platform-cli auth login`, or paste the Oasis-Token from a browser session")
+      return []
+    }
+
+    diagnostics.append("StepFun platform-cli: found session token (\(shortPath(url)))")
+    return [
+      DiscoveredCredential(
+        stableID: "stepfun:platform-cli:\(shortPath(url))",
+        provider: .stepfun,
+        suggestedName: "StepFun",
+        sourceLabel: "platform-cli (\(shortPath(url)))",
+        credentials: [CredentialField.stepfunToken: token]
+      )
+    ]
   }
 
   /// Antigravity (Google's IDE) and its CLI keep the Google login under `~/.gemini`.

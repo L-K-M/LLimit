@@ -61,6 +61,7 @@ the Claude Keychain import is macOS-only — Linux Claude Code writes
 | **Google Antigravity** | Refresh token + project id | Antigravity IDE / CLI (`~/.gemini`), OpenCode (`antigravity-accounts.json`) |
 | **Devin** (Cognition) | Session API key | Devin CLI (`~/.local/share/devin/credentials.toml`) |
 | **Meta Muse** | Meta API key | Muse Code (`~/.config/muse/auth.json`) |
+| **StepFun** | Oasis-Token, or username + password | platform-cli (`~/.platform-cli/config.json`) |
 
 ## How accounts work
 
