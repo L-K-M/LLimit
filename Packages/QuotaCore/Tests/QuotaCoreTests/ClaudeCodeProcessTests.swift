@@ -22,6 +22,7 @@ final class ClaudeCodeProcessTests: XCTestCase {
       "ANTHROPIC_BASE_URL": "https://example.invalid", "CLAUDE_CONFIG_DIR": "/another/profile",
       "CLAUDE_CODE_OAUTH_TOKEN": "wrong-access-token",
       "CLAUDE_CODE_OAUTH_REFRESH_TOKEN": "wrong-refresh-token",
+      "CLAUDE_CODE_SIMPLE": "1",
       "CLAUDE_CODE_OAUTH_SCOPES": "wrong-scope", "BASH_ENV": "/tmp/untrusted-hook",
       "NODE_OPTIONS": "--require=/tmp/untrusted-hook", "DYLD_INSERT_LIBRARIES": "/tmp/untrusted.dylib"
     ]
@@ -47,6 +48,47 @@ final class ClaudeCodeProcessTests: XCTestCase {
     XCTAssertEqual(environment["CLAUDE_CODE_OAUTH_REFRESH_TOKEN"], "selected-profile-refresh")
     XCTAssertEqual(environment["CLAUDE_CODE_OAUTH_SCOPES"], "user:profile user:inference")
     XCTAssertNil(environment["CLAUDE_CODE_OAUTH_TOKEN"])
+    XCTAssertEqual(environment["CLAUDE_CODE_SIMPLE"], "1")
+  }
+
+  func testOnlyRenewalUsesSimpleModeToSuppressStartupAuthentication() {
+    let parent = ["CLAUDE_CODE_SIMPLE": "0", "HOME": "/home/example"]
+    let interactive = ClaudeCodeProcess.environment(parent: parent, profileDirectory: directory)
+    let renewal = ClaudeCodeProcess.environment(
+      parent: parent, profileDirectory: directory,
+      renewal: ClaudeCodeRenewalMaterial(refreshToken: "selected-profile-refresh", scopes: ["user:profile"]))
+
+    XCTAssertNil(interactive["CLAUDE_CODE_SIMPLE"])
+    XCTAssertEqual(renewal["CLAUDE_CODE_SIMPLE"], "1")
+    XCTAssertEqual(interactive["CLAUDE_CONFIG_DIR"], renewal["CLAUDE_CONFIG_DIR"])
+  }
+
+  func testRenewalChildConsumesItsGrantOnlyInExplicitHandler() async throws {
+    let profile = directory.appendingPathComponent("private-profile", isDirectory: true)
+    try FileManager.default.createDirectory(at: profile, withIntermediateDirectories: true)
+    let executable = try fixture("""
+      [ -d "$CLAUDE_CONFIG_DIR" ] || exit 31
+      [ -n "$CLAUDE_CODE_OAUTH_REFRESH_TOKEN" ] || exit 32
+      if [ "$CLAUDE_CODE_SIMPLE" != "1" ]; then
+        printf startup > "$CLAUDE_CONFIG_DIR/consumed-grant.txt"
+      fi
+      [ ! -e "$CLAUDE_CONFIG_DIR/consumed-grant.txt" ] || exit 33
+      printf explicit > "$CLAUDE_CONFIG_DIR/consumed-grant.txt"
+      printf saved > "$CLAUDE_CONFIG_DIR/completed-login.txt"
+      """)
+    let runner = ClaudeCodeProcess()
+    let environment = ClaudeCodeProcess.environment(
+      parent: ["PATH": "/usr/bin:/bin", "CLAUDE_CONFIG_DIR": "/another/profile"],
+      profileDirectory: profile,
+      renewal: ClaudeCodeRenewalMaterial(refreshToken: "fixture-only-grant", scopes: ["user:profile"]))
+
+    let result = try await runner.run(
+      executable: executable, arguments: ["auth", "login"], environment: environment,
+      workingDirectory: directory, timeout: 5)
+
+    XCTAssertEqual(result, .completed(status: 0))
+    XCTAssertEqual(try String(contentsOf: profile.appendingPathComponent("consumed-grant.txt"), encoding: .utf8), "explicit")
+    XCTAssertEqual(try String(contentsOf: profile.appendingPathComponent("completed-login.txt"), encoding: .utf8), "saved")
   }
 
   func testArgumentsStayLiteralAndAllStandardStreamsUseNullDevice() async throws {

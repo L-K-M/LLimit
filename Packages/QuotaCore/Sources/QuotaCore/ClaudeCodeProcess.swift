@@ -52,6 +52,9 @@ public actor ClaudeCodeProcess {
     environment["CLAUDE_CONFIG_DIR"] = profileDirectory.standardizedFileURL.path
     environment["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
     if let renewal {
+      // Disable startup authentication so it cannot consume the rotating grant
+      // before the explicit auth login handler renews and saves it.
+      environment["CLAUDE_CODE_SIMPLE"] = "1"
       environment["CLAUDE_CODE_OAUTH_REFRESH_TOKEN"] = renewal.refreshToken
       environment["CLAUDE_CODE_OAUTH_SCOPES"] = renewal.scopes.joined(separator: " ")
     }

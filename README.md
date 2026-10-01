@@ -188,6 +188,11 @@ to request an import; other providers' **Auto-fill** does not request Claude
 Keychain access. Managed Claude accounts reuse their verified cached token until
 it approaches expiry, unless a renewal is pending or authentication requires a
 fresh profile check.
+Explicit Claude renewals suppress the CLI's automatic startup authentication so
+that startup renewal cannot race with the explicit exchange. Claude Code still performs
+the exchange and stores the replacement in that account's private profile.
+An account blocked by an earlier incomplete renewal must be reconnected once;
+the update cannot safely reuse its possibly consumed refresh token.
 
 ## Build & run (Linux)
 

@@ -24,6 +24,13 @@ credential identity checks, failure recovery, and subprocess timeout regressions
 The renewal regressions also verify that a cached token with known expiry and a
 verified identity avoids profile reads while it has more than five minutes left.
 Forced renewal, unknown expiry, and pending operations still read the profile.
+The process tests verify that only an explicit renewal uses
+`CLAUDE_CODE_SIMPLE=1`. Claude Code 2.1.283 otherwise starts its automatic token
+renewal during command initialization before handling the explicit refresh-token
+login. The two exchanges can race on the same rotating grant. Simple mode skips
+that startup credential lookup; the explicit login still writes its replacement
+through Claude Code's own private-profile store. Interactive login stays in the
+normal mode. A synthetic child process checks the actual renewal environment.
 
 Keychain prompts are a separate manual check: reopen Settings and confirm it does
 not scan credentials automatically. On Add Account, click **Scan** to explicitly
@@ -43,6 +50,8 @@ To verify the real sign-in flow manually:
    mismatch. Signing in to an already connected account must report a duplicate.
 5. After credentials approach expiry, refresh usage and confirm Claude Code
    renews that profile while the other account retains its own credentials.
+   After upgrading a profile already marked as an incomplete renewal, reconnect
+   it first. The update must not clear that marker or replay the uncertain grant.
 6. For an existing imported Claude account, choose **Connect Claude**, then cancel
    with **Send Control-C**. Confirm its original credentials still work and the
    **Import or paste a token** controls remain available. A canceled sign-in must
