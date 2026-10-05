@@ -1332,6 +1332,8 @@ private struct ProviderMark: View {
       return "chevron.left.forwardslash.chevron.right"
     case .venice:
       return "water.waves"
+    case .cline:
+      return "chevron.left.forwardslash.chevron.right"
     }
   }
 }

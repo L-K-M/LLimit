@@ -111,6 +111,26 @@ final class ProviderMetricSelectionTests: XCTestCase {
     XCTAssertTrue(defaultRingMetrics(for: usage).isEmpty)
   }
 
+  func testClineUsesShortestClinePassWindowFirst() {
+    let usage = makeUsage(provider: .cline, metrics: [
+      UsageMetric(id: "credit-balance", label: "Credit balance", usedDisplay: "$12.50"),
+      UsageMetric(id: "monthly", label: "Monthly remaining", remainingPercent: 20),
+      UsageMetric(id: "five_hour", label: "5-hour remaining", remainingPercent: 75),
+      UsageMetric(id: "weekly", label: "Weekly remaining", remainingPercent: 40)
+    ])
+    XCTAssertEqual(defaultRingMetrics(for: usage).map(\.id), ["five_hour", "weekly"])
+    XCTAssertEqual(primaryLimitSlot(for: usage.metrics)?.kind, .monthly)
+    XCTAssertFalse(chartsAsLongTermLimit(.session, accountKinds: [.session, .weekly, .monthly]))
+  }
+
+  func testClineCreditBalanceNeverInventsQuotaRings() {
+    let usage = makeUsage(provider: .cline, metrics: [
+      UsageMetric(id: "credit-balance", label: "Credit balance", usedDisplay: "$12.50")
+    ])
+    XCTAssertTrue(defaultRingMetrics(for: usage).isEmpty)
+    XCTAssertNil(primaryLimitSlot(for: usage.metrics))
+  }
+
   func testLongTermFilterDropsShortWindowsWhenALongerOneExists() {
     // Claude's 5-hour window goes, both weeklies stay.
     let claude: [QuotaWindowKind] = [.session, .weekly, .weekly]

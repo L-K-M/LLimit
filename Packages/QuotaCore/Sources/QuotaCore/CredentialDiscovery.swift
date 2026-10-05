@@ -79,6 +79,7 @@ public struct CredentialDiscovery: Sendable {
       candidates += scanKimi(home: home, diagnostics: &diagnostics)
       candidates += scanAntigravity(home: home, diagnostics: &diagnostics)
       candidates += scanVenice(home: home, diagnostics: &diagnostics)
+      candidates += scanCline(home: home, diagnostics: &diagnostics)
       candidates += scanOpenCode(home: home, diagnostics: &diagnostics)
     }
 
@@ -484,6 +485,57 @@ public struct CredentialDiscovery: Sendable {
       sourceLabel: "Venice CLI (\(shortPath(url)))",
       credentials: [CredentialField.veniceAPIKey: key]
     )]
+  }
+
+  /// Cline stores the `cline` provider's account credential in
+  /// ~/.cline/data/settings/providers.json, and older standalone builds wrote
+  /// the same credential flat into ~/.cline/data/secrets.json. Import copies it;
+  /// later refreshes never require Cline or either file.
+  ///
+  /// Two shapes are read because Cline's storage has moved between releases
+  /// (`settings.apiKey` for a pasted key, `settings.auth.accessToken` for a
+  /// browser sign-in). Only the access token is imported — LLimit does not
+  /// take Cline's refresh token, so an expired session needs an explicit
+  /// reimport rather than a silent renewal.
+  private func scanCline(home: URL, diagnostics: inout [String]) -> [DiscoveredCredential] {
+    var results: [DiscoveredCredential] = []
+    let providersURL = path(home, ".cline", "data", "settings", "providers.json")
+    if let providers = readJSON(at: providersURL, label: "Cline", diagnostics: &diagnostics),
+       let entry = (providers["providers"] as? [String: Any])?["cline"] as? [String: Any],
+       let settings = entry["settings"] as? [String: Any],
+       let key = clineProviderKey(in: settings) {
+      diagnostics.append("Cline: found API key (\(shortPath(providersURL)))")
+      results.append(DiscoveredCredential(
+        stableID: "cline:providers",
+        provider: .cline,
+        suggestedName: "Cline",
+        sourceLabel: "Cline (\(shortPath(providersURL)))",
+        credentials: [CredentialField.clineAPIKey: key]
+      ))
+    }
+
+    let secretsURL = path(home, ".cline", "data", "secrets.json")
+    if let secrets = readJSON(at: secretsURL, label: "Cline", diagnostics: &diagnostics),
+       let key = nonEmptyString(secrets["clineApiKey"]) {
+      diagnostics.append("Cline: found API key (\(shortPath(secretsURL)))")
+      results.append(DiscoveredCredential(
+        stableID: "cline:secrets",
+        provider: .cline,
+        suggestedName: "Cline",
+        sourceLabel: "Cline (\(shortPath(secretsURL)))",
+        credentials: [CredentialField.clineAPIKey: key]
+      ))
+    }
+
+    return results
+  }
+
+  /// A pasted key wins over a signed-in session's access token: it is the
+  /// credential the dashboard issues for long-lived use.
+  private func clineProviderKey(in settings: [String: Any]) -> String? {
+    if let key = nonEmptyString(settings["apiKey"]) { return key }
+
+    return (settings["auth"] as? [String: Any]).flatMap { nonEmptyString($0["accessToken"]) }
   }
 
   /// `devin auth login` writes a flat `credentials.toml` in the CLI's data

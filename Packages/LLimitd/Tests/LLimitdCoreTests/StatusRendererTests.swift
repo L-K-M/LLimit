@@ -290,6 +290,46 @@ final class StatusRendererTests: XCTestCase {
     XCTAssertTrue(text.contains("Kimi: ERROR slow down"))
   }
 
+  func testClinePassHeadlineAndCreditBalanceShareOneLine() throws {
+    // The headline is the constrained ClinePass window; the credit balance has
+    // no percentage and must not become one.
+    let usage = ProviderUsage(
+      accountID: "cline-account", provider: .cline, title: "Cline",
+      metrics: [
+        UsageMetric(id: "five_hour", label: "5-hour remaining", remainingPercent: 75, usedDisplay: "25% used"),
+        UsageMetric(id: "monthly", label: "Monthly remaining", remainingPercent: 20, usedDisplay: "80% used"),
+        UsageMetric(id: "credit-balance", label: "Credit balance", usedDisplay: "$4.25")
+      ],
+      maxUsagePercent: 80, fetchedAt: now
+    )
+    let object = try decodedWaybar(QuotaSnapshot(generatedAt: now, providers: [usage], failures: []))
+
+    XCTAssertEqual(object["text"] as? String, "Cline 20%")
+    XCTAssertEqual(object["percentage"] as? Int, 20)
+    XCTAssertEqual(object["class"] as? String, "warning")
+    let account = try XCTUnwrap((object["accounts"] as? [[String: Any]])?.first)
+    let metrics = try XCTUnwrap(account["metrics"] as? [[String: Any]])
+    XCTAssertNil(metrics[2]["remainingPercent"])
+    XCTAssertEqual(metrics[2]["usageLine"] as? String, "$4.25")
+    XCTAssertTrue(StatusRenderer.humanReadable(snapshot: QuotaSnapshot(generatedAt: now, providers: [usage], failures: []), now: now)
+      .contains("5-hour remaining 75% left · Monthly remaining 20% left · Credit balance $4.25"))
+  }
+
+  func testClineCreditOnlyAccountRendersAmountsWithoutInventingPercentage() throws {
+    let usage = ProviderUsage(
+      accountID: "cline-credits-only", provider: .cline, title: "Cline",
+      metrics: [UsageMetric(id: "credit-balance", label: "Credit balance", usedDisplay: "$0.00")],
+      warning: "No Cline credits left", fetchedAt: now
+    )
+    let snapshot = QuotaSnapshot(generatedAt: now, providers: [usage], failures: [])
+    let object = try decodedWaybar(snapshot)
+
+    XCTAssertEqual(object["text"] as? String, "Cline Credit balance $0.00")
+    XCTAssertNil(object["percentage"])
+    XCTAssertEqual(object["class"] as? String, "warning")
+    XCTAssertTrue(StatusRenderer.humanReadable(snapshot: snapshot, now: now).contains("No Cline credits left"))
+  }
+
   func testHumanReadableWithoutSnapshotExplainsNextStep() {
     XCTAssertTrue(StatusRenderer.humanReadable(snapshot: nil, now: now).contains("llimit refresh"))
   }

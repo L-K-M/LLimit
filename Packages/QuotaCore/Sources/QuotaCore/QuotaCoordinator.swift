@@ -31,7 +31,8 @@ public struct QuotaCoordinator: Sendable {
         DevinQuotaClient(httpClient: httpClient),
         MetaMuseQuotaClient(httpClient: httpClient),
         OpenCodeGoQuotaClient(httpClient: httpClient),
-        VeniceQuotaClient(httpClient: httpClient)
+        VeniceQuotaClient(httpClient: httpClient),
+        ClineQuotaClient(httpClient: httpClient)
       ]
     )
   }

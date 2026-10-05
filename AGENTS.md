@@ -13,7 +13,7 @@ CLI for login and renewal, with a private profile for each account.
 
 `CredentialDiscovery` exists only as an *optional import shortcut* — it can detect a
 login from a locally installed tool (Claude Code, Codex, Copilot, Antigravity,
-OpenCode, Devin CLI, Muse Code, Venice CLI) so the
+OpenCode, Devin CLI, Muse Code, Venice CLI, Cline) so the
 user can one-click create a pre-filled account instead of pasting a token. Once
 imported, the account is copied into and owned by LLimit.
 
@@ -31,7 +31,7 @@ reference and verified account identity, without copying Codex tokens into its
 settings. The user's normal Codex login and existing imported accounts stay separate.
 
 Providers: Claude (Anthropic), OpenAI/ChatGPT, GitHub Copilot, Zhipu, Z.ai, Kimi,
-Google Antigravity, Devin, Meta Muse, OpenCode Go, Venice.
+Google Antigravity, Devin, Meta Muse, OpenCode Go, Venice, Cline.
 
 ## Layout
 
@@ -128,10 +128,14 @@ Linux:
 - The host app is **not sandboxed** (the import shortcut reads `~/.claude`, `~/.codex`,
   `~/.config/github-copilot`, `~/.kimi`, `~/.kimi-code`, `~/.gemini`,
   `~/.local/share/opencode`, `~/.local/share/devin`, `~/.config/muse`, `~/.venice`,
-  and the Keychain). The widget extension **stays sandboxed**; it only reads the App
+  `~/.cline`, and the Keychain). The widget extension **stays sandboxed**; it only reads the App
   Group container.
-- Adding a `QuotaProvider` case is a breaking change for exhaustive `switch`es: update
-  `Models.displayName`, `Models.credentialFields`, and the widget's `compactProviderName`.
+- Adding a `QuotaProvider` case is a breaking change for **six** exhaustive `switch`es:
+  `Models.displayName`, `Models.credentialFields`,
+  `ProviderMetricSelection.defaultRingMetrics`, the widget's `compactProviderName`,
+  the widget's `ProviderTile.palette`, and `ProviderMark.symbolName`. `AppModel`'s
+  `defaultPrimaryKind(for:)` has a `default:` and needs a case only when the
+  provider's longest window is not `.weekly`.
 - Provider APIs are undocumented and unstable. Fail gracefully (`ProviderFailure`) and
   keep showing the last good snapshot.
 
@@ -149,6 +153,33 @@ Linux:
 
 ## Provider API notes
 
+- **Cline**: read-only account API at `https://api.cline.bot`, authenticated with
+  `Authorization: Bearer <API key>` and `Accept: application/json`. Every response
+  is wrapped in `{success, error, data}`; an on-premise or older deployment can
+  return the bare object, so unwrap `data` only when the `success` marker is
+  present, and carry `success: false` out as a typed API failure. `GET
+  /api/v1/users/me` both validates the key and yields the `usr-…` id that
+  `GET /api/v1/users/{id}/balance` needs, so never guess that id. Cline bills two
+  ways and both are reported: `GET /api/v1/users/me/plan/usage-limits` returns
+  `{limits: [{type, percentUsed, resetsAt?}]}` for the ClinePass subscription
+  windows (`five_hour`, `weekly`, `monthly`), and `data: null` means the account
+  has no subscription. Treat only 401/403/404 on that endpoint as "no windows";
+  any other failure must fail the refresh rather than silently drop a window the
+  user previously saw. `balance` is an integer in **millionths** of a US dollar
+  (`4250000` is `$4.25`) — but `costUsd` in the same API is scaled by 1e8, so do
+  not reuse a money scale across fields. The credit balance has no reported total
+  or reset, so it is an amount only and never a percentage. Only the ClinePass
+  access token is imported, never `auth.refreshToken`: LLimit does not rotate
+  Cline's sessions, so an expired token needs an explicit reimport. Import
+  `~/.cline/data/settings/providers.json` (`providers.cline.settings.apiKey`, or
+  `settings.auth.accessToken` for a browser sign-in) and the legacy flat
+  `~/.cline/data/secrets.json` (`clineApiKey`). Both schemas are read because
+  Cline's storage has moved between releases, and standalone builds on macOS may
+  keep the credential in the OS keychain instead, where discovery cannot see it.
+  `GET /api/v1/users/{id}/usages` and `/usages/daily` exist but are history, not
+  quota; LLimit does not page them. Sources: [Enterprise API reference](https://docs.cline.bot/enterprise-solutions/api-reference),
+  [`cline-account-service.ts`](https://github.com/cline/cline/blob/main/sdk/packages/core/src/account/cline-account-service.ts)
+  and the observed responses in [EDM115/cline-usage-tool](https://github.com/EDM115/cline-usage-tool).
 - **Venice**: read-only `GET https://api.venice.ai/api/v1/api_keys/rate_limits`
   accepts either key type and reports key balances (`DIEM`, `USD`,
   `BUNDLED_CREDITS`), `accessPermitted`, and `nextEpochBegins` under `data`.

@@ -43,6 +43,7 @@ llimit accounts list
 llimit accounts add --provider anthropic        # prompts for that provider's fields
 llimit accounts add --provider opencode-go      # prompts for your OpenCode Go API key
 llimit accounts add --provider venice           # prompts for your Venice API key
+llimit accounts add --provider cline            # prompts for your Cline API key
 llimit accounts import                          # list discovered local logins, import one
 llimit accounts enable|disable|remove <id>      # id may be a unique prefix
 llimit refresh                                  # one-shot fetch, writes the snapshot
@@ -70,6 +71,16 @@ The bound survives daemon restarts; percentages are marked `≈` and metrics exp
 `~/.venice/config.json` (`api_key`) or OpenCode's `venice` entry in `auth.json`.
 USD and bundled credits remain amounts without percentages. These are API
 balances, not web-app message/image quotas.
+
+Cline tracks both billing modes. ClinePass, the monthly subscription, reports
+five-hour, weekly, and monthly window limits with reset times; Cline credits, the
+prepaid pay-as-you-go balance, has no reported total or reset and stays an amount
+without a percentage. Add it with `--provider cline`, or import a Cline login from
+`~/.cline/data/settings/providers.json` (`providers.cline.settings.apiKey` or
+`settings.auth.accessToken`) and the legacy flat `~/.cline/data/secrets.json`
+(`clineApiKey`). Only the access token is imported: LLimit does not renew Cline
+sessions, so an expired one needs a fresh import. No Cline process is required
+after import, and polling reads the account API without making inference requests.
 
 ## systemd
 

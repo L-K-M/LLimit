@@ -177,6 +177,83 @@ final class CredentialDiscoveryTests: XCTestCase {
                    ["venice-cli-fixture", "venice-opencode-fixture"])
   }
 
+  func testDiscoversClineAPIKeyFromProvidersSettings() throws {
+    try write(#"""
+    {"version":1,"providers":{"cline":{"updatedAt":"2026-01-01T00:00:00.000Z","tokenSource":"manual",
+      "settings":{"apiKey":"cline-providers-fixture"}},"openai":{"settings":{"apiKey":"unrelated"}}}}
+    """#, to: ".cline", "data", "settings", "providers.json")
+
+    let cline = try XCTUnwrap(discover().first { $0.provider == .cline })
+    XCTAssertEqual(cline.stableID, "cline:providers")
+    XCTAssertEqual(cline.credentials, [CredentialField.clineAPIKey: "cline-providers-fixture"])
+    XCTAssertTrue(cline.provider.hasRequiredCredentials(cline.credentials))
+  }
+
+  func testDiscoversClineOAuthAccessTokenFromProvidersSettings() throws {
+    try write(#"""
+    {"version":1,"providers":{"cline":{"settings":{"auth":{"accessToken":"cline-oauth-fixture","refreshToken":"r"}}}}}
+    """#, to: ".cline", "data", "settings", "providers.json")
+    XCTAssertEqual(discover().first { $0.provider == .cline }?.credentials,
+                   [CredentialField.clineAPIKey: "cline-oauth-fixture"])
+  }
+
+  func testDiscoversClineAPIKeyFromLegacySecretsFile() throws {
+    try write(#"{"clineApiKey":"cline-secrets-fixture","clineAccountId":"usr-01FIXTURE"}"#,
+              to: ".cline", "data", "secrets.json")
+    let result = CredentialDiscovery(homeDirectories: [home], environment: [:]).discover()
+    let cline = try XCTUnwrap(result.credentials.first { $0.provider == .cline })
+    XCTAssertEqual(cline.stableID, "cline:secrets")
+    XCTAssertEqual(cline.credentials, [CredentialField.clineAPIKey: "cline-secrets-fixture"])
+    XCTAssertFalse(result.diagnostics.joined().contains("cline-secrets-fixture"))
+  }
+
+  func testDeduplicatesOneClineKeyStoredInBothFiles() throws {
+    try write(#"{"version":1,"providers":{"cline":{"settings":{"apiKey":"cline-shared-fixture"}}}}"#,
+              to: ".cline", "data", "settings", "providers.json")
+    try write(#"{"clineApiKey":"cline-shared-fixture"}"#, to: ".cline", "data", "secrets.json")
+
+    let result = CredentialDiscovery(homeDirectories: [home], environment: [:]).discover()
+    let cline = result.credentials.filter { $0.provider == .cline }
+    XCTAssertEqual(cline.count, 1)
+    XCTAssertEqual(cline.first?.stableID, "cline:providers")
+  }
+
+  func testImportsDistinctClineAccountsFromBothFiles() throws {
+    try write(#"{"version":1,"providers":{"cline":{"settings":{"apiKey":"cline-providers-fixture"}}}}"#,
+              to: ".cline", "data", "settings", "providers.json")
+    try write(#"{"clineApiKey":"cline-secrets-fixture"}"#, to: ".cline", "data", "secrets.json")
+    let cline = discover().filter { $0.provider == .cline }
+    XCTAssertEqual(cline.count, 2)
+    XCTAssertEqual(Set(cline.compactMap { $0.credentials[CredentialField.clineAPIKey] }),
+                   ["cline-providers-fixture", "cline-secrets-fixture"])
+  }
+
+  func testClineDiscoveryRejectsMissingAndMalformedKeys() throws {
+    for body in ["{}", "[]", #"{"clineApiKey":null}"#, #"{"clineApiKey":true}"#, #"{"clineApiKey":"  "}"#] {
+      try write(body, to: ".cline", "data", "secrets.json")
+      XCTAssertFalse(discover().contains { $0.provider == .cline }, body)
+    }
+
+    for providers in [
+      "{}",
+      #"{"version":1}"#,
+      #"{"version":1,"providers":{}}"#,
+      #"{"version":1,"providers":{"cline":{}}}"#,
+      #"{"version":1,"providers":{"cline":{"settings":{}}}}"#,
+      #"{"version":1,"providers":{"cline":"api-key-fixture"}}"#,
+      #"{"version":1,"providers":{"cline":{"settings":{"apiKey":""}}}}"#
+    ] {
+      try write(providers, to: ".cline", "data", "settings", "providers.json")
+      XCTAssertFalse(discover().contains { $0.provider == .cline }, providers)
+    }
+  }
+
+  func testClineDiscoveryIgnoresOtherProviderKeys() throws {
+    try write(#"{"openRouterApiKey":"unrelated-fixture","clineAccountId":"usr-01FIXTURE"}"#,
+              to: ".cline", "data", "secrets.json")
+    XCTAssertFalse(discover().contains { $0.provider == .cline })
+  }
+
   func testDiscoversCopilotEditorHostsFile() throws {
     try write(#"{"github.com":{"oauth_token":"gho_editor","user":"octocat"}}"#,
               to: ".config", "github-copilot", "hosts.json")

@@ -34,6 +34,8 @@ public enum CredentialField {
 
   public static let veniceAPIKey = "venice.api_key"
 
+  public static let clineAPIKey = "cline.api_key"
+
   public static let copilotOAuthToken = "copilot.oauth_token"
   public static let copilotPATToken = "copilot.pat_token"
   public static let copilotUsername = "copilot.username"

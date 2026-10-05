@@ -65,6 +65,7 @@ and Claude Keychain import, are macOS-only. Linux Claude Code writes
 | **Meta Muse** | Meta API key | Muse Code (`~/.config/muse/auth.json`) |
 | **OpenCode Go** | API key for a Go subscription | OpenCode (`opencode-go` in `auth.json`) |
 | **Venice** | API key; Admin key for reported daily DIEM allocation | Venice CLI (`~/.venice/config.json`), OpenCode (`venice` in `auth.json`) |
+| **Cline** | API key | Cline (`~/.cline/data/settings/providers.json`, legacy `secrets.json`) |
 
 For OpenCode Go, choose **Settings → Add Account → OpenCode Go** and enter your
 OpenCode API key, or scan for a saved Go key. LLimit shows the rolling, weekly,
@@ -91,6 +92,17 @@ Bundled credits are USD-denominated balances; the API does not expose their tota
 allowance or reset date. This tracks API credits, not web-app message/image limits.
 Polling only reads balances and does not make inference requests. Imported keys
 work without Venice CLI or OpenCode running.
+
+For Cline, choose **Settings → Add Account → Cline** and enter an API key from
+[app.cline.bot](https://app.cline.bot/dashboard) under Account → API Keys, or import
+a Cline CLI/extension login. Cline bills two ways and LLimit shows both. ClinePass,
+the monthly subscription, reports rolling five-hour, weekly, and monthly limits with
+their reset times. Cline credits, the pay-as-you-go balance, has no reported total
+or reset, so it shows as an amount. Rings use the five-hour and weekly windows and
+the monthly window takes the account's primary color. Polling only reads the
+account API and never makes an inference request. Imported keys work without Cline
+running; because LLimit does not renew Cline sessions, an expired one needs a fresh
+import or a replacement key.
 
 ## How accounts work
 

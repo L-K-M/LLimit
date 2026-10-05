@@ -30,6 +30,11 @@ public func defaultRingMetrics(for usage: ProviderUsage) -> [UsageMetric] {
     preferredIDs = ["session-rolling", "monthly", "weekly"]
   case .venice:
     preferredIDs = ["daily-diem"]
+  case .cline:
+    // ClinePass windows first, shortest first. The API returns them as
+    // duration-named types, so a re-ordered `limits[]` cannot repoint the
+    // ring at a different window.
+    preferredIDs = ["five_hour", "weekly", "monthly"]
   }
 
   var selected: [UsageMetric] = []

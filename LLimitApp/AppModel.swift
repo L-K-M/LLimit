@@ -1484,6 +1484,9 @@ final class AppModel: ObservableObject {
     case .gitHubCopilot, .zhipu, .zai: return .monthly
     case .googleAntigravity: return .other
     case .venice: return .daily
+    // ClinePass reports a five-hour, weekly and monthly window; monthly is the
+    // longest, and it owns the account's primary color once usage is live.
+    case .cline: return .monthly
     default: return .weekly
     }
   }

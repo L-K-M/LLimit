@@ -12,6 +12,7 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
   case metaMuse = "meta-muse"
   case openCodeGo = "opencode-go"
   case venice = "venice"
+  case cline = "cline"
 
   public var displayName: String {
     switch self {
@@ -37,6 +38,8 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
       return "OpenCode Go"
     case .venice:
       return "Venice"
+    case .cline:
+      return "Cline"
     }
   }
 }
@@ -195,6 +198,14 @@ public extension QuotaProvider {
           key: CredentialField.veniceAPIKey,
           label: "API key",
           help: "Create a key at venice.ai/settings/api. An Admin key reports the daily DIEM allocation; other keys use a clearly marked estimate from observed balances."
+        )
+      ]
+    case .cline:
+      return [
+        CredentialFieldDescriptor(
+          key: CredentialField.clineAPIKey,
+          label: "API key",
+          help: "Create a key at app.cline.bot under Account -> API Keys. It reports ClinePass window usage and the prepaid credit balance."
         )
       ]
     }
