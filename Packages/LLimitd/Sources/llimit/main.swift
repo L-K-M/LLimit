@@ -353,7 +353,17 @@ func runTrend(_ args: [String]) {
     }
     i += 1
   }
-  let history = (try? QuotaHistoryStore(fileURL: LinuxPaths().historyFileURL).load()) ?? []
+  let historyURL = LinuxPaths().historyFileURL
+  let history: [QuotaSnapshot]
+  if FileManager.default.fileExists(atPath: historyURL.path) {
+    do {
+      history = try QuotaHistoryStore(fileURL: historyURL).load()
+    } catch {
+      fail("couldn't read history: \(error.localizedDescription)")
+    }
+  } else {
+    history = []
+  }
   print(TrendRenderer.render(history: history, days: days, accountPrefix: accountPrefix))
 }
 

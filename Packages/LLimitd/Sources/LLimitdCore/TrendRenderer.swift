@@ -10,9 +10,12 @@ public enum TrendRenderer {
 
   /// `width` time-buckets over the history window; the last sample in each
   /// bucket wins and empty buckets inherit the previous value (step data).
-  /// Leading buckets before the first sample stay blank.
+  /// Leading buckets before the first sample stay blank. `scale` pins the
+  /// value range (percent series pass 0...100 so height reads as level);
+  /// without it the series normalizes to its own observed min/max.
   public static func sparkline(_ samples: [(at: Date, value: Double)],
-                               window: ClosedRange<Date>, width: Int = 24) -> String {
+                               window: ClosedRange<Date>, width: Int = 24,
+                               scale: ClosedRange<Double>? = nil) -> String {
     guard width > 0, !samples.isEmpty else { return "" }
     let span = max(1, window.upperBound.timeIntervalSince(window.lowerBound))
     var buckets = [Double?](repeating: nil, count: width)
@@ -22,7 +25,9 @@ public enum TrendRenderer {
       buckets[index] = sample.value
     }
     let observed = buckets.compactMap { $0 }
-    guard let low = observed.min(), let high = observed.max() else { return "" }
+    guard !observed.isEmpty else { return "" }
+    let low = scale?.lowerBound ?? observed.min()!
+    let high = scale?.upperBound ?? observed.max()!
     let range = high - low
 
     var output = ""
@@ -33,7 +38,7 @@ public enum TrendRenderer {
         output.append(" ")
         continue
       }
-      // A flat series draws a mid-height line rather than a floor row.
+      // A flat unscaled series draws a mid-height line rather than a floor row.
       let level = range == 0 ? 3 : Int((value - low) / range * 7).clamped(to: 0...7)
       output.append(blocks[level])
     }
@@ -50,11 +55,16 @@ public enum TrendRenderer {
     let sorted = history.filter { $0.generatedAt >= cutoff }
       .sorted { $0.generatedAt < $1.generatedAt }
 
+    // Identity is (account, metric) only — titles/labels are display data and
+    // can change mid-history on an upstream rename without splitting a series.
     struct Series: Hashable {
-      let accountID: String, title: String, metricID: String, label: String
+      let accountID: String, metricID: String
     }
     var order: [Series] = []
     var samples: [Series: [(at: Date, value: Double)]] = [:]
+    var displayTitle: [Series: String] = [:]
+    var displayLabel: [Series: String] = [:]
+    var isPercent: [Series: Bool] = [:]
     var latestValue: [Series: String] = [:]
 
     for snapshot in sorted {
@@ -66,10 +76,12 @@ public enum TrendRenderer {
         }
         for metric in usage.metrics where !metric.isUnlimited {
           guard let value = metric.remainingPercent.map(Double.init) ?? metric.remainingAmount else { continue }
-          let key = Series(accountID: usage.accountID, title: usage.title,
-                           metricID: metric.id, label: metric.label)
+          let key = Series(accountID: usage.accountID, metricID: metric.id)
           if !order.contains(key) { order.append(key) }
           samples[key, default: []].append((at: snapshot.generatedAt, value: value))
+          displayTitle[key] = usage.title
+          displayLabel[key] = metric.label
+          isPercent[key] = metric.remainingPercent != nil
           if let percent = metric.remainingPercent {
             latestValue[key] = "\(percent)% left"
           } else if let amount = metric.remainingAmount {
@@ -82,15 +94,20 @@ public enum TrendRenderer {
     var lines = ["LLimit trend — last \(days)d"]
     var currentAccount = ""
     var anySeries = false
-    for key in order.sorted(by: { ($0.title, $0.label) < ($1.title, $1.label) }) {
+    for key in order.sorted(by: {
+      (displayTitle[$0] ?? "", displayLabel[$0] ?? "") <
+        (displayTitle[$1] ?? "", displayLabel[$1] ?? "")
+    }) {
       guard let series = samples[key], series.count >= 2 else { continue }
       anySeries = true
-      if key.title != currentAccount {
-        currentAccount = key.title
-        lines.append("\(key.title):")
+      let title = displayTitle[key] ?? key.accountID
+      if title != currentAccount {
+        currentAccount = title
+        lines.append("\(title):")
       }
-      let line = sparkline(series, window: window, width: width)
-      lines.append("  \(key.label.padding(toLength: 22, withPad: " ", startingAt: 0)) \(line)  \(latestValue[key] ?? "")")
+      let line = sparkline(series, window: window, width: width,
+                           scale: isPercent[key] == true ? 0...100 : nil)
+      lines.append("  \((displayLabel[key] ?? key.metricID).padding(toLength: 22, withPad: " ", startingAt: 0)) \(line)  \(latestValue[key] ?? "")")
     }
     if !anySeries {
       lines.append("  not enough history yet — the daemon records a point each refresh")
