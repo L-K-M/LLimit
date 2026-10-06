@@ -102,8 +102,11 @@ public struct QuotaCoordinator: Sendable {
       (previousSnapshot?.providers ?? []).filter { $0.provider == .venice }.map { ($0.accountID, $0) },
       uniquingKeysWith: { $0.fetchedAt >= $1.fetchedAt ? $0 : $1 }
     )
-    let usages = ordered.compactMap(\.usage).map {
-      VeniceQuotaEstimate.applying(to: $0, previous: previousByID[$0.accountID])
+    let usages = ordered.compactMap(\.usage).map { usage in
+      if usage.provider == .venice {
+        return VeniceQuotaEstimate.applying(to: usage, previous: previousByID[usage.accountID])
+      }
+      return usage
     }
     let failures = ordered.compactMap(\.failure)
     return QuotaSnapshot(generatedAt: now, providers: usages, failures: failures)
