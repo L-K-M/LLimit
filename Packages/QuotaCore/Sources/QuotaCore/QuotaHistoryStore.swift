@@ -58,6 +58,15 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     maxEntries: Int = 3_000
   ) throws {
     var history = try load()
+
+    // Most refresh cycles change nothing the trend can show. Skip the append —
+    // and the whole-file rewrite it implies — when the newest entry differs
+    // only in volatile fields.
+    if let last = history.max(by: { $0.generatedAt < $1.generatedAt }),
+       last.isContentEquivalent(to: snapshot) {
+      return
+    }
+
     history.append(snapshot)
 
     let cutoffDays = max(1, keepDays)

@@ -426,6 +426,28 @@ public struct QuotaSnapshot: Codable, Hashable, Sendable {
   public var providers: [ProviderUsage]
   public var failures: [ProviderFailure]
 
+  /// True when the two snapshots differ only in volatile fields — timestamps
+  /// and the derived `resetIn` countdown text — so recording the newer one
+  /// adds no information to the trend.
+  public func isContentEquivalent(to other: QuotaSnapshot) -> Bool {
+    func normalized(_ snapshot: QuotaSnapshot) -> QuotaSnapshot {
+      var copy = snapshot
+      copy.generatedAt = .distantPast
+      copy.providers = snapshot.providers.map { provider in
+        var provider = provider
+        provider.fetchedAt = .distantPast
+        provider.metrics = provider.metrics.map { metric in
+          var metric = metric
+          metric.resetIn = nil
+          return metric
+        }
+        return provider
+      }
+      return copy
+    }
+    return normalized(self) == normalized(other)
+  }
+
   public init(
     version: Int = 1,
     generatedAt: Date,

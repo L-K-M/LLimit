@@ -77,4 +77,48 @@ final class QuotaHistoryStoreTests: XCTestCase {
     XCTAssertEqual(loaded.providers.map(\.accountID), ["keep-me"])
     XCTAssertTrue(loaded.failures.isEmpty)
   }
+
+  private let fixedReset = Date(timeIntervalSince1970: 1_800_000_000)
+
+  private func snapshot(at now: Date, percent: Int, fetchedAt: Date? = nil, resetIn: String? = nil) -> QuotaSnapshot {
+    QuotaSnapshot(
+      generatedAt: now,
+      providers: [
+        ProviderUsage(
+          accountID: "acct",
+          provider: .anthropic,
+          title: "Claude",
+          metrics: [
+            UsageMetric(id: "session", label: "Session", remainingPercent: percent,
+                        resetAt: fixedReset, resetIn: resetIn)
+          ],
+          maxUsagePercent: 100 - percent,
+          fetchedAt: fetchedAt ?? now
+        )
+      ],
+      failures: []
+    )
+  }
+
+  func testAppendSkipsUnchangedSnapshots() throws {
+    let (store, dir) = makeStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+
+    try store.append(snapshot(at: now, percent: 70))
+    // Timestamps and the derived countdown text move every cycle; content does not.
+    try store.append(snapshot(at: now.addingTimeInterval(900), percent: 70,
+                              fetchedAt: now.addingTimeInterval(900), resetIn: "in 2h 45m"))
+    try store.append(snapshot(at: now.addingTimeInterval(1_800), percent: 70,
+                              fetchedAt: now.addingTimeInterval(1_800), resetIn: "in 2h 30m"))
+    XCTAssertEqual(try store.load().count, 1)
+
+    // A real change records a new point — and dedup resumes from there.
+    try store.append(snapshot(at: now.addingTimeInterval(2_700), percent: 60,
+                              fetchedAt: now.addingTimeInterval(2_700)))
+    try store.append(snapshot(at: now.addingTimeInterval(3_600), percent: 60,
+                              fetchedAt: now.addingTimeInterval(3_600), resetIn: "in 2h"))
+    XCTAssertEqual(try store.load().count, 2)
+    XCTAssertEqual(try store.load().last?.generatedAt, now.addingTimeInterval(2_700))
+  }
 }
