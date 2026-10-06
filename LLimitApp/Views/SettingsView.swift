@@ -99,9 +99,11 @@ struct SettingsView: View {
   }
 
   private func accountSidebarRow(_ account: ProviderAccount) -> some View {
-    HStack(spacing: 8) {
+    let status = accountStatus(for: account)
+
+    return HStack(spacing: 8) {
       Circle()
-        .fill(accountStatusColor(for: account.id))
+        .fill(status.color)
         .frame(width: 8, height: 8)
         .accessibilityHidden(true)
 
@@ -120,22 +122,53 @@ struct SettingsView: View {
         .accessibilityHidden(true)
     }
     .padding(.vertical, 2)
-    // The status dot is color-only, so carry the state in the row's value for
-    // VoiceOver instead of hiding it.
+    // The status dot is color-only and hidden above; the row's accessibility
+    // value carries the state for VoiceOver instead.
     .accessibilityElement(children: .combine)
     .accessibilityLabel("\(account.resolvedDisplayName), \(account.provider.displayName)")
-    .accessibilityValue(accountStatusDescription(for: account.id))
+    .accessibilityValue(status.label)
+    // The help text advertises reordering; expose it directly rather than only
+    // through the context menu. Both are no-ops at the ends of the list.
+    .accessibilityAction(named: "Move Up") {
+      model.moveProviderAccount(account.id, direction: .up)
+    }
+    .accessibilityAction(named: "Move Down") {
+      model.moveProviderAccount(account.id, direction: .down)
+    }
     .help("Drag to reorder accounts and their menu bar bars, or use Move Up and Move Down in the context menu.")
   }
 
-  private func accountStatusDescription(for accountID: String) -> String {
-    guard let account = model.account(withID: accountID), account.isEnabled else {
-      return "Disabled"
+  /// One state machine for an account's status, so the dot's color and the
+  /// announced value cannot drift apart.
+  private enum AccountStatus {
+    case disabled
+    case refreshFailed
+    case needsAttention
+    case ready
+
+    var color: Color {
+      switch self {
+      case .disabled: return .secondary
+      case .refreshFailed: return .orange
+      case .needsAttention: return .red
+      case .ready: return .green
+      }
     }
-    if accountFailure(for: accountID) != nil {
-      return "Refresh failed"
+
+    var label: String {
+      switch self {
+      case .disabled: return "Disabled"
+      case .refreshFailed: return "Refresh failed"
+      case .needsAttention: return "Needs attention"
+      case .ready: return "Ready"
+      }
     }
-    return model.isAccountAvailable(accountID) ? "Ready" : "Needs attention"
+  }
+
+  private func accountStatus(for account: ProviderAccount) -> AccountStatus {
+    guard account.isEnabled else { return .disabled }
+    if accountFailure(for: account.id) != nil { return .refreshFailed }
+    return model.isAccountAvailable(account.id) ? .ready : .needsAttention
   }
 
   // MARK: - Detail router
@@ -1203,16 +1236,6 @@ struct SettingsView: View {
   }
 
   // MARK: - Status helpers
-
-  private func accountStatusColor(for accountID: String) -> Color {
-    guard let account = model.account(withID: accountID), account.isEnabled else {
-      return .secondary
-    }
-    if accountFailure(for: accountID) != nil {
-      return .orange
-    }
-    return model.isAccountAvailable(accountID) ? .green : .red
-  }
 
   private func shortName(for usage: ProviderUsage) -> String {
     if !usage.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
