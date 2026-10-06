@@ -3,6 +3,7 @@ import XCTest
 
 final class QuotaHistoryStoreTests: XCTestCase {
   private let t0 = Date(timeIntervalSince1970: 1_700_000_000)
+  private let secondsPerDay: TimeInterval = 24 * 60 * 60
 
   private func makeStore() -> (QuotaHistoryStore, URL) {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -206,6 +207,113 @@ final class QuotaHistoryStoreTests: XCTestCase {
     try store.save([targeted])
 
     XCTAssertEqual(try store.loadRecent(days: 1, now: t0), [targeted])
+  }
+
+  func testLoadRecentCapKeepsNewestFetchDespiteOldGeneration() throws {
+    let (store, dir) = makeStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let targeted = QuotaSnapshot(
+      generatedAt: t0.addingTimeInterval(-2 * secondsPerDay),
+      providers: [usage("a", at: t0)], failures: []
+    )
+    let olderFetch = QuotaSnapshot(
+      generatedAt: t0.addingTimeInterval(-120),
+      providers: [usage("b", at: t0.addingTimeInterval(-120))], failures: []
+    )
+    let recentFailure = QuotaSnapshot(
+      generatedAt: t0.addingTimeInterval(-60), providers: [], failures: [failure("b")]
+    )
+    try store.save([recentFailure, targeted, olderFetch])
+
+    // Cap by source activity, then return the existing publication ordering.
+    XCTAssertEqual(try store.loadRecent(days: 1, maxEntries: 2, now: t0), [targeted, recentFailure])
+    XCTAssertEqual(try store.load(), [targeted, olderFetch, recentFailure])
+  }
+
+  func testAppendRetentionKeepsArchivedFetchDespiteOldGeneration() throws {
+    let (store, dir) = makeStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let cutoff = t0.addingTimeInterval(-secondsPerDay)
+    let targeted = QuotaSnapshot(
+      version: 7, generatedAt: t0.addingTimeInterval(-2 * secondsPerDay),
+      providers: [usage("a", at: cutoff)], failures: []
+    )
+    let expiredFailure = QuotaSnapshot(
+      generatedAt: cutoff.addingTimeInterval(-1), providers: [], failures: [failure("b")]
+    )
+    try store.save([targeted, expiredFailure])
+
+    let failed = QuotaSnapshot(generatedAt: t0, providers: targeted.providers, failures: [failure("a")])
+    try store.append(failed, keepDays: 1)
+
+    let failureEvent = QuotaSnapshot(generatedAt: t0, providers: [], failures: failed.failures)
+    XCTAssertEqual(try store.load(), [targeted, failureEvent])
+    XCTAssertEqual(failed.providers, targeted.providers)
+  }
+
+  func testAppendCapKeepsArchivedNewestFetchDespiteOldGeneration() throws {
+    let (store, dir) = makeStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let targeted = QuotaSnapshot(
+      generatedAt: t0.addingTimeInterval(-2 * secondsPerDay),
+      providers: [usage("a", at: t0)], failures: []
+    )
+    let olderFetch = QuotaSnapshot(
+      generatedAt: t0.addingTimeInterval(-120),
+      providers: [usage("b", at: t0.addingTimeInterval(-120))], failures: []
+    )
+    let recentFailure = QuotaSnapshot(
+      generatedAt: t0.addingTimeInterval(-60), providers: [], failures: [failure("b")]
+    )
+    try store.save([targeted, olderFetch])
+    try store.append(recentFailure, maxEntries: 2)
+
+    XCTAssertEqual(try store.load(), [targeted, recentFailure])
+  }
+
+  func testAppendCapKeepsNewTargetedFetchDespiteOldGeneration() throws {
+    let (store, dir) = makeStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let archived = QuotaSnapshot(
+      generatedAt: t0.addingTimeInterval(-60),
+      providers: [usage("b", at: t0.addingTimeInterval(-60))], failures: []
+    )
+    try store.save([archived])
+
+    let targeted = QuotaSnapshot(
+      generatedAt: t0.addingTimeInterval(-2 * secondsPerDay),
+      providers: [usage("a", at: t0)], failures: []
+    )
+    try store.append(targeted, maxEntries: 1)
+
+    XCTAssertEqual(try store.load(), [targeted])
+  }
+
+  func testAppendRetentionUsesNewFetchAsActivityAnchor() throws {
+    let (store, dir) = makeStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let cutoff = t0.addingTimeInterval(-secondsPerDay)
+    let boundary = QuotaSnapshot(
+      generatedAt: t0.addingTimeInterval(-3 * secondsPerDay),
+      providers: [usage("b", at: cutoff)], failures: []
+    )
+    let oldDate = t0.addingTimeInterval(-2 * secondsPerDay)
+    let expired = QuotaSnapshot(generatedAt: oldDate, providers: [usage("c", at: oldDate)], failures: [])
+    try store.save([boundary, expired])
+
+    let targeted = QuotaSnapshot(
+      generatedAt: oldDate, providers: [usage("a", at: t0), usage("d", at: oldDate)], failures: []
+    )
+    try store.append(targeted, keepDays: 1)
+
+    let newReadings = QuotaSnapshot(generatedAt: oldDate, providers: [usage("a", at: t0)], failures: [])
+    XCTAssertEqual(try store.load(), [boundary, newReadings])
+    XCTAssertEqual(targeted.providers.count, 2)
   }
 
   func testLoadRecentDropsSnapshotsOutsideWindow() throws {

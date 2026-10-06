@@ -26,20 +26,16 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     return try decoder.decode([QuotaSnapshot].self, from: data)
   }
 
-  /// Loads recent snapshots or source fetches, capped to the newest `maxEntries`.
+  /// Loads recent snapshot/source activity, capped to the newest `maxEntries`.
+  /// Returns entries in `generatedAt` order.
   /// The widget uses this so a large history file can't exhaust the extension's memory
   /// budget while rendering the (at most 30-day) trend chart.
   public func loadRecent(days: Int, maxEntries: Int = 3_000, now: Date = Date()) throws -> [QuotaSnapshot] {
     let cutoff = now.addingTimeInterval(-Double(max(1, days)) * Self.secondsPerDay)
     let recent = try load()
-      // A targeted retry can fetch after its containing snapshot was generated.
-      .filter { $0.generatedAt >= cutoff || $0.providers.contains { $0.fetchedAt >= cutoff } }
-      .sorted { $0.generatedAt < $1.generatedAt }
+      .filter { Self.effectiveActivityDate(for: $0) >= cutoff }
 
-    if recent.count > max(1, maxEntries) {
-      return Array(recent.suffix(max(1, maxEntries)))
-    }
-    return recent
+    return Self.cappedSnapshots(recent, maxEntries: maxEntries)
   }
 
   public func save(_ snapshots: [QuotaSnapshot]) throws {
@@ -54,6 +50,7 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: fileURL.path)
   }
 
+  /// Archives sparse new observations and failure events, not full current state.
   public func append(
     _ snapshot: QuotaSnapshot,
     keepDays: Int = 45,
@@ -61,7 +58,8 @@ public final class QuotaHistoryStore: @unchecked Sendable {
   ) throws {
     var history = try load()
     let cutoffDays = max(1, keepDays)
-    let cutoffDate = snapshot.generatedAt.addingTimeInterval(-Double(cutoffDays) * Self.secondsPerDay)
+    let cutoffDate = Self.effectiveActivityDate(for: snapshot)
+      .addingTimeInterval(-Double(cutoffDays) * Self.secondsPerDay)
     let observations = QuotaObservations.newSuccessfulUsage(in: snapshot, excluding: history)
       .filter { $0.fetchedAt >= cutoffDate }
 
@@ -73,15 +71,25 @@ public final class QuotaHistoryStore: @unchecked Sendable {
       history.append(entry)
     }
 
-    history = history.filter { $0.generatedAt >= cutoffDate }
-    history.sort { $0.generatedAt < $1.generatedAt }
+    history = history.filter { Self.effectiveActivityDate(for: $0) >= cutoffDate }
+    try save(Self.cappedSnapshots(history, maxEntries: maxEntries))
+  }
 
-    let limit = max(1, maxEntries)
-    if history.count > limit {
-      history = Array(history.suffix(limit))
-    }
+  private static func effectiveActivityDate(for snapshot: QuotaSnapshot) -> Date {
+    // A targeted retry can fetch after its containing snapshot was generated.
+    snapshot.providers.reduce(snapshot.generatedAt) { max($0, $1.fetchedAt) }
+  }
 
-    try save(history)
+  private static func cappedSnapshots(_ snapshots: [QuotaSnapshot], maxEntries: Int) -> [QuotaSnapshot] {
+    let ranked = snapshots.map { (snapshot: $0, activity: effectiveActivityDate(for: $0)) }
+      .sorted { lhs, rhs in
+        if lhs.activity != rhs.activity { return lhs.activity < rhs.activity }
+        return lhs.snapshot.generatedAt < rhs.snapshot.generatedAt
+      }
+
+    // Select by activity without changing the archive's publication ordering.
+    return ranked.suffix(max(1, maxEntries)).map(\.snapshot)
+      .sorted { $0.generatedAt < $1.generatedAt }
   }
 
   public func remove(accountIDs: Set<String>) throws {

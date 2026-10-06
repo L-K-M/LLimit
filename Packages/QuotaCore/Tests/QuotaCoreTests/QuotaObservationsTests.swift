@@ -114,10 +114,13 @@ final class QuotaObservationsTests: XCTestCase {
 
   func testSameFetchSecondIsConservativelyOneObservation() {
     let sources = [0.2, 0.8].map { offset in snapshot([usage(at: t0.addingTimeInterval(offset))], at: t0) }
-    let observations = QuotaObservations.extract(from: sources, accounts: [account], window: window)
 
-    XCTAssertEqual(observations.count, 1)
-    XCTAssertEqual(observations.first?.fetchedAt, t0.addingTimeInterval(0.8))
+    for candidates in [sources, Array(sources.reversed())] {
+      let observations = QuotaObservations.extract(from: candidates, accounts: [account], window: window)
+
+      XCTAssertEqual(observations.count, 1)
+      XCTAssertEqual(observations.first?.fetchedAt, t0.addingTimeInterval(0.8))
+    }
   }
 
   func testDedupeBeforeWindowFilterDoesNotTurnRoundedFutureCopyIntoObservation() {

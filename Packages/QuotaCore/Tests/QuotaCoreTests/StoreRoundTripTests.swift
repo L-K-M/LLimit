@@ -274,7 +274,7 @@ final class StoreRoundTripTests: XCTestCase {
     let fetchedAt = dayStart.addingTimeInterval(3 * 86_400)
     let newSnapshot = QuotaSnapshot(
       generatedAt: fetchedAt,
-      providers: [ProviderUsage(provider: .anthropic, title: "Claude", metrics: [], fetchedAt: fetchedAt)],
+      providers: [ProviderUsage(accountID: "claude-a", provider: .anthropic, title: "Claude", metrics: [], fetchedAt: fetchedAt)],
       failures: []
     )
 
