@@ -34,7 +34,13 @@ public final class SnapshotStore: @unchecked Sendable {
       return nil
     }
     let data = try Data(contentsOf: fileURL)
-    guard let snapshot = try? decoder.decode(QuotaSnapshot.self, from: data) else {
+    let snapshot: QuotaSnapshot
+    do {
+      snapshot = try decoder.decode(QuotaSnapshot.self, from: data)
+    } catch {
+      FileHandle.standardError.write(Data(
+        "LLimit: snapshot decode failed; quarantined \(fileURL.lastPathComponent): \(error)\n".utf8
+      ))
       quarantineCorruptFile(fileURL)
       return nil
     }

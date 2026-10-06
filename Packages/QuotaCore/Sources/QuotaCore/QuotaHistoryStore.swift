@@ -33,6 +33,9 @@ public final class QuotaHistoryStore: @unchecked Sendable {
       try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
       return decoded
     } catch {
+      FileHandle.standardError.write(Data(
+        "LLimit: history decode failed; quarantined \(fileURL.lastPathComponent): \(error)\n".utf8
+      ))
       quarantineCorruptFile(fileURL)
       return []
     }
@@ -153,11 +156,17 @@ func quarantineCorruptFile(_ fileURL: URL, keep: Int = 5) {
     .appendingPathExtension("corrupt-\(timestamp)-\(UUID().uuidString).json")
   try? FileManager.default.moveItem(at: fileURL, to: quarantined)
 
-  // Epoch-second names sort newest-first lexicographically.
+  // Order by modification time: deterministic even when same-second
+  // quarantine names tie on their epoch-second prefix.
   let siblings = ((try? FileManager.default.contentsOfDirectory(
-    at: fileURL.deletingLastPathComponent(), includingPropertiesForKeys: nil)) ?? [])
+    at: fileURL.deletingLastPathComponent(),
+    includingPropertiesForKeys: [.contentModificationDateKey])) ?? [])
     .filter { $0.lastPathComponent.hasPrefix("\(base).corrupt-") }
-    .sorted { $0.lastPathComponent > $1.lastPathComponent }
+    .sorted {
+      let lhs = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+      let rhs = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+      return (lhs ?? .distantPast) > (rhs ?? .distantPast)
+    }
   for stale in siblings.dropFirst(keep) {
     try? FileManager.default.removeItem(at: stale)
   }
