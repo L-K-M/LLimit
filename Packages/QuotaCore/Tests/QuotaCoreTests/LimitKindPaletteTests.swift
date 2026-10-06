@@ -26,8 +26,12 @@ final class LimitKindPaletteTests: XCTestCase {
   func testLowercasedHexStillResolvesToItsPalette() {
     // The public setters do not normalize, so a value written directly can differ
     // in case from the palette it visually matches; matching must see through it.
+    // Flip the case unconditionally, so the test cannot pass vacuously if the
+    // palette's literal is already lowercase.
     var recolored = LimitKindPalette.ocean.colors
-    recolored.dailyHexColor = recolored.dailyHexColor.lowercased()
+    let original = recolored.dailyHexColor
+    recolored.dailyHexColor = original == original.lowercased() ? original.uppercased() : original.lowercased()
+    XCTAssertNotEqual(recolored.dailyHexColor, original)
     XCTAssertEqual(recolored.palette, .ocean)
   }
 
