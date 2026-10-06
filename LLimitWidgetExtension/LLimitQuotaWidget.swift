@@ -362,12 +362,51 @@ private func dashboardEmptyState(for entry: QuotaEntry) -> DashboardEmptyState {
 }
 
 /// Names of the accounts in a failure-only snapshot, for the roomier medium
-/// widget. A legacy provider-keyed failure falls back to the provider name.
+/// widget. Order-preserving and de-duplicated: a legacy provider-keyed failure
+/// falls back to the provider name, and two of those would otherwise repeat.
 private func unavailableAccountNames(for entry: QuotaEntry) -> [String] {
   guard let snapshot = entry.snapshot, snapshot.providers.isEmpty else { return [] }
-  return snapshot.failures.map { failure in
-    entry.settings.account(withID: failure.accountID)?.resolvedDisplayName
+  var seen = Set<String>()
+  return snapshot.failures.compactMap { failure in
+    let name = entry.settings.account(withID: failure.accountID)?.resolvedDisplayName
       ?? failure.provider.displayName
+    return seen.insert(name).inserted ? name : nil
+  }
+}
+
+/// The empty-state body, shared by both dashboard families so their copy and
+/// warning styling cannot drift. `names` is empty for the small family.
+private struct DashboardEmptyStateView: View {
+  let state: DashboardEmptyState
+  var names: [String] = []
+
+  private static let maxNames = 4
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 3) {
+      Text(state.title)
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(state.isWarning ? Color.orange : Color.primary)
+
+      ForEach(Array(names.prefix(Self.maxNames).enumerated()), id: \.offset) { _, name in
+        Text(name)
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+      }
+
+      if names.count > Self.maxNames {
+        Text("+\(names.count - Self.maxNames) more")
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+      }
+
+      Text(state.detail)
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+    }
+    .accessibilityElement(children: .combine)
   }
 }
 
@@ -415,14 +454,8 @@ private struct OverviewSmallQuotaView: View {
             .foregroundStyle(.orange)
         }
       } else {
-        let state = dashboardEmptyState(for: entry)
         Spacer(minLength: 0)
-        Text(state.title)
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(state.isWarning ? Color.orange : Color.primary)
-        Text(state.detail)
-          .font(.caption2)
-          .foregroundStyle(.secondary)
+        DashboardEmptyStateView(state: dashboardEmptyState(for: entry))
         Spacer(minLength: 0)
       }
     }
@@ -492,21 +525,12 @@ private struct MediumCompactQuotaView: View {
             .foregroundStyle(.orange)
         }
       } else {
-        let state = dashboardEmptyState(for: entry)
         Spacer(minLength: 0)
-        Text(state.title)
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(state.isWarning ? Color.orange : Color.primary)
         // The medium family has room to name who is unavailable.
-        ForEach(Array(unavailableAccountNames(for: entry).prefix(4).enumerated()), id: \.offset) { _, name in
-          Text(name)
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-        }
-        Text(state.detail)
-          .font(.caption2)
-          .foregroundStyle(.secondary)
+        DashboardEmptyStateView(
+          state: dashboardEmptyState(for: entry),
+          names: unavailableAccountNames(for: entry)
+        )
         Spacer(minLength: 0)
       }
     }
