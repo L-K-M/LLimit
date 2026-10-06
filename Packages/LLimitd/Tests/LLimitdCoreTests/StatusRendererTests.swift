@@ -333,4 +333,51 @@ final class StatusRendererTests: XCTestCase {
   func testHumanReadableWithoutSnapshotExplainsNextStep() {
     XCTAssertTrue(StatusRenderer.humanReadable(snapshot: nil, now: now).contains("llimit refresh"))
   }
+
+  // MARK: - compact + resets
+
+  func testCompactLineJoinsAccountPercents() {
+    XCTAssertEqual(
+      StatusRenderer.compactLine(snapshot: snapshot(remaining: [84, 62])),
+      "Claude 1:84% Claude 2:62%"
+    )
+    XCTAssertEqual(StatusRenderer.compactLine(snapshot: nil), "LLimit: no data")
+  }
+
+  func testResetLinesSortSoonestFirst() {
+    let usage = ProviderUsage(
+      accountID: "acct",
+      provider: .anthropic,
+      title: "Claude",
+      metrics: [
+        UsageMetric(id: "weekly", label: "Weekly", remainingPercent: 62,
+                    resetAt: now.addingTimeInterval(4 * 86_400)),
+        UsageMetric(id: "five-hour", label: "5-hour limit", remainingPercent: 8,
+                    resetAt: now.addingTimeInterval(2 * 3_600)),
+      ],
+      fetchedAt: now
+    )
+    let snapshot = QuotaSnapshot(generatedAt: now, providers: [usage], failures: [])
+    let lines = StatusRenderer.resetLines(snapshot: snapshot, now: now)
+
+    XCTAssertEqual(lines.count, 2)
+    XCTAssertTrue(lines[0].contains("5-hour limit"))
+    XCTAssertTrue(lines[1].contains("Weekly"))
+    XCTAssertTrue(lines[0].hasPrefix("in "))
+  }
+
+  func testResetLinesSkipsExpiredResets() {
+    let usage = ProviderUsage(
+      accountID: "acct",
+      provider: .anthropic,
+      title: "Claude",
+      metrics: [
+        UsageMetric(id: "five-hour", label: "5-hour limit", remainingPercent: 8,
+                    resetAt: now.addingTimeInterval(-600))
+      ],
+      fetchedAt: now
+    )
+    let snapshot = QuotaSnapshot(generatedAt: now, providers: [usage], failures: [])
+    XCTAssertEqual(StatusRenderer.resetLines(snapshot: snapshot, now: now), [])
+  }
 }

@@ -203,6 +203,43 @@ public enum StatusRenderer {
     return object
   }
 
+  /// Tightest useful rendering — `Claude:84% GPT:62%` — for shell prompts and
+  /// `watch`-style loops. Accounts without a percentage show their usage line.
+  public static func compactLine(snapshot: QuotaSnapshot?) -> String {
+    guard let snapshot, !snapshot.providers.isEmpty else {
+      return "LLimit: no data"
+    }
+    return snapshot.providers.sorted(by: titleOrder).map { usage in
+      if let remaining = usage.metrics.compactMap(\.remainingPercent).min() {
+        let qualifier = headlineIsEstimated(for: usage) ? "≈" : ""
+        return "\(usage.title):\(qualifier)\(remaining)%"
+      }
+      let balances = usage.metrics.compactMap { metric -> String? in
+        guard !metric.isUnlimited, let value = metric.usageLine else { return nil }
+        return "\(metric.label) \(value)"
+      }
+      return balances.isEmpty ? usage.title : "\(usage.title):\(balances.joined(separator: "/"))"
+    }.joined(separator: " ")
+  }
+
+  /// Every upcoming reset across accounts, soonest first — answers "what frees
+  /// up next?". One row per metric: "in 45m   Claude — 5-hour limit". Metrics
+  /// that carry only the `resetIn` display text (no date) sort last — they
+  /// can't be ordered reliably.
+  public static func resetLines(snapshot: QuotaSnapshot?, now: Date = Date()) -> [String] {
+    guard let snapshot else { return [] }
+    let rows: [(date: Date, line: String)] = snapshot.providers.flatMap { usage in
+      usage.metrics.compactMap { metric -> (Date, String)? in
+        guard let countdown = metric.resetCountdown(at: now), countdown != "reset" else {
+          return nil
+        }
+        let sortable = metric.resetAt.map { $0 > now ? $0 : Date.distantFuture } ?? .distantFuture
+        return (sortable, "in \(countdown)   \(usage.title) — \(metric.label)")
+      }
+    }
+    return rows.sorted { $0.date < $1.date }.map(\.line)
+  }
+
   public static func relativeAge(_ date: Date, now: Date) -> String {
     let seconds = Int(now.timeIntervalSince(date))
     if seconds < 60 {

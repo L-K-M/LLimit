@@ -32,7 +32,9 @@ func printUsage() {
       llimit accounts disable <account-id>
       llimit accounts remove <account-id>
       llimit refresh
-      llimit status [--json]
+      llimit status [--json|--compact]
+      llimit resets
+      llimit export [--format csv|json] [--days <n>]
       llimit daemon
       llimit paths
 
@@ -333,8 +335,65 @@ func runStatus(_ args: [String]) {
   let daemon = makeDaemon()
   if args.contains("--json") {
     print(StatusRenderer.waybarJSON(snapshot: daemon.snapshot))
+  } else if args.contains("--compact") {
+    print(StatusRenderer.compactLine(snapshot: daemon.snapshot))
   } else {
     print(StatusRenderer.humanReadable(snapshot: daemon.snapshot))
+  }
+}
+
+func runResets() {
+  let daemon = makeDaemon()
+  let lines = StatusRenderer.resetLines(snapshot: daemon.snapshot)
+  if lines.isEmpty {
+    print("No upcoming resets recorded. Run `llimit refresh` first.")
+  } else {
+    print(lines.joined(separator: "\n"))
+  }
+}
+
+func runExport(_ args: [String]) {
+  var format = "json"
+  var days: Int?
+  var i = 0
+  while i < args.count {
+    switch args[i] {
+    case "--format":
+      i += 1
+      guard i < args.count else { fail("--format needs csv or json") }
+      format = args[i]
+    case "--days":
+      i += 1
+      guard i < args.count, let value = Int(args[i]), value > 0 else {
+        fail("--days needs a positive integer")
+      }
+      days = value
+    default:
+      fail("unknown export option: \(args[i])")
+    }
+    i += 1
+  }
+  guard format == "json" || format == "csv" else {
+    fail("unknown export format: \(format) (want csv or json)")
+  }
+
+  let paths = LinuxPaths()
+  let store = QuotaHistoryStore(fileURL: paths.historyFileURL)
+  let history: [QuotaSnapshot]
+  do {
+    history = try days.map { try store.loadRecent(days: $0) } ?? store.load()
+  } catch {
+    fail("cannot read history: \(error.localizedDescription)")
+  }
+
+  do {
+    if format == "csv" {
+      print(HistoryExporter.csv(history: history), terminator: "")
+    } else {
+      print(try HistoryExporter.json(history: history))
+    }
+  } catch {
+    fail("export failed: \(error.localizedDescription)")
   }
 }
 
@@ -406,6 +465,10 @@ case "refresh":
   await runRefresh()
 case "status":
   runStatus(Array(arguments.dropFirst()))
+case "resets":
+  runResets()
+case "export":
+  runExport(Array(arguments.dropFirst()))
 case "daemon":
   await runDaemon()
 case "paths":
