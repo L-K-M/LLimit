@@ -77,4 +77,25 @@ final class QuotaHistoryStoreTests: XCTestCase {
     XCTAssertEqual(loaded.providers.map(\.accountID), ["keep-me"])
     XCTAssertTrue(loaded.failures.isEmpty)
   }
+
+  func testCorruptFileIsQuarantinedAndHistoryRecovers() throws {
+    let (store, dir) = makeStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let url = dir.appendingPathComponent("history.json")
+
+    try store.save([QuotaSnapshot(generatedAt: Date(), providers: [], failures: [])])
+    try Data("{\"partial\":".utf8).write(to: url)
+
+    // The corrupt bytes are preserved aside and the store recovers empty.
+    XCTAssertEqual(try store.load(), [])
+    XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+    XCTAssertEqual(
+      String(decoding: try Data(contentsOf: url.appendingPathExtension("corrupt")), as: UTF8.self),
+      "{\"partial\":")
+
+    // The next append writes a fresh history instead of failing forever.
+    let snapshot = QuotaSnapshot(generatedAt: Date(), providers: [], failures: [])
+    try store.append(snapshot)
+    XCTAssertEqual(try store.load().count, 1)
+  }
 }

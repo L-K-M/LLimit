@@ -30,7 +30,14 @@ public final class SnapshotStore: @unchecked Sendable {
       return nil
     }
     let data = try Data(contentsOf: fileURL)
-    return try decoder.decode(QuotaSnapshot.self, from: data)
+    do {
+      return try decoder.decode(QuotaSnapshot.self, from: data)
+    } catch {
+      // A file that cannot decode would fail every load forever. Move it
+      // aside once and recover empty rather than wedge the refresh loop.
+      quarantineCorruptFile(at: fileURL)
+      return nil
+    }
   }
 
   public func save(_ snapshot: QuotaSnapshot) throws {

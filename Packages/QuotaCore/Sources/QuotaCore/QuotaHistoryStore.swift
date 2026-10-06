@@ -22,7 +22,14 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     }
 
     let data = try Data(contentsOf: fileURL)
-    return try decoder.decode([QuotaSnapshot].self, from: data)
+    do {
+      return try decoder.decode([QuotaSnapshot].self, from: data)
+    } catch {
+      // Unreadable-by-corruption is recoverable: preserve the bytes once
+      // and start an empty history instead of throwing on every cycle.
+      quarantineCorruptFile(at: fileURL)
+      return []
+    }
   }
 
   /// Loads only the snapshots within the last `days`, capped to the newest `maxEntries`.

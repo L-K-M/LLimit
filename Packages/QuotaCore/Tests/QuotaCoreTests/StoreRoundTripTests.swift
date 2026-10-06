@@ -29,6 +29,22 @@ final class StoreRoundTripTests: XCTestCase {
     XCTAssertEqual(loaded?.providers.first?.metrics.first?.remainingPercent, 70)
   }
 
+  func testCorruptSnapshotIsQuarantinedAndStoreRecovers() throws {
+    let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+    let fileURL = tempDir.appendingPathComponent("snapshot.json")
+    let store = SnapshotStore(fileURL: fileURL)
+
+    try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+    try Data("not json".utf8).write(to: fileURL)
+    XCTAssertNil(try store.load())
+    XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.appendingPathExtension("corrupt").path))
+
+    // A save after quarantine produces a readable file again.
+    try store.save(QuotaSnapshot(generatedAt: Date(), providers: [], failures: []))
+    XCTAssertNotNil(try store.load())
+  }
+
   func testSettingsStoreDefaultsWhenMissing() throws {
     let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     let fileURL = tempDir.appendingPathComponent("settings.json")

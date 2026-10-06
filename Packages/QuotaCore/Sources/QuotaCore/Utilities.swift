@@ -137,6 +137,15 @@ func roundedPercent(_ value: Double) -> Int? {
   return Int(min(100, max(0, value)).rounded())
 }
 
+/// Moves a store file that failed to decode aside so the store can start
+/// fresh instead of failing on the same bytes forever. The corrupt file is
+/// kept as `<name>.corrupt` for inspection; a newer quarantine replaces it.
+func quarantineCorruptFile(at fileURL: URL) {
+  let quarantined = fileURL.appendingPathExtension("corrupt")
+  try? FileManager.default.removeItem(at: quarantined)
+  try? FileManager.default.moveItem(at: fileURL, to: quarantined)
+}
+
 func parseJSONObject(from data: Data) throws -> [String: Any] {
   let object = try JSONSerialization.jsonObject(with: data)
   guard let dictionary = object as? [String: Any] else {
