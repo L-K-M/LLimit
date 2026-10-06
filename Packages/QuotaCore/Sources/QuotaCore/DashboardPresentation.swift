@@ -36,11 +36,6 @@ public struct DashboardPresentation: Sendable {
       return
     }
 
-    if case .unavailable = snapshot {
-      self.init(state: .storageUnavailable)
-      return
-    }
-
     guard !currentSettings.accounts.isEmpty else {
       self.init(state: .noAccounts)
       return
@@ -49,6 +44,11 @@ public struct DashboardPresentation: Sendable {
     let enabledAccounts = currentSettings.accounts.filter(\.isEnabled)
     guard !enabledAccounts.isEmpty else {
       self.init(state: .noEnabledAccounts)
+      return
+    }
+
+    if case .unavailable = snapshot {
+      self.init(state: .storageUnavailable)
       return
     }
 

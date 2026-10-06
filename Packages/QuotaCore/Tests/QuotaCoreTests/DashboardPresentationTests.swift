@@ -52,9 +52,12 @@ final class DashboardPresentationTests: XCTestCase {
   func testAggregateWithoutAttributableMetricsCannotCreatePercentage() {
     for aggregate in [0, 80, 100] {
       let storedUsage = usage(account, metrics: [], aggregate: aggregate)
+      let result = presentation(accounts: [account], snapshot: .loaded(snapshot([storedUsage])))
+
       XCTAssertNil(dashboardPrimaryMetric(for: storedUsage))
       XCTAssertNil(dashboardRemainingPercent(for: storedUsage))
       XCTAssertTrue(dashboardBarMetrics(for: storedUsage).isEmpty)
+      XCTAssertFalse(result.overviewSummary.contains("lowest"))
     }
   }
 
@@ -131,6 +134,32 @@ final class DashboardPresentationTests: XCTestCase {
 
     XCTAssertEqual(result.state, .noEnabledAccounts)
     XCTAssertTrue(result.providers.isEmpty)
+  }
+
+  func testEmptyLoadedSettingsWinOverUnavailableSnapshot() {
+    let result = presentation(accounts: [], snapshot: .unavailable)
+
+    XCTAssertEqual(result.state, .noAccounts)
+    XCTAssertTrue(result.providers.isEmpty)
+    XCTAssertEqual(result.failureCount, 0)
+  }
+
+  func testAllDisabledLoadedSettingsWinOverUnavailableSnapshot() {
+    var disabled = account
+    disabled.isEnabled = false
+    let result = presentation(accounts: [disabled], snapshot: .unavailable)
+
+    XCTAssertEqual(result.state, .noEnabledAccounts)
+    XCTAssertTrue(result.providers.isEmpty)
+    XCTAssertEqual(result.failureCount, 0)
+  }
+
+  func testEnabledLoadedSettingsStillRequireReadableSnapshot() {
+    let result = presentation(accounts: [account], snapshot: .unavailable)
+
+    XCTAssertEqual(result.state, .storageUnavailable)
+    XCTAssertTrue(result.providers.isEmpty)
+    XCTAssertEqual(result.failureCount, 0)
   }
 
   func testConfiguredAccountsWithMissingOrEmptySnapshotAwaitData() {
