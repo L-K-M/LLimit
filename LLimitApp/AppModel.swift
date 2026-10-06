@@ -274,7 +274,13 @@ final class AppModel: ObservableObject {
   private func publishSnapshot(_ refreshed: QuotaSnapshot) {
     // Pace needs pre-append history; the paced copy is what gets stored and
     // published so snapshot readers (widgets, widget store) see estimates.
-    let history = (try? historyStore.loadRecent(days: 35)) ?? []
+    let history: [QuotaSnapshot]
+    do {
+      history = try historyStore.loadRecent(days: 35)
+    } catch {
+      print("[LLimit] History load for pace estimates failed: \(error.localizedDescription)")
+      history = []
+    }
     let refreshed = refreshed.applyingPaceEstimates(from: history)
     do {
       try historyStore.append(refreshed)

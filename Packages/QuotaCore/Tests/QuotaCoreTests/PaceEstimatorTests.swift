@@ -66,6 +66,18 @@ final class PaceEstimatorTests: XCTestCase {
     XCTAssertEqual(estimate?.summary, "runs out in ~3h")
   }
 
+  func testExhaustionAnchoredAtLastSampleNotNow() {
+    // Newest sample is 30 minutes old; the projection must anchor at the
+    // sample's own timestamp, same baseline as the measured rate.
+    let estimate = estimate([(2, 100), (0.5, 60)], hoursToReset: 5)
+    XCTAssertEqual(estimate?.trend, .runsOut)
+    // rate = 40/1.5 ≈ 26.67%/h; 60% remaining -> ~2.25h after the last sample
+    // (base - 0.5h + 2.25h = base + 1.75h), not base + 2.25h.
+    let expected = base.addingTimeInterval(1.75 * 3_600)
+    XCTAssertEqual(estimate?.exhaustionAt?.timeIntervalSince1970 ?? 0,
+                   expected.timeIntervalSince1970, accuracy: 1)
+  }
+
   // MARK: - snapshot integration
 
   private func snapshot(
@@ -128,6 +140,39 @@ final class PaceEstimatorTests: XCTestCase {
       ],
       failures: []
     )
+    let paced = current.applyingPaceEstimates(from: history, now: base)
+    XCTAssertNil(paced.providers[0].metrics[0].paceEstimate)
+  }
+
+  func testApplyingPaceEstimatesTopUpWithinWindowIsNotAReset() {
+    // 60 -> 40 -> 85 -> 80, all stamped with the same resetAt: the +45 jump is
+    // a top-up, not a window boundary, so all samples stay in the rate slope
+    // (net drain ≈ -6.7%/h -> steady). Jump-only detection would keep just the
+    // last two points and report a draining 5%/h onTrack.
+    let resetAt = base.addingTimeInterval(4 * 3_600)
+    let history = [
+      snapshot(at: base.addingTimeInterval(-3 * 3_600), percent: 60, resetAt: resetAt),
+      snapshot(at: base.addingTimeInterval(-2 * 3_600), percent: 40, resetAt: resetAt),
+      snapshot(at: base.addingTimeInterval(-1 * 3_600), percent: 85, resetAt: resetAt),
+    ]
+    let current = snapshot(at: base, percent: 80, resetAt: resetAt)
+
+    let paced = current.applyingPaceEstimates(from: history, now: base)
+    XCTAssertEqual(paced.providers[0].metrics[0].paceEstimate?.trend, .steady)
+  }
+
+  func testApplyingPaceEstimatesDropsSmallJumpAcrossReset() {
+    // Previous window was barely used: a 98 -> 100 reset is under the 4pt jump
+    // threshold. The old resetAt stamps identify it as another window anyway,
+    // leaving too few same-window points to estimate.
+    let newReset = base.addingTimeInterval(4 * 3_600)
+    let oldReset = base.addingTimeInterval(-20 * 3_600)
+    let history = [
+      snapshot(at: base.addingTimeInterval(-2 * 3_600), percent: 99, resetAt: oldReset),
+      snapshot(at: base.addingTimeInterval(-1 * 3_600), percent: 98, resetAt: oldReset),
+    ]
+    let current = snapshot(at: base, percent: 100, resetAt: newReset)
+
     let paced = current.applyingPaceEstimates(from: history, now: base)
     XCTAssertNil(paced.providers[0].metrics[0].paceEstimate)
   }

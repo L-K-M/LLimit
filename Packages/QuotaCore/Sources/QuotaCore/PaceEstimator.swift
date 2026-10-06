@@ -58,11 +58,16 @@ public enum PaceEstimator {
   /// Window boundaries are detected as upward jumps (a reset restores
   /// percent), so history overlapping the previous window is safe. Returns nil
   /// with fewer than two usable samples or a span under 15 minutes.
+  /// `sameWindow`: pass true when the caller already verified every sample
+  /// belongs to the current window (e.g. via matching `resetAt`); the jump
+  /// heuristic is then skipped so an intra-window top-up isn't misread as a
+  /// reset.
   public static func estimate(
     points: [(date: Date, percent: Double)],
     now: Date,
     resetAt: Date,
-    maxLookback: TimeInterval
+    maxLookback: TimeInterval,
+    sameWindow: Bool = false
   ) -> PaceEstimate? {
     let cutoff = now - maxLookback
     let samples = points
@@ -72,10 +77,12 @@ public enum PaceEstimator {
 
     // Keep only samples since the last reset: remainingPercent is
     // monotonically non-increasing inside a window, so a >4pt rise marks a
-    // boundary.
+    // boundary. Skipped when the caller has already proven same-window.
     var windowStart = 0
-    for i in 1..<samples.count where samples[i].percent - samples[i - 1].percent > 4 {
-      windowStart = i
+    if !sameWindow {
+      for i in 1..<samples.count where samples[i].percent - samples[i - 1].percent > 4 {
+        windowStart = i
+      }
     }
     let window = Array(samples[windowStart...])
     guard window.count >= 2,
@@ -97,7 +104,7 @@ public enum PaceEstimator {
       )
     }
 
-    let exhaustionAt = now.addingTimeInterval(last.percent / rate * 3_600)
+    let exhaustionAt = last.date.addingTimeInterval(last.percent / rate * 3_600)
     if exhaustionAt < resetAt {
       return PaceEstimate.make(
         trend: .runsOut, burnRatePerHour: rate,
@@ -129,6 +136,19 @@ public extension QuotaSnapshot {
   /// remaining percentage, a future reset, or a classifiable window are left
   /// untouched.
   func applyingPaceEstimates(from history: [QuotaSnapshot], now: Date = Date()) -> QuotaSnapshot {
+    // Group usable samples once — an O(history) pass — rather than rescanning
+    // the whole archive per metric.
+    var grouped: [String: [String: [(date: Date, percent: Double, resetAt: Date?)]]] = [:]
+    for past in history {
+      for usage in past.providers {
+        for sample in usage.metrics {
+          guard let percent = sample.remainingPercent else { continue }
+          grouped[usage.accountID, default: [:]][sample.id, default: []]
+            .append((date: past.generatedAt, percent: Double(percent), resetAt: sample.resetAt))
+        }
+      }
+    }
+
     var copy = self
     for usageIndex in copy.providers.indices {
       for metricIndex in copy.providers[usageIndex].metrics.indices {
@@ -140,16 +160,24 @@ public extension QuotaSnapshot {
               ) else { continue }
 
         let accountID = copy.providers[usageIndex].accountID
-        var points: [(date: Date, percent: Double)] = history.compactMap { past in
-          guard let usage = past.providers.first(where: { $0.accountID == accountID }),
-                let sample = usage.metrics.first(where: { $0.id == metric.id }),
-                let percent = sample.remainingPercent else { return nil }
-          return (past.generatedAt, Double(percent))
+        var allStamped = true
+        var points = (grouped[accountID]?[metric.id] ?? []).compactMap { sample -> (date: Date, percent: Double)? in
+          // A reset changes resetAt: samples stamped with a different reset
+          // belong to another window. Tolerance absorbs providers recomputing
+          // an absolute reset from a relative ETA. Samples with no resetAt
+          // fall through to the estimator's jump heuristic.
+          guard let sampleReset = sample.resetAt else {
+            allStamped = false
+            return (date: sample.date, percent: sample.percent)
+          }
+          guard abs(sampleReset.timeIntervalSince(resetAt)) <= 300 else { return nil }
+          return (date: sample.date, percent: sample.percent)
         }
-        points.append((now, Double(remaining)))
+        points.append((date: now, percent: Double(remaining)))
 
         if let estimate = PaceEstimator.estimate(
-          points: points, now: now, resetAt: resetAt, maxLookback: lookback
+          points: points, now: now, resetAt: resetAt, maxLookback: lookback,
+          sameWindow: allStamped
         ) {
           copy.providers[usageIndex].metrics[metricIndex].paceEstimate = estimate
         }

@@ -310,7 +310,13 @@ public final class QuotaDaemon {
 
     // Pace needs pre-append history; the paced copy is what gets stored so
     // snapshot readers (`llimit status`, bar modules) see estimates.
-    let history = (try? historyStore.loadRecent(days: 35)) ?? []
+    let history: [QuotaSnapshot]
+    do {
+      history = try historyStore.loadRecent(days: 35)
+    } catch {
+      log("[llimitd] History load for pace estimates failed: \(error.localizedDescription)")
+      history = []
+    }
     refreshed = refreshed.applyingPaceEstimates(from: history)
 
     do {
