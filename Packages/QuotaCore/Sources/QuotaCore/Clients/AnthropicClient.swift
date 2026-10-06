@@ -14,8 +14,11 @@ public struct AnthropicClient: QuotaProviderClient {
   private let httpClient: any HTTPClient
 
   private static let usageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
-  // Must look like Claude Code or the endpoint drops us into a hostile rate-limit bucket.
-  private static let userAgent = "claude-code/1.0.110"
+  // Must look like Claude Code or the endpoint drops us into a hostile
+  // rate-limit bucket. Track the installed CLI's version so the UA doesn't
+  // drift stale as Claude Code updates; the constant is the no-CLI fallback.
+  private static let fallbackVersion = "1.0.110"
+  private static let userAgent = "claude-code/\(ClaudeCodeVersion.current() ?? fallbackVersion)"
   private static let oauthBetaHeader = "oauth-2025-04-20"
 
   public init(httpClient: any HTTPClient) {
