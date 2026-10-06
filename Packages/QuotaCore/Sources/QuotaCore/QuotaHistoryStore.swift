@@ -1,6 +1,7 @@
 import Foundation
 
 public final class QuotaHistoryStore: @unchecked Sendable {
+  private static let secondsPerDay: TimeInterval = 24 * 60 * 60
   private let fileURL: URL
   private let encoder: JSONEncoder
   private let decoder: JSONDecoder
@@ -25,13 +26,14 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     return try decoder.decode([QuotaSnapshot].self, from: data)
   }
 
-  /// Loads only the snapshots within the last `days`, capped to the newest `maxEntries`.
+  /// Loads recent snapshots or source fetches, capped to the newest `maxEntries`.
   /// The widget uses this so a large history file can't exhaust the extension's memory
   /// budget while rendering the (at most 30-day) trend chart.
   public func loadRecent(days: Int, maxEntries: Int = 3_000, now: Date = Date()) throws -> [QuotaSnapshot] {
-    let cutoff = now.addingTimeInterval(-Double(max(1, days)) * 86_400)
+    let cutoff = now.addingTimeInterval(-Double(max(1, days)) * Self.secondsPerDay)
     let recent = try load()
-      .filter { $0.generatedAt >= cutoff }
+      // A targeted retry can fetch after its containing snapshot was generated.
+      .filter { $0.generatedAt >= cutoff || $0.providers.contains { $0.fetchedAt >= cutoff } }
       .sorted { $0.generatedAt < $1.generatedAt }
 
     if recent.count > max(1, maxEntries) {
@@ -58,10 +60,19 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     maxEntries: Int = 3_000
   ) throws {
     var history = try load()
-    history.append(snapshot)
-
     let cutoffDays = max(1, keepDays)
-    let cutoffDate = snapshot.generatedAt.addingTimeInterval(-Double(cutoffDays) * 86_400)
+    let cutoffDate = snapshot.generatedAt.addingTimeInterval(-Double(cutoffDays) * Self.secondsPerDay)
+    let observations = QuotaObservations.newSuccessfulUsage(in: snapshot, excluding: history)
+      .filter { $0.fetchedAt >= cutoffDate }
+
+    // Record new readings and failure events, not carried or untouched usages.
+    // Dedupe before pruning so retention cannot resurrect an archived reading.
+    if !observations.isEmpty || !snapshot.failures.isEmpty {
+      var entry = snapshot
+      entry.providers = observations
+      history.append(entry)
+    }
+
     history = history.filter { $0.generatedAt >= cutoffDate }
     history.sort { $0.generatedAt < $1.generatedAt }
 

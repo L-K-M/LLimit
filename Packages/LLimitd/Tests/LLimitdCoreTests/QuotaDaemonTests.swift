@@ -272,7 +272,9 @@ final class QuotaDaemonTests: XCTestCase {
 
   func testVeniceDailyEstimateSurvivesRefreshAndRestart() async throws {
     let reset = Date().addingTimeInterval(3_600)
-    let client = VeniceBalanceClient(balances: [100, 75], reset: reset)
+    // Distinct fetch seconds keep history independent of filesystem speed.
+    let firstFetchAt = Date().addingTimeInterval(-60)
+    let client = VeniceBalanceClient(balances: [100, 75], reset: reset, firstFetchAt: firstFetchAt)
     let daemon = makeDaemon(coordinator: QuotaCoordinator(clients: [client]))
     let key = "venice-daemon-test-key"
     let account = daemon.addAccount(provider: .venice, credentials: [CredentialField.veniceAPIKey: key])
@@ -285,7 +287,9 @@ final class QuotaDaemonTests: XCTestCase {
     XCTAssertEqual(daemon.snapshot?.providers.first?.metrics.first?.remainingPercent, 75)
 
     // A new process must recover the observed upper bound from its saved snapshot.
-    let nextClient = VeniceBalanceClient(balances: [50, 120, 60], reset: reset)
+    let nextClient = VeniceBalanceClient(
+      balances: [50, 120, 60], reset: reset, firstFetchAt: firstFetchAt.addingTimeInterval(2)
+    )
     let restarted = makeDaemon(coordinator: QuotaCoordinator(clients: [nextClient]))
     XCTAssertEqual(restarted.snapshot?.providers.first?.accountID, account.id)
     await restarted.refreshNow()
@@ -346,21 +350,26 @@ private actor VeniceBalanceClient: QuotaProviderClient {
   let provider: QuotaProvider = .venice
   private var balances: [Double]
   private let reset: Date
+  private var nextFetchAt: Date?
 
-  init(balances: [Double], reset: Date) {
+  init(balances: [Double], reset: Date, firstFetchAt: Date? = nil) {
     self.balances = balances
     self.reset = reset
+    self.nextFetchAt = firstFetchAt
   }
 
   func fetchUsage(configuration: ProviderRuntimeConfiguration, now: Date) async throws -> ProviderUsage {
     let balance = balances.removeFirst()
+    let fetchedAt = nextFetchAt ?? now
+    nextFetchAt = nextFetchAt?.addingTimeInterval(1)
+
     return ProviderUsage(
       accountID: configuration.accountID,
       provider: provider,
       title: configuration.displayName,
       metrics: [UsageMetric(id: "daily-diem", label: "Daily DIEM remaining", remainingAmount: balance,
                             usedDisplay: "\(balance) DIEM", resetAt: reset)],
-      fetchedAt: now
+      fetchedAt: fetchedAt
     )
   }
 }

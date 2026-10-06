@@ -132,11 +132,11 @@ private struct TrendLineChartWidgetView: View {
     let snapshots = entry.history + [entry.snapshot].compactMap { $0 }
     // Only charted accounts count: a hidden account's estimate is not on screen.
     let accountFilter = TrendChartAccountFilter(settings: entry.settings)
-    let includesEstimates = snapshots.contains { snapshot in
-      snapshot.generatedAt >= start && snapshot.generatedAt <= entry.date
-        && snapshot.providers.contains { usage in
-          accountFilter.includes(usage) && usage.metrics.contains(where: \.isPercentageEstimated)
-        }
+    let observations = QuotaObservations.extract(
+      from: snapshots, accounts: entry.settings.accounts, window: start...entry.date
+    )
+    let includesEstimates = observations.contains { usage in
+      accountFilter.includes(usage) && usage.metrics.contains(where: \.isPercentageEstimated)
     }
     return includesEstimates
       ? "Quota trend chart. Includes estimated remaining percentages."
@@ -713,22 +713,13 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
     return TrendChartData(series: [], startDate: startWindow, endDate: now, warnings: [], hidesEveryAccount: true)
   }
 
-  var snapshots = entry.history.filter { snapshot in
-    snapshot.generatedAt >= startWindow && snapshot.generatedAt <= now
-  }
+  let observations = QuotaObservations.extract(
+    from: entry.history + [entry.snapshot].compactMap { $0 },
+    accounts: entry.settings.accounts,
+    window: startWindow...now
+  ).filter { accountFilter.includes($0) }
 
-  if let current = entry.snapshot {
-    let alreadyIncluded = snapshots.contains {
-      abs($0.generatedAt.timeIntervalSince(current.generatedAt)) < 1
-    }
-    if !alreadyIncluded {
-      snapshots.append(current)
-    }
-  }
-
-  snapshots.sort { $0.generatedAt < $1.generatedAt }
-
-  guard !snapshots.isEmpty else {
+  guard !observations.isEmpty else {
     return TrendChartData(series: [], startDate: startWindow, endDate: now, warnings: [])
   }
 
@@ -744,44 +735,40 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
   var usageByAccount: [String: ProviderUsage] = [:]
   var sawUnlimitedMetric = false
 
-  for snapshot in snapshots {
-    for usage in snapshot.providers {
-      guard accountFilter.includes(usage) else { continue }
+  for usage in observations {
+    var metricOrder = orderByAccount[usage.accountID] ?? []
+    usageByAccount[usage.accountID] = usage
 
-      var metricOrder = orderByAccount[usage.accountID] ?? []
-      usageByAccount[usage.accountID] = usage
-
-      for metric in usage.metrics {
-        // Unlimited metrics have no trend to chart — plotting them pins a
-        // flat line at 100% and only adds noise.
-        if metric.isUnlimited {
-          sawUnlimitedMetric = true
-          continue
-        }
-        guard metric.remainingPercent != nil else {
-          continue
-        }
-
-        let resolvedID = metric.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-          ? metric.label
-          : metric.id
-
-        if !metricOrder.contains(resolvedID) {
-          metricOrder.append(resolvedID)
-        }
-
-        let key = SeriesKey(accountID: usage.accountID, metricID: resolvedID)
-        let remaining = Double(metric.remainingPercent ?? 0)
-        pointsByKey[key, default: []].append(TrendPoint(date: snapshot.generatedAt, remainingPercent: remaining))
-        labelsByKey[key] = metric.label
-
-        if let resetAt = metric.resetAt {
-          resetByKey[key] = resetAt
-        }
+    for metric in usage.metrics {
+      // Unlimited metrics have no trend to chart — plotting them pins a
+      // flat line at 100% and only adds noise.
+      if metric.isUnlimited {
+        sawUnlimitedMetric = true
+        continue
+      }
+      guard metric.remainingPercent != nil else {
+        continue
       }
 
-      orderByAccount[usage.accountID] = metricOrder
+      let resolvedID = metric.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        ? metric.label
+        : metric.id
+
+      if !metricOrder.contains(resolvedID) {
+        metricOrder.append(resolvedID)
+      }
+
+      let key = SeriesKey(accountID: usage.accountID, metricID: resolvedID)
+      let remaining = Double(metric.remainingPercent ?? 0)
+      pointsByKey[key, default: []].append(TrendPoint(date: usage.fetchedAt, remainingPercent: remaining))
+      labelsByKey[key] = metric.label
+
+      if let resetAt = metric.resetAt {
+        resetByKey[key] = resetAt
+      }
     }
+
+    orderByAccount[usage.accountID] = metricOrder
   }
 
   var series: [TrendSeries] = []
@@ -890,7 +877,7 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
   // window: two days of history in a seven-day window otherwise huddles in
   // the right half of an empty chart.
   var chartStart = startWindow
-  if let earliest = snapshots.first?.generatedAt {
+  if let earliest = observations.first?.fetchedAt {
     chartStart = max(startWindow, earliest)
   }
   let minimumSpan: TimeInterval = 6 * 3_600
