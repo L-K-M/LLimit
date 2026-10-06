@@ -1,4 +1,9 @@
 import Foundation
+// CGRect's geometry members and Equatable come from CoreGraphics on Apple
+// platforms; Foundation provides them on Linux.
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
 
 @main
 private struct MenuBarPanelGeometryTests {

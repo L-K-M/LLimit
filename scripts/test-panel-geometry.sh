@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Checks the menu bar panel resize geometry. The geometry is plain Foundation,
+# Checks the menu bar panel resize geometry. The geometry needs no AppKit,
 # so this compiles it standalone without building the app.
 set -euo pipefail
 
