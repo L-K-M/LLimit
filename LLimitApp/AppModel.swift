@@ -409,6 +409,7 @@ final class AppModel: ObservableObject {
     updated.accounts.removeAll { $0.id == accountID }
     updated.providerStyleSettings.removeAll { $0.accountID == accountID }
     updated.providerTileSlots = updated.providerTileSlots.map { $0 == accountID ? "" : $0 }
+    updated.widgetVisibility.trendHiddenAccountIDs.removeAll { $0 == accountID }
     let outcome: ClaudeCodeProfileRetirement.Outcome
     do {
       guard !configurationLoadFailed else { throw ClaudeProfileService.Failure.settingsUnavailable }
@@ -446,6 +447,7 @@ final class AppModel: ObservableObject {
     // Deleting the account is an explicit choice, so its tile slots fall back to
     // automatic (visibly badged on the tile) instead of a dead "reassign" state.
     providerTileSlots = updated.providerTileSlots
+    widgetVisibility = updated.widgetVisibility
     reconcileSnapshotWithCurrentAccounts()
     purgeHistory(for: removedAccount)
     reloadAccountStatuses()
@@ -1268,6 +1270,22 @@ final class AppModel: ObservableObject {
       get: { self.widgetVisibility[keyPath: keyPath] },
       set: { newValue in
         self.widgetVisibility[keyPath: keyPath] = newValue
+        self.saveConfiguration()
+      }
+    )
+  }
+
+  /// Shows or hides one account's lines in the trend widget. Hidden accounts
+  /// keep their tiles and dashboard rows.
+  func trendChartAccountBinding(for accountID: String) -> Binding<Bool> {
+    Binding(
+      get: { !self.widgetVisibility.trendHiddenAccountIDs.contains(accountID) },
+      set: { isShown in
+        var hiddenIDs = self.widgetVisibility.trendHiddenAccountIDs.filter { $0 != accountID }
+        if !isShown {
+          hiddenIDs.append(accountID)
+        }
+        self.widgetVisibility.trendHiddenAccountIDs = hiddenIDs
         self.saveConfiguration()
       }
     )

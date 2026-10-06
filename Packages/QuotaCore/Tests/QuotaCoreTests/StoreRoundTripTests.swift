@@ -94,7 +94,8 @@ final class StoreRoundTripTests: XCTestCase {
         showShortTermLimitsInTrend: false,
         smallDashboardProviderLimit: 3,
         mediumProviderLimit: 4,
-        trendHistoryDays: 14
+        trendHistoryDays: 14,
+        trendHiddenAccountIDs: ["openai-primary"]
       )
     )
 
@@ -122,6 +123,32 @@ final class StoreRoundTripTests: XCTestCase {
     XCTAssertEqual(loaded.widgetVisibility.smallDashboardProviderLimit, 3)
     XCTAssertEqual(loaded.widgetVisibility.mediumProviderLimit, 4)
     XCTAssertEqual(loaded.widgetVisibility.trendHistoryDays, 14)
+    XCTAssertEqual(loaded.widgetVisibility.trendHiddenAccountIDs, ["openai-primary"])
+  }
+
+  func testTrendHiddenAccountsDefaultNormalizeAndPruneRemovedAccounts() throws {
+    // Settings files written before the key existed chart every account.
+    let legacy = try JSONDecoder().decode(
+      AppSettings.self,
+      from: Data("{ \"widgetVisibility\": { \"trendHistoryDays\": 7 } }".utf8)
+    )
+    XCTAssertEqual(legacy.widgetVisibility.trendHiddenAccountIDs, [])
+
+    // Trimmed, deduplicated, and sorted regardless of toggle order.
+    let visibility = WidgetVisibilitySettings(trendHiddenAccountIDs: ["b", " a ", "b", "  "])
+    XCTAssertEqual(visibility.trendHiddenAccountIDs, ["a", "b"])
+
+    // IDs of accounts that no longer exist drop out, at init and at decode.
+    let accounts = [
+      ProviderAccount(id: "a", provider: .anthropic, displayName: "A", isEnabled: true, credentials: [:])
+    ]
+    let settings = AppSettings(accounts: accounts, widgetVisibility: visibility)
+    XCTAssertEqual(settings.widgetVisibility.trendHiddenAccountIDs, ["a"])
+
+    var stale = settings
+    stale.widgetVisibility.trendHiddenAccountIDs = ["a", "removed"]
+    let decoded = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(stale))
+    XCTAssertEqual(decoded.widgetVisibility.trendHiddenAccountIDs, ["a"])
   }
 
   func testRefreshIntervalIsClampedAtModelAndDecodeBoundaries() throws {

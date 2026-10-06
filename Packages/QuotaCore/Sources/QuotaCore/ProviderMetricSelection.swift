@@ -129,6 +129,42 @@ public func chartsAsLongTermLimit(_ kind: QuotaWindowKind, accountKinds: [QuotaW
   return !accountKinds.contains { !$0.isShortTerm }
 }
 
+/// Which snapshot usages the trend chart plots: those of enabled accounts the
+/// user has not hidden (`WidgetVisibilitySettings.trendHiddenAccountIDs`).
+/// Built once per render; the chart asks about every usage of every history
+/// snapshot, so lookups are set-based.
+public struct TrendChartAccountFilter: Sendable {
+  private let enabledAccountIDs: Set<String>
+  private let soleEnabledAccountIDByProvider: [QuotaProvider: String]
+  private let hiddenAccountIDs: Set<String>
+
+  public init(settings: AppSettings) {
+    let enabledAccounts = settings.accounts.filter(\.isEnabled)
+    enabledAccountIDs = Set(enabledAccounts.map(\.id))
+    soleEnabledAccountIDByProvider = Dictionary(grouping: enabledAccounts, by: \.provider)
+      .compactMapValues { $0.count == 1 ? $0[0].id : nil }
+    hiddenAccountIDs = Set(settings.widgetVisibility.trendHiddenAccountIDs)
+  }
+
+  public func includes(_ usage: ProviderUsage) -> Bool {
+    if enabledAccountIDs.contains(usage.accountID) {
+      return !hiddenAccountIDs.contains(usage.accountID)
+    }
+
+    // Legacy snapshots name a sole account by the provider's raw value. That
+    // resolves only while the provider has exactly one enabled account.
+    guard usage.accountID == usage.provider.rawValue,
+          let ownerID = soleEnabledAccountIDByProvider[usage.provider] else { return false }
+    return !hiddenAccountIDs.contains(ownerID)
+  }
+
+  /// Every enabled account is hidden: the chart is empty by choice, not for
+  /// lack of history.
+  public var hidesEveryAccount: Bool {
+    !enabledAccountIDs.isEmpty && enabledAccountIDs.isSubset(of: hiddenAccountIDs)
+  }
+}
+
 /// How many color-scheme variants exist per identity hue: base, deep, pale.
 /// A fourth account wraps back to the base scheme.
 public let accountColorVariantCount = 3

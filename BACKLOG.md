@@ -494,8 +494,9 @@ longer be reached.
 
 ### Trend chart
 
-- Add selected-series configuration; the provider tiles double as the legend (build 19), so the
-  chart deliberately has no in-chart legend.
+- Accounts can be hidden from the chart (Settings → Trend Widget). Add per-metric selection if
+  that proves too coarse; the provider tiles double as the legend (build 19), so the chart
+  deliberately has no in-chart legend.
 - Show current value and time/percentage context.
 - Preserve extrema during downsampling.
 - Segment paths around large gaps (reset boundaries already render as vertical snaps).

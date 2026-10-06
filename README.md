@@ -157,6 +157,8 @@ import or a replacement key.
   notice; these profiles are not automatically deleted or imported.
 - Each account can have its own widget styling on macOS; on Linux the bar module
   shows every enabled account.
+- The trend chart plots every enabled account. To declutter it, turn accounts
+  off under **Trend Widget** in Settings; their tiles and dashboard rows remain.
 - In an account's settings, **Primary color** sets the color of its longest limit
   in the ring and matching chart line. You can change it without enabling the
   background styling override, or choose **Reset to automatic** to restore the

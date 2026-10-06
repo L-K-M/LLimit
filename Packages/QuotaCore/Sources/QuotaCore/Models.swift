@@ -1256,6 +1256,9 @@ public struct WidgetVisibilitySettings: Codable, Hashable, Sendable {
   public var smallDashboardProviderLimit: Int
   public var mediumProviderLimit: Int
   public var trendHistoryDays: Int
+  /// Accounts the trend widget leaves out. An exclusion list, so an account
+  /// added later is charted until the user hides it.
+  public var trendHiddenAccountIDs: [String]
 
   public init(
     showTimestamp: Bool = true,
@@ -1268,7 +1271,8 @@ public struct WidgetVisibilitySettings: Codable, Hashable, Sendable {
     showShortTermLimitsInTrend: Bool = true,
     smallDashboardProviderLimit: Int = 2,
     mediumProviderLimit: Int = 6,
-    trendHistoryDays: Int = 7
+    trendHistoryDays: Int = 7,
+    trendHiddenAccountIDs: [String] = []
   ) {
     self.showTimestamp = showTimestamp
     self.showFailureCount = showFailureCount
@@ -1281,6 +1285,7 @@ public struct WidgetVisibilitySettings: Codable, Hashable, Sendable {
     self.smallDashboardProviderLimit = Self.clampSmallProviderLimit(smallDashboardProviderLimit)
     self.mediumProviderLimit = Self.clampMediumProviderLimit(mediumProviderLimit)
     self.trendHistoryDays = Self.clampTrendHistoryDays(trendHistoryDays)
+    self.trendHiddenAccountIDs = Self.normalizedAccountIDs(trendHiddenAccountIDs)
   }
 
   public static var `default`: WidgetVisibilitySettings {
@@ -1299,6 +1304,7 @@ public struct WidgetVisibilitySettings: Codable, Hashable, Sendable {
     case smallDashboardProviderLimit
     case mediumProviderLimit
     case trendHistoryDays
+    case trendHiddenAccountIDs
   }
 
   public init(from decoder: Decoder) throws {
@@ -1318,6 +1324,8 @@ public struct WidgetVisibilitySettings: Codable, Hashable, Sendable {
     mediumProviderLimit = Self.clampMediumProviderLimit(decodedProviderLimit)
     let decodedTrendDays = (try? container.decodeIfPresent(Int.self, forKey: .trendHistoryDays)) ?? 7
     trendHistoryDays = Self.clampTrendHistoryDays(decodedTrendDays)
+    let decodedHiddenAccountIDs = (try? container.decodeIfPresent([String].self, forKey: .trendHiddenAccountIDs)) ?? []
+    trendHiddenAccountIDs = Self.normalizedAccountIDs(decodedHiddenAccountIDs)
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -1333,6 +1341,7 @@ public struct WidgetVisibilitySettings: Codable, Hashable, Sendable {
     try container.encode(Self.clampSmallProviderLimit(smallDashboardProviderLimit), forKey: .smallDashboardProviderLimit)
     try container.encode(Self.clampMediumProviderLimit(mediumProviderLimit), forKey: .mediumProviderLimit)
     try container.encode(Self.clampTrendHistoryDays(trendHistoryDays), forKey: .trendHistoryDays)
+    try container.encode(Self.normalizedAccountIDs(trendHiddenAccountIDs), forKey: .trendHiddenAccountIDs)
   }
 
   private static func clampSmallProviderLimit(_ value: Int) -> Int {
@@ -1345,6 +1354,15 @@ public struct WidgetVisibilitySettings: Codable, Hashable, Sendable {
 
   private static func clampTrendHistoryDays(_ value: Int) -> Int {
     max(1, min(30, value))
+  }
+
+  /// Trimmed, deduplicated, and sorted, so toggling accounts in any order
+  /// saves the same file.
+  private static func normalizedAccountIDs(_ values: [String]) -> [String] {
+    let trimmed = values
+      .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+      .filter { !$0.isEmpty }
+    return Set(trimmed).sorted()
   }
 }
 
@@ -1379,7 +1397,7 @@ public struct AppSettings: Codable, Hashable, Sendable {
     self.widgetStyle = widgetStyle
     self.widgetBackgroundSettings = widgetBackgroundSettings
     self.providerStyleSettings = AppSettings.normalizedProviderStyleSettings(providerStyleSettings, accounts: self.accounts)
-    self.widgetVisibility = widgetVisibility
+    self.widgetVisibility = AppSettings.normalizedWidgetVisibility(widgetVisibility, accounts: self.accounts)
     self.providerTileSlots = AppSettings.normalizedProviderTileSlots(providerTileSlots)
   }
 
@@ -1503,7 +1521,10 @@ public struct AppSettings: Codable, Hashable, Sendable {
       accounts: accounts
     )
 
-    widgetVisibility = (try? container.decodeIfPresent(WidgetVisibilitySettings.self, forKey: .widgetVisibility)) ?? .default
+    widgetVisibility = AppSettings.normalizedWidgetVisibility(
+      (try? container.decodeIfPresent(WidgetVisibilitySettings.self, forKey: .widgetVisibility)) ?? .default,
+      accounts: accounts
+    )
 
     providerTileSlots = AppSettings.normalizedProviderTileSlots(
       (try? container.decodeIfPresent([String].self, forKey: .providerTileSlots)) ?? []
@@ -1546,6 +1567,18 @@ public struct AppSettings: Codable, Hashable, Sendable {
       slots.append("")
     }
     return Array(slots)
+  }
+
+  /// Drops trend-hidden IDs of accounts that no longer exist, like the
+  /// per-account style settings, so removing an account leaves no residue.
+  private static func normalizedWidgetVisibility(
+    _ value: WidgetVisibilitySettings,
+    accounts: [ProviderAccount]
+  ) -> WidgetVisibilitySettings {
+    let accountIDs = Set(accounts.map(\.id))
+    var normalized = value
+    normalized.trendHiddenAccountIDs = value.trendHiddenAccountIDs.filter { accountIDs.contains($0) }
+    return normalized
   }
 
   private static func normalizedProviderStyleSettings(
