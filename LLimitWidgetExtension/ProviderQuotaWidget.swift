@@ -64,6 +64,30 @@ struct ProviderTileSlot8Widget: Widget {
   }
 }
 
+struct ProviderTileSlot9Widget: Widget {
+  var body: some WidgetConfiguration {
+    providerTileConfiguration(slotIndex: 8, displayName: "Provider Tile 9")
+  }
+}
+
+struct ProviderTileSlot10Widget: Widget {
+  var body: some WidgetConfiguration {
+    providerTileConfiguration(slotIndex: 9, displayName: "Provider Tile 10")
+  }
+}
+
+struct ProviderTileSlot11Widget: Widget {
+  var body: some WidgetConfiguration {
+    providerTileConfiguration(slotIndex: 10, displayName: "Provider Tile 11")
+  }
+}
+
+struct ProviderTileSlot12Widget: Widget {
+  var body: some WidgetConfiguration {
+    providerTileConfiguration(slotIndex: 11, displayName: "Provider Tile 12")
+  }
+}
+
 // configurationDisplayName/description MUST be plain, non-formatted text: an
 // interpolated string literal becomes a LocalizedStringKey with format
 // arguments, and WidgetKit fatal-errors on those when archiving the gallery

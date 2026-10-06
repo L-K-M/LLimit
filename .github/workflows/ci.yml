@@ -47,6 +47,9 @@ jobs:
       - name: Test primary limit colors
         run: scripts/test-limit-colors.sh --skip-build "$RUNNER_TEMP/LLimitBuild"
 
+      - name: Test menu bar panel geometry
+        run: scripts/test-panel-geometry.sh
+
       - name: Test Claude embedded terminal
         run: scripts/test-claude-profile.sh --skip-build "$RUNNER_TEMP/LLimitBuild"
 

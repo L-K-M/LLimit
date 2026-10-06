@@ -1371,7 +1371,7 @@ public struct AppSettings: Codable, Hashable, Sendable {
   /// Number of independently placeable "Provider Tile" widgets. WidgetKit requires
   /// one compile-time widget kind per tile, so this cannot be dynamic; changing it
   /// means adding/removing ProviderTileSlotNWidget types in the widget bundle too.
-  public static let providerTileSlotCount = 8
+  public static let providerTileSlotCount = 12
 
   public var refreshIntervalMinutes: Int
   public var accounts: [ProviderAccount]

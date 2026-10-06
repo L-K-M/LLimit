@@ -135,6 +135,18 @@ To verify the real flow manually:
 Live browser sign-in, multiple real accounts, and expiry-driven renewal have not
 been verified by the synthetic suite or the no-authentication smoke check.
 
+# Menu bar panel geometry checks
+
+Run `scripts/test-panel-geometry.sh`. It compiles the panel resize geometry
+standalone, without building the app, and checks that a corner drag keeps the
+top edge under the menu bar and the opposite edge in place, stops at the
+minimum size and the visible screen edge, never yanks a panel that already
+overflows, and fits a remembered size to a smaller screen.
+
+Dragging the grips in the running app is a manual check: open the dropdown,
+drag each bottom corner, close and reopen it, and confirm the size persists.
+Also relaunch LLimit and confirm the size survives.
+
 # Limit color integration checks
 
 On macOS, run `scripts/test-limit-colors.sh [DerivedData directory]`. The script
@@ -198,10 +210,10 @@ The command-line color harness cannot verify Dock or Cmd-Tab behavior.
 
 1. Open the macOS widget gallery and select LLimit, then close the gallery.
 2. Install a newer build with `scripts/build.sh --install --run --no-reveal`.
-   The install must validate the dashboard, trend chart, and all eight provider
+   The install must validate the dashboard, trend chart, and all twelve provider
    tiles before registering the extension and restarting the gallery host.
 3. Reopen the gallery and confirm **Quota Trend Chart** offers small and medium
-   previews, alongside **LLimit Dashboard** and **Provider Tile 1** through **8**.
+   previews, alongside **LLimit Dashboard** and **Provider Tile 1** through **12**.
    Confirm already placed widgets remain assigned and render normally.
 
 The gallery can retain previews rejected after an app version change even when
