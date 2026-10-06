@@ -5,7 +5,7 @@ import QuotaCore
 /// only the history archive, which is credential-free by contract.
 public enum HistoryExporter {
   /// One CSV row per metric sample:
-  /// `generatedAt,accountID,provider,account,metric,label,remainingPercent,remainingAmount,resetAt`.
+  /// `generatedAt,account_id,provider,account,metric,label,remaining_percent,remaining_amount,reset_at`.
   public static func csv(history: [QuotaSnapshot]) -> String {
     var lines = ["generatedAt,account_id,provider,account,metric,label,remaining_percent,remaining_amount,reset_at"]
     let iso = ISO8601DateFormatter()
@@ -41,9 +41,12 @@ public enum HistoryExporter {
   }
 
   private static func escape(_ field: String) -> String {
-    guard field.contains(",") || field.contains("\"") || field.contains("\n") else {
-      return field
+    // Spreadsheet-safety: a leading =, +, - or @ is interpreted as a formula by
+    // Excel/Numbers even inside quotes — neutralize with a leading apostrophe.
+    let guarded = field.first.map({ "=+-@".contains($0) }) == true ? "'" + field : field
+    guard guarded.contains(",") || guarded.contains("\"") || guarded.contains("\n") || guarded.contains("\r") else {
+      return guarded
     }
-    return "\"" + field.replacingOccurrences(of: "\"", with: "\"\"") + "\""
+    return "\"" + guarded.replacingOccurrences(of: "\"", with: "\"\"") + "\""
   }
 }

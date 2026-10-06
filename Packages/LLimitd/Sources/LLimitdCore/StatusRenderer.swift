@@ -233,7 +233,9 @@ public enum StatusRenderer {
         guard let countdown = metric.resetCountdown(at: now), countdown != "reset" else {
           return nil
         }
-        let sortable = metric.resetAt.map { $0 > now ? $0 : Date.distantFuture } ?? .distantFuture
+        // `resetCountdown` returns "reset" for past dates (filtered above),
+        // so any resetAt that reaches the sort is already future.
+        let sortable = metric.resetAt ?? .distantFuture
         return (sortable, "in \(countdown)   \(usage.title) — \(metric.label)")
       }
     }

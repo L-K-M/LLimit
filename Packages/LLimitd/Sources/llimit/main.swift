@@ -386,6 +386,12 @@ func runExport(_ args: [String]) {
     fail("cannot read history: \(error.localizedDescription)")
   }
 
+  if history.isEmpty {
+    FileHandle.standardError.write(
+      "warning: no history recorded yet; run `llimit refresh` or start the daemon first\n"
+        .data(using: .utf8)!)
+  }
+
   do {
     if format == "csv" {
       print(HistoryExporter.csv(history: history), terminator: "")

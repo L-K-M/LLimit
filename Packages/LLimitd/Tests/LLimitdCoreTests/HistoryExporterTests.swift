@@ -37,6 +37,24 @@ final class HistoryExporterTests: XCTestCase {
     XCTAssertTrue(lines[1].contains(",84,"))
   }
 
+  func testCSVQuotesCarriageReturn() {
+    var snapshot = history()[0]
+    snapshot.providers[0].title = "line1\rline2"
+    let csv = HistoryExporter.csv(history: [snapshot])
+    // An embedded \r must be quoted so a row stays on one line.
+    XCTAssertTrue(csv.contains("\"line1\rline2\""))
+  }
+
+  func testCSVNeutralizesFormulaLeadingCharacters() {
+    var snapshot = history()[0]
+    snapshot.providers[0].title = "=cmd|' /C calc'!A0"
+    var csv = HistoryExporter.csv(history: [snapshot])
+    XCTAssertTrue(csv.contains("'=cmd|' /C calc'!A0"))
+    snapshot.providers[0].title = "@SUM(1)"
+    csv = HistoryExporter.csv(history: [snapshot])
+    XCTAssertTrue(csv.contains("'@SUM(1)"))
+  }
+
   func testJSONRoundTrips() throws {
     let json = try HistoryExporter.json(history: history())
     let data = try XCTUnwrap(json.data(using: .utf8))
