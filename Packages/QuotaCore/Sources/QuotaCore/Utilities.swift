@@ -124,13 +124,13 @@ func parseRetryAfter(_ value: String?, now: Date) -> TimeInterval? {
   }
 
   if let seconds = Double(trimmed), seconds.isFinite, seconds > 0 {
-    return min(seconds, Self.maximumRetryAfterSeconds)
+    return min(seconds, TimeInterval.maximumRetryAfterSeconds)
   }
 
   if let date = parseHTTPDate(trimmed) {
     let delay = date.timeIntervalSince(now)
     guard delay > 0 else { return nil }
-    return min(delay, Self.maximumRetryAfterSeconds)
+    return min(delay, TimeInterval.maximumRetryAfterSeconds)
   }
 
   return nil

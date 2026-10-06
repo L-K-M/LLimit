@@ -119,8 +119,8 @@ final class AnthropicClientTests: XCTestCase {
       XCTFail("Expected a rate-limit failure")
     } catch let error as ProviderClientError {
       XCTAssertEqual(error.kind, .rateLimit)
-      XCTAssertEqual(error.retryAfter, 24 * 3_600)
-      XCTAssertFalse(error.message.contains("Next attempt"), "an unhumanizable duration must not claim a next-attempt time")
+      XCTAssertEqual(error.retryAfter, 24 * 3_600, "the cooldown must cap at 24 hours, not eternity")
+      XCTAssertTrue(error.message.contains("Next attempt"), "a capped duration is humanizable: \(error.message)")
     } catch {
       XCTFail("Unexpected error: \(error)")
     }
