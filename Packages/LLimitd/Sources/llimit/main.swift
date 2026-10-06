@@ -33,6 +33,7 @@ func printUsage() {
       llimit accounts remove <account-id>
       llimit refresh
       llimit status [--json]
+      llimit check [--below <pct>] [--stale-hours <h>]
       llimit daemon
       llimit paths
 
@@ -338,6 +339,45 @@ func runStatus(_ args: [String]) {
   }
 }
 
+/// Exit 1 (with reasons on stdout) when any metric is at/below the threshold,
+/// an account is failing, or data is stale — the scriptable half of threshold
+/// alerts: `llimit check || notify-send LLimit "$(llimit check)"`.
+func runCheck(_ args: [String]) {
+  var minPercent = 10
+  var staleHours = 2.0
+  var i = 0
+  while i < args.count {
+    switch args[i] {
+    case "--below":
+      i += 1
+      guard i < args.count, let value = Int(args[i]), (0...100).contains(value) else {
+        fail("--below needs a percentage 0-100")
+      }
+      minPercent = value
+    case "--stale-hours":
+      i += 1
+      guard i < args.count, let value = Double(args[i]), value > 0 else {
+        fail("--stale-hours needs a positive number")
+      }
+      staleHours = value
+    default:
+      fail("unknown check option: \(args[i])")
+    }
+    i += 1
+  }
+
+  let daemon = makeDaemon()
+  let issues = StatusRenderer.checkIssues(
+    snapshot: daemon.snapshot, minPercent: minPercent, staleHours: staleHours
+  )
+  if issues.isEmpty {
+    print("ok")
+  } else {
+    print(issues.joined(separator: "\n"))
+    exit(1)
+  }
+}
+
 /// Retained so the signal sources stay alive for the process lifetime.
 var shutdownSignalSources: [DispatchSourceSignal] = []
 
@@ -406,6 +446,8 @@ case "refresh":
   await runRefresh()
 case "status":
   runStatus(Array(arguments.dropFirst()))
+case "check":
+  runCheck(Array(arguments.dropFirst()))
 case "daemon":
   await runDaemon()
 case "paths":

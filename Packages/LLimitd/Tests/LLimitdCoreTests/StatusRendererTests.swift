@@ -333,4 +333,33 @@ final class StatusRendererTests: XCTestCase {
   func testHumanReadableWithoutSnapshotExplainsNextStep() {
     XCTAssertTrue(StatusRenderer.humanReadable(snapshot: nil, now: now).contains("llimit refresh"))
   }
+
+  // MARK: - check (scriptable threshold exit code)
+
+  func testCheckIssuesEmptyWhenHealthy() {
+    XCTAssertEqual(StatusRenderer.checkIssues(snapshot: snapshot(remaining: [84, 62]), now: now), [])
+  }
+
+  func testCheckIssuesFlagsLowMetrics() {
+    let issues = StatusRenderer.checkIssues(snapshot: snapshot(remaining: [84, 8]), now: now)
+    XCTAssertEqual(issues.count, 1)
+    XCTAssertTrue(issues[0].contains("Claude 2"))
+    XCTAssertTrue(issues[0].contains("8%"))
+  }
+
+  func testCheckIssuesFlagsFailuresAndStale() {
+    let failure = ProviderFailure(accountID: "a", provider: .openAI, kind: .auth, message: "bad token")
+    var staleSnapshot = snapshot(remaining: [50])
+    staleSnapshot.providers[0].fetchedAt = now.addingTimeInterval(-3 * 3_600)
+    staleSnapshot.failures = [failure]
+
+    let issues = StatusRenderer.checkIssues(snapshot: staleSnapshot, now: now)
+    XCTAssertEqual(issues.count, 2)
+    XCTAssertTrue(issues.contains { $0.contains("stale") })
+    XCTAssertTrue(issues.contains { $0.contains("bad token") })
+  }
+
+  func testCheckIssuesWithoutSnapshotFails() {
+    XCTAssertEqual(StatusRenderer.checkIssues(snapshot: nil, now: now).count, 1)
+  }
 }

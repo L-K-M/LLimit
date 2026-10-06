@@ -203,6 +203,39 @@ public enum StatusRenderer {
     return object
   }
 
+  /// One line per threshold violation, provider failure, or stale account —
+  /// the offense list behind `llimit check`'s exit code. Stateless by design:
+  /// cron users get a notification every cycle the problem persists, which is
+  /// the standard `check || notify-send` contract.
+  public static func checkIssues(
+    snapshot: QuotaSnapshot?, now: Date = Date(),
+    minPercent: Int = 10, staleHours: Double = 2
+  ) -> [String] {
+    guard let snapshot else {
+      return ["no quota data yet — run `llimit refresh` (or start `llimit daemon`)"]
+    }
+
+    var issues = snapshot.failures.sorted(by: { $0.accountID < $1.accountID }).map {
+      "\($0.provider.displayName): ERROR \($0.message)"
+    }
+
+    for usage in snapshot.providers.sorted(by: titleOrder) {
+      if now.timeIntervalSince(usage.fetchedAt) > staleHours * 3_600 {
+        issues.append("\(usage.title): data stale (updated \(relativeAge(usage.fetchedAt, now: now)))")
+      }
+      for metric in usage.metrics {
+        guard let remaining = metric.remainingPercent, remaining <= minPercent else { continue }
+        let qualifier = metric.isPercentageEstimated ? "≈" : ""
+        issues.append("\(usage.title) — \(metric.label) at \(qualifier)\(remaining)%")
+      }
+    }
+
+    if issues.isEmpty && snapshot.providers.isEmpty {
+      issues.append("no accounts configured")
+    }
+    return issues
+  }
+
   public static func relativeAge(_ date: Date, now: Date) -> String {
     let seconds = Int(now.timeIntervalSince(date))
     if seconds < 60 {
