@@ -30,11 +30,13 @@ enum MenuBarPanelSize {
   static let widthKey = "MenuBarPanelWidth"
   static let heightKey = "MenuBarPanelHeight"
   static let defaultWidth: Double = 420
-  // Header and action bar around the dashboard's former fixed 510pt height.
-  static let defaultHeight: Double = 610
+  // Approximate height of the header, action bar, and dividers around the dashboard.
+  private static let chromeHeight: CGFloat = 100
+  // The dashboard's former fixed 510pt menu bar height.
+  static let defaultHeight = Double(510 + chromeHeight)
   static let minimumWidth: CGFloat = 360
-  // Header and action bar around the dashboard's 320pt minimum.
-  static let minimumHeight: CGFloat = 440
+  // The dashboard's 320pt minimum menu bar height.
+  static let minimumHeight: CGFloat = 320 + chromeHeight
   // Gap kept between the panel and the edges of the visible screen area.
   static let screenMargin: CGFloat = 12
 

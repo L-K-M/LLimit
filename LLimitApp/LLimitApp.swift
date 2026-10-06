@@ -536,6 +536,8 @@ private struct MenuBarContent: View {
 
   @AppStorage(MenuBarPanelSize.widthKey) private var panelWidth = MenuBarPanelSize.defaultWidth
   @AppStorage(MenuBarPanelSize.heightKey) private var panelHeight = MenuBarPanelSize.defaultHeight
+  @State private var panelAnchor = WindowAnchor()
+  @State private var panelScreenSize: CGSize?
 
   private static let relativeTimeFormatter: RelativeDateTimeFormatter = {
     let formatter = RelativeDateTimeFormatter()
@@ -544,9 +546,11 @@ private struct MenuBarContent: View {
   }()
 
   var body: some View {
+    // Fitted to the panel's own screen. NSScreen.main follows keyboard focus and
+    // can be another display; it only stands in until the panel first opens.
     let menuBarSize = MenuBarPanelSize.fitted(
       CGSize(width: panelWidth, height: panelHeight),
-      within: NSScreen.main?.visibleFrame.size
+      within: panelScreenSize ?? NSScreen.main?.visibleFrame.size
     )
 
     VStack(spacing: 0) {
@@ -568,7 +572,7 @@ private struct MenuBarContent: View {
     // The menu bar panel sizes itself to the ideal frame, which is the size the
     // user last dragged it to.
     .frame(
-      minWidth: 360,
+      minWidth: MenuBarPanelSize.minimumWidth,
       idealWidth: presentation == .menuBar ? menuBarSize.width : 430,
       maxWidth: presentation == .floating ? .infinity : menuBarSize.width,
       minHeight: presentation == .floating ? 440 : nil,
@@ -579,10 +583,11 @@ private struct MenuBarContent: View {
       // The floating dashboard is a titled window AppKit already resizes.
       if presentation == .menuBar {
         HStack {
-          PanelResizeGrip(corner: .bottomLeading, width: $panelWidth, height: $panelHeight)
+          PanelResizeGrip(corner: .bottomLeading, panel: panelAnchor, width: $panelWidth, height: $panelHeight)
           Spacer()
-          PanelResizeGrip(corner: .bottomTrailing, width: $panelWidth, height: $panelHeight)
+          PanelResizeGrip(corner: .bottomTrailing, panel: panelAnchor, width: $panelWidth, height: $panelHeight)
         }
+        .background(PanelWindowReader(anchor: panelAnchor) { panelScreenSize = $0 })
       }
     }
     .foregroundStyle(.white)
@@ -961,10 +966,10 @@ private struct PanelResizeGrip: View {
   private static let gripInset: CGFloat = 6
 
   let corner: MenuBarPanelCorner
+  let panel: WindowAnchor
   @Binding var width: Double
   @Binding var height: Double
 
-  @State private var panelAnchor = WindowAnchor()
   // Gesture state resets on its own when a drag is cancelled, e.g. by the
   // panel closing mid-drag, so a stale origin never leaks into the next drag.
   @GestureState private var dragStart: DragStart?
@@ -990,17 +995,16 @@ private struct PanelResizeGrip: View {
     .frame(width: Self.gripSize, height: Self.gripSize)
     .padding(Self.gripInset)
     .contentShape(Rectangle())
-    .background(HostingWindowReader(anchor: panelAnchor))
     .modifier(FrameResizeCursor(corner: corner))
     .gesture(
       DragGesture(minimumDistance: 0)
         .updating($dragStart) { _, start, _ in
-          guard start == nil, let panel = panelAnchor.window else { return }
+          guard start == nil, let window = panel.window else { return }
           let remembered = CGSize(width: width, height: height)
           start = DragStart(
             pointer: NSEvent.mouseLocation,
-            frame: panel.frame,
-            size: MenuBarPanelSize.fitted(remembered, within: panel.screen?.visibleFrame.size)
+            frame: window.frame,
+            size: MenuBarPanelSize.fitted(remembered, within: window.screen?.visibleFrame.size)
           )
         }
         .onChanged { _ in resize(following: NSEvent.mouseLocation) }
@@ -1011,8 +1015,8 @@ private struct PanelResizeGrip: View {
 
   private func resize(following pointer: NSPoint) {
     guard let start = dragStart,
-      let panel = panelAnchor.window,
-      let screen = panel.screen ?? NSScreen.main
+      let window = panel.window,
+      let screen = window.screen ?? NSScreen.main
     else { return }
 
     let resized = MenuBarPanelSize.resize(
@@ -1026,34 +1030,70 @@ private struct PanelResizeGrip: View {
     height = Double(resized.size.height)
     // The panel only grows on its own when its content does, so set the frame
     // directly to shrink it and to keep the top edge under the menu bar.
-    panel.setFrame(resized.frame, display: true)
+    window.setFrame(resized.frame, display: true)
   }
 }
 
-/// Looks up the window hosting a view on demand, here the MenuBarExtra panel,
-/// without writing view state from AppKit callbacks.
+/// Looks up the window hosting a view on demand, here the MenuBarExtra panel.
 private final class WindowAnchor {
   weak var view: NSView?
 
   var window: NSWindow? { view?.window }
 }
 
-private struct HostingWindowReader: NSViewRepresentable {
+/// Anchors the MenuBarExtra panel and reports the visible size of the screen it
+/// is on whenever it opens or moves to another display.
+private struct PanelWindowReader: NSViewRepresentable {
   let anchor: WindowAnchor
+  let onScreenChange: (CGSize?) -> Void
 
-  func makeNSView(context: Context) -> PassthroughView {
-    let view = PassthroughView()
+  func makeNSView(context: Context) -> ReportingView {
+    let view = ReportingView()
+    view.onScreenChange = onScreenChange
     anchor.view = view
     return view
   }
 
-  func updateNSView(_ view: PassthroughView, context: Context) {
+  func updateNSView(_ view: ReportingView, context: Context) {
+    view.onScreenChange = onScreenChange
     anchor.view = view
   }
 
-  /// Never takes clicks, so the grip's drag gesture receives them.
-  final class PassthroughView: NSView {
+  final class ReportingView: NSView {
+    var onScreenChange: ((CGSize?) -> Void)?
+
+    /// Never takes clicks, so the grips' drag gestures receive them.
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+      super.viewWillMove(toWindow: newWindow)
+      NotificationCenter.default.removeObserver(self, name: NSWindow.didChangeScreenNotification, object: window)
+    }
+
+    override func viewDidMoveToWindow() {
+      super.viewDidMoveToWindow()
+      guard let window else { return }
+
+      NotificationCenter.default.addObserver(
+        self,
+        selector: #selector(windowDidChangeScreen),
+        name: NSWindow.didChangeScreenNotification,
+        object: window
+      )
+      // Deferred: the view can join its window during a SwiftUI update, which
+      // must not write view state.
+      DispatchQueue.main.async { [weak self] in
+        self?.reportScreen()
+      }
+    }
+
+    @objc private func windowDidChangeScreen(_ notification: Notification) {
+      reportScreen()
+    }
+
+    private func reportScreen() {
+      onScreenChange?(window?.screen?.visibleFrame.size)
+    }
   }
 }
 
