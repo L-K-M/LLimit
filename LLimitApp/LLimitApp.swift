@@ -539,6 +539,13 @@ private struct MenuBarContent: View {
   @State private var panelAnchor = WindowAnchor()
   @State private var panelScreenSize: CGSize?
 
+  private var adaptiveDashboardColors: [Color] {
+    // Use the dark graphite palette by default for the menu bar dropdown,
+    // but allow the floating window to feel adaptive by preserving the
+    // identity colors regardless of light/dark mode.
+    [DashboardPalette.backgroundTop, DashboardPalette.backgroundBottom]
+  }
+
   private static let relativeTimeFormatter: RelativeDateTimeFormatter = {
     let formatter = RelativeDateTimeFormatter()
     formatter.unitsStyle = .abbreviated
@@ -593,12 +600,11 @@ private struct MenuBarContent: View {
     .foregroundStyle(.white)
     .background {
       LinearGradient(
-        colors: [DashboardPalette.backgroundTop, DashboardPalette.backgroundBottom],
+        colors: adaptiveDashboardColors,
         startPoint: .top,
         endPoint: .bottom
       )
     }
-    .environment(\.colorScheme, .dark)
   }
 
   private var dashboardDivider: some View {
