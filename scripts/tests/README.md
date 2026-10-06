@@ -198,10 +198,10 @@ The command-line color harness cannot verify Dock or Cmd-Tab behavior.
 
 1. Open the macOS widget gallery and select LLimit, then close the gallery.
 2. Install a newer build with `scripts/build.sh --install --run --no-reveal`.
-   The install must validate the dashboard, trend chart, and all eight provider
+   The install must validate the dashboard, trend chart, and all twelve provider
    tiles before registering the extension and restarting the gallery host.
 3. Reopen the gallery and confirm **Quota Trend Chart** offers small and medium
-   previews, alongside **LLimit Dashboard** and **Provider Tile 1** through **8**.
+   previews, alongside **LLimit Dashboard** and **Provider Tile 1** through **12**.
    Confirm already placed widgets remain assigned and render normally.
 
 The gallery can retain previews rejected after an app version change even when

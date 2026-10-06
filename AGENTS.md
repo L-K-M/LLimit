@@ -283,8 +283,10 @@ Requires macOS 14+, Xcode 16+, [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 - Treat placed widget `kind` strings as frozen; changing one orphans placed tiles
   (Apple forums thread 746574). The slot count is compile-time (one Widget type
   per kind) — keep `AppSettings.providerTileSlotCount`, the
-  `ProviderTileSlotNWidget` types, and `SharedConstants.providerSlotWidgetKinds`
-  in sync when changing it.
+  `ProviderTileSlotNWidget` types, `SharedConstants.providerSlotWidgetKinds`,
+  and the slot loops in `scripts/build.sh`/`scripts/widget-diagnostics.sh` in
+  sync when changing it. `WidgetBundleBuilder` takes at most ten widgets per
+  block, so the tiles live in nested bundles in `LLimitWidgetBundle`.
 - `configurationDisplayName`/`description` must be plain, non-formatted text.
   An interpolated string literal becomes a LocalizedStringKey with format
   arguments and WidgetKit fatal-errors on it at extension launch

@@ -424,8 +424,8 @@ with account count and has only a generic accessibility label.
 Widget-side configuration was abandoned after the Edit Widget flow stayed dead across every
 intent shape tried (builds 7-13, including a fresh `.v3` identity retest under Apple's canonical
 `AppEntity` + `EntityQuery`; no build ever opened the Edit sheet for any intent from this app).
-Build 14 (extended to eight slots in build 16) replaced the single configurable tile with static
-slot widgets ("Provider Tile 1"…"8", kinds `ch.lkmc.llimit.widget.provider-tile.slot1..8` —
+Build 14 (extended to eight slots in build 16, twelve in build 37) replaced the single configurable
+tile with static slot widgets ("Provider Tile 1"…"12", kinds `ch.lkmc.llimit.widget.provider-tile.slot1..12` —
 WidgetKit registers kinds at compile time, so the count cannot be dynamic). Account selection
 lives in LLimit → Settings → Widgets (`AppSettings.providerTileSlots`, synced through the App
 Group store; the app reloads widget timelines on every assignment change). Unassigned tiles
