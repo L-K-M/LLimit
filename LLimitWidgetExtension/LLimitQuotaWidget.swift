@@ -347,10 +347,12 @@ private struct OverviewSmallQuotaView: View {
         Text("LLM Quota")
           .font(.caption.weight(.semibold))
         Spacer()
-        if entry.settings.widgetVisibility.showTimestamp, let snapshot = entry.snapshot {
-          Text(snapshot.generatedAt, style: .time)
-            .font(.caption2)
-            .foregroundStyle(.secondary)
+        if let snapshot = entry.snapshot {
+          DashboardFreshnessLabel(
+            snapshot: snapshot,
+            refreshIntervalMinutes: entry.refreshIntervalMinutes,
+            showClock: entry.settings.widgetVisibility.showTimestamp
+          )
         }
       }
 
@@ -382,13 +384,7 @@ private struct OverviewSmallQuotaView: View {
             .foregroundStyle(.orange)
         }
       } else {
-        Spacer(minLength: 0)
-        Text("No accounts configured")
-          .font(.caption.weight(.semibold))
-        Text("Add accounts in LLimit")
-          .font(.caption2)
-          .foregroundStyle(.secondary)
-        Spacer(minLength: 0)
+        DashboardEmptyStateView(state: DashboardEmptyState(snapshot: entry.snapshot, accounts: entry.settings.accounts))
       }
     }
     .padding(8)
@@ -429,10 +425,12 @@ private struct MediumCompactQuotaView: View {
         Text("LLM Quota")
           .font(.caption.weight(.semibold))
         Spacer()
-        if entry.settings.widgetVisibility.showTimestamp, let snapshot = entry.snapshot {
-          Text(snapshot.generatedAt, style: .time)
-            .font(.caption2)
-            .foregroundStyle(.secondary)
+        if let snapshot = entry.snapshot {
+          DashboardFreshnessLabel(
+            snapshot: snapshot,
+            refreshIntervalMinutes: entry.refreshIntervalMinutes,
+            showClock: entry.settings.widgetVisibility.showTimestamp
+          )
         }
       }
 
@@ -457,13 +455,7 @@ private struct MediumCompactQuotaView: View {
             .foregroundStyle(.orange)
         }
       } else {
-        Spacer(minLength: 0)
-        Text("No accounts configured")
-          .font(.caption.weight(.semibold))
-        Text("Add accounts in LLimit")
-          .font(.caption2)
-          .foregroundStyle(.secondary)
-        Spacer(minLength: 0)
+        DashboardEmptyStateView(state: DashboardEmptyState(snapshot: entry.snapshot, accounts: entry.settings.accounts))
       }
     }
     .padding(10)
@@ -483,6 +475,101 @@ private struct MediumCompactQuotaView: View {
   }
 }
 
+/// The dashboard's no-rows states, kept distinct because each demands
+/// different user action: a config problem, a data problem, or a read
+/// problem. Collapsing them into "No accounts configured" told users with
+/// accounts to add accounts.
+private enum DashboardEmptyState {
+  case noAccounts
+  case waitingForData
+  case allUnavailable(failureCount: Int)
+
+  init(snapshot: QuotaSnapshot?, accounts: [ProviderAccount]) {
+    if let snapshot, !snapshot.failures.isEmpty {
+      self = .allUnavailable(failureCount: snapshot.failures.count)
+    } else if accounts.isEmpty {
+      self = .noAccounts
+    } else {
+      self = .waitingForData
+    }
+  }
+
+  var title: String {
+    switch self {
+    case .noAccounts:
+      return "No accounts configured"
+    case .waitingForData:
+      return "Waiting for quota data"
+    case .allUnavailable(let count):
+      return count == 1 ? "1 account unavailable" : "\(count) accounts unavailable"
+    }
+  }
+
+  var subtitle: String {
+    switch self {
+    case .noAccounts:
+      return "Add accounts in LLimit"
+    case .waitingForData:
+      return "Open LLimit to fetch limits"
+    case .allUnavailable:
+      return "Last refresh failed. Open LLimit to review."
+    }
+  }
+}
+
+private struct DashboardEmptyStateView: View {
+  let state: DashboardEmptyState
+
+  var body: some View {
+    Spacer(minLength: 0)
+    Text(state.title)
+      .font(.caption.weight(.semibold))
+      .multilineTextAlignment(.center)
+    Text(state.subtitle)
+      .font(.caption2)
+      .foregroundStyle(.secondary)
+      .multilineTextAlignment(.center)
+    Spacer(minLength: 0)
+  }
+}
+
+/// The dashboard's freshness signal: the existing timestamp, repainted with
+/// a stale badge once the snapshot is older than two refresh intervals (the
+/// same heuristic the provider tiles use). Without it a dead refresh loop
+/// rendered stale quotas as healthy indefinitely. WidgetKit keeps
+/// Text(dateStyle:) ticking without extra timeline entries.
+private struct DashboardFreshnessLabel: View {
+  let snapshot: QuotaSnapshot
+  let refreshIntervalMinutes: Int
+  let showClock: Bool
+
+  private var isStale: Bool {
+    let thresholdSeconds = Double(max(30, refreshIntervalMinutes * 2) * 60)
+    return Date().timeIntervalSince(snapshot.generatedAt) > thresholdSeconds
+  }
+
+  var body: some View {
+    HStack(spacing: 3) {
+      if isStale {
+        Image(systemName: "clock.arrow.circlepath")
+          .font(.caption2)
+          .accessibilityHidden(true)
+      }
+      if showClock || isStale {
+        Text(snapshot.generatedAt, style: .time)
+          .font(.caption2)
+      }
+    }
+    .foregroundStyle(isStale ? .orange : .secondary)
+    .accessibilityElement(children: .combine)
+    .accessibilityLabel(
+      isStale
+        ? "Data is stale, last updated \(snapshot.generatedAt.formatted(date: .omitted, time: .shortened))"
+        : "Updated \(snapshot.generatedAt.formatted(date: .omitted, time: .shortened))"
+    )
+  }
+}
+
 private struct CompactProviderUsageRow: View {
   let usage: ProviderUsage
   let kindColors: LimitKindColors
@@ -497,14 +584,19 @@ private struct CompactProviderUsageRow: View {
     let dualPercent = showDualLimitPercentages ? dualLimitPercentText(for: usage) : nil
     let basePercent = metric?.remainingPercent ?? providerRemainingPercent(for: usage)
     let unlimited = metric?.isUnlimited ?? usage.metrics.contains(where: \.isUnlimited)
+    let hasNumericPercent = basePercent != nil || unlimited
 
     HStack(spacing: 6) {
+      // Flexible name and flexible, capped bar: the old fixed 58pt name +
+      // fixed 40/72pt percent columns summed to ~142pt inside a ~155pt
+      // widget, collapsing the progress bar to zero width in dual mode.
       Text(shortName + (!showPercentages && metric?.isPercentageEstimated == true ? " ≈" : ""))
         .font(.caption2.weight(.semibold))
         .lineLimit(1)
-        .frame(width: 58, alignment: .leading)
+        .minimumScaleFactor(0.6)
+        .frame(maxWidth: .infinity, alignment: .leading)
 
-      if showProgressBar, basePercent != nil || unlimited {
+      if showProgressBar, hasNumericPercent {
         MiniProgressBar(
           percent: basePercent,
           unlimited: unlimited,
@@ -512,7 +604,8 @@ private struct CompactProviderUsageRow: View {
           stops: dashboardBarStops(for: usage, kindColors: kindColors, step: colorStep, primaryHexColor: primaryHexColor),
           showDualStops: showDualLimitPercentages
         )
-          .frame(height: 5)
+        .frame(height: 5)
+        .frame(maxWidth: 90)
       } else {
         Spacer(minLength: 0)
       }
@@ -524,8 +617,8 @@ private struct CompactProviderUsageRow: View {
           .font(.caption2.weight(.semibold))
           .monospacedDigit()
           .lineLimit(1)
-          .minimumScaleFactor(0.8)
-          .frame(width: basePercent == nil && !unlimited ? nil : (dualPercent == nil ? 40 : 72), alignment: .trailing)
+          .minimumScaleFactor(0.7)
+          .flexiblePercentLayout(hasNumericPercent: hasNumericPercent)
           .accessibilityLabel(dualPercent == nil
             ? percentageAccessibilityText(for: metric)
             : dualLimitAccessibilityText(for: usage))
@@ -536,6 +629,21 @@ private struct CompactProviderUsageRow: View {
 
   private var shortName: String {
     compactProviderName(for: usage)
+  }
+}
+
+private extension View {
+  /// A numeric percentage claims its intrinsic width (it is short and must
+  /// never wrap or clip); a usage line like "4.0M / 10.0M" has no number to
+  /// defend, so it stays flexible and right-aligned like before.
+  @ViewBuilder
+  func flexiblePercentLayout(hasNumericPercent: Bool) -> some View {
+    if hasNumericPercent {
+      fixedSize(horizontal: true, vertical: false)
+        .layoutPriority(1)
+    } else {
+      frame(maxWidth: .infinity, alignment: .trailing)
+    }
   }
 }
 
@@ -676,12 +784,6 @@ private func dashboardBarStops(for usage: ProviderUsage, kindColors: LimitKindCo
       color: metricColors[index]
     )
   }
-}
-
-private func dashboardBarPercents(for usage: ProviderUsage) -> [Int] {
-  dashboardBarMetrics(for: usage)
-    .map { max(0, min(100, $0.remainingPercent ?? 0)) }
-    .sorted()
 }
 
 private func dualLimitPercentText(for usage: ProviderUsage) -> String? {
@@ -1040,13 +1142,6 @@ private func compactProviderName(for usage: ProviderUsage) -> String {
   return compactProviderName(for: usage.provider)
 }
 
-private func resetSummaries(for metrics: [UsageMetric], at date: Date) -> [String] {
-  metrics.compactMap { metric in
-    guard let summary = metric.resetCountdown(at: date) else { return nil }
-    return summary == "reset" ? "<1m" : summary
-  }
-}
-
 private func percentText(for metric: UsageMetric?) -> String {
   guard let metric else { return "--" }
   if metric.isUnlimited {
@@ -1058,9 +1153,12 @@ private func percentText(for metric: UsageMetric?) -> String {
   return metric.usageLine ?? "--"
 }
 
+/// VoiceOver reads words, not symbols: "INF" and "--" announce literally.
 private func percentageAccessibilityText(for metric: UsageMetric?) -> String {
-  guard let metric, let remaining = metric.remainingPercent, !metric.isUnlimited else {
-    return percentText(for: metric)
+  guard let metric else { return "Unknown" }
+  if metric.isUnlimited { return "Unlimited" }
+  guard let remaining = metric.remainingPercent else {
+    return metric.usageLine ?? "Unknown"
   }
   return "\(metric.isPercentageEstimated ? "Estimated " : "")\(remaining) percent remaining"
 }
