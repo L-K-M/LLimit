@@ -33,6 +33,7 @@ func printUsage() {
       llimit accounts remove <account-id>
       llimit refresh
       llimit status [--json]
+      llimit trend [--days <n>] [--account <prefix>]
       llimit daemon
       llimit paths
 
@@ -329,6 +330,33 @@ func runRefresh() async {
   print(StatusRenderer.humanReadable(snapshot: daemon.snapshot))
 }
 
+/// Per-account sparklines from the history file — quota is stepwise, so
+/// samples forward-fill; `llimit trend --days 3` shows the burn shape.
+func runTrend(_ args: [String]) {
+  var days = 7
+  var accountPrefix: String?
+  var i = 0
+  while i < args.count {
+    switch args[i] {
+    case "--days":
+      i += 1
+      guard i < args.count, let value = Int(args[i]), value > 0 else {
+        fail("--days needs a positive integer")
+      }
+      days = value
+    case "--account":
+      i += 1
+      guard i < args.count else { fail("--account needs an id or title prefix") }
+      accountPrefix = args[i]
+    default:
+      fail("unknown trend option: \(args[i])")
+    }
+    i += 1
+  }
+  let history = (try? QuotaHistoryStore(fileURL: LinuxPaths().historyFileURL).load()) ?? []
+  print(TrendRenderer.render(history: history, days: days, accountPrefix: accountPrefix))
+}
+
 func runStatus(_ args: [String]) {
   let daemon = makeDaemon()
   if args.contains("--json") {
@@ -406,6 +434,8 @@ case "refresh":
   await runRefresh()
 case "status":
   runStatus(Array(arguments.dropFirst()))
+case "trend":
+  runTrend(Array(arguments.dropFirst()))
 case "daemon":
   await runDaemon()
 case "paths":
