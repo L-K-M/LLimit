@@ -137,6 +137,18 @@ func roundedPercent(_ value: Double) -> Int? {
   return Int(min(100, max(0, value)).rounded())
 }
 
+/// Non-cryptographic fingerprint used to detect *changes* in a credential
+/// without persisting the credential itself — snapshots are credential-free.
+/// Equality is all that is checked, so collision resistance does not matter.
+func credentialFingerprint(_ value: String) -> String {
+  var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+  for byte in value.utf8 {
+    hash ^= UInt64(byte)
+    hash &*= 0x0000_0100_0000_01b3
+  }
+  return String(hash, radix: 16)
+}
+
 func parseJSONObject(from data: Data) throws -> [String: Any] {
   let object = try JSONSerialization.jsonObject(with: data)
   guard let dictionary = object as? [String: Any] else {

@@ -262,6 +262,10 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
   public var remainingAmount: Double?
   /// An observed balance used as the denominator when the server supplies no total.
   public var estimatedTotal: Double?
+  /// Fingerprint of the credential that produced this reading, so an estimate
+  /// observed under one API key is never carried onto a different key.
+  /// See `credentialFingerprint` — not a credential itself.
+  public var estimateKeyHash: String?
   public var usedDisplay: String?
   public var totalDisplay: String?
   public var resetAt: Date?
@@ -275,6 +279,7 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
     remainingPercent: Int? = nil,
     remainingAmount: Double? = nil,
     estimatedTotal: Double? = nil,
+    estimateKeyHash: String? = nil,
     usedDisplay: String? = nil,
     totalDisplay: String? = nil,
     resetAt: Date? = nil,
@@ -287,6 +292,7 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
     self.remainingPercent = remainingPercent
     self.remainingAmount = remainingAmount
     self.estimatedTotal = estimatedTotal
+    self.estimateKeyHash = estimateKeyHash
     self.usedDisplay = usedDisplay
     self.totalDisplay = totalDisplay
     self.resetAt = resetAt

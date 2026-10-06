@@ -20,13 +20,21 @@ enum VeniceQuotaEstimate {
     }
     let priorMetric = prior?.metrics.first(where: { $0.id == "daily-diem" })
 
-    // A concurrent or delayed response must not roll an established estimate back.
-    if let prior, priorMetric?.isPercentageEstimated == true, usage.fetchedAt <= prior.fetchedAt {
+    // A concurrent or delayed response must not roll an established estimate
+    // back — unless the key changed since the prior reading, in which case the
+    // estimate belongs to a different credential and must not survive.
+    if let prior, priorMetric?.isPercentageEstimated == true,
+       priorMetric?.estimateKeyHash == metric.estimateKeyHash,
+       usage.fetchedAt <= prior.fetchedAt {
       return prior
     }
 
     let upperBound: Double
     if let priorMetric, let priorReset = priorMetric.resetAt,
+       // The estimate belongs to the API key that produced the prior reading.
+       // A replaced key starts a fresh observation instead of measuring a
+       // different account's balance against this key's denominator.
+       priorMetric.estimateKeyHash == metric.estimateKeyHash,
        // SnapshotStore's ISO-8601 dates retain whole seconds. Compare at that
        // precision so reloading does not turn the same server epoch into a new one.
        floor(priorReset.timeIntervalSince1970) == floor(resetAt.timeIntervalSince1970),

@@ -192,6 +192,10 @@ final class AppModel: ObservableObject {
     isRefreshing = true
     defer { isRefreshing = false }
 
+    // Pending Venice key edits must land before the refresh assembles the
+    // credential snapshot — the estimate stored under the old key must be gone
+    // before the new key can fetch.
+    flushVeniceInvalidations()
     await refreshExpiringChatGPTTokens()
     let claudeFailures = await prepareClaudeAccounts()
     reloadAccountStatuses()
@@ -1587,18 +1591,15 @@ final class AppModel: ObservableObject {
 
     if previousAccount.provider == .venice,
        previousAccount.credentials[CredentialField.veniceAPIKey] != updatedAccount.credentials[CredentialField.veniceAPIKey] {
-      guard !configurationLoadFailed else {
-        statusMessage = "Could not change this key because the settings file could not be read."
-        return
-      }
-      do {
-        // The observed DIEM denominator belongs to this key. Clear it durably
-        // before accepting a replacement key, including Auto-fill replacements.
-        try invalidateVeniceUsage(for: previousAccount)
-      } catch {
-        statusMessage = "Could not clear this account's previous usage. Check LLimit's storage permissions and try again."
-        return
-      }
+      // The observed DIEM denominator belongs to the old key and must be
+      // cleared — but this binding fires per keystroke, and each invalidation
+      // rewrites the full history file. Defer to a coalesced flush: once per
+      // editing burst on a timer, and synchronously before any refresh so the
+      // new key can never be fetched while the old estimate is still stored.
+      // The estimate's key fingerprint (estimateKeyHash) additionally makes a
+      // stale estimate unreachable even if the flush never lands.
+      pendingVeniceInvalidations.insert(accountID)
+      scheduleVeniceInvalidationFlush()
     }
     providerAccounts[index] = updatedAccount
 
@@ -1609,6 +1610,39 @@ final class AppModel: ObservableObject {
     }
     reloadAccountStatuses()
     saveConfiguration()
+  }
+
+  private var pendingVeniceInvalidations: Set<String> = []
+  private var veniceInvalidationTask: Task<Void, Never>?
+
+  private func scheduleVeniceInvalidationFlush() {
+    veniceInvalidationTask?.cancel()
+    veniceInvalidationTask = Task { [weak self] in
+      try? await Task.sleep(nanoseconds: 1_000_000_000)
+      guard !Task.isCancelled else { return }
+      self?.flushVeniceInvalidations()
+    }
+  }
+
+  /// Runs the deferred Venice usage clears — once per editing burst instead of
+  /// once per keystroke. refreshNow calls this before building fetch
+  /// configurations so a request can never go out under the new key while the
+  /// old key's estimate is still stored. Failed clears stay pending and retry
+  /// on the next flush.
+  private func flushVeniceInvalidations() {
+    veniceInvalidationTask?.cancel()
+    veniceInvalidationTask = nil
+    let pending = pendingVeniceInvalidations
+    pendingVeniceInvalidations = []
+    for accountID in pending {
+      guard let account = account(withID: accountID) else { continue }
+      do {
+        try invalidateVeniceUsage(for: account)
+      } catch {
+        pendingVeniceInvalidations.insert(accountID)
+        statusMessage = "Could not clear this account's previous usage. Check LLimit's storage permissions and try again."
+      }
+    }
   }
 
   private func invalidateVeniceUsage(for account: ProviderAccount) throws {
