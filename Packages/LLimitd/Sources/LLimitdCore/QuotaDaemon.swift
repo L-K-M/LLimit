@@ -523,7 +523,8 @@ public final class QuotaDaemon {
   }
 
   private func reconcileSnapshotWithCurrentAccounts() {
-    guard let currentSnapshot = snapshot else { return }
+    // Failed settings reads do not prove cached accounts were removed.
+    guard !configurationLoadFailed, let currentSnapshot = snapshot else { return }
 
     let activeAccounts = settings.accounts.filter { $0.isEnabled && $0.hasRequiredCredentials }
     let reconciled = currentSnapshot.reconciled(with: activeAccounts)

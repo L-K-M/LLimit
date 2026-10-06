@@ -211,6 +211,55 @@ final class QuotaDaemonTests: XCTestCase {
     XCTAssertEqual(contents, "not json")
   }
 
+  func testFailedSettingsLoadPreservesCachedSnapshot() throws {
+    let daemon = makeDaemon()
+    try FileManager.default.createDirectory(at: daemon.paths.configDirectory, withIntermediateDirectories: true)
+    try Data("not json".utf8).write(to: daemon.paths.settingsFileURL)
+    try assertFailedSettingsLoadPreservesSnapshot(daemon)
+  }
+
+  func testUnreadableSettingsLoadPreservesCachedSnapshot() throws {
+    let daemon = makeDaemon()
+    try SettingsStore(fileURL: daemon.paths.settingsFileURL).save(.default)
+    try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: daemon.paths.settingsFileURL.path)
+    guard (try? Data(contentsOf: daemon.paths.settingsFileURL)) == nil else {
+      throw XCTSkip("This user can read mode-000 files; unreadable-settings fixture cannot be enforced.")
+    }
+    try assertFailedSettingsLoadPreservesSnapshot(daemon)
+  }
+
+  private func assertFailedSettingsLoadPreservesSnapshot(_ daemon: QuotaDaemon) throws {
+    let date = Date(timeIntervalSince1970: 1_700_000_000)
+    let cached = QuotaSnapshot(
+      generatedAt: date,
+      providers: [ProviderUsage(
+        accountID: "cached-account", provider: .anthropic, title: "Cached Claude",
+        metrics: [UsageMetric(id: "weekly", label: "Weekly", remainingPercent: 73)],
+        fetchedAt: date
+      )],
+      failures: [ProviderFailure(accountID: "cached-failure", provider: .kimi, kind: .network, message: "Offline")]
+    )
+    try SnapshotStore(fileURL: daemon.paths.snapshotFileURL).save(cached)
+    try FileManager.default.setAttributes([.modificationDate: date], ofItemAtPath: daemon.paths.snapshotFileURL.path)
+    let before = try Data(contentsOf: daemon.paths.snapshotFileURL)
+
+    daemon.loadConfiguration()
+
+    XCTAssertTrue(daemon.statusMessage.contains("Could not load settings"))
+    XCTAssertThrowsError(try daemon.saveConfiguration())
+    XCTAssertEqual(daemon.snapshot, cached)
+    XCTAssertEqual(try Data(contentsOf: daemon.paths.snapshotFileURL), before)
+    let attributes = try FileManager.default.attributesOfItem(atPath: daemon.paths.snapshotFileURL.path)
+    XCTAssertEqual(attributes[.modificationDate] as? Date, date)
+
+    // A repaired settings file restores normal account reconciliation.
+    try SettingsStore(fileURL: daemon.paths.settingsFileURL).save(.default)
+    daemon.loadConfiguration()
+    XCTAssertTrue(daemon.snapshot?.providers.isEmpty == true)
+    XCTAssertTrue(daemon.snapshot?.failures.isEmpty == true)
+    XCTAssertNoThrow(try daemon.saveConfiguration())
+  }
+
   // MARK: - Refresh behavior
 
   func testRefreshWritesCredentialFreeSnapshotAndHistory() async throws {
