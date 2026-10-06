@@ -249,6 +249,17 @@ final class StatusRendererTests: XCTestCase {
     XCTAssertEqual(object["resetIn"] as? String, "3h 12m")
   }
 
+  func testMetricObjectOmitsABlankResetString() {
+    // Whitespace is not a countdown; a consumer's fallback must not be able to
+    // render "resets in ".
+    let metric = UsageMetric(id: "weekly", label: "Weekly limit",
+                             remainingPercent: 40, resetIn: "   ")
+    let object = StatusRenderer.metricObject(metric, now: now)
+
+    XCTAssertNil(object["resetIn"])
+    XCTAssertNil(object["resetAt"])
+  }
+
   func testHumanReadableTicksTheResetCountdownAgainstNow() {
     let resetAt = now.addingTimeInterval(3 * 3600 + 12 * 60)
     let usage = ProviderUsage(

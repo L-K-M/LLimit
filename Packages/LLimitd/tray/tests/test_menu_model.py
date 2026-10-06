@@ -71,6 +71,14 @@ class FormatMetricTests(unittest.TestCase):
     def test_metric_without_reset_omits_the_clause(self):
         self.assertEqual(format_metric({"label": "Weekly", "remainingPercent": 8}), "Weekly — 8% left")
 
+    def test_blank_reset_string_is_treated_as_absent(self):
+        # The CLI no longer emits blank resetIn, but the tray may read cached or
+        # hand-written JSON, so the fallback must not render "resets in ".
+        self.assertEqual(
+            format_metric({"label": "Weekly", "remainingPercent": 8, "resetIn": "   "}),
+            "Weekly — 8% left",
+        )
+
     def test_estimated_metric_marks_percentage_and_keeps_reset(self):
         text = format_metric({"label": "Daily DIEM", "remainingPercent": 50,
                               "estimated": True, "resetIn": "3h"})

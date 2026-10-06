@@ -96,10 +96,13 @@ public enum StatusRenderer {
   }
 
   /// ISO 8601 with a trailing `Z`, the shape `resetAt` is emitted in.
+  ///
+  /// Uses the value-type `ISO8601FormatStyle` rather than a cached
+  /// `ISO8601DateFormatter`: it allocates no formatter object, so there is
+  /// nothing to hoist, and it holds no shared mutable state — the corelibs
+  /// `ISO8601DateFormatter` is not thread-safe on Linux.
   static func iso8601String(_ date: Date) -> String {
-    let formatter = ISO8601DateFormatter()
-    formatter.formatOptions = [.withInternetDateTime]
-    return formatter.string(from: date)
+    date.formatted(ISO8601FormatStyle())
   }
 
   /// One limit as a JSON row for popup consumers (the tray). Optional fields are
@@ -121,7 +124,10 @@ public enum StatusRenderer {
     if metric.isPercentageEstimated {
       object["estimated"] = true
     }
-    if let resetIn = metric.resetIn {
+    // A blank string is not a countdown: drop it, as humanReadable does, so a
+    // consumer's fallback cannot render "resets in ".
+    if let resetIn = metric.resetIn,
+       !resetIn.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
       object["resetIn"] = resetIn
     }
     if let resetAt = metric.resetAt {

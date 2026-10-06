@@ -114,8 +114,8 @@ def format_metric(metric: dict[str, Any]) -> str:
             body = f"{body} · " + (
                 "reset due" if reset_seconds <= 0 else f"resets in {format_countdown(reset_seconds)}"
             )
-        elif reset:
-            body = f"{body} · resets in {reset}"
+        elif isinstance(reset, str) and reset.strip():
+            body = f"{body} · resets in {reset.strip()}"
 
     return f"{label} — {body}"
 
