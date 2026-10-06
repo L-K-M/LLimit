@@ -121,4 +121,21 @@ final class QuotaHistoryStoreTests: XCTestCase {
     XCTAssertEqual(try store.load().count, 2)
     XCTAssertEqual(try store.load().last?.generatedAt, now.addingTimeInterval(2_700))
   }
+
+  func testAppendFoldsDuplicateOnceNewestPointIsAnHourStale() throws {
+    let (store, dir) = makeStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+
+    try store.append(snapshot(at: now, percent: 70))
+    // Same content, two hours later: the stored point must advance its
+    // generatedAt so a static stretch can't age the newest entry out of
+    // `loadRecent` windows — without growing the archive.
+    try store.append(snapshot(at: now.addingTimeInterval(7_200), percent: 70,
+                              fetchedAt: now.addingTimeInterval(7_200)))
+
+    let loaded = try store.load()
+    XCTAssertEqual(loaded.count, 1)
+    XCTAssertEqual(loaded.last?.generatedAt, now.addingTimeInterval(7_200))
+  }
 }
