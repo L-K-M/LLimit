@@ -1188,6 +1188,7 @@ private struct OverviewCard: View {
   private static let gaugeColumns = [GridItem(.adaptive(minimum: 104), spacing: 6, alignment: .top)]
   private static let gaugeFontSize: CGFloat = 11
   private static let metricLabelSuffixes = [" remaining", " limit", " quota"]
+  // Keep aligned with UsageMetric.resetCountdown(at:)'s reset-due sentinel.
   private static let resetDueCountdown = "reset"
 
   private var lowestRemaining: Int? {
@@ -1316,8 +1317,8 @@ private struct OverviewCard: View {
 
   private func accountGaugeRemainingPercent(for provider: ProviderUsage) -> Int? {
     // An aggregate fallback cannot identify a limiting metric or its reset.
-    guard MenuBarQuotaStyling.constrainingMetric(for: provider) != nil else { return nil }
-    return MenuBarQuotaStyling.remainingPercent(for: provider)
+    guard let remaining = MenuBarQuotaStyling.constrainingMetric(for: provider)?.remainingPercent else { return nil }
+    return max(0, min(100, remaining))
   }
 
   private func accountGaugeCaption(for provider: ProviderUsage) -> String {

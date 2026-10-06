@@ -162,10 +162,13 @@ dashboard. Use no credentials or network refreshes.
    label. Check wrapping without overlap or vertical clipping. Any ellipsis must
    retain the full account and metric names in the tooltip and VoiceOver label.
 3. **Two metrics:** give `5-hour limit` 15% with a reset in 1h, and `Weekly limit`
-   70% with a reset in 2d 3h. Expect `5-hour`, 15%, and the 1h reset. Reverse the
-   percentages and expect `Weekly` with its own reset. A primary weekly color
-   override must not change which metric the caption names. Click each gauge
-   and confirm it still jumps to that account's card in the existing order.
+   70% with a reset in 2d 3h. Expect `5-hour` and 15%; the 1h reset suffix appears
+   only when the combined caption fits on one line. Check both fit and fallback.
+   Reverse the percentages and expect `Weekly` with its own reset under the same
+   fit rule. The tooltip and VoiceOver label always report the selected metric's
+   reset. A primary weekly color override must not change which metric the
+   caption names. Click each gauge and confirm it still jumps to that account's
+   card in the existing order.
 4. **Ties/more metrics:** equal bounded percentages choose the first metric in
    snapshot order, matching the existing identity accent. Include a lower
    `Weekly (Opus)` third metric to confirm selection uses the full metric list,
