@@ -30,7 +30,7 @@ public extension StatusRenderer {
     var lines = ["Upcoming resets (next \(window))\(stale)"]
     for entry in resets {
       let countdown = entry.countdown(at: now)
-      let when = countdown == "reset" ? "reset due" : "in \(countdown)"
+      let when = entry.resetAt <= now ? "reset due" : "in \(countdown)"
       var line = "\(when) — \(entry.accountName) · \(entry.metricLabel)"
       if entry.isUnlimited {
         line += " (unlimited)"
