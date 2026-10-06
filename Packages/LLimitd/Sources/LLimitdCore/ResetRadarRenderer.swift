@@ -23,21 +23,28 @@ public extension StatusRenderer {
     // A snapshot that stopped refreshing days ago renders as a clean all-clear
     // otherwise; say how old the data is.
     let stale = stalenessHint(snapshot: snapshot, now: now)
+    // A failed refresh contributes no entries; say so instead of letting a
+    // partial schedule read as the whole one.
+    let failureCount = snapshot.failures.count
+    let failureLine = failureCount == 0 ? nil :
+      "\(failureCount) account\(failureCount == 1 ? "" : "s") failed to refresh; their resets may be missing."
     guard !resets.isEmpty else {
       return "No resets in the next \(window)\(stale)."
+        + (failureLine.map { "\n" + $0 } ?? "")
     }
 
     var lines = ["Upcoming resets (next \(window))\(stale)"]
     for entry in resets {
-      let countdown = entry.countdown(at: now)
-      let when = entry.resetAt <= now ? "reset due" : "in \(countdown)"
-      var line = "\(when) — \(entry.accountName) · \(entry.metricLabel)"
+      var line = "in \(entry.countdown(at: now)) — \(entry.accountName) · \(entry.metricLabel)"
       if entry.isUnlimited {
         line += " (unlimited)"
       } else if let remaining = entry.remainingPercent {
         line += " (\(remaining)% left)"
       }
       lines.append(line)
+    }
+    if let failureLine {
+      lines.append(failureLine)
     }
     return lines.joined(separator: "\n")
   }
@@ -59,6 +66,9 @@ public extension StatusRenderer {
 
     if let snapshot {
       object["generatedAt"] = iso8601String(snapshot.generatedAt)
+      // A failed refresh contributes no rows; the count keeps a partial
+      // schedule from reading as the whole one.
+      object["failureCount"] = snapshot.failures.count
       object["resets"] = snapshot
         .upcomingResets(now: now, within: windowInterval(windowDays))
         .map { entry -> [String: Any] in

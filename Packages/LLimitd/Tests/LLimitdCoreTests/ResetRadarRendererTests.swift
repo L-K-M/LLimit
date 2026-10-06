@@ -164,4 +164,66 @@ final class ResetRadarRendererTests: XCTestCase {
     // An amount-only limit has no percentage to report.
     XCTAssertNil(rows[1]["remainingPercent"])
   }
+
+  // MARK: - Failed refreshes
+
+  private func failureSnapshot(
+    failures: [ProviderFailure],
+    resetsIn seconds: TimeInterval? = nil
+  ) -> QuotaSnapshot {
+    QuotaSnapshot(
+      generatedAt: now,
+      providers: seconds.map {
+        [usage("a", "Claude", [metric("weekly", "Weekly limit", in: $0)])]
+      } ?? [],
+      failures: failures
+    )
+  }
+
+  func testFailuresAppendACaveatToTheSchedule() {
+    let snap = failureSnapshot(
+      failures: [
+        ProviderFailure(accountID: "openai", provider: .openAI, kind: .auth, message: "expired"),
+        ProviderFailure(accountID: "kimi", provider: .kimi, kind: .network, message: "timeout")
+      ],
+      resetsIn: 3600
+    )
+
+    let lines = StatusRenderer.resetsHumanReadable(snapshot: snap, now: now, windowDays: 7)
+      .split(separator: "\n").map(String.init)
+
+    XCTAssertEqual(
+      lines.last,
+      "2 accounts failed to refresh; their resets may be missing."
+    )
+  }
+
+  func testASingleFailureIsSingularAndSurfacesOnAnEmptySchedule() {
+    let snap = failureSnapshot(
+      failures: [ProviderFailure(accountID: "openai", provider: .openAI, kind: .auth, message: "expired")]
+    )
+
+    XCTAssertEqual(
+      StatusRenderer.resetsHumanReadable(snapshot: snap, now: now, windowDays: 7),
+      "No resets in the next 7 days.\n1 account failed to refresh; their resets may be missing."
+    )
+  }
+
+  func testJSONCarriesTheFailureCount() throws {
+    let snap = failureSnapshot(
+      failures: [ProviderFailure(accountID: "openai", provider: .openAI, kind: .auth, message: "expired")],
+      resetsIn: 3600
+    )
+
+    let json = StatusRenderer.resetsJSON(snapshot: snap, now: now, windowDays: 7)
+    let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+
+    XCTAssertEqual(object["failureCount"] as? Int, 1)
+
+    let clean = StatusRenderer.resetsJSON(snapshot: failureSnapshot(failures: [], resetsIn: 3600),
+                                          now: now, windowDays: 7)
+    let cleanObject = try XCTUnwrap(
+      JSONSerialization.jsonObject(with: Data(clean.utf8)) as? [String: Any])
+    XCTAssertEqual(cleanObject["failureCount"] as? Int, 0)
+  }
 }
