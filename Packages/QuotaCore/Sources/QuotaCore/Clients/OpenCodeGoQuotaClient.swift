@@ -72,9 +72,9 @@ public struct OpenCodeGoQuotaClient: QuotaProviderClient {
       metric(from: windows.monthly, id: "monthly", label: "Monthly limit", now: now)
     ]
     // A rate-limited window is exhausted regardless of the reported percent.
-    let maxUsage = [windows.rolling, windows.weekly, windows.monthly]
-      .map { $0.status == .rateLimited ? 100 : $0.percent }.max() ?? 0
-    let limited = [windows.rolling, windows.weekly, windows.monthly].contains { $0.status == .rateLimited }
+    let allWindows = [windows.rolling, windows.weekly, windows.monthly]
+    let maxUsage = allWindows.map(\.effectivePercent).max() ?? 0
+    let limited = allWindows.contains(where: \.isExhausted)
 
     return ProviderUsage(
       accountID: configuration.accountID,
@@ -94,10 +94,9 @@ public struct OpenCodeGoQuotaClient: QuotaProviderClient {
           let resetAt = parseISO8601(window.resetsAt) else {
       throw Self.invalidResponse
     }
-    // rate-limited means exhausted even if percent reads below 100 — the
-    // endpoint proxies migrated keys, so trust the status over the number
-    // instead of failing the whole fetch on the mismatch.
-    let limited = window.status == .rateLimited
+    // rate-limited means exhausted even if percent reads below 100 —
+    // GoUsageWindow.isExhausted encodes the rule for every consumer.
+    let limited = window.isExhausted
     return UsageMetric(
       id: id,
       label: label,
@@ -133,4 +132,9 @@ private struct GoUsageWindow: Decodable {
   let status: Status
   let percent: Int
   let resetsAt: String
+
+  /// The endpoint proxies migrated keys, so `status` can report `rate-limited`
+  /// with `percent` still below 100 — trust the flag over the number.
+  var isExhausted: Bool { status == .rateLimited }
+  var effectivePercent: Int { isExhausted ? 100 : percent }
 }
