@@ -118,6 +118,28 @@ final class QuotaUtilitiesTests: XCTestCase {
     XCTAssertEqual(errorBodyExcerpt(""), "")
     XCTAssertEqual(errorBodyExcerpt("short body"), "short body")
     XCTAssertEqual(errorBodyExcerpt("abcdef", maxLength: 3), "abc…")
+
+    // Exact boundary: no ellipsis at maxLength, ellipsis one past it.
+    XCTAssertEqual(errorBodyExcerpt(String(repeating: "x", count: 240)).count, 240)
+    XCTAssertTrue(errorBodyExcerpt(String(repeating: "x", count: 241)).hasSuffix("…"))
+  }
+
+  func testErrorBodyExcerptRedactsCredentialTokens() {
+    let jwt = "eyJhbGciOi.eyJzdWIiOiIx.SflKxwRJSMeKKF2QT4"
+    for body in [
+      "Authorization: Bearer sk-ant-api03-abcdefghijklmnop rejected",
+      "upstream said Bearer \(jwt) is expired",
+      "error: key ghp_0123456789abcdef not recognized",
+      "token=sk-proj-abc123def456 invalid",
+    ] {
+      let excerpt = errorBodyExcerpt(body)
+      XCTAssertTrue(excerpt.contains("<redacted>"), "expected redaction in \(excerpt)")
+      for token in ["sk-ant-api03-abcdefghijklmnop", jwt, "ghp_0123456789abcdef", "sk-proj-abc123def456"] {
+        XCTAssertFalse(excerpt.contains(token))
+      }
+    }
+    // Ordinary prose without credential-shaped tokens stays untouched.
+    XCTAssertEqual(errorBodyExcerpt("quota exceeded; please slow down"), "quota exceeded; please slow down")
   }
 
   func testErrorBodyExcerptDecodesLossyData() {

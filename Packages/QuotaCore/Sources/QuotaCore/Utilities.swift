@@ -137,23 +137,47 @@ func roundedPercent(_ value: Double) -> Int? {
   return Int(min(100, max(0, value)).rounded())
 }
 
+/// "Authorization: Bearer <token>" — the most common way a debug/echo error
+/// page reflects the caller's own credential back.
+private let bearerTokenPattern = try! NSRegularExpression(
+  pattern: #"(?i)\b(Bearer[ \t]+)\S+"#
+)
+/// JWT-shaped strings and known API-key prefixes, so a reflected credential
+/// cannot ride an error body into the persisted snapshot/history surfaces.
+private let credentialTokenPattern = try! NSRegularExpression(
+  pattern: #"ey[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}|\b(?:sk-ant-|sk-|ghp_|gho_|ghu_|ghs_|github_pat_|r8_|AIza|xox[a-z]-)[A-Za-z0-9_-]{4,}"#
+)
+
+private func redactCredentialTokens(in text: String) -> String {
+  var result = bearerTokenPattern.stringByReplacingMatches(
+    in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "$1<redacted>")
+  result = credentialTokenPattern.stringByReplacingMatches(
+    in: result, range: NSRange(result.startIndex..., in: result), withTemplate: "<redacted>")
+  return result
+}
+
 /// Single-line, length-capped excerpt of an error response body for
 /// `ProviderClientError` messages. Error bodies are unbounded upstream — a
 /// proxy or CDN error page can be arbitrarily large — and the message is
-/// persisted into snapshots, history, and the App Group store. An excerpt also
-/// limits what a misbehaving deployment can echo back (including a reflected
-/// `Authorization` value) into those credential-free surfaces.
+/// persisted into snapshots, history, and the App Group store. Credential-shaped
+/// tokens are redacted so a misbehaving deployment cannot echo the caller's own
+/// `Authorization` value into those credential-free surfaces.
 func errorBodyExcerpt(_ text: String, maxLength: Int = 240) -> String {
-  let folded = text
-    .components(separatedBy: .whitespacesAndNewlines)
-    .filter { !$0.isEmpty }
-    .joined(separator: " ")
+  let folded = redactCredentialTokens(
+    in: text
+      .components(separatedBy: .whitespacesAndNewlines)
+      .filter { !$0.isEmpty }
+      .joined(separator: " ")
+  )
   guard folded.count > max(1, maxLength) else { return folded }
   return String(folded.prefix(max(1, maxLength))) + "…"
 }
 
 func errorBodyExcerpt(_ data: Data, maxLength: Int = 240) -> String {
-  errorBodyExcerpt(String(decoding: data, as: UTF8.self), maxLength: maxLength)
+  // Bound the decode: bodies can be arbitrarily large, and only the first
+  // ~maxLength characters survive folding/capping anyway.
+  let head = data.prefix(max(64, maxLength * 16 + 64))
+  return errorBodyExcerpt(String(decoding: head, as: UTF8.self), maxLength: maxLength)
 }
 
 func parseJSONObject(from data: Data) throws -> [String: Any] {
