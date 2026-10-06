@@ -379,6 +379,37 @@ struct SettingsView: View {
 
         Divider()
 
+        settingsRow(title: "Notifications") {
+          VStack(alignment: .leading, spacing: 10) {
+            settingsGroupCard(title: "Quota Alerts") {
+              Toggle(
+                "Alert when a limit runs low",
+                isOn: model.alertSettingsBinding(for: \.enabled)
+              )
+              Toggle(
+                "Alert when a refresh fails",
+                isOn: model.alertSettingsBinding(for: \.notifyOnFailure)
+              )
+
+              visibilityStepperRow(
+                title: "Warn below %",
+                value: model.alertThresholdBinding(for: \.warningPercent),
+                range: QuotaAlertSettings.warningRange,
+                displayedValue: model.alertSettings.warningPercent
+              )
+              visibilityStepperRow(
+                title: "Critical below %",
+                value: model.alertThresholdBinding(for: \.criticalPercent),
+                range: QuotaAlertSettings.criticalRange,
+                displayedValue: model.alertSettings.criticalPercent
+              )
+            }
+          }
+        }
+        .help("macOS may ask for notification permission the first time an alert fires.")
+
+        Divider()
+
         settingsRow(title: "Visible information") {
           VStack(alignment: .leading, spacing: 10) {
             settingsGroupCard(title: "All Widgets") {
