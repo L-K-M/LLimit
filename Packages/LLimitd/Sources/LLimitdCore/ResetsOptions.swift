@@ -29,7 +29,10 @@ public enum ResetsOptionError: Error, Equatable, Sendable {
     case .missingDaysValue, .invalidDaysValue:
       return "--days needs a whole number of days"
     case .daysOutOfRange:
-      return "--days must be between 1 and 90"
+      // Derived from the single source of truth so the copy cannot drift from
+      // the range the parser actually enforces.
+      let range = ResetsOptions.supportedDays
+      return "--days must be between \(range.lowerBound) and \(range.upperBound)"
     }
   }
 }
