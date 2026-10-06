@@ -2,12 +2,13 @@
 
 Consolidated on 2026-10-06 from the full pre-implementation review in `tmp.md`,
 the earlier document at `756ce3c`, and fetched `origin/main:ANALYSIS.md` at
-`54d423e` (including `e2d5e02` and the incoming third review pass).
+`8b11179` (including `e2d5e02`, pass C at `54d423e`, and pass D).
+The #72 scope correction is preserved in local commit `c1d0d19`.
 
 The source reviews examined baseline `2d6ac1e652ac33724961a5a8bf8f43f0f8d31d2f`:
 macOS app, widgets, QuotaCore, Linux CLI/daemon/tray, scripts, CI/release, and
 `BACKLOG.md`. `tmp.md` records four independent GPT-6.1 Sol reviews; the incoming
-main document records three review passes. This consolidation is
+main document records four review passes. This consolidation is
 documentation-only, not a new code or PR review.
 
 Each remaining item gives evidence, scope, and acceptance. Line references are
@@ -25,11 +26,15 @@ Check the implementation references before coding overlapping work.
 - QuotaCore built in Swift 6 language mode. LLimitd's optional Swift 6 build
   failed at `StatusRenderer.swift:222` on a non-Sendable stored comparator;
   supported-mode tests passed. Async test fixtures also need synchronization work.
-- The incoming review environment lacked Swift and relied on CI. It reports tray
-  tests increasing **23 to 27** after countdown work. Its CI description includes
+- Incoming passes A–C lacked Swift and relied on CI. They report tray tests
+  increasing **23 to 27** after countdown work. Their CI description includes
   macOS `xcodebuild`, QuotaCore tests, Linux QuotaCore/LLimitd tests, and
   `python3 -m unittest discover -s Packages/LLimitd/tray/tests`.
   `scripts/test-panel-geometry.sh` and `scripts/test-limit-colors.sh` cover pure logic.
+- Incoming pass D reports **426 QuotaCore** and **52 LLimitd** tests on Linux
+  **Swift 6.2.3**, observing each regression test fail before its fix. Widget changes
+  were reportedly parse-checked locally and compile-gated on macOS CI. These are
+  source-document reports, not independently verified results in this worktree.
 - The coordinating agent reports the latest combined code passed **492 QuotaCore**
   and **57 LLimitd** tests. These are reported results, not rerun for this doc edit.
 - Native rendering, Instruments, VoiceOver, live authentication, installed widgets,
@@ -47,6 +52,10 @@ Check the implementation references before coding overlapping work.
 
 These scopes and open status come from the task handoff. CI/review monitoring and
 final status updates belong to the coordinating agent. They are not merged work.
+At the follow-up handoff, main reported two completed GLM rounds without agreed
+important findings and latest CI green for **#66/#67/#70/#72**. **#69's first GLM
+round was running; #75's second was queued.** These are reported checkpoints,
+not independently checked approval or completion; all six remain open.
 
 | PR | Branch | Retired instructions and retained implementation scope |
 |---|---|---|
@@ -83,7 +92,7 @@ Retired baseline evidence remains traceable without repeating implementation tas
 
 ### Implementations reported by incoming main
 
-All references below are retained as reports, including newly fetched pass-C
+All references below are retained as reports, including newly fetched pass-C/D
 references. Their PRs, reviews, CI, and merge status were not checked. Do not infer
 status from the incoming document's words “fixed,” “landed,” or “merged.”
 
@@ -128,20 +137,45 @@ status from the incoming document's words “fixed,” “landed,” or “merge
   account JSON `failing`/`error`/`errorKind`, most-actionable duplicate collapse,
   failure escalation from green to warning, and full error tooltips in tray.
   Cross-account severity/recency ordering and all-failed health need separate checks.
+- [#65](https://github.com/L-K-M/LLimit/pull/65), `fix/client-hardening-glm`:
+  shared `errorKind(forStatusCode:)` maps Zhipu/OpenAI/Copilot billing 429 to
+  `.rateLimit`; Copilot quota non-401/403/404 and token-exchange 5xx no longer fall
+  through to misleading `.auth`. Incoming copy says `.api` includes response bodies;
+  reconcile that with #63/#70 so raw diagnostics cannot cross display boundaries.
+  Missing/unparseable Antigravity `remainingFraction` becomes unknown with nil
+  `maxUsagePercent` when no bounded data exists. Transport rethrows
+  `CancellationError`/`URLError.cancelled`, but end-to-end cancellation remains C10.
+  Zhipu accepts success without numeric `code`; OpenAI labels exact 45-minute,
+  25-hour, and N-second windows with classifier tests. `parseNumeric` replaces a
+  per-call regex with a scan. These reported changes do not establish live contracts.
 - [#68](https://github.com/L-K-M/LLimit/pull/68), `fix/venice-key-invalidation`:
   deferred/debounced invalidation, termination flush, and estimate key fingerprint
   preventing attachment to a replacement key. Whole-archive purge cost remains.
+- [#71](https://github.com/L-K-M/LLimit/pull/71), `fix/settings-secure-save`:
+  credential settings use `O_CREAT|O_EXCL` at `0600`, `fchmod`, file `fsync`,
+  same-directory rename, `stat` type/mode verification, and directory `fsync`;
+  failure removes the intermediate and throws. The incoming polling test reports
+  thousands of intermediate `0644` samples before, only `0600` after a large save.
+  Directory restriction, owner/symlink checks, and shared-container compatibility
+  still need proof; reuse this reported helper rather than rebuild secure writes.
 - [#73](https://github.com/L-K-M/LLimit/pull/73): floating dashboard follows system
   appearance after removing forced dark mode; neutral palette validation remains.
 - [#74](https://github.com/L-K-M/LLimit/pull/74), `fix/store-file-permissions`:
   `writeOwnerOnlyAtomically` creates a `0600` temporary file before rename for
-  snapshots/history; chmod/write errors reach stderr. Local directories, settings
-  credentials, type/owner verification, and shared-container compatibility remain.
+  snapshots/history; chmod/write errors reach stderr. #71 reports the settings
+  counterpart; local directories, owner/type checks, and shared access remain C09.
 - [#76](https://github.com/L-K-M/LLimit/pull/76), `fix/history-dedup`:
   skip content-equivalent points when newest is fresh (<1h), fold a newer timestamp
   into stale points to keep flat stretches recent. Reconcile with #52/#75 before
   integration: publication time cannot become source observation time, and genuinely
   fresh equal readings must not disappear. Sparse archives need preservation tests.
+- [#77](https://github.com/L-K-M/LLimit/pull/77), `feat/retry-after-cooldown`:
+  delta-seconds/IMF-fixdate `Retry-After`, capped at 24h, reaches
+  `ProviderClientError.retryAfter` and additive Codable `ProviderFailure.retryAt`
+  (old records decode nil). Coordinator skips still-cooling accounts and carries
+  failure so `mergingStaleUsage` preserves last-known usage; Anthropic copy names
+  the wait. Other clients (Copilot internal API/Kimi), GitHub headers, and broader
+  scheduling remain follow-ups. Preserve `retryAt` rather than invent a duplicate field.
 - [#78](https://github.com/L-K-M/LLimit/pull/78), `fix/store-corruption-quarantine`:
   undecodable snapshot/history moves to `<name>.corrupt`, with
   `reportPersistenceIssue` using Darwin os.Logger/Linux stderr. Quarantine does not
@@ -149,12 +183,30 @@ status from the incoming document's words “fixed,” “landed,” or “merge
 - [#79](https://github.com/L-K-M/LLimit/pull/79), `fix/app-group-store-nil`:
   failable App Group `SnapshotStore` convenience initializer and NSLog breadcrumb
   replace force unwrap; tile/trend still need explicit load outcomes and recovery.
+- [#80](https://github.com/L-K-M/LLimit/pull/80), `fix/widget-dashboard-states`:
+  all-failed/no-data/no-accounts states complement #54 and overlap #72. A header
+  orange-clock stale badge appears at 2× refresh interval even with the clock setting
+  off; this is not per-account age. Flexible systemSmall name/percent columns replace
+  fixed 58pt plus 40/72pt columns reported to collapse dual-mode progress bars.
+  Dashboard rows speak unlimited/unknown instead of literal `INF`/`--`; dead
+  `resetSummaries`/`dashboardBarPercents` are reportedly removed. Medium fixed columns,
+  capacity and full semantics remain; native layout was not verified here.
 - [#81](https://github.com/L-K-M/LLimit/pull/81), `fix/opencode-go-rate-limited`:
   `GoUsageWindow.isExhausted`/`effectivePercent` renders `rate-limited` windows as
   exhausted at any reported percent instead of failing the fetch.
 - [#82](https://github.com/L-K-M/LLimit/pull/82): near-reset pulsing ring glow
   within five minutes, reported in reset-radar work. Anticipation is not verified
   replenishment; an observed-reset receipt remains a separate idea.
+- [#83](https://github.com/L-K-M/LLimit/pull/83), `feat/cli-polish`:
+  `llimit version`/`--version`/`-v` and `accounts list` data-state summaries from pure
+  snapshot-only `StatusRenderer.accountQuotaSummary`: worst remaining percentage,
+  estimate marker, balance, failure kind, or no data. JSON listing remains a gap;
+  preserve credential-free projection rather than loading settings for display health.
+- [#84](https://github.com/L-K-M/LLimit/pull/84), `fix/schema-drift-hardening`:
+  Anthropic fails `.decoding` when every reported window is unparsable/non-dictionary
+  instead of healthy-looking “No usage data”/zero usage, retaining readable windows
+  on partial drift. Kimi coerces heterogeneous `limits[]` element-wise rather than
+  losing all rolling windows. Preserve valid partial data; verify sanitized fixtures.
 - [#85](https://github.com/L-K-M/LLimit/pull/85), `fix/settings-save-debounce`:
   400ms coalescing for keystrokes/color drags, synchronous `willTerminate` flush
   (observer queue nil; async hops may be dropped on quit), and resign-active flush.
@@ -228,19 +280,23 @@ errors; `Core/Clients/ChatGPTOAuth.swift:41-46` included refresh response text.
 Snapshots/history/log owners persisted those strings. #70 implements safe new
 failures; incoming #63 reports excerpt sanitation. Neither reference establishes
 migration of existing archives or a widget-specific credential-free projection.
+#77 reports additive `retryAt` and a cooldown, not the full structured failure model.
 
 **Work:** Migrate/filter historical errors on every relevant read/export/publication
 path; use allowlisted public messages, not raw diagnostic bodies. Add backward-compatible
-`failedAt: Date`, safe `httpStatusCode: Int?`, `retryAfter: Date?` from headers, and
-safe provider code where justified. Define a bounded widget/display DTO; keep raw
-diagnostics transient. Preserve reconnect, unsupported-key, and missing-CLI advice.
-Surfaces can then distinguish “failing for 3h” from “retries in 2m.”
+`failedAt: Date`, safe `httpStatusCode: Int?`, and safe provider code where justified.
+Reuse reported `ProviderFailure.retryAt: Date?`/`ProviderClientError.retryAfter`
+instead of adding a second retry-time field (earlier proposal: `retryAfter: Date?`).
+Define a bounded widget/display DTO; keep raw diagnostics transient. Preserve
+reconnect, unsupported-key, and missing-CLI advice. Surfaces can then distinguish
+“failing for 3h” from “retries in 2m.”
 
 **Done:** Legacy snapshot/history fixtures with reflected access/refresh tokens,
 unknown token-like values, HTML, controls, and oversized bodies leak nothing through
 persisted/display/export/log output. Old Codable records still decode. Typed,
 unexpected, OAuth, cooldown/countdown, and recency-ordering cases stay actionable.
-Do not reopen #70's completed new-failure implementation.
+Do not reopen #70's completed new-failure implementation; reconcile #65's reported
+response-body errors with that boundary and #77's carried cooldown failures.
 
 ### C03. macOS unreadable-settings guard [high; Linux retired in #66]
 
@@ -294,15 +350,19 @@ or delete namespaces. Preserve existing managed-Codex operation guarantees.
 history before committing removal. `AppModel.swift:163-184,550-578,1603-1611`
 left edits in memory; Auto-fill could replace save errors with success. Settings
 often hides notices. A single `statusMessage` is overwritten by later refresh text.
+Pass D also reports unstructured `print()`/`debugInfo()` on every snapshot sync
+in `LLimitApp/AppModel.swift`, separate from #78's persistence logger.
 
 **Work:** Return explicit durable outcomes. Save settings before destructive derived
 cleanup. Roll back failed mutations or expose retryable unsaved drafts. Keep scoped
 notices with severity, account/context, timestamp, and recovery action; later success
-must not dismiss a durability failure.
+must not dismiss a durability failure. Route sync diagnostics through existing
+`reportPersistenceIssue`-style logging with safe structured fields, not stdout dumps.
 
 **Done:** Inject failures for add/import/edit/enable/remove/Auto-fill. Durable state
 stays unchanged, CLI exits nonzero, errors appear beside the operation, uncommitted
-removal preserves history, and cleanup failures remain visible.
+removal preserves history, and cleanup failures remain visible. Capture sync logs:
+severity/context stay useful, secrets stay absent, and JSON stdout stays clean.
 
 ### C07. Imported OpenAI identity needs workspace and user binding [high]
 
@@ -331,30 +391,33 @@ grant. Report durability uncertainty, not ordinary refresh success.
 the next cycle neither loses the replacement nor resubmits the old grant. Use
 synthetic transport/storage, not real OAuth credentials; do not overwrite env references.
 
-### C09. Private persistence needs creation-time and ownership guarantees [high]
+### C09. Private persistence: directories, ownership, and integration [high; partial]
 
 **Evidence:** Baseline `Core/SettingsStore.swift:24-32` created unrestricted parents,
 wrote atomically, then ignored chmod failure. Snapshot/history requested `0644`.
-Incoming #74 reports owner-only atomic snapshot/history writes; credentials and
-directory/type/owner guarantees remain separate.
+Incoming #71 reports secure settings creation/replacement/type/mode/durability;
+#74 reports owner-only snapshot/history writes. Neither report establishes every
+directory/owner/symlink or shared-container invariant.
 
-**Work:** Encapsulate private atomic persistence: local credential directory `0700`,
-temporary/replacement files `0600`, symlink/wrong-type/wrong-owner validation, final
-mode checks, and explicit failures. Use the narrowest functional App Group mode
-compatible with sandboxed widgets. Reuse reported #74 mechanics where applicable.
+**Work:** Reuse reported #71/#74 helpers. Restrict local credential directories to
+`0700`, validate owners/types/symlinks and final modes, and propagate verification
+failures. Keep local temporary/replacement files `0600` and the narrowest functional
+App Group mode compatible with sandboxed widgets; do not rebuild reported byte-one
+protection or swallow its cleanup/fsync errors.
 
 **Done:** First-save/overwrite/permission-failure/symlink/type/owner tests prove no
-public credential temporary file and no falsely successful save. Verify replacement
-and shared-container access, not only chmod after exposure.
+public credential temporary file and no falsely successful save. Verify replacement,
+directory restrictions, and shared-container access, not only chmod after exposure.
 
-### C10. Cancellation must not become ordinary failure [high]
+### C10. Cancellation must not become ordinary failure [high; transport partly reported]
 
-**Evidence:** `Core/HTTPClient.swift:29-34` wrapped cancellation; coordinator captured
-every error. Publication owners lacked a cancellation-before-commit guarantee.
+**Evidence:** Baseline `Core/HTTPClient.swift:29-34` wrapped cancellation; coordinator
+captured every error. #65 reports transport rethrow only. Publication owners lacked
+a cancellation-before-commit guarantee; rethrow alone does not prove propagation.
 
-**Work:** Preserve cancellation through transport/client/coordinator, stop retries,
-and guard snapshot/history commits. Quota cancellation must not replay or destroy
-uncertain official-CLI rotating-grant operations.
+**Work:** Reuse reported transport handling; preserve cancellation through clients/
+coordinator, stop retries, and guard snapshot/history commits. Quota cancellation
+must not replay or destroy uncertain official-CLI rotating-grant operations.
 
 **Done:** Cancel a suspending fetch: no new snapshot/history write. Linux shutdown
 signals do not replace good usage with shutdown-induced failures. Pending auth
@@ -373,31 +436,50 @@ any skipped account records; no silent partial recovery or empty defaults.
 **Done:** Truncated/newer/mixed-provider files preserve originals. Test restoration,
 downgrade preservation, version validation, backup failures, and visible recovery.
 
+### C12. Duplicate provider registration can trap [medium; reported latent risk]
+
+**Evidence:** Pass D identifies `Core/QuotaCoordinator.swift` initializer's
+`Dictionary(uniqueKeysWithValues:)`: two clients reporting one provider can trap.
+It cites Zhipu/Z.ai as multi-client motivation; distinct provider cases alone do
+not establish that duplicate same-provider registration is supported.
+
+**Work:** Define the registration invariant before changing construction. Preserve
+the suggested `Dictionary(_, uniquingKeysWith:)` option only with an explicit
+duplicate policy; do not silently select the wrong client or add a broad registry.
+
+**Done:** Inject duplicate provider clients: documented deterministic handling or
+actionable configuration failure, no process trap. Normal provider registration
+and Zhipu/Z.ai identity remain unchanged.
+
 ## Providers and account setup
 
-A01/A02 are retired in #69; remaining source-backed items follow.
+A01/A02 are retired in #69; remaining baseline and reported follow-ups follow.
 
 | ID | Evidence | Scope and acceptance |
 |---|---|---|
-| A03 | Copilot retries 503 through auth paths then calls it `.auth` (`Core/Clients/CopilotClient.swift:144-158,216-225,274-287`). | Fallback only for verified compatibility statuses. First 503 makes one `.api` request; malformed successful exchange is `.decoding`; preserve 429 and supported auth fallback. |
+| A03 | Copilot retries 503 through auth paths then calls it `.auth` (`Core/Clients/CopilotClient.swift:144-158,216-225,274-287`); #65 reports fallback hardening. | Reconcile #65 before changing fallback. Verify compatibility statuses: first 503 makes one sanitized `.api` request; malformed successful exchange is `.decoding`; preserve 429 and supported auth fallback. Do not restore raw-body errors when integrating #70. |
 | A04 | Managed Codex maps decoding/launch/timeout/storage/identity failures to `.auth` (`Core/CodexAccountService.swift:84-106,204-206`). | Map domain failures to sanitized actionable kinds: missing CLI configuration, malformed rates decoding, identity mismatch auth. Preserve every pending-operation guarantee. |
 | A05 | Shared metadata blocks distinct imports (`AppModel.swift:583-588`; `Linux/QuotaDaemon.swift:227-235`). | Compare keyed provider-specific authenticators, not intersecting arbitrary values. Different Devin keys sharing a server/Google tokens sharing a project remain importable; identical keys deduplicate. |
 | A06 | Any OpenCode Anthropic candidate suppresses ordinary Keychain discovery, even stale/different accounts (`AppModel.swift:501-519`; `Core/CredentialDiscovery.swift:364-367`). | Explicit Claude/all-provider scans include/deduplicate Keychain candidates. Other-provider scans never prompt Keychain. Distinct injected sources both appear. |
 | A07 | Antigravity companion discovery ignores custom XDG data roots and returns one of several accounts (`CredentialDiscovery.swift:339-345,403-440`). | Reuse resolved OpenCode roots; enumerate distinct usable accounts without mixing token/project fields. Test custom roots, two accounts, and migration-root duplicates. |
 | A08 | One pending OpenAI login blocks every refresh (`AppModel.swift:187-201,778-799,857-872`; `refreshNow` busy guard). | Skip/preserve only busy accounts. Unrelated provider refresh succeeds during browser login; no competing managed-profile request. Give visible waiting/busy feedback rather than a silent no-op. |
+| A09 | Pass D reports `dateFromEpochTimestamp` magnitude-only scaling can read pre-2001 milliseconds as seconds (year ~5000), 0/-1 reset sentinels as 1970 with perpetual “reset” text, and `monthEndDate`/`startOfNextMonth` using machine timezone for assumed Copilot/Zhipu resets (`Core/Utilities.swift`). | Establish provider units/sentinel semantics with fixtures; use explicit units/context rather than another global magnitude guess. Reject invalid reset sentinels at the provider boundary without forbidding legitimate general epoch dates. Pin monthly reset helpers to UTC only after contract verification. Test historical milliseconds, valid seconds/milliseconds, 0/-1, malformed/future values, UTC boundaries, and multiple machine timezones. |
 
 ### Provider questions requiring sanitized fixtures
 
-Incoming main also reports empty Anthropic recognized schemas, Zhipu responses
-without supported limit types, and missing Google fractions treated as zero.
-Retain these as validation candidates, not established additional endpoint defects.
-Synthetic missing/empty/hostile-number tests should distinguish unknown from zero,
-require recognizable success, and keep aggregate usage nil without bounded metrics.
-Capture contracts before choosing new endpoint or absent-field semantics:
+Earlier incoming reports identified empty Anthropic schemas, unsupported Zhipu
+limit types, and missing Google fractions treated as zero. #65/#84 now report
+Google unknown handling, Anthropic all-unreadable failure/partial preservation,
+Zhipu optional numeric `code`, exact OpenAI window labels, and heterogeneous Kimi
+limits. Reconcile these references rather than reimplement their reported fixes.
+The Zhipu no-supported-limit case remains a validation candidate. Missing/empty/
+hostile-number tests must distinguish unknown from zero, require recognizable
+success, preserve valid partial windows, and keep aggregate usage nil without
+bounded metrics. Capture contracts before choosing new endpoint/field semantics:
 
 - Antigravity fixed model catalog and absent/unparseable fractions
   (`GoogleAntigravityClient.swift:18-23,50-79`): exhausted/unavailable semantics and
-  current-model omission; missing data is not verified zero.
+  current-model omission; missing data is not verified zero. Coordinate #65.
 - Anthropic extra-usage credit-to-dollar scale (`AnthropicClient.swift:109-120`):
   response tied to known billing amount before changing units; private headers.
 - Copilot current AI-credit versus legacy premium-request plans, organization scope,
@@ -405,32 +487,35 @@ Capture contracts before choosing new endpoint or absent-field semantics:
 - Claude official CLI namespace/renewal compatibility and detected-version UA
   (reported #91); synthetic ordering is not compatibility with every version.
 - OpenAI additional limits/credits/`allowed`/reached type/absolute reset fields:
-  optional decoding only from captured contracts.
+  optional decoding only from captured contracts; preserve #65 label-to-kind tests.
 - Zhipu/Z.ai percentages/endpoints and private Google/Anthropic headers.
 
 No additional code-established Venice, OpenCode Go, Kimi, Devin, or Zhipu client
-defect warranted speculative API changes in the `tmp.md` review. Reported #81 is
-retained without independent validation; provider APIs are undocumented and unstable.
+defect warranted speculative API changes in the original `tmp.md` review. Later
+pass-D reports are separate evidence; #65/#81/#84 were not independently validated
+here. Provider APIs are undocumented and unstable.
 
 ## Performance, networking, and scheduling
 
-| ID | Source-backed cost or risk | Scope and acceptance |
+| ID | Source-backed cost or reported risk | Scope and acceptance |
 |---|---|---|
 | F01 | `Core/QuotaHistoryStore.swift:19-40,55-73` decodes full archives before filtering, sorts twice on append, and caps entries, not bytes. App publication then reloads a two-day slice. | Benchmark 12 accounts/multiple metrics/3,000 entries and 45-day archives: append latency, UI stalls, widget RSS. Publish bounded `quota-trend.json` projection so windowed widget reads do not decode raw archives; downsample before sharing. Consider partitioned/indexed/append-only storage only with preservation tests and measured need. #52/#75/#76 semantics must survive. |
 | F02 | Edits/publication synchronously encode/write/reload local/shared stores on `@MainActor` (`AppModel.swift:163-175,274-289,1759-1760,2020-2031`). Only timeline reloads were debounced at baseline; #85 reports edit debounce. | Serialize persistence behind an application service; move encode/I/O off main actor and skip identical redacted writes. Coordinate reported dirty flag/debounce, flush final edits on focus loss/close/termination and before Test Connection/Refresh; auth durability is immediate. Slow-storage tests plus Instruments verify responsive typing/resize and final durability. Earlier 500ms is a tuning candidate, not a durability rule; #85 reports 400ms. |
 | F03 | Stores retain codecs under `@unchecked Sendable`; append/purge is unlocked read-modify-write and baseline corruption blocked future appends. | Operation-local codecs and serialized logical mutations; coordinate cross-process writers. Reuse/check reported #78 quarantine rather than rebuilding it. Concurrent append/purge, truncation/schema mismatch, and replacement failure preserve unrelated data and corruption evidence. |
 | F04 | Metric rebuilds scan snapshots/accounts/metrics; hover/resize/minute ticks can repeat work; both dashboards use eager cards (`LLimitApp.swift:416-442,557-562,633-668,1397-1440`; `ProviderQuotaCard.sparkPoints`/`SparkSeriesBuilder.points`). | Precompute immutable `[accountID: [metricID: [SparkPoint]]]` on history changes, hoist lookups, and profile before lazy-card changes. Hover/resize must not rebuild unchanged series; moving windows stay correct. No measured stuttering claim. |
-| F05 | `Core/HTTPClient.swift:14-28` uses shared URLSession, unbounded buffered bodies, request-only timeout, and one coordinator task per account; URL codes/cancellation collapse. | Dedicated ephemeral session with cookies/cache off, resource deadline, streaming body cap, host connection/concurrency bounds, preserved URL codes/cancellation. Test slow/oversized/many-account cases. Centralize verified transient classes (408/425/429, provider-specific 403, selected 5xx), Retry-After/GitHub rate headers, and a small jittered read-only retry budget. Never replay ambiguous OAuth exchanges. |
+| F05 | `Core/HTTPClient.swift:14-28` uses shared URLSession, unbounded buffered bodies, request-only timeout, and one coordinator task per account; baseline URL codes/cancellation collapse. #65 reports cancellation rethrow; #77 reports Anthropic cooldown. | Dedicated ephemeral session with cookies/cache off, resource deadline, streaming body cap, host connection/concurrency bounds, preserved URL codes; C10 covers end-to-end cancellation. Reuse #77 delta/date/24h cooldown, then adopt verified headers in Copilot internal/Kimi and GitHub rate metadata. Test slow/oversized/429/5xx/many-account cases, carried failures and old Codable records. Centralize remaining verified transient classes (408/425/429, provider-specific 403, selected 5xx) and small jittered read-only retries. Never replay ambiguous OAuth exchanges. |
 | F06 | A 29-minute-old snapshot with a 30-minute interval sleeps another 30 minutes after restart (`Linux/QuotaDaemon.swift:336-351,579-592`); manual refresh has no shared deadline. | Schedule from last attempt/success and remaining due time; inject clock/sleeper. Refresh fixture after one minute, overdue data immediately. Coalesce manual refresh/wake/network return, jitter/cooldown; suspend with no configured accounts. |
-| F07 | Trend entries retain raw history/build all arrays before 240-point cap; tiles generate up to 37 entries for static states (`QuotaTimelineProvider.swift:5-10,55-68`; `ProviderQuotaWidget.swift:183-209`). | Compact projection, one entry for static states, explicit changing-state boundaries. Measure archive/render/RSS. Value sharing means 37 entries do not prove 37 deep heap copies; dashboard timeline already has one lightweight entry. |
+| F07 | Trend entries retain raw history/build all arrays before 240-point cap; tiles generate up to 37 entries for static states (`QuotaTimelineProvider.swift:5-10,55-68`; `ProviderQuotaWidget.swift:183-209`). Pass D reports footer-countdown clones across twelve tile kinds per reload. | Compact projection and one entry with `.after(nextRefresh)` except explicit changing-state/reset/stale boundaries. Measure archive/render/RSS and countdown behavior. Value sharing means 37 entries do not prove 37 deep heap copies; dashboard timeline already has one lightweight entry. Coordinate W09 boundaries rather than merely deleting all dated entries. |
 | F08 | Transient App Group failures can leave display stores incomplete; reported #79 avoids a nil-container crash but does not repair publication. | Reconcile redacted settings/latest local snapshot at bootstrap; bounded retries and affected-timeline reload after repair. Inject transient failure; recover without another credential edit and expose load failure while unavailable. |
 | F09 | Venice intermediate key edits can purge/rewrite the whole archive (`AppModel.swift:1601-1638`); reported #68 defers invalidation and fingerprints estimates. | Retain draft/commit semantics or clear old-key display state immediately, then purge once per committed replacement. Verify #68 before further debounce work. Typed/pasted key plus large archive: no per-character purge, no old estimate on new key, correct in-flight rejection, durable final edit. Paste is not established as 32 updates. |
 | F10 | `AppModel.primaryColorsByAccountID` (`:1462`) constructs `currentSettings()`/all account styles per access across view bodies. | Profile, then memoize by account/style revision. Rename/reorder/enable/style changes invalidate the right projection; unrelated hover/state changes do not rebuild settings or alter stable identity. |
+| F11 | Pass D reports two `ISO8601DateFormatter` allocations per `parseISO8601`, response-local decoders in eight clients, and repeated all-account sorting in `accountColorStep` (`Core/Utilities.swift`, `Clients/`, `ProviderMetricSelection.swift`). #65 reports the numeric regex-to-scan change. | Profile parsing/projection cost first. Prefer supported value-type `ISO8601FormatStyle`, never an unsynchronized static formatter; hoist stable-account sorting. Preserve the proposed per-client decoder reuse only with proven synchronization under parallel same-provider accounts; otherwise keep operation-local codecs (F03). Test timestamp/number parsing equivalence, concurrent clients, and unchanged identity after reorder/disable. |
+| F12 | Pass D reports up to four sequential Copilot round trips, three Cline calls (profile → balance → usage-limits), and a global 10s transport timeout. Its ~40s Copilot estimate is inferred, not measured; it reports Linux whole-request versus Darwin idle `timeoutInterval` behavior. | Benchmark/verify both platforms; add per-client timeout budgets within F05's resource bounds, especially streaming Muse versus chained Copilot. Parallelize independent Cline balance/usage work after validated user identity where safe; preserve authentication prerequisites and failure semantics. Slow-stream/chain/cancellation fixtures verify budgets, response bounds, and no OAuth replay. |
 
 ## Linux display, installation, and convenience
 
 L01 is retired in #66. Baseline findings below must be reconciled with reported
-#50/#51/#64/#88/#97–#99 before implementing overlapping behavior.
+#50/#51/#64/#83/#88/#97–#99 before implementing overlapping behavior.
 
 | ID | Evidence | Scope and acceptance |
 |---|---|---|
@@ -443,7 +528,7 @@ L01 is retired in #66. Baseline findings below must be reconciled with reported
 | L08 | README `install.sh -- --timer` is rejected by parser (`Packages/LLimitd/README.md:89`; installer:22-26); rejection reproduced pre-install. | Correct the documented command and execute that parser path successfully. |
 | L09 | No in-place rename/update; noninteractive secrets use `--set` argv. | Transactional `llimit accounts set <id> [--name …] [--set key=value …]` under settings lock, plus stdin/file-descriptor secret input. Preserve IDs/history/tile slots, invalidate key-dependent estimates, keep secrets out of argv/history/diagnostics; inject durable-save failures. |
 | L10 | Release hardcodes amd64 and does not smoke-test packaged binary (`build-deb.sh:89`; release workflow:123-133). | Fixture-XDG artifact smoke checks, then ARM64 if scoped. Validate binary/dependencies/units and GTK-free tray output; exercise installed CLI flags, not only source tests. |
-| L11 | Incoming main proposes `--version`, `accounts list --json`, daemon `--quiet`, and cross-account severity/recency failure order; #64 reports per-account ranking only. | Embed release version; stable credential-free account metadata, clean JSON stdout/quiet daemon output. Test ordering with C01 timestamps and isolated fixtures; preserve documented machine contracts. |
+| L11 | #83 reports version aliases and account data-state summaries; `accounts list --json`, daemon `--quiet`, and cross-account severity/recency order remain proposed gaps. #64 reports per-account ranking only. | Reuse snapshot-only `accountQuotaSummary`; verify release version embedding rather than rebuild version flags. Add stable credential-free JSON account metadata and clean quiet/JSON output. Test ordering with C01 timestamps and isolated fixtures; preserve machine contracts. |
 | L12 | Amount-only tray accounts lack headline; reset radar has no dedicated tray section at baseline (`format_account_header`). | Display reported amount without percentage; integrate reported #51 radar. Test credits-only Cline, missing data versus empty schedule, absolute reset ordering and stale labels. |
 
 ## macOS usability, visuals, and accessibility
@@ -459,9 +544,10 @@ L01 is retired in #66. Baseline findings below must be reconciled with reported
 | M07 | Preset matching compares legacy ring fields that no longer drive rendered metric colors (`WidgetStylePreset.swift:299-317`). | Match rendered properties, show affected longest window and real tile preview. Current/custom follows actual appearance; one-action reset to global. |
 | M08 | Direct mutable `LimitKindColors` assignments bypass initializer normalization (`sessionHexColor`, `otherHexColors`); #53 reports defensive `matching` rebuild. | Canonical writes with existing normalizer; consider setters before widening visibility. Test lowercase/short/invalid assignments, uppercase canonical output and round trips; retain legacy matching behavior and validated palette. |
 | M09 | System appearance alone does not validate a graphite light-surface palette. | Coordinate reported #73; validate text/hairlines/tracks/status accents/transparency on actual light/dark surfaces. Window identity remains separate from provider branding. |
-| M10 | `WidgetVisibilitySettings.showResetInfo` is persisted but unused; `resetSummaries`/`dashboardBarPercents` reported dead (`Core/Models.swift`; widget). | Verify consumers; expose scoped reset preference or deliberately retire compatibility field. Delete only proven-unused helpers; retain round-trip compatibility and current reset presentation. |
+| M10 | `WidgetVisibilitySettings.showResetInfo` is persisted but unused (`Core/Models.swift`); #80 reports removal of dead `resetSummaries`/`dashboardBarPercents`. | Reconcile #80 rather than request duplicate helper cleanup. Verify remaining consumers; expose scoped reset preference or deliberately retire compatibility field. Retain round-trip compatibility and current reset presentation. |
 | M11 | Color alone remains a state channel in sidebar/provider dots and summary controls; incoming main groups rings/menu bars with them. | Add check/warning/exclamation or textual/AX equivalents, honoring Differentiate Without Color. Keep identity-colored rings/menu bars as identity, not status; reserved accents carry danger. Extend reported #56 pattern with one state enum. |
-| M12 | Literal `INF`/`--` appear in Settings/widgets/tray; incoming main reports no localization infrastructure. | Localized Unlimited/Unknown and semantic equivalents; String Catalog as a bounded project. Test hidden percentages/localized long labels without changing amount/unknown semantics. |
+| M12 | Literal `INF`/`--` appear in baseline Settings/widgets/tray; #80 reports dashboard spoken equivalents only. Incoming main reports no localization infrastructure. | Localized Unlimited/Unknown and semantic equivalents across remaining surfaces; String Catalog as a bounded project. Test hidden percentages/localized long labels without changing amount/unknown semantics; dashboard speech alone is not full localization. |
+| M13 | Pass D reports provider-keyed legacy style fallback in `Core/Models.swift` reuses one entry for two same-provider accounts, permanently saving identical inherited `primaryHexColor`/style. Tiles are the trend legend. | Consume a legacy match once, or clear only duplicate inherited primaries beyond the first deterministic match. Fixture two siblings/one legacy entry, multiple entries and save/reload: automatic variants remain distinguishable, explicit account overrides stay authoritative, IDs/backgrounds/history survive. Migration-only; do not recolor existing deliberate custom matches. |
 
 ### Native layout/lifecycle hypotheses, not reproduced defects
 
@@ -485,7 +571,8 @@ L01 is retired in #66. Baseline findings below must be reconciled with reported
 ## Widgets and chart integrity
 
 W01/W02 and dashboard W03 are retired in #72; C02 observation semantics are retired
-in #75. Remaining load, sampling, forecast, and rendering work follows.
+in #75. Per-account age is not part of #72; see W14. Remaining load, sampling,
+forecast, and rendering work follows, coordinated with reported #80.
 
 | ID | Evidence | Scope and acceptance |
 |---|---|---|
@@ -493,19 +580,23 @@ in #75. Remaining load, sampling, forecast, and rendering work follows.
 | W04 | Base/deep/pale repeats after three accounts, dash patterns restart per account, and tiles are trend legend (`Core/ProviderMetricSelection.swift:168-170,194-204`; widget:815,851-868). | Stable central non-color account tags/pattern identity; validate any broader color design. Four/twelve/coincident/grayscale/custom-identical-color accounts remain traceable. Increasing modulus fails: higher steps all become pale. Rename/add/reorder/disable must not retarget identity. |
 | W05 | Uniform `downsampleTrendPoints` loses zero at index 120 when 241 points become 240 (`LLimitQuotaWidget.swift:930-945`). | Chronological extrema-preserving buckets, endpoints/reset transitions, bounded output. Retain fixture's zero and short refill spikes; source-time observations survive display sampling. |
 | W06 | `depletionWarnings` uses display-decimated last eight points across resets and `remainingPercent <= 60` gate (`LLimitQuotaWidget.swift:838-879,964-995`). | Estimate from fresh current-reset-segment observations before display sampling, with defined horizon/confidence. 10% pre-reset → 100% reset → 20% now warns about current depletion; stale/gapped/single-point data is not confident. Coordinate reported #87 before converging estimator implementations; correct semantics first. |
-| W07 | Trend AX only “Quota trend chart”; hiding percentages loses dashboard numeric semantics; literal `INF`/`--` (`widget:130-143,207-235,520-534,1050-1065`). | Presentation-independent account/metric/value/reset/freshness/failure spoken summaries; hide decoration. Hidden percentages retain numeric semantics and named unknown/unlimited. Native traversal required; reported badge labels do not close this. |
+| W07 | Trend AX only “Quota trend chart”; hiding percentages loses dashboard numeric semantics; literal `INF`/`--` (`widget:130-143,207-235,520-534,1050-1065`). | Presentation-independent account/metric/value/reset/freshness/failure spoken summaries; hide decoration. Hidden percentages retain numeric semantics and named unknown/unlimited. Native traversal required; reported badge labels and #80 dashboard sentinel speech do not close this. |
 | W08 | Light/custom backgrounds retain white/faint text/weak scrims (`ProviderQuotaWidget.swift:479-500,571-587,735-738,819-836`; trend:184-199). | Luminance-aware neutral chrome or controlled scrim, preserving identity hues/primary overrides. Capture white/black/saturated/transparent/high-contrast surfaces. |
 | W09 | Tile last entry may precede stale threshold; delayed reload freezes “Data is current”/countdown (`ProviderQuotaWidget.swift:176-211,610-622,671-679`). | Explicit stale/reset boundary entries beyond requested reload and honest cached age. Inspect timeline without extra provider calls; verify delayed native delivery. macOS delay frequency is unmeasured. |
 | W10 | “Unlimited plans only” means any unlimited metric was seen, even with unknown premium quota (`widget:124-125,745-762,908`). | Distinguish all-explicitly-unlimited from mixed unknown/non-chartable; unknown premium plus unlimited chat never says unlimited-only. |
 | W11 | Dashboard/trend impose 72% alpha while tile/shared parsers retain RGBA (`widget:1092-1096`; tile:887-892; shared:161-165). | One tested component/background contract. Consolidate `normalizeHexColor`, `rgbaComponents`, `Color(providerTileHex:)`, `backgroundBaseColor`, `AppModel.parseHexColor`; do not add another parser. Transparent/quarter/half/full alpha matches before intentional effects. |
 | W12 | Incoming main requests current-value/time/percentage context and multiple relevant trend warnings when space permits. | Add bounded summaries from corrected observations without obscuring traces. Fixture sparse/dense/multiple-warning layouts; disclose omitted warnings, retain unknown/freshness and accessibility context. |
+| W13 | Pass D reports no `.widgetURL` anywhere: tiles cannot open their assigned account and dashboards cannot open a failing account (`LLimitWidgetExtension/`; host routing in `LLimitApp/`). | Add a scoped app URL scheme/account route before widget links. Test assigned/failing/unknown/removed account IDs, useful app focus and recovery, credential-free URLs, frozen widget kinds, and no silent account mutation or login switch. |
+| W14 | #72 covers truthful dashboard membership/value/load states, not per-account age. #80 reports a header badge at 2× interval; a fresh aggregate attempt can still carry old `ProviderUsage.fetchedAt`. | Use per-account source time/current failure for cached-row age/health, sharing L02's semantics rather than inventing another freshness model. Fixtures: mixed fresh/stale, targeted sibling refresh, cached failure, hidden clock/percentages; no aggregate timestamp implying each account succeeded. |
 
 ### Widget visual/runtime checks
 
 - Medium dashboard attempts up to twelve rows plus header/footer/padding without
   geometry-derived capacity. Render 1/2/6/12 accounts, dual values, failures, enlarged
   text; derive capacity, avoid fixed-width clipping, disclose omitted accounts.
-  Consider medium tiles/`.systemLarge` dashboard only after overflow work; freeze kinds.
+  Reconcile #80's reported systemSmall flexible-column fix; medium fixed columns
+  and provider-limit clamp remain. Consider medium tiles/`.systemLarge` dashboard
+  only after overflow work; freeze kinds.
 - Inspect 6.5-point axes and 7-point tile badges at actual desktop scaling.
 - Segment gap-spanning solid paths and uncertain refill timing; a later observation
   does not establish continuous measurement or an exact reset instant.
@@ -652,7 +743,8 @@ bounded follow-up with its acceptance condition; do not rebuild recorded feature
   `.after(nextRefreshDate)`. Static tile entries/raw trend payload are separate F07 work.
 - Percentage visibility is dashboard-only at baseline: tiles do not read
   `showPercentageValues`. Clarify the label or deliberately extend scope; do not
-  assert tile support. Dead reset helpers/unused visibility field remain M10, not done.
+  assert tile support. #80 reports dead reset-helper removal; the unused
+  `showResetInfo` compatibility field still remains M10 work.
 - Missing snapshot is not empty reset schedule; stale radar is not a fresh all-clear.
   Whitespace-only `resetIn` disappears in human/JSON/tray paths.
 - No-op append still enforces retention. Sparse entries are source observations,
@@ -664,24 +756,31 @@ bounded follow-up with its acceptance condition; do not rebuild recorded feature
   value-type `ISO8601FormatStyle` or operation-local instances. Sorting needs a total
   comparator; Swift `sorted` does not supply stable tie behavior.
 - Existing validated colors, full-metric slots, account provenance, and frozen widget
-  kinds are constraints, not opportunities for speculative redesign.
+  kinds are constraints, not opportunities for speculative redesign. Reported #80
+  aggregate staleness and #65 transport cancellation are partial boundary improvements,
+  not proof of per-account freshness or cancellation-safe publication.
 
 ## Suggested follow-up order and handoff
 
 1. Reconcile overlapping reported implementations with the six open slices before
-   choosing code work, especially #63/#70, #52/#76/#75, #54/#72, and #87/W06.
+   choosing code work, especially #63/#65/#70, #52/#76/#75, #54/#80/#72,
+   #71/#74/C09, #77/C01/F05, and #87/W06. Reported PR progress is not a merge instruction.
 2. Prioritize remaining auth/publication/durability/cancellation boundaries C03–C10,
    historical/structured failure C01, and recovery C11. Unrelated green tests do
-   not prove these invariants.
-3. Measure and bound F01–F05/F09; compact widget projection, serialized persistence,
-   and cached series before storage redesign. Verify scheduler F06 and repair F08.
+   not prove these invariants. Keep registration C12 and timestamp A09 bounded.
+3. Measure and bound F01–F05/F09/F11/F12; compact widget projection, serialized
+   persistence, and cached series before storage redesign. Verify scheduler F06
+   and repair F08. Do not trade allocation reduction for shared-codec races.
 4. Choose focused freshness/notices/accessibility, transactional Linux account edits,
-   installer/TLS/artifact checks, and tile/trend load states using their fixtures.
+   installer/TLS/artifact checks, tile/trend load states, account age and deep links
+   using their fixtures. Reconcile reported #83 version/listing work first.
 5. Menu modes/light chrome/presets/optional metadata and novel features follow honest
-   observations and forecast correctness. Signing/provider fixtures gate release claims.
+   observations and forecast correctness. Legacy-style migration M13 preserves
+   account identity; signing/provider fixtures gate release claims.
 
 The coordinating agent owns CI/GLM monitoring, final PR/status reconciliation, and
 publication of this document. `tmp.md` records an original GLM exit target of two
-rounds without applicable important findings or the requested timeout; no completed
-round or approval is inferred here. Feature PRs remain open per the handoff. Retain
-`tmp.md` until final `ANALYSIS.md` is pushed to main.
+rounds without applicable important findings or the requested timeout. The follow-up
+checkpoints above are reported only; no overall approval/completion is inferred.
+Feature PRs remain open per the handoff. Retain `tmp.md` until final `ANALYSIS.md`
+is pushed to main.
