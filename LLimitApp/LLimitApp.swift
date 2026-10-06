@@ -1276,6 +1276,33 @@ private struct OverviewCard: View {
           tint: failureCount == 0 ? .green : .orange
         )
       }
+
+      // Best model to burn: the account with the most headroom
+      if let best = bestModelToBurn(from: providers) {
+        Divider()
+          .frame(height: 1)
+          .padding(.vertical, 4)
+        HStack(spacing: 6) {
+          Image(systemName: "trophy.fill")
+            .font(.system(size: 9, weight: .bold))
+            .foregroundStyle(.yellow)
+          Text("Best to burn")
+            .font(.system(size: 9, weight: .semibold))
+            .tracking(0.4)
+            .foregroundStyle(.white.opacity(0.55))
+          Spacer()
+          Text(best.title)
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.85))
+          if let remaining = MenuBarQuotaStyling.remainingPercent(for: best) {
+            Text("\(remaining)%")
+              .font(.system(size: 9, weight: .bold))
+              .monospacedDigit()
+              .foregroundStyle(.green.opacity(0.85))
+          }
+        }
+        .padding(.horizontal, 4)
+      }
     }
     .padding(13)
     .dashboardCard()
@@ -1684,5 +1711,18 @@ private enum MenuBarQuotaStyling {
   private static func clampPercent(_ value: Int) -> Int {
     max(0, min(100, value))
   }
+}
+
+/// The account with the most headroom: highest bounded remaining percentage.
+private func bestModelToBurn(from providers: [ProviderUsage]) -> ProviderUsage? {
+  let candidates = providers.filter { provider in
+    provider.metrics.contains(where: { !$0.isUnlimited })
+  }
+  guard !candidates.isEmpty else { return nil }
+  let sorted = candidates.sorted { a, b in
+    (MenuBarQuotaStyling.remainingPercent(for: a) ?? 0) > (MenuBarQuotaStyling.remainingPercent(for: b) ?? 0)
+      || ((MenuBarQuotaStyling.remainingPercent(for: a) ?? 0) == (MenuBarQuotaStyling.remainingPercent(for: b) ?? 0) && a.title < b.title)
+  }
+  return sorted.first
 }
 
