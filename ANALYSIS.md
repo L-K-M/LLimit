@@ -1,6 +1,6 @@
 # LLimit — analysis and shovel-ready ideas
 
-This document is the durable output of three independent full reviews of `main`
+This document is the durable output of four independent full reviews of `main`
 at `2d6ac1e` ("Add twelve widget slots and a resizable dropdown"), consolidated
 here. Between them the reviews read every surface: the macOS app
 (`LLimitApp/`), the widget extension (`LLimitWidgetExtension/`), the shared
@@ -17,11 +17,15 @@ entries that are already **done** or **stale** so they are not re-litigated.
 
 ## How the review was validated
 
-- Swift toolchain is not available in the review environment, so Swift changes
-  are verified by CI: `.github/workflows/ci.yml` runs the macOS `xcodebuild`
-  build plus `swift test` for `QuotaCore`, and a Linux SwiftPM job that runs
-  `swift test` for **both** `QuotaCore` and `LLimitd`, plus the Python tray
-  tests (`python3 -m unittest discover -s Packages/LLimitd/tray/tests`).
+- Passes A–C had no Swift toolchain in their review environment, so their
+  Swift changes are verified by CI: `.github/workflows/ci.yml` runs the macOS
+  `xcodebuild` build plus `swift test` for `QuotaCore`, and a Linux SwiftPM
+  job that runs `swift test` for **both** `QuotaCore` and `LLimitd`, plus the
+  Python tray tests (`python3 -m unittest discover -s Packages/LLimitd/tray/tests`).
+- Pass D ran both Linux suites locally on Swift 6.2.3 (QuotaCore 426 tests,
+  LLimitd 52 tests at its close) and observed every regression test fail
+  before its fix; widget-code changes are parse-checked locally and
+  compile-gated on the macOS CI job.
 - Tray tests were run locally during the review (23 → 27 passing after the
   countdown change).
 - `scripts/test-panel-geometry.sh` and `scripts/test-limit-colors.sh` exercise
@@ -143,6 +147,53 @@ Review pass C (third independent pass; PRs open for review):
   per-kind failures notify once, re-arm on recovery; thresholds configurable
   in Settings → General (§4.6 closed; §11.9 minus quiet hours/Focus).
 
+Review pass D (fourth independent pass; PRs open for review):
+
+- **#65 `fix/client-hardening-glm`** — provider error-classification
+  hardening: Zhipu, OpenAI, and Copilot's billing path map 429 to
+  `.rateLimit` (shared `errorKind(forStatusCode:)`); Copilot's auth-mode
+  fallback no longer swallows server errors into a misleading `.auth`
+  (quota-API non-401/403/404 and token-exchange 5xx fail as `.api` with the
+  response body); Antigravity reports a missing/unparsable
+  `remainingFraction` as unknown instead of fabricating 0% (`maxUsagePercent`
+  stays nil with no bounded data); `URLSessionHTTPClient` rethrows
+  `CancellationError`/`URLError.cancelled` instead of persisting a bogus
+  `.network` failure; Zhipu accepts success payloads that omit the numeric
+  `code`; OpenAI window labels use exact units (45-minute, 25-hour,
+  N-second) with `QuotaWindowKind.classify` tests pinning the label-to-kind
+  contract; `parseNumeric` drops its per-call regex for a hand-rolled scan.
+- **#71 `fix/settings-secure-save`** — the credential-bearing settings file
+  itself is written owner-only from its first byte (open `O_CREAT|O_EXCL`
+  0600 + `fchmod`, `fsync`, same-directory `rename`, `stat` verification,
+  post-rename directory `fsync`), closing the umask exposure window and the
+  swallowed `try?` chmod that #74 left on the settings side. A polling test
+  samples intermediate-file modes during a large save (observed 0644
+  thousands of times per run before, only 0600 after).
+- **#77 `feat/retry-after-cooldown`** — `Retry-After` (delta-seconds or
+  IMF-fixdate, capped at 24 h) parsed into `ProviderClientError.retryAfter`
+  and `ProviderFailure.retryAt` (additive Codable; old snapshots decode nil),
+  and `QuotaCoordinator.refresh` skips accounts still inside a rate-limit
+  cooldown, carrying the failure forward so callers' `mergingStaleUsage`
+  keeps last-known usage alive. Anthropic's user-facing copy names the wait.
+- **#80 `fix/widget-dashboard-states`** — dashboard widgets distinguish
+  all-failed / no-data-yet / no-accounts states (complementing #54's
+  medium-family work), gain a stale badge on the header timestamp (orange
+  clock at 2× the refresh interval, shown even with the clock setting off),
+  fix the systemSmall row where fixed 58pt name + 40/72pt percent columns
+  collapsed the progress bar to zero width in the default dual-percentage
+  mode, stop announcing "INF"/"--" literally in dashboard rows, and delete
+  the `resetSummaries`/`dashboardBarPercents` dead code (§1.3's first
+  bullet).
+- **#83 `feat/cli-polish`** — `llimit version` (`--version`/`-v`; §4.2's
+  first bullet) and a per-account data-state summary in `accounts list`
+  (worst remaining percent with estimate marker, balance line, failure kind,
+  no-data) from a pure snapshot-only `StatusRenderer.accountQuotaSummary`.
+- **#84 `fix/schema-drift-hardening`** — Anthropic fails `.decoding` when
+  every reported window is unparsable or non-dictionary (instead of
+  "No usage data" with a healthy-looking `maxUsagePercent: 0`), keeps
+  readable windows on partial drift; Kimi coerces a heterogenous `limits[]`
+  element-wise instead of dropping every rolling window.
+
 ### Review-driven refinements worth remembering
 
 Each PR absorbed one or more automated review rounds. The changes those rounds
@@ -197,10 +248,15 @@ App Group boundary. (Backlog: "Failure-data redaction boundary".)
 
 ### 1.3 Dead code
 - `LLimitWidgetExtension/LLimitQuotaWidget.swift` — `resetSummaries(for:at:)`
-  and `dashboardBarPercents(for:)` are never called.
+  and `dashboardBarPercents(for:)` are never called. (Removed by #80.)
 - `WidgetVisibilitySettings.showResetInfo` (Models.swift) is stored,
   decoded and round-tripped but no surface reads it. Expose it (a real "show
   reset info" toggle) or delete it.
+- Latent trap: `QuotaCoordinator.init` builds its client map with
+  `Dictionary(uniqueKeysWithValues:)`, which traps if two clients ever report
+  the same provider — the Zhipu/Z.ai pair shows multi-client providers are a
+  supported shape. `Dictionary(_, uniquingKeysWith:)` turns the crash into a
+  testable invariant.
 **Done when:** `grep` finds no unused declarations and the settings round-trip
 test still passes.
 
@@ -255,6 +311,25 @@ Memoize it against the accounts/style revision.
 Deferred invalidation + a key fingerprint on VeniceQuotaEstimate, plus a
 termination flush for pending invalidations. The underlying cost of a
 full-archive rewrite per invalidation remains and is covered by 2.1.
+
+### 2.6 Parsing and client-call churn
+`parseISO8601` allocates two `ISO8601DateFormatter`s per call and runs for
+nearly every metric reset timestamp in nearly every client each refresh
+(see the formatter trap note above — do not "fix" with a shared static
+formatter). Eight clients allocate a `JSONDecoder` per response, and
+`accountColorStep` re-sorts all accounts per lookup. On the network side,
+Copilot's fallback chain is up to four sequential round trips (~40 s worst
+case at the uniform timeout), Cline runs three sequential calls
+(profile → balance → usage-limits) that could partly parallelize once the
+user id is known, and `URLSessionHTTPClient` has one global 10 s timeout
+with no per-provider override — the streaming Muse probe and the chained
+Copilot path want very different budgets, and FoundationNetworking enforces
+`timeoutInterval` as a whole-request cap on Linux versus an idle timeout on
+Darwin.
+**Do:** switch date parsing to the value-type `ISO8601FormatStyle` where
+available; one decoder per client; hoist the account sort out of per-row
+lookups; parallelize Cline's calls after the user id; add per-client timeout
+overrides.
 
 ## 3. Visual, layout and theming
 
@@ -323,6 +398,18 @@ Mocha, Nord, Tokyo Night, Monokai Pro — each needing a contrast pass for text
 and ring tracks. Small, self-contained additions to `WidgetStylePreset.swift` /
 `LimitKindPalette.swift`.
 
+### 3.8 Legacy style migration can hand sibling accounts the same primary color
+The provider-keyed legacy fallback in `Models.swift` never consumes entries as
+it matches them, so with two accounts of one provider and one legacy
+provider-keyed style entry, both accounts inherit the same `primaryHexColor`
+and style — violating the "two accounts never share an exact color scheme"
+invariant (the provider tiles double as the trend chart's legend, so a
+collision makes two lines indistinguishable). Migration-only, but permanent
+once saved.
+**Do:** consume each matched legacy entry once (or clear the inherited
+primary for all but the first match), with a settings-fixture test covering
+two sibling accounts.
+
 ## 4. UX and interaction
 
 ### 4.1 No way to edit a Linux account after creation
@@ -333,8 +420,10 @@ and tile slots.
 settings lock, with tests in `LLimitdCoreTests`.
 
 ### 4.2 CLI ergonomics
-- No `--version` (the `.deb` and systemd units would use it).
+- `--version`: added by #83 (`llimit version` / `--version` / `-v`).
 - No `llimit accounts list --json` for scripting.
+- `accounts list` now shows each account's data state from the snapshot
+  (#83); a `--json` variant is the remaining scripting gap.
 - `llimit status` failure rows: #64 made them severity-ranked per account;
   cross-account ordering is still `accountID`, not severity or recency
   (needs `failedAt` from 1.2 to do recency properly).
@@ -343,7 +432,10 @@ settings lock, with tests in `LLimitdCoreTests`.
 `AppModel.statusMessage` is a single `String`; a save failure can be replaced
 immediately by a later "Refreshed N account(s)". Replace it with structured
 notices carrying severity, account/context, timestamp and a recovery action,
-and do not overwrite durability failures with later success text. (Backlog.)
+and do not overwrite durability failures with later success text. Related:
+the AppModel sync paths `print()` unstructured logs (including
+`debugInfo()` on every snapshot sync) instead of routing through the
+`reportPersistenceIssue`-style logger from #78. (Backlog.)
 
 ### 4.4 Freshness is not modelled per account
 Last-known usage is carried after a failure, but the aggregate snapshot time is
@@ -410,17 +502,16 @@ Stream Deck angle (third-party widgets reading `llimit status --json`).
 
 ## 7. Security and credential handling
 
-### 7.1 Enforce local file permissions — partially done by #74
-#74 replaced the write-then-`try?`-chmod pattern with `writeOwnerOnlyAtomically`
-(create temp `0600`, write, `rename`), so snapshot/history files are `0600`
-with no world-readable window, and chmod/write failures are reported. Remaining:
-parent directories are not explicitly restricted, the App Group copy should use
-the narrowest functional mode, and nothing verifies regular-file type/owner
-after replacement.
-**Do:** create the local LLimit directory `0700`; verify regular-file type,
-owner and final mode after replacement; treat verification failure as a save
-failure; use `0600` locally and the narrowest functional mode in the App Group;
-add first-save, overwrite, wrong-owner/type and permission-failure tests.
+### 7.1 Enforce local file permissions — settings half done by #71, data half by #74
+#71 writes the credential-bearing settings file owner-only from its first
+byte (open `0600`, `fchmod`, `fsync`, same-directory rename, `stat`
+verification of type and mode, directory `fsync`), with failure removing the
+intermediate and throwing. #74 did the same for snapshot/history via
+`writeOwnerOnlyAtomically`. Remaining: parent directories are not explicitly
+restricted, and the App Group copy should use the narrowest functional mode.
+**Do:** create the local LLimit directory `0700`; use `0600` locally and the
+narrowest functional mode in the App Group; add wrong-owner/type and
+permission-failure tests where they can be arranged.
 
 ### 7.2 Stores are `@unchecked Sendable` with shared codecs — quarantine done by #78
 #78 quarantines undecodable archives to `<name>.corrupt` with a logged trail, so
@@ -455,27 +546,44 @@ reset). Validate `QuotaSnapshot.version`. (Backlog.)
 
 ### 8.2 Dashboard widgets
 - Derive row capacity from geometry instead of a fixed provider limit.
-- Remove fixed-width columns or use `ViewThatFits`.
+- Fixed-width columns: the systemSmall row's collapse is fixed by #80
+  (flexible name/percent layout); the medium family's fixed columns and the
+  fixed provider-limit clamp remain — use `ViewThatFits` or geometry-derived
+  capacity.
 - Evaluate `.systemLarge` for a full multi-account dashboard.
+- No `.widgetURL` deep links anywhere in the extension: a provider tile
+  cannot jump to its account, the dashboard cannot open the failing account.
+  Needs an app URL scheme first (backlog).
 
 ### 8.3 Provider tiles
 Runtime validation on macOS is still outstanding (see `BACKLOG.md` for the full
 ladder): auto-mapping, the `#N AUTO` badge, pinned assignments, light/dark
 desktop contexts, and the intended per-provider palettes.
+- Tile timelines still clone up to 37 identical entries per kind (× 12 kinds)
+  per reload just to tick the footer countdown text
+  (`ProviderQuotaWidget.getTimeline`); the dashboard provider already ships
+  single-entry timelines. Converge on one entry with `.after(nextRefresh)`
+  unless a reset boundary requires another.
 
 ## 9. Network layer
 
 ### 9.1 Dedicated, resource-bounded HTTP client
 `URLSessionHTTPClient` uses `URLSession.shared` with a request timeout only: it
 shares cookies/cache, buffers unbounded responses, and collapses structured
-`URLError`s and cancellation into a generic `.network` failure.
+`URLError`s into a generic `.network` failure (the cancellation half is fixed
+by #65, which rethrows `CancellationError`; `URLError.Code` preservation
+remains).
 **Do:** an ephemeral session (cookies and URL cache off), a resource deadline,
 a connection limit, a response-body cap enforced while receiving, and preserved
-`URLError.Code`/cancellation. (Backlog.)
+`URLError.Code`. Per-client timeout overrides belong here too (see 2.6).
+(Backlog.)
 
 ### 9.2 Retry, rate-limit and scheduling policy
-Centralize transient-failure classification (network, 408, 425, 429,
-provider-specific 403, selected 5xx), honor `Retry-After` and GitHub
+`Retry-After` is now parsed (delta-seconds or IMF-fixdate, capped at 24 h) and
+honored as a per-account fetch cooldown in `QuotaCoordinator` (#77, Anthropic
+first). Remaining: adopt the header in the other rate-limited clients
+(Copilot internal API, Kimi), centralize transient-failure classification
+(network, 408, 425, provider-specific 403, selected 5xx), honor GitHub
 rate-limit headers, add a small jittered retry budget for idempotent reads,
 never replay rotating OAuth exchanges after an ambiguous timeout, add per-host
 concurrency limits, and build one scheduler from last attempt/last success/
@@ -484,11 +592,21 @@ snapshot age/wake/network-return. (Backlog.)
 ## 10. Provider correctness
 
 ### 10.1 Validate schemas instead of trusting them
-Anthropic can accept an empty recognized schema, Zhipu can succeed with no
-supported limit type, and Google treats a missing `remainingFraction` as zero.
-Treat missing percentages as unknown, require recognized metrics before
-reporting success, and keep aggregate usage `nil` when no bounded metric
-exists. Add missing-field / empty-payload / hostile-number tests per provider.
+Progress: Google's missing `remainingFraction` now reads as unknown instead of
+zero and `maxUsagePercent` stays nil without bounded data (#65); Anthropic
+fails `.decoding` when every reported window is unparsable or non-dictionary
+instead of emitting a healthy-looking empty metric (#84); Zhipu accepts
+success without the numeric `code` (#65); OpenAI labels odd window durations
+in exact units (#65). Remaining: Zhipu can still succeed with no supported
+limit type, and the shared helpers have edge cases —
+`dateFromEpochTimestamp` infers its scale purely from magnitude (a pre-2001
+millisecond timestamp parses as seconds → a date in year ~5000; sentinels
+0/-1 become 1970 and render "reset" forever), and the month-boundary helpers
+(`monthEndDate`/`startOfNextMonth`) use the machine timezone for Copilot's
+and Zhipu's assumed resets (pin to UTC after fixture verification).
+**Do:** require recognized metrics before reporting success, keep aggregate
+usage `nil` when no bounded metric exists, and add missing-field /
+empty-payload / hostile-number tests per provider.
 
 ### 10.2 Copilot, OpenAI, Google, Zhipu, Anthropic endpoint verification
 All provider APIs here are private and unstable; change behaviour only from
@@ -556,13 +674,14 @@ Do not re-open these; remove them from `BACKLOG.md` when convenient.
   applies to provider tiles"** — the tiles never read
   `showPercentageValues`; the setting is dashboard-only in practice.
 - **"Remove or consolidate ring/reset helpers superseded by the provider
-  tile"** — `resetSummaries`/`dashboardBarPercents` are unused and can simply be
-  deleted (item 1.3).
+  tile"** — done: `resetSummaries`/`dashboardBarPercents` were unused and
+  deleted in #80 (the `showResetInfo` toggle itself is still unread — see
+  1.3).
 
 ## 13. Suggested order
 
-1. Merge/review the open PRs from all passes (#50–#59, #73, #63–#100 per the
-   lists above).
+1. Merge/review the open PRs from all passes (#50–#59, #63–#100 per the
+   lists above, including pass D: #65, #71, #77, #80, #83, #84).
 2. Structured failure fields (1.2) and the remainder of file-permission
    enforcement (7.1) — the two remaining security items.
 3. History storage + main-actor persistence (2.1, 2.3) and sparkline
