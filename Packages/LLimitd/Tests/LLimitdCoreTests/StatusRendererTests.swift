@@ -267,6 +267,37 @@ final class StatusRendererTests: XCTestCase {
       .contains("Weekly limit 40% left (resets in 2h 12m)"))
   }
 
+  func testHumanReadableFallsBackToTheFrozenResetString() {
+    // `resetIn` without `resetAt`: resetCountdown(at:) returns the frozen string,
+    // so the clause must still appear rather than vanish.
+    let usage = ProviderUsage(
+      accountID: "acct", provider: .anthropic, title: "Claude",
+      metrics: [UsageMetric(id: "weekly", label: "Weekly limit",
+                            remainingPercent: 40, resetIn: "3h 12m")],
+      fetchedAt: now
+    )
+    let text = StatusRenderer.humanReadable(
+      snapshot: QuotaSnapshot(generatedAt: now, providers: [usage], failures: []), now: now)
+
+    XCTAssertTrue(text.contains("Weekly limit 40% left (resets in 3h 12m)"))
+  }
+
+  func testHumanReadableOmitsABlankResetString() {
+    // A blank `resetIn` yields no countdown, so the clause is dropped instead of
+    // rendering a malformed "(resets in )".
+    let usage = ProviderUsage(
+      accountID: "acct", provider: .anthropic, title: "Claude",
+      metrics: [UsageMetric(id: "weekly", label: "Weekly limit",
+                            remainingPercent: 40, resetIn: "   ")],
+      fetchedAt: now
+    )
+    let text = StatusRenderer.humanReadable(
+      snapshot: QuotaSnapshot(generatedAt: now, providers: [usage], failures: []), now: now)
+
+    XCTAssertTrue(text.contains("Weekly limit 40% left"))
+    XCTAssertFalse(text.contains("(resets in"))
+  }
+
   func testHumanReadableMarksADueReset() {
     let usage = ProviderUsage(
       accountID: "acct", provider: .anthropic, title: "Claude",
