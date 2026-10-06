@@ -1042,7 +1042,8 @@ private final class WindowAnchor {
 }
 
 /// Anchors the MenuBarExtra panel and reports the visible size of the screen it
-/// is on whenever it opens or moves to another display.
+/// is on whenever it opens, moves to another display, or that display's visible
+/// area changes (Dock resize, resolution change).
 private struct PanelWindowReader: NSViewRepresentable {
   let anchor: WindowAnchor
   let onScreenChange: (CGSize?) -> Void
@@ -1067,18 +1068,25 @@ private struct PanelWindowReader: NSViewRepresentable {
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
       super.viewWillMove(toWindow: newWindow)
-      NotificationCenter.default.removeObserver(self, name: NSWindow.didChangeScreenNotification, object: window)
+      NotificationCenter.default.removeObserver(self)
     }
 
     override func viewDidMoveToWindow() {
       super.viewDidMoveToWindow()
       guard let window else { return }
 
-      NotificationCenter.default.addObserver(
+      let center = NotificationCenter.default
+      center.addObserver(
         self,
-        selector: #selector(windowDidChangeScreen),
+        selector: #selector(screenDidChange),
         name: NSWindow.didChangeScreenNotification,
         object: window
+      )
+      center.addObserver(
+        self,
+        selector: #selector(screenDidChange),
+        name: NSApplication.didChangeScreenParametersNotification,
+        object: nil
       )
       // Deferred: the view can join its window during a SwiftUI update, which
       // must not write view state.
@@ -1087,7 +1095,7 @@ private struct PanelWindowReader: NSViewRepresentable {
       }
     }
 
-    @objc private func windowDidChangeScreen(_ notification: Notification) {
+    @objc private func screenDidChange(_ notification: Notification) {
       reportScreen()
     }
 
