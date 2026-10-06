@@ -134,7 +134,8 @@ final class QuotaUtilitiesTests: XCTestCase {
   func testClaudeCodeVersionParsing() {
     XCTAssertEqual(ClaudeCodeVersion.parseVersion(from: "2.0.30 (Claude Code)"), "2.0.30")
     XCTAssertEqual(ClaudeCodeVersion.parseVersion(from: "1.0.110"), "1.0.110")
-    XCTAssertEqual(ClaudeCodeVersion.parseVersion(from: "claude version 0.9.1-beta"), nil)
+    XCTAssertEqual(ClaudeCodeVersion.parseVersion(from: "claude version 0.9.1-beta"), "0.9.1-beta")
+    XCTAssertEqual(ClaudeCodeVersion.parseVersion(from: "2.1.0-rc.1 (Claude Code)"), "2.1.0-rc.1")
     XCTAssertEqual(ClaudeCodeVersion.parseVersion(from: ""), nil)
   }
 }

@@ -18,7 +18,12 @@ public struct AnthropicClient: QuotaProviderClient {
   // rate-limit bucket. Track the installed CLI's version so the UA doesn't
   // drift stale as Claude Code updates; the constant is the no-CLI fallback.
   private static let fallbackVersion = "1.0.110"
-  private static let userAgent = "claude-code/\(ClaudeCodeVersion.current() ?? fallbackVersion)"
+  // Computed per request: ClaudeCodeVersion.current() probes in the
+  // background and returns nil until it lands, so the first requests after
+  // launch use the fallback and later ones pick up the real version.
+  private static var userAgent: String {
+    "claude-code/\(ClaudeCodeVersion.current() ?? fallbackVersion)"
+  }
   private static let oauthBetaHeader = "oauth-2025-04-20"
 
   public init(httpClient: any HTTPClient) {
