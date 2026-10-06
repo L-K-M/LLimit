@@ -317,13 +317,21 @@ private struct GlossRing: View {
     return Double(max(0, min(100, remaining ?? 0))) / 100
   }
 
+  private var innerDiameter: CGFloat {
+    diameter - lineWidth * 2
+  }
+
   var body: some View {
+    // Strokes are inset by half their width so the ring stays inside its frame
+    // and keeps the same margins as the rest of the card's content.
     ZStack {
       Circle()
+        .inset(by: lineWidth / 2)
         .stroke(Color.white.opacity(0.08), lineWidth: lineWidth)
 
       if progress > 0.001 {
         Circle()
+          .inset(by: lineWidth / 2)
           .trim(from: 0, to: progress)
           .stroke(
             AngularGradient(
@@ -340,13 +348,13 @@ private struct GlossRing: View {
       }
 
       Text(centerText)
-        .font(.system(size: diameter * 0.27, weight: .bold, design: .rounded))
+        .font(.system(size: innerDiameter * 0.33, weight: .bold, design: .rounded))
         .monospacedDigit()
         .foregroundStyle(.white.opacity(0.94))
         .contentTransition(.numericText())
         .minimumScaleFactor(0.6)
         .lineLimit(1)
-        .frame(width: diameter - lineWidth * 2.6)
+        .frame(width: innerDiameter * 0.88)
     }
     .frame(width: diameter, height: diameter)
     .accessibilityLabel(accessibilityText)
@@ -539,12 +547,6 @@ private struct MenuBarContent: View {
   @State private var panelAnchor = WindowAnchor()
   @State private var panelScreenSize: CGSize?
 
-  private static let relativeTimeFormatter: RelativeDateTimeFormatter = {
-    let formatter = RelativeDateTimeFormatter()
-    formatter.unitsStyle = .abbreviated
-    return formatter
-  }()
-
   var body: some View {
     // Fitted to the panel's own screen. NSScreen.main follows keyboard focus and
     // can be another display; it only stands in until the panel first opens.
@@ -714,9 +716,10 @@ private struct MenuBarContent: View {
 
         Group {
           if model.isRefreshing {
-            Text("Updating quotas...")
+            Text("Refreshing…")
           } else if let snapshot = model.snapshot {
-            Text("Updated \(relativeTimeString(from: snapshot.generatedAt, relativeTo: now))")
+            // Same formatter and clock as the cards' "fetched" ages.
+            Text("Updated \(QuotaDisplayText.relativeAge(snapshot.generatedAt, now: now))")
           } else {
             Text("Waiting for quota data")
           }
@@ -738,6 +741,12 @@ private struct MenuBarContent: View {
             .help("All accounts reporting")
             .accessibilityLabel("All accounts reporting")
         } else {
+          let issueSummary = QuotaDisplayText.countPhrase(
+            snapshot.failures.count,
+            singular: "account issue",
+            plural: "account issues"
+          )
+
           HStack(spacing: 3) {
             Image(systemName: "exclamationmark.triangle.fill")
               .font(.system(size: 9, weight: .bold))
@@ -749,8 +758,8 @@ private struct MenuBarContent: View {
           .padding(.horizontal, 7)
           .padding(.vertical, 3)
           .background(.orange.opacity(0.15), in: Capsule())
-          .help("\(snapshot.failures.count) account issue(s)")
-          .accessibilityLabel("\(snapshot.failures.count) account issues")
+          .help(issueSummary)
+          .accessibilityLabel(issueSummary)
         }
       }
 
@@ -919,10 +928,6 @@ private struct MenuBarContent: View {
 
   private func failureTitle(for failure: ProviderFailure) -> String {
     model.account(withID: failure.accountID)?.displayName ?? failure.provider.displayName
-  }
-
-  private func relativeTimeString(from date: Date, relativeTo now: Date) -> String {
-    Self.relativeTimeFormatter.localizedString(for: date, relativeTo: now)
   }
 }
 
@@ -1182,9 +1187,6 @@ private struct OverviewCard: View {
   let accounts: [ProviderAccount]
   let onSelect: (String) -> Void
 
-  // Six gauges per row at the default 420pt panel width.
-  private static let gaugeColumns = [GridItem(.adaptive(minimum: 54), spacing: 6, alignment: .top)]
-
   private var lowestRemaining: Int? {
     providers.compactMap(MenuBarQuotaStyling.remainingPercent).min()
   }
@@ -1197,7 +1199,7 @@ private struct OverviewCard: View {
     VStack(spacing: 12) {
       HStack(alignment: .firstTextBaseline) {
         SectionTitle(text: "OVERVIEW")
-        Text("\(metricCount) METRICS")
+        Text(QuotaDisplayText.countPhrase(metricCount, singular: "METRIC", plural: "METRICS"))
           .font(.system(size: 9, weight: .semibold))
           .tracking(0.6)
           .foregroundStyle(DashboardPalette.tertiaryText)
@@ -1205,7 +1207,7 @@ private struct OverviewCard: View {
 
       if !providers.isEmpty {
         // Every account gets a gauge. Rows wrap, so a wider panel fits more per row.
-        LazyVGrid(columns: Self.gaugeColumns, spacing: 10) {
+        OverviewGaugeGrid(rowSpacing: 10) {
           ForEach(providers) { provider in
             Button {
               onSelect(provider.accountID)
@@ -1268,10 +1270,10 @@ private struct OverviewCard: View {
           tint: tint
         )
         statDivider
-        StatCell(label: "ACCOUNTS", value: "\(accountCount)", tint: .white.opacity(0.92))
+        StatCell(label: accountCount == 1 ? "ACCOUNT" : "ACCOUNTS", value: "\(accountCount)", tint: .white.opacity(0.92))
         statDivider
         StatCell(
-          label: "ISSUES",
+          label: failureCount == 1 ? "ISSUE" : "ISSUES",
           value: "\(failureCount)",
           tint: failureCount == 0 ? .green : .orange
         )
@@ -1302,6 +1304,64 @@ private struct OverviewCard: View {
       return "\(provider.title), \(balances.joined(separator: ", ")). Jump to card."
     }
     return "\(provider.title), quota unavailable. Jump to card."
+  }
+}
+
+/// Places Overview gauges in the balanced rows of `OverviewGaugeLayout`: every
+/// cell has the same width, and a shorter row is centered under the longest.
+private struct OverviewGaugeGrid: Layout {
+  var rowSpacing: CGFloat
+
+  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    let width = proposal.width ?? .infinity
+    let rows = OverviewGaugeLayout.rows(count: subviews.count, width: width)
+    let cellWidth = OverviewGaugeLayout.cellWidth(columns: rows.first ?? 0, width: width)
+    let heights = rowHeights(rows, subviews: subviews, cellWidth: cellWidth)
+    let height = heights.reduce(0, +) + rowSpacing * CGFloat(max(0, rows.count - 1))
+
+    return CGSize(
+      width: width.isFinite ? width : rowWidth(rows.first ?? 0, cellWidth: cellWidth),
+      height: height
+    )
+  }
+
+  func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    let rows = OverviewGaugeLayout.rows(count: subviews.count, width: bounds.width)
+    let cellWidth = OverviewGaugeLayout.cellWidth(columns: rows.first ?? 0, width: bounds.width)
+    let heights = rowHeights(rows, subviews: subviews, cellWidth: cellWidth)
+
+    var start = 0
+    var y = bounds.minY
+    for (row, length) in rows.enumerated() {
+      var x = bounds.midX - rowWidth(length, cellWidth: cellWidth) / 2
+      for subview in subviews[start..<(start + length)] {
+        subview.place(
+          at: CGPoint(x: x, y: y),
+          anchor: .topLeading,
+          proposal: ProposedViewSize(width: cellWidth, height: heights[row])
+        )
+        x += cellWidth + OverviewGaugeLayout.columnSpacing
+      }
+      start += length
+      y += heights[row] + rowSpacing
+    }
+  }
+
+  private func rowHeights(_ rows: [Int], subviews: Subviews, cellWidth: CGFloat) -> [CGFloat] {
+    var heights: [CGFloat] = []
+    var start = 0
+    for length in rows {
+      let rowHeight = subviews[start..<(start + length)]
+        .map { $0.sizeThatFits(ProposedViewSize(width: cellWidth, height: nil)).height }
+        .max() ?? 0
+      heights.append(rowHeight)
+      start += length
+    }
+    return heights
+  }
+
+  private func rowWidth(_ length: Int, cellWidth: CGFloat) -> CGFloat {
+    CGFloat(length) * cellWidth + OverviewGaugeLayout.columnSpacing * CGFloat(max(0, length - 1))
   }
 }
 
@@ -1342,6 +1402,8 @@ private struct ProviderQuotaCard: View {
 
   @State private var isHovered = false
 
+  private static let detailSeparator = " · "
+
   private var accent: Color {
     LimitKindColorScheme.accountAccent(for: usage.metrics, colors: kindColors, step: colorStep, primaryHexColor: primaryHexColor)
   }
@@ -1373,10 +1435,22 @@ private struct ProviderQuotaCard: View {
             }
           }
 
-          Text(accountDetail)
-            .font(.system(size: 10.5))
-            .foregroundStyle(DashboardPalette.secondaryText)
-            .lineLimit(1)
+          // The age is the card's only freshness cue, so the provider and
+          // subtitle give way first, truncating in the middle.
+          HStack(spacing: 0) {
+            if !detailParts.isEmpty {
+              Text(detailParts.joined(separator: Self.detailSeparator))
+                .truncationMode(.middle)
+            }
+            Text(detailParts.isEmpty ? fetchedAge : Self.detailSeparator + fetchedAge)
+              .fixedSize()
+              .layoutPriority(1)
+          }
+          .font(.system(size: 10.5))
+          .foregroundStyle(DashboardPalette.secondaryText)
+          .lineLimit(1)
+          .help((detailParts + [fetchedAge]).joined(separator: Self.detailSeparator))
+          .accessibilityElement(children: .combine)
         }
 
         Spacer(minLength: 8)
@@ -1441,13 +1515,17 @@ private struct ProviderQuotaCard: View {
     return points
   }
 
-  private var accountDetail: String {
-    var parts = [usage.provider.displayName]
-    if let subtitle = usage.subtitle, !subtitle.isEmpty, subtitle != accountName {
-      parts.append(subtitle)
-    }
-    parts.append("fetched \(usage.fetchedAt.formatted(.relative(presentation: .named)))")
-    return parts.joined(separator: " · ")
+  private var detailParts: [String] {
+    QuotaDisplayText.accountDetailParts(
+      providerName: usage.provider.displayName,
+      accountName: displayName,
+      subtitle: usage.subtitle
+    )
+  }
+
+  // Same formatter and dashboard clock as the header's "Updated" age.
+  private var fetchedAge: String {
+    "fetched \(QuotaDisplayText.relativeAge(usage.fetchedAt, now: now))"
   }
 
   private func statusLine(_ text: String, systemImage: String, color: Color) -> some View {
@@ -1637,9 +1715,16 @@ private struct ProviderFailureCard: View {
       VStack(alignment: .leading, spacing: 3) {
         Text(displayName)
           .font(.system(size: 13, weight: .semibold))
-        Text(failure.provider.displayName)
-          .font(.system(size: 10))
-          .foregroundStyle(DashboardPalette.tertiaryText)
+        // A default-named account already shows the provider as its title.
+        if let providerName = QuotaDisplayText.accountDetailParts(
+          providerName: failure.provider.displayName,
+          accountName: displayName,
+          subtitle: nil
+        ).first {
+          Text(providerName)
+            .font(.system(size: 10))
+            .foregroundStyle(DashboardPalette.tertiaryText)
+        }
         Text(failure.message)
           .font(.caption)
           .foregroundStyle(.orange)
