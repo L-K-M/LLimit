@@ -7,11 +7,14 @@ import FoundationNetworking
 final class FailurePrivacyTests: XCTestCase {
   private static let serverErrorStatus = 503
   private static let invalidGrantStatus = 400
+  private static let tooManyRequestsStatus = 429
   private static let successStatus = 200
+  // Independent output contract: a larger production cap must fail these tests.
   private static let maximumMessageScalars = 512
-  private static let reflectedSecret = "reflected-access-secret"
-  private static let unknownSecret = "server-issued-unknown-token"
-  private static let responseMarker = "UPSTREAM_RESPONSE_BODY"
+  // Synthetic sentinels, never valid credentials. Shared with diagnostic fixtures.
+  fileprivate static let reflectedSecret = "reflected-access-secret"
+  fileprivate static let unknownSecret = "server-issued-unknown-token"
+  fileprivate static let responseMarker = "UPSTREAM_RESPONSE_BODY"
   private let now = Date(timeIntervalSince1970: 1_700_000_000)
 
   func testLiveProviderFailuresNeverPublishResponseBodies() async throws {
@@ -66,6 +69,26 @@ final class FailurePrivacyTests: XCTestCase {
       XCTAssertFalse(error.message.contains(Self.responseMarker))
     } catch {
       XCTFail("Expected a public provider error")
+    }
+  }
+
+  func testNonAuthOAuthFailuresOfferRetryWithoutReconnect() async {
+    for status in [Self.serverErrorStatus, Self.tooManyRequestsStatus] {
+      do {
+        _ = try await ChatGPTOAuth.refresh(
+          refreshToken: Self.reflectedSecret,
+          httpClient: PrivacyHTTP(status: status, body: "\(Self.responseMarker) \(Self.reflectedSecret)")
+        )
+        XCTFail("Expected an API failure")
+      } catch let error as ProviderClientError {
+        XCTAssertEqual(error.kind, .api)
+        XCTAssertEqual(error.statusCode, status)
+        XCTAssertTrue(error.message.contains("Try again later"))
+        XCTAssertFalse(error.message.contains("Reconnect"))
+        assertPrivate(error.localizedDescription)
+      } catch {
+        XCTFail("Expected a public provider error")
+      }
     }
   }
 
@@ -155,6 +178,54 @@ final class FailurePrivacyTests: XCTestCase {
     XCTAssertLessThanOrEqual(failure.message.unicodeScalars.count, Self.maximumMessageScalars)
   }
 
+  func testOverlappingSecretsAreRedactedLongestFirst() async {
+    let longerSecret = Self.reflectedSecret + "-private-tail"
+    let coordinator = QuotaCoordinator(clients: [
+      PrivacyFailingClient(provider: .anthropic, error: ProviderClientError(kind: .auth,
+        message: "Short: \(Self.reflectedSecret). Long: \(longerSecret)."))
+    ])
+    let snapshot = await coordinator.refresh(configurations: [
+      ProviderRuntimeConfiguration(provider: .anthropic, isEnabled: true,
+        credentials: [CredentialField.anthropicAccessToken: Self.reflectedSecret]),
+      ProviderRuntimeConfiguration(provider: .openAI, isEnabled: false,
+        credentials: [CredentialField.openAIRefreshToken: longerSecret])
+    ], now: now)
+
+    XCTAssertEqual(snapshot.failures.first?.message, "Short: [redacted]. Long: [redacted].")
+  }
+
+  func testTruncationCannotRetainAPartialSecretAtTheBoundary() async throws {
+    let prefixLength = Self.reflectedSecret.count / 2
+    let padding = String(repeating: "x", count: Self.maximumMessageScalars - prefixLength)
+    let coordinator = QuotaCoordinator(clients: [
+      PrivacyFailingClient(provider: .anthropic, error: ProviderClientError(kind: .api,
+        message: padding + Self.reflectedSecret))
+    ])
+    let snapshot = await coordinator.refresh(configurations: [
+      ProviderRuntimeConfiguration(provider: .anthropic, isEnabled: true,
+        credentials: [CredentialField.anthropicAccessToken: Self.reflectedSecret])
+    ], now: now)
+
+    let failure = try XCTUnwrap(snapshot.failures.first)
+    XCTAssertFalse(failure.message.contains(String(Self.reflectedSecret.prefix(prefixLength))))
+    XCTAssertLessThanOrEqual(failure.message.unicodeScalars.count, Self.maximumMessageScalars)
+  }
+
+  func testNonSecretAccountMetadataIsNotRedacted() async {
+    let accountID = "fixture-workspace-id"
+    let message = "Check account \(accountID)."
+    let coordinator = QuotaCoordinator(clients: [
+      PrivacyFailingClient(provider: .openAI, error: ProviderClientError(kind: .auth, message: message))
+    ])
+    let snapshot = await coordinator.refresh(configurations: [
+      ProviderRuntimeConfiguration(provider: .openAI, isEnabled: true,
+        credentials: [CredentialField.openAIAccountID: accountID,
+                      CredentialField.openAIAccessToken: Self.reflectedSecret])
+    ], now: now)
+
+    XCTAssertEqual(snapshot.failures.first?.message, message)
+  }
+
   func testCombiningCharactersCannotBypassMessageBound() async throws {
     let message = "e" + String(repeating: "\u{0301}", count: 2_000)
     let coordinator = QuotaCoordinator(clients: [
@@ -185,6 +256,7 @@ final class FailurePrivacyTests: XCTestCase {
   private func assertPrivate(_ text: String, file: StaticString = #filePath, line: UInt = #line) {
     XCTAssertFalse(text.contains(Self.reflectedSecret), file: file, line: line)
     XCTAssertFalse(text.contains(Self.unknownSecret), file: file, line: line)
+    XCTAssertFalse(text.contains(Self.responseMarker), file: file, line: line)
   }
 }
 
@@ -209,7 +281,7 @@ private struct PrivacyFailingClient: QuotaProviderClient {
 
 private struct PrivacyDiagnostic: LocalizedError, Sendable {
   var errorDescription: String? {
-    "UPSTREAM_RESPONSE_BODY reflected-access-secret server-issued-unknown-token"
+    "\(FailurePrivacyTests.responseMarker) \(FailurePrivacyTests.reflectedSecret) \(FailurePrivacyTests.unknownSecret)"
   }
 }
 

@@ -41,7 +41,9 @@ public enum ChatGPTOAuth {
       let kind: QuotaErrorKind = (response.statusCode == 400 || response.statusCode == 401) ? .auth : .api
       throw ProviderClientError(
         kind: kind,
-        message: "ChatGPT token refresh failed (HTTP \(response.statusCode)). Reconnect this account or import its credentials again.",
+        message: kind == .auth
+          ? "ChatGPT token refresh failed (HTTP \(response.statusCode)). Reconnect this account or import its credentials again."
+          : "ChatGPT token refresh failed (HTTP \(response.statusCode)). Try again later.",
         statusCode: response.statusCode
       )
     }
