@@ -35,7 +35,7 @@ public struct ZhipuQuotaClient: QuotaProviderClient {
 
     let (data, response) = try await httpClient.data(for: request)
     guard (200..<300).contains(response.statusCode) else {
-      let body = String(data: data, encoding: .utf8) ?? ""
+      let body = errorBodyExcerpt(data)
       let kind: QuotaErrorKind = response.statusCode == 401 || response.statusCode == 403 ? .auth : .api
       throw ProviderClientError(kind: kind, message: "\(provider.displayName) API error \(response.statusCode): \(body)")
     }

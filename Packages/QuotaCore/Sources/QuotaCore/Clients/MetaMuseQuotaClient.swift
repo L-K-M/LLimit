@@ -65,7 +65,7 @@ public struct MetaMuseQuotaClient: QuotaProviderClient {
 
     let (data, response) = try await httpClient.data(for: request)
     guard (200..<300).contains(response.statusCode) else {
-      let detail = apiErrorMessage(in: data) ?? String(data: data, encoding: .utf8) ?? ""
+      let detail = apiErrorMessage(in: data) ?? errorBodyExcerpt(data)
       switch response.statusCode {
       case 401, 403:
         throw ProviderClientError(kind: .auth, message: "Meta authorization failed (\(response.statusCode)) — check the API key or run `muse login` again")
@@ -116,7 +116,7 @@ public struct MetaMuseQuotaClient: QuotaProviderClient {
       // loudly instead of wearing a green placeholder.
       guard parsed.sawRecognizablePayload else {
         // Prefer the API's own explanation — "bad key" beats "format changed".
-        let excerpt = String(body.prefix(200))
+        let excerpt = errorBodyExcerpt(body)
         let detail = parsed.streamError ?? apiErrorMessage(in: data)
         throw ProviderClientError(
           kind: .api,
@@ -253,8 +253,9 @@ public struct MetaMuseQuotaClient: QuotaProviderClient {
   private func apiErrorMessage(in data: Data) -> String? {
     guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
     if let error = object["error"] as? [String: Any], let message = nonEmptyString(error["message"]) {
-      return message
+      return errorBodyExcerpt(message)
     }
-    return nonEmptyString(object["detail"]) ?? nonEmptyString(object["title"]) ?? nonEmptyString(object["message"])
+    return (nonEmptyString(object["detail"]) ?? nonEmptyString(object["title"]) ?? nonEmptyString(object["message"]))
+      .map { errorBodyExcerpt($0) }
   }
 }

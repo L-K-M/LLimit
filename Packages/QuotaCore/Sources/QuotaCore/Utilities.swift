@@ -137,6 +137,25 @@ func roundedPercent(_ value: Double) -> Int? {
   return Int(min(100, max(0, value)).rounded())
 }
 
+/// Single-line, length-capped excerpt of an error response body for
+/// `ProviderClientError` messages. Error bodies are unbounded upstream — a
+/// proxy or CDN error page can be arbitrarily large — and the message is
+/// persisted into snapshots, history, and the App Group store. An excerpt also
+/// limits what a misbehaving deployment can echo back (including a reflected
+/// `Authorization` value) into those credential-free surfaces.
+func errorBodyExcerpt(_ text: String, maxLength: Int = 240) -> String {
+  let folded = text
+    .components(separatedBy: .whitespacesAndNewlines)
+    .filter { !$0.isEmpty }
+    .joined(separator: " ")
+  guard folded.count > max(1, maxLength) else { return folded }
+  return String(folded.prefix(max(1, maxLength))) + "…"
+}
+
+func errorBodyExcerpt(_ data: Data, maxLength: Int = 240) -> String {
+  errorBodyExcerpt(String(decoding: data, as: UTF8.self), maxLength: maxLength)
+}
+
 func parseJSONObject(from data: Data) throws -> [String: Any] {
   let object = try JSONSerialization.jsonObject(with: data)
   guard let dictionary = object as? [String: Any] else {

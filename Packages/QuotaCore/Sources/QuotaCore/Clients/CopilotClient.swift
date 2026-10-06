@@ -74,7 +74,7 @@ public struct CopilotClient: QuotaProviderClient {
 
     let (data, response) = try await httpClient.data(for: request)
     guard (200..<300).contains(response.statusCode) else {
-      let body = String(data: data, encoding: .utf8) ?? ""
+      let body = errorBodyExcerpt(data)
       let kind: QuotaErrorKind = response.statusCode == 401 || response.statusCode == 403 ? .auth : .api
       throw ProviderClientError(kind: kind, message: "Copilot billing API failed \(response.statusCode): \(body)")
     }
@@ -216,8 +216,7 @@ public struct CopilotClient: QuotaProviderClient {
     let (data, response) = try await httpClient.data(for: request)
     guard (200..<300).contains(response.statusCode) else {
       if response.statusCode == 429 {
-        let body = String(data: data, encoding: .utf8) ?? ""
-        throw ProviderClientError(kind: .rateLimit, message: "Copilot quota API rate limited: \(body)")
+        throw ProviderClientError(kind: .rateLimit, message: "Copilot quota API rate limited: \(errorBodyExcerpt(data))")
       }
       if [401, 403, 404].contains(response.statusCode) {
         return nil
@@ -274,8 +273,7 @@ public struct CopilotClient: QuotaProviderClient {
       let (data, response) = try await httpClient.data(for: request)
       guard (200..<300).contains(response.statusCode) else {
         if response.statusCode == 429 {
-          let body = String(data: data, encoding: .utf8) ?? ""
-          throw ProviderClientError(kind: .rateLimit, message: "Copilot token exchange rate limited: \(body)")
+          throw ProviderClientError(kind: .rateLimit, message: "Copilot token exchange rate limited: \(errorBodyExcerpt(data))")
         }
         continue
       }

@@ -108,6 +108,23 @@ final class QuotaUtilitiesTests: XCTestCase {
     XCTAssertLessThan(diff, 1)
   }
 
+  func testErrorBodyExcerptCapsLengthAndFoldsWhitespace() {
+    let long = String(repeating: "x", count: 500)
+    let excerpt = errorBodyExcerpt(long)
+    XCTAssertTrue(excerpt.hasSuffix("…"))
+    XCTAssertEqual(excerpt.count, 241)
+
+    XCTAssertEqual(errorBodyExcerpt("a\n\n  b\tc  "), "a b c")
+    XCTAssertEqual(errorBodyExcerpt(""), "")
+    XCTAssertEqual(errorBodyExcerpt("short body"), "short body")
+    XCTAssertEqual(errorBodyExcerpt("abcdef", maxLength: 3), "abc…")
+  }
+
+  func testErrorBodyExcerptDecodesLossyData() {
+    let data = Data([0x68, 0x69, 0xFF, 0x0A, 0x62]) // "hi?\nb"
+    XCTAssertEqual(errorBodyExcerpt(data), "hi\u{FFFD} b")
+  }
+
   func testStartOfNextMonthReturnsCalendarBoundary() {
     var sourceComponents = DateComponents()
     sourceComponents.year = 2024

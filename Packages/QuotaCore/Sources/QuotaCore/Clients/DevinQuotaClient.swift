@@ -77,7 +77,7 @@ public struct DevinQuotaClient: QuotaProviderClient {
 
     let (data, response) = try await httpClient.data(for: request)
     guard (200..<300).contains(response.statusCode) else {
-      let body = String(data: data, encoding: .utf8) ?? ""
+      let body = errorBodyExcerpt(data)
       switch response.statusCode {
       case 401, 403:
         throw ProviderClientError(kind: .auth, message: "Devin authorization failed (\(response.statusCode)) — check the API key or re-run `devin auth login`")

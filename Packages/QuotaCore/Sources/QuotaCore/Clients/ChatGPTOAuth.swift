@@ -38,7 +38,7 @@ public enum ChatGPTOAuth {
 
     let (data, response) = try await httpClient.data(for: request)
     guard (200..<300).contains(response.statusCode) else {
-      let body = (String(data: data, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+      let body = errorBodyExcerpt(data)
       let kind: QuotaErrorKind = (response.statusCode == 400 || response.statusCode == 401) ? .auth : .api
       throw ProviderClientError(
         kind: kind,

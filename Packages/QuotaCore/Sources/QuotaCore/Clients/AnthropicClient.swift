@@ -40,7 +40,7 @@ public struct AnthropicClient: QuotaProviderClient {
 
     let (data, response) = try await httpClient.data(for: request)
     guard (200..<300).contains(response.statusCode) else {
-      let body = (String(data: data, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+      let body = errorBodyExcerpt(data)
       if response.statusCode == 401 || response.statusCode == 403 {
         throw ProviderClientError(
           kind: .auth,
