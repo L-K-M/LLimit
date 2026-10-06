@@ -100,6 +100,10 @@ struct SettingsView: View {
 
   private func accountSidebarRow(_ account: ProviderAccount) -> some View {
     let status = accountStatus(for: account)
+    // The same ordered collection the sidebar lists, so the gating matches what
+    // the user sees.
+    let canMoveUp = model.providerAccounts.first?.id != account.id
+    let canMoveDown = model.providerAccounts.last?.id != account.id
 
     return HStack(spacing: 8) {
       Circle()
@@ -127,13 +131,15 @@ struct SettingsView: View {
     .accessibilityElement(children: .combine)
     .accessibilityLabel("\(account.resolvedDisplayName), \(account.provider.displayName)")
     .accessibilityValue(status.label)
-    // The help text advertises reordering; expose it directly rather than only
-    // through the context menu. Both are no-ops at the ends of the list.
-    .accessibilityAction(named: "Move Up") {
-      model.moveProviderAccount(account.id, direction: .up)
-    }
-    .accessibilityAction(named: "Move Down") {
-      model.moveProviderAccount(account.id, direction: .down)
+    // The help text advertises reordering; expose it directly, but only where it
+    // can act, so VoiceOver never offers a no-op at either end of the list.
+    .accessibilityActions {
+      if canMoveUp {
+        Button("Move Up") { model.moveProviderAccount(account.id, direction: .up) }
+      }
+      if canMoveDown {
+        Button("Move Down") { model.moveProviderAccount(account.id, direction: .down) }
+      }
     }
     .help("Drag to reorder accounts and their menu bar bars, or use Move Up and Move Down in the context menu.")
   }
