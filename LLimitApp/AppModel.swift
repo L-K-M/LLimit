@@ -262,7 +262,8 @@ final class AppModel: ObservableObject {
     let changedIDs = Set(configurations.compactMap { configuration -> String? in
       guard configuration.provider == .venice else { return nil }
       guard let current = account(withID: configuration.accountID), current.isEnabled,
-            current.credentials[CredentialField.veniceAPIKey] == configuration.credentials[CredentialField.veniceAPIKey] else {
+            current.credentials.resolvingEnvironmentReferences()[CredentialField.veniceAPIKey]
+              == configuration.credentials[CredentialField.veniceAPIKey] else {
         return configuration.accountID
       }
       return nil
@@ -656,8 +657,12 @@ final class AppModel: ObservableObject {
       guard let index = providerAccounts.firstIndex(where: { $0.id == accountID }) else { continue }
       let credentials = providerAccounts[index].credentials
       guard let refreshToken = credentials[CredentialField.openAIRefreshToken], !refreshToken.isEmpty else { continue }
+      // env: references are externally managed — rotating would strand the new
+      // grant (it can't be written back into a variable) or replace the pointer
+      // with a persisted secret. The variable's owner keeps it fresh.
+      if refreshToken.isEnvironmentReference { continue }
 
-      let access = credentials[CredentialField.openAIAccessToken] ?? ""
+      let access = credentials.resolvingEnvironmentReferences()[CredentialField.openAIAccessToken] ?? ""
       if !access.isEmpty, !ChatGPTOAuth.isAccessTokenExpired(access) { continue }
 
       if await refreshOpenAIAccount(id: accountID, refreshToken: refreshToken) {
@@ -705,11 +710,17 @@ final class AppModel: ObservableObject {
       // A reconnect or credential edit must not be replaced by an older refresh.
       guard let index = providerAccounts.firstIndex(where: { $0.id == accountID }),
             providerAccounts[index].credentials == previous else { return false }
-      providerAccounts[index].credentials[CredentialField.openAIAccessToken] = result.accessToken
-      if let newRefresh = result.refreshToken {
+      // Never overwrite an env: reference — the field stores the pointer, not
+      // the secret it resolved to.
+      if providerAccounts[index].credentials[CredentialField.openAIAccessToken]?.isEnvironmentReference != true {
+        providerAccounts[index].credentials[CredentialField.openAIAccessToken] = result.accessToken
+      }
+      if let newRefresh = result.refreshToken,
+         providerAccounts[index].credentials[CredentialField.openAIRefreshToken]?.isEnvironmentReference != true {
         providerAccounts[index].credentials[CredentialField.openAIRefreshToken] = newRefresh
       }
-      if let newAccountID = result.accountID {
+      if let newAccountID = result.accountID,
+         providerAccounts[index].credentials[CredentialField.openAIAccountID]?.isEnvironmentReference != true {
         providerAccounts[index].credentials[CredentialField.openAIAccountID] = newAccountID
       }
       return true
@@ -750,8 +761,10 @@ final class AppModel: ObservableObject {
       }
 
       // Nothing fresher on disk: the stored token is genuinely bad, so force a refresh.
+      // An env: reference is externally managed — rotating can't be persisted.
       let refreshToken = providerAccounts[index].credentials[CredentialField.openAIRefreshToken] ?? ""
-      if !refreshToken.isEmpty, await refreshOpenAIAccount(id: accountID, refreshToken: refreshToken) {
+      if !refreshToken.isEmpty, !refreshToken.isEnvironmentReference,
+         await refreshOpenAIAccount(id: accountID, refreshToken: refreshToken) {
         recovered.insert(accountID)
       }
     }
@@ -1682,7 +1695,7 @@ final class AppModel: ObservableObject {
         provider: account.provider,
         displayName: account.resolvedDisplayName,
         isEnabled: account.isEnabled,
-        credentials: account.credentials
+        credentials: account.credentials.resolvingEnvironmentReferences()
       )
     }
   }

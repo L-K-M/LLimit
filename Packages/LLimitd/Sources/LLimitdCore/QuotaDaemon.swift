@@ -394,8 +394,12 @@ public final class QuotaDaemon {
       guard let index = settings.accounts.firstIndex(where: { $0.id == accountID }) else { continue }
       let credentials = settings.accounts[index].credentials
       guard let refreshToken = credentials[CredentialField.openAIRefreshToken], !refreshToken.isEmpty else { continue }
+      // env: references are externally managed — rotating would strand the new
+      // grant (it can't be written back into a variable) or replace the pointer
+      // with a persisted secret. The variable's owner keeps it fresh.
+      if refreshToken.isEnvironmentReference { continue }
 
-      let access = credentials[CredentialField.openAIAccessToken] ?? ""
+      let access = credentials.resolvingEnvironmentReferences()[CredentialField.openAIAccessToken] ?? ""
       if !access.isEmpty, !ChatGPTOAuth.isAccessTokenExpired(access) { continue }
 
       if await refreshOpenAIAccount(id: accountID, refreshToken: refreshToken) {
@@ -439,11 +443,17 @@ public final class QuotaDaemon {
       let result = try await ChatGPTOAuth.refresh(refreshToken: refreshToken)
       guard let index = settings.accounts.firstIndex(where: { $0.id == accountID }),
             settings.accounts[index].credentials == previous else { return false }
-      settings.accounts[index].credentials[CredentialField.openAIAccessToken] = result.accessToken
-      if let newRefresh = result.refreshToken {
+      // Never overwrite an env: reference — the field stores the pointer, not
+      // the secret it resolved to.
+      if settings.accounts[index].credentials[CredentialField.openAIAccessToken]?.isEnvironmentReference != true {
+        settings.accounts[index].credentials[CredentialField.openAIAccessToken] = result.accessToken
+      }
+      if let newRefresh = result.refreshToken,
+         settings.accounts[index].credentials[CredentialField.openAIRefreshToken]?.isEnvironmentReference != true {
         settings.accounts[index].credentials[CredentialField.openAIRefreshToken] = newRefresh
       }
-      if let newAccountID = result.accountID {
+      if let newAccountID = result.accountID,
+         settings.accounts[index].credentials[CredentialField.openAIAccountID]?.isEnvironmentReference != true {
         settings.accounts[index].credentials[CredentialField.openAIAccountID] = newAccountID
       }
       return true
@@ -479,8 +489,10 @@ public final class QuotaDaemon {
         continue
       }
 
+      // An env: reference is externally managed — rotating can't be persisted.
       let refreshToken = settings.accounts[index].credentials[CredentialField.openAIRefreshToken] ?? ""
-      if !refreshToken.isEmpty, await refreshOpenAIAccount(id: accountID, refreshToken: refreshToken) {
+      if !refreshToken.isEmpty, !refreshToken.isEnvironmentReference,
+         await refreshOpenAIAccount(id: accountID, refreshToken: refreshToken) {
         recovered.insert(accountID)
       }
     }
@@ -497,7 +509,9 @@ public final class QuotaDaemon {
         provider: account.provider,
         displayName: account.resolvedDisplayName,
         isEnabled: account.isEnabled,
-        credentials: account.credentials
+        // env:NAME references resolve here — the daemon's environment (e.g. a
+        // systemd EnvironmentFile) supplies the secret, settings store the pointer.
+        credentials: account.credentials.resolvingEnvironmentReferences()
       )
     }
   }

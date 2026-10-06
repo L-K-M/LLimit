@@ -137,6 +137,35 @@ func roundedPercent(_ value: Double) -> Int? {
   return Int(min(100, max(0, value)).rounded())
 }
 
+public extension String {
+  /// True when the value is an `env:NAME` indirection — a shell-style variable
+  /// name that resolves from the process environment at runtime. Anything else
+  /// (including `env:` followed by an invalid identifier) is a literal value.
+  var isEnvironmentReference: Bool {
+    guard hasPrefix("env:") else { return false }
+    let name = String(dropFirst(4))
+    return name.range(of: #"^[A-Za-z_][A-Za-z0-9_]*$"#, options: .regularExpression) != nil
+  }
+}
+
+public extension Dictionary where Key == String, Value == String {
+  /// Resolves values of the form `env:NAME` from the process environment, so a
+  /// credential can live outside the settings file entirely (e.g. a systemd
+  /// `EnvironmentFile` for the Linux daemon). A NAME that is unset resolves to
+  /// empty, which readiness checks and the provider client then report as a
+  /// missing credential. Paths that write credentials back into settings must
+  /// leave `isEnvironmentReference` values untouched so the pointer is never
+  /// replaced by the secret it resolved to.
+  func resolvingEnvironmentReferences(
+    _ environment: [String: String] = ProcessInfo.processInfo.environment
+  ) -> [String: String] {
+    mapValues { value in
+      guard value.isEnvironmentReference else { return value }
+      return environment[String(value.dropFirst(4))] ?? ""
+    }
+  }
+}
+
 func parseJSONObject(from data: Data) throws -> [String: Any] {
   let object = try JSONSerialization.jsonObject(with: data)
   guard let dictionary = object as? [String: Any] else {

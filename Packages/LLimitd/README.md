@@ -36,6 +36,21 @@ XDG defaults (`~/.config`, `~/.local/share`) apply when the variables are unset;
 relative XDG values are ignored per the spec. Run `llimit paths` to see the
 resolved locations.
 
+### Credentials from the environment
+
+Any credential field may store an `env:NAME` reference instead of the secret
+itself — set it via `llimit accounts add --set venice.api_key=env:VENICE_API_KEY`
+or by editing the settings file. The value resolves from the daemon's process
+environment at request time (e.g. a systemd `EnvironmentFile`); the settings
+file only ever contains the pointer. An unset variable is reported as a missing
+credential, and an invalid variable name is treated as a literal value.
+
+Because a rotated grant cannot be written back into an environment variable,
+automatic ChatGPT token refresh skips accounts whose refresh token is an
+`env:` reference — keep that variable fresh externally. OpenAI accounts are the
+only ones whose credentials LLimit rotates; every other provider's key is
+read-only and safe to indirection.
+
 ## Usage
 
 ```

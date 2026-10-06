@@ -73,13 +73,18 @@ public enum OpenAICredentialSync {
     var updated = stored
     var changed = false
 
-    if updated[CredentialField.openAIAccessToken] != liveAccess {
+    // An env: reference stores a pointer, not a value — a live file sync must
+    // never replace it with the secret it resolves to.
+    if updated[CredentialField.openAIAccessToken] != liveAccess,
+      updated[CredentialField.openAIAccessToken]?.isEnvironmentReference != true
+    {
       updated[CredentialField.openAIAccessToken] = liveAccess
       changed = true
     }
 
     if let liveRefresh = live[CredentialField.openAIRefreshToken], !liveRefresh.isEmpty,
-      updated[CredentialField.openAIRefreshToken] != liveRefresh
+      updated[CredentialField.openAIRefreshToken] != liveRefresh,
+      updated[CredentialField.openAIRefreshToken]?.isEnvironmentReference != true
     {
       updated[CredentialField.openAIRefreshToken] = liveRefresh
       changed = true
