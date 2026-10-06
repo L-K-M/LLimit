@@ -78,14 +78,13 @@ public struct MetaMuseQuotaClient: QuotaProviderClient {
 
     let (data, response) = try await httpClient.data(for: request)
     guard (200..<300).contains(response.statusCode) else {
-      let detail = apiErrorMessage(in: data) ?? String(data: data, encoding: .utf8) ?? ""
       switch response.statusCode {
       case 401, 403:
         throw ProviderClientError(kind: .auth, message: "Meta authorization failed (\(response.statusCode)) — check the API key or run `muse login` again")
       case 429:
-        throw ProviderClientError(kind: .rateLimit, message: "Meta API rate limited: \(detail)")
+        throw ProviderClientError(kind: .rateLimit, message: "Meta API is rate limiting requests. Try again later.", statusCode: response.statusCode)
       default:
-        throw ProviderClientError(kind: .api, message: "Meta API error \(response.statusCode): \(detail)")
+        throw ProviderClientError(kind: .api, message: "Meta API unavailable (HTTP \(response.statusCode)). Try again later.", statusCode: response.statusCode)
       }
     }
 
@@ -125,13 +124,13 @@ public struct MetaMuseQuotaClient: QuotaProviderClient {
       // A present snapshot must report a window. Only a completed response
       // without a snapshot establishes a pay-as-you-go result.
       guard parsed.sawCompletedResponse else {
-        // Prefer the API's own explanation — "bad key" beats "format changed".
-        let excerpt = String(body.prefix(200))
+        // Failed streams can contain credentials or generated text; publish only recovery advice.
         let detail = parsed.streamError ?? apiErrorMessage(in: data)
         throw ProviderClientError(
           kind: .api,
-          message: detail.map { "Meta API error: \($0) (body: \(excerpt))" }
-            ?? "Meta API response contained no recognizable usage payload — stream format may have changed (body: \(excerpt))"
+          message: detail == nil
+            ? "Meta API response contained no recognizable usage payload. Try again later."
+            : "Meta API request failed. Check the API key or try again later."
         )
       }
       metrics.append(UsageMetric(id: "empty", label: "Pay-as-you-go — no subscription quota"))
@@ -199,8 +198,7 @@ public struct MetaMuseQuotaClient: QuotaProviderClient {
   /// JSON response. `sawCompletedResponse` distinguishes a completed response
   /// without a subscription snapshot from an unrecognized or unfinished body.
   /// A dedicated subscription event or snapshot field is never absence.
-  /// `streamError` carries the message of a stream-level error event so the
-  /// thrown failure can headline the API's own explanation.
+  /// `streamError` identifies a failed stream; its raw explanation stays transient.
   private func subscriptionUsageSnapshot(in body: String) throws -> (
     snapshot: SubscriptionSnapshot?,
     sawCompletedResponse: Bool,

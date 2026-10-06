@@ -74,16 +74,15 @@ public struct CopilotClient: QuotaProviderClient {
 
     let (data, response) = try await httpClient.data(for: request)
     guard (200..<300).contains(response.statusCode) else {
-      let body = String(data: data, encoding: .utf8) ?? ""
       let kind: QuotaErrorKind = response.statusCode == 401 || response.statusCode == 403 ? .auth : .api
-      throw ProviderClientError(kind: kind, message: "Copilot billing API failed \(response.statusCode): \(body)")
+      throw ProviderClientError(kind: kind, message: "Copilot billing API failed (HTTP \(response.statusCode)). Check the account credentials or try again later.", statusCode: response.statusCode)
     }
 
     let payload: BillingUsageResponse
     do {
       payload = try JSONDecoder().decode(BillingUsageResponse.self, from: data)
     } catch {
-      throw ProviderClientError(kind: .decoding, message: "Copilot billing payload decoding failed: \(error.localizedDescription)")
+      throw ProviderClientError(kind: .decoding, message: "Copilot returned invalid billing data. Try again later.")
     }
 
     let premiumItems = payload.usageItems.filter {
@@ -216,8 +215,7 @@ public struct CopilotClient: QuotaProviderClient {
     let (data, response) = try await httpClient.data(for: request)
     guard (200..<300).contains(response.statusCode) else {
       if response.statusCode == 429 {
-        let body = String(data: data, encoding: .utf8) ?? ""
-        throw ProviderClientError(kind: .rateLimit, message: "Copilot quota API rate limited: \(body)")
+        throw ProviderClientError(kind: .rateLimit, message: "Copilot quota API is rate limiting requests. Try again later.", statusCode: response.statusCode)
       }
       if [401, 403, 404].contains(response.statusCode) {
         return nil
@@ -228,7 +226,7 @@ public struct CopilotClient: QuotaProviderClient {
     do {
       return try JSONDecoder().decode(InternalUsageResponse.self, from: data)
     } catch {
-      throw ProviderClientError(kind: .decoding, message: "Copilot internal payload decoding failed: \(error.localizedDescription)")
+      throw ProviderClientError(kind: .decoding, message: "Copilot returned invalid quota data. Try again later.")
     }
   }
 
@@ -274,8 +272,7 @@ public struct CopilotClient: QuotaProviderClient {
       let (data, response) = try await httpClient.data(for: request)
       guard (200..<300).contains(response.statusCode) else {
         if response.statusCode == 429 {
-          let body = String(data: data, encoding: .utf8) ?? ""
-          throw ProviderClientError(kind: .rateLimit, message: "Copilot token exchange rate limited: \(body)")
+          throw ProviderClientError(kind: .rateLimit, message: "Copilot token exchange is rate limiting requests. Try again later.", statusCode: response.statusCode)
         }
         continue
       }
