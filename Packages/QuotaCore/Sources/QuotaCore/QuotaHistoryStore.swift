@@ -52,12 +52,28 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: fileURL.path)
   }
 
+  /// Appends a snapshot to the retained history, unless it repeats the newest
+  /// entry exactly.
+  ///
+  /// A refresh that carries the last-known usage after a failure, or that fails
+  /// again with the same message, produces a snapshot whose accounts and failures
+  /// are byte-identical to the newest stored one — it carries no new information.
+  /// Storing it only grows the file (and the widget's per-render decode) and adds
+  /// a flat repeated point to the trend. A *successful* refresh always advances
+  /// `ProviderUsage.fetchedAt`, so genuine observations are never skipped.
   public func append(
     _ snapshot: QuotaSnapshot,
     keepDays: Int = 45,
     maxEntries: Int = 3_000
   ) throws {
     var history = try load()
+
+    if let newest = history.max(by: { $0.generatedAt < $1.generatedAt }),
+       newest.providers == snapshot.providers,
+       newest.failures == snapshot.failures {
+      return
+    }
+
     history.append(snapshot)
 
     let cutoffDays = max(1, keepDays)

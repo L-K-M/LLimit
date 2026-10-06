@@ -77,4 +77,69 @@ final class QuotaHistoryStoreTests: XCTestCase {
     XCTAssertEqual(loaded.providers.map(\.accountID), ["keep-me"])
     XCTAssertTrue(loaded.failures.isEmpty)
   }
+
+  // MARK: - No-op appends
+
+  private func makeSnapshot(
+    at date: Date,
+    fetchedAt: Date,
+    failures: [ProviderFailure] = []
+  ) -> QuotaSnapshot {
+    QuotaSnapshot(
+      generatedAt: date,
+      providers: [
+        ProviderUsage(
+          accountID: "a",
+          provider: .anthropic,
+          title: "Claude",
+          metrics: [UsageMetric(id: "weekly", label: "Weekly", remainingPercent: 50)],
+          fetchedAt: fetchedAt
+        )
+      ],
+      failures: failures
+    )
+  }
+
+  func testAppendSkipsASnapshotThatRepeatsTheNewestEntry() throws {
+    let (store, dir) = makeStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    try store.append(makeSnapshot(at: now, fetchedAt: now))
+    // A carried-stale refresh: newer aggregate stamp, identical account content.
+    try store.append(makeSnapshot(at: now.addingTimeInterval(1800), fetchedAt: now))
+
+    let loaded = try store.load()
+    XCTAssertEqual(loaded.count, 1)
+    XCTAssertEqual(loaded.first?.generatedAt, now)
+  }
+
+  func testAppendSkipsARepeatedFailureWithNoNewContent() throws {
+    let (store, dir) = makeStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let failure = ProviderFailure(accountID: "a", provider: .anthropic, kind: .auth, message: "expired")
+    try store.append(makeSnapshot(at: now, fetchedAt: now, failures: [failure]))
+    try store.append(makeSnapshot(at: now.addingTimeInterval(1800), fetchedAt: now, failures: [failure]))
+
+    XCTAssertEqual(try store.load().count, 1)
+
+    // A genuinely different failure is still recorded.
+    let other = ProviderFailure(accountID: "a", provider: .anthropic, kind: .rateLimit, message: "slow down")
+    try store.append(makeSnapshot(at: now.addingTimeInterval(3600), fetchedAt: now, failures: [other]))
+    XCTAssertEqual(try store.load().count, 2)
+  }
+
+  func testAppendKeepsAFreshObservationEvenWhenTheValuesMatch() throws {
+    let (store, dir) = makeStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    try store.append(makeSnapshot(at: now, fetchedAt: now))
+    // Same percentages, but a real fetch: `fetchedAt` moved, so it is new data.
+    try store.append(makeSnapshot(at: now.addingTimeInterval(1800), fetchedAt: now.addingTimeInterval(1800)))
+
+    XCTAssertEqual(try store.load().count, 2)
+  }
 }
