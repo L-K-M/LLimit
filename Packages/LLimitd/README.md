@@ -49,6 +49,8 @@ llimit accounts enable|disable|remove <id>      # id may be a unique prefix
 llimit refresh                                  # one-shot fetch, writes the snapshot
 llimit status                                   # human-readable
 llimit status --json                            # waybar/polybar contract
+llimit resets                                   # every upcoming reset, soonest first
+llimit resets --json --days 3                   # the same radar as JSON
 llimit daemon                                   # refresh loop in the foreground
 ```
 
@@ -105,6 +107,22 @@ credentials, ever. Ready-made modules:
 - `examples/eww/` — `defpoll` widget; eww parses the JSON natively.
 
 See [`examples/README.md`](examples/README.md) for the full key-by-key contract.
+
+## Reset radar
+
+`llimit resets` answers "what resets next, and when?" across every account:
+
+```
+$ llimit resets
+Upcoming resets (next 7 days)
+in 3h 12m — Claude · 5-hour limit (62% left)
+in 4d 2h — OpenAI · Weekly limit (41% left)
+in 6d — Zhipu AI · MCP monthly (unlimited)
+```
+
+`--days N` widens the window (1–90, default 7). `--json` prints the same radar
+for scripts, with `resetAt` (ISO 8601), a live `resetIn`, and the metric's
+context; a limit with no absolute reset (a rolling balance) is not scheduled.
 
 ## Tray icon
 

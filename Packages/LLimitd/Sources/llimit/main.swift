@@ -33,6 +33,7 @@ func printUsage() {
       llimit accounts remove <account-id>
       llimit refresh
       llimit status [--json]
+      llimit resets [--json] [--days N]
       llimit daemon
       llimit paths
 
@@ -406,6 +407,8 @@ case "refresh":
   await runRefresh()
 case "status":
   runStatus(Array(arguments.dropFirst()))
+case "resets":
+  runResets(Array(arguments.dropFirst()))
 case "daemon":
   await runDaemon()
 case "paths":
