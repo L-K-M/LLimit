@@ -77,6 +77,10 @@ class FormatAccountHeaderTests(unittest.TestCase):
         text = format_account_header({"name": "Zhipu AI", "remainingPercent": None, "metrics": [{"unlimited": True}]})
         self.assertEqual(text, "Zhipu AI — unlimited")
 
+    def test_failing_account_is_marked(self):
+        text = format_account_header({"name": "Claude", "remainingPercent": 8, "failing": True})
+        self.assertEqual(text, "Claude — 8% left · refresh failed")
+
 
 class BuildMenuModelTests(unittest.TestCase):
     def sample(self):
@@ -164,6 +168,39 @@ class BuildMenuModelTests(unittest.TestCase):
             {"class": "ok", "accounts": [{"name": "Copilot", "remainingPercent": 90, "metrics": []}]}
         )
         self.assertIn("No limits reported", rows_of_kind(model, "metric"))
+
+    def test_failure_only_account_row_shows_the_error(self):
+        model = build_menu_model(
+            {
+                "class": "error",
+                "text": "LLimit: error",
+                "tooltip": "Updated just now",
+                "accounts": [
+                    {"id": "a9", "provider": "anthropic", "name": "Claude work",
+                     "failing": True, "error": "token expired", "errorKind": "auth"},
+                ],
+            }
+        )
+        self.assertEqual(rows_of_kind(model, "header"), ["Claude work — refresh failed"])
+        self.assertIn("Error: token expired", rows_of_kind(model, "metric"))
+        self.assertNotIn("No limits reported", rows_of_kind(model, "metric"))
+
+    def test_failing_account_with_preserved_quota_shows_both(self):
+        model = build_menu_model(
+            {
+                "class": "warning",
+                "accounts": [
+                    {"id": "a1", "provider": "anthropic", "name": "Claude",
+                     "remainingPercent": 42, "stale": True, "failing": True,
+                     "error": "offline", "errorKind": "network",
+                     "metrics": [{"id": "weekly", "label": "Weekly", "remainingPercent": 42}]},
+                ],
+            }
+        )
+        self.assertEqual(
+            rows_of_kind(model, "header"), ["Claude — 42% left · refresh failed · stale"]
+        )
+        self.assertIn("Error: offline", rows_of_kind(model, "metric"))
 
     def test_accounts_are_separated_but_not_leading(self):
         model = build_menu_model(self.sample())

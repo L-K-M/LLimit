@@ -64,6 +64,7 @@ public struct QuotaCoordinator: Sendable {
               failure: ProviderFailure(
                 accountID: configuration.accountID,
                 provider: configuration.provider,
+                title: configuration.displayName,
                 kind: error.kind,
                 message: error.message
               )
@@ -76,6 +77,7 @@ public struct QuotaCoordinator: Sendable {
               failure: ProviderFailure(
                 accountID: configuration.accountID,
                 provider: configuration.provider,
+                title: configuration.displayName,
                 kind: .unknown,
                 message: error.localizedDescription
               )

@@ -103,6 +103,8 @@ def format_account_header(account: dict[str, Any]) -> str:
     elif all(m.get("unlimited") for m in account.get("metrics") or [{}]):
         parts.append("unlimited")
 
+    if account.get("failing"):
+        parts.append("refresh failed")
     if account.get("stale"):
         parts.append("stale")
 
@@ -149,7 +151,10 @@ def build_menu_model(status: dict[str, Any] | None) -> TrayModel:
             rows.append(MenuRow("header", format_account_header(account)))
             for metric in account.get("metrics") or []:
                 rows.append(MenuRow("metric", format_metric(metric), tooltip=metric.get("detail") or ""))
-            if not (account.get("metrics") or []):
+            error = (account.get("error") or "").strip()
+            if error:
+                rows.append(MenuRow("metric", f"Error: {error[:120]}"))
+            elif not (account.get("metrics") or []):
                 rows.append(MenuRow("metric", "No limits reported"))
     elif status_class == "error":
         rows.append(MenuRow("note", "Every account failed to refresh"))

@@ -73,6 +73,7 @@ public extension QuotaSnapshot {
 
       var reconciled = failure
       reconciled.accountID = activeAccount.id
+      reconciled.title = activeAccount.resolvedDisplayName
       return reconciled
     }
 

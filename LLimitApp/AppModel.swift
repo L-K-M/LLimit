@@ -1101,7 +1101,11 @@ final class AppModel: ObservableObject {
       claudeCredentialFailures.insert(id)
       claudeAccountMessages[id] = message
       reloadAccountStatuses()
-      return ProviderFailure(accountID: id, provider: .anthropic, kind: .auth, message: message)
+      return ProviderFailure(
+        accountID: id, provider: .anthropic,
+        title: account(withID: id)?.resolvedDisplayName,
+        kind: .auth, message: message
+      )
     }
   }
 

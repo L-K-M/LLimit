@@ -53,7 +53,7 @@ public enum StatusRenderer {
     }
 
     for failure in snapshot.failures.sorted(by: { $0.accountID < $1.accountID }) {
-      lines.append("\(failure.provider.displayName): ERROR \(failure.message)")
+      lines.append("\(failureName(failure, in: snapshot)): ERROR \(failure.message)")
     }
 
     return lines.joined(separator: "\n")
@@ -112,6 +112,10 @@ public enum StatusRenderer {
     }
 
     let providers = snapshot.providers.sorted(by: titleOrder)
+    let failuresByAccount = Dictionary(
+      snapshot.failures.map { ($0.accountID, $0) },
+      uniquingKeysWith: { $0.kind.rawValue <= $1.kind.rawValue ? $0 : $1 }
+    )
     var accounts: [[String: Any]] = []
     var remainingPercents: [Int] = []
 
@@ -139,12 +143,33 @@ public enum StatusRenderer {
       if headlineIsEstimated(for: usage) {
         account["estimated"] = true
       }
+      if let failure = failuresByAccount[usage.accountID] {
+        // The row shows stale-but-preserved quota; flag that the last fetch
+        // failed so bars and the tray can render the account as degraded.
+        account["failing"] = true
+        account["error"] = failure.message
+        account["errorKind"] = failure.kind.rawValue
+      }
       accounts.append(account)
+    }
+
+    // A failure with no usage row at all (the account has never succeeded, or
+    // its stale usage was reconciled away) still deserves a named row.
+    for failure in snapshot.failures.sorted(by: { $0.accountID < $1.accountID })
+    where !providers.contains(where: { $0.accountID == failure.accountID }) {
+      accounts.append([
+        "id": failure.accountID,
+        "provider": failure.provider.rawValue,
+        "name": failure.title ?? failure.provider.displayName,
+        "failing": true,
+        "error": failure.message,
+        "errorKind": failure.kind.rawValue
+      ])
     }
 
     let text: String
     if providers.isEmpty {
-      text = "LLimit"
+      text = snapshot.failures.isEmpty ? "LLimit: no accounts" : "LLimit: error"
     } else {
       text = providers.map { usage in
         if let remaining = usage.metrics.compactMap(\.remainingPercent).min() {
@@ -181,10 +206,13 @@ public enum StatusRenderer {
     }
 
     var tooltipLines = ["Updated \(relativeAge(snapshot.generatedAt, now: now))"]
-    tooltipLines.append(humanReadable(snapshot: snapshot, now: now)
+    let detail = humanReadable(snapshot: snapshot, now: now)
       .split(separator: "\n")
       .dropFirst()
-      .joined(separator: "\n"))
+      .joined(separator: "\n")
+    if !detail.isEmpty {
+      tooltipLines.append(detail)
+    }
 
     var object: [String: Any] = [
       "text": text,
@@ -217,6 +245,16 @@ public enum StatusRenderer {
       return "\(hours) h ago"
     }
     return "\(hours / 24) d ago"
+  }
+
+  /// Display name for a failure: the account title the coordinator recorded,
+  /// or the preserved (stale) usage row's title, or the bare provider name.
+  private static func failureName(_ failure: ProviderFailure, in snapshot: QuotaSnapshot) -> String {
+    if let title = failure.title, !title.isEmpty { return title }
+    if let usage = snapshot.providers.first(where: { $0.accountID == failure.accountID }) {
+      return usage.title
+    }
+    return failure.provider.displayName
   }
 
   private static let titleOrder: (ProviderUsage, ProviderUsage) -> Bool = { lhs, rhs in

@@ -333,4 +333,69 @@ final class StatusRendererTests: XCTestCase {
   func testHumanReadableWithoutSnapshotExplainsNextStep() {
     XCTAssertTrue(StatusRenderer.humanReadable(snapshot: nil, now: now).contains("llimit refresh"))
   }
+
+  // MARK: - Failure identity
+
+  func testFailureLinePrefersRecordedAccountTitle() {
+    let text = StatusRenderer.humanReadable(
+      snapshot: QuotaSnapshot(
+        generatedAt: now,
+        providers: [],
+        failures: [
+          ProviderFailure(accountID: "acct-2", provider: .anthropic, title: "Claude work",
+                          kind: .auth, message: "token expired"),
+          ProviderFailure(accountID: "acct-1", provider: .anthropic,
+                          kind: .rateLimit, message: "slow down")
+        ]
+      ),
+      now: now
+    )
+
+    XCTAssertTrue(text.contains("Claude work: ERROR token expired"))
+    XCTAssertTrue(text.contains("Claude: ERROR slow down"))
+  }
+
+  func testFailureOnlyAccountGetsNamedRowInJSON() throws {
+    let snapshot = QuotaSnapshot(
+      generatedAt: now, providers: [],
+      failures: [ProviderFailure(accountID: "acct-9", provider: .anthropic,
+                                 title: "Claude work", kind: .auth, message: "token expired")]
+    )
+    let object = try decodedWaybar(snapshot)
+
+    XCTAssertEqual(object["class"] as? String, "error")
+    XCTAssertEqual(object["text"] as? String, "LLimit: error")
+    let account = try XCTUnwrap((object["accounts"] as? [[String: Any]])?.first)
+    XCTAssertEqual(account["name"] as? String, "Claude work")
+    XCTAssertEqual(account["failing"] as? Bool, true)
+    XCTAssertEqual(account["error"] as? String, "token expired")
+    XCTAssertEqual(account["errorKind"] as? String, "auth")
+  }
+
+  func testStalePreservedAccountRowIsMarkedFailing() throws {
+    let base = snapshot(remaining: [73])
+    let failed = QuotaSnapshot(
+      generatedAt: now,
+      providers: base.providers,
+      failures: [ProviderFailure(accountID: "account-0", provider: .anthropic,
+                                 title: "Claude 1", kind: .network, message: "offline")]
+    )
+    let object = try decodedWaybar(failed)
+
+    let account = try XCTUnwrap((object["accounts"] as? [[String: Any]])?.first)
+    XCTAssertEqual(account["failing"] as? Bool, true)
+    XCTAssertEqual(account["error"] as? String, "offline")
+    XCTAssertEqual(account["errorKind"] as? String, "network")
+    // The preserved quota stays visible alongside the failure marker.
+    XCTAssertEqual(account["remainingPercent"] as? Int, 73)
+  }
+
+  func testEmptySnapshotReadsNoAccountsAndDropsTrailingTooltipLine() throws {
+    let object = try decodedWaybar(QuotaSnapshot(generatedAt: now, providers: [], failures: []))
+
+    XCTAssertEqual(object["class"] as? String, "empty")
+    XCTAssertEqual(object["text"] as? String, "LLimit: no accounts")
+    let tooltip = try XCTUnwrap(object["tooltip"] as? String)
+    XCTAssertFalse(tooltip.hasSuffix("\n"))
+  }
 }

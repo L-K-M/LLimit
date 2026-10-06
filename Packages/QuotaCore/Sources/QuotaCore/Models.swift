@@ -386,12 +386,18 @@ public struct ProviderFailure: Codable, Hashable, Identifiable, Sendable {
   public var id: String { accountID }
   public var accountID: String
   public var provider: QuotaProvider
+  /// The account's display name captured when the fetch failed, so error
+  /// surfaces can name the failing account without a settings lookup. Absent
+  /// in snapshots written before this field existed.
+  public var title: String?
   public var kind: QuotaErrorKind
   public var message: String
 
-  public init(accountID: String? = nil, provider: QuotaProvider, kind: QuotaErrorKind, message: String) {
+  public init(accountID: String? = nil, provider: QuotaProvider, title: String? = nil,
+              kind: QuotaErrorKind, message: String) {
     self.accountID = accountID ?? provider.rawValue
     self.provider = provider
+    self.title = title
     self.kind = kind
     self.message = message
   }
@@ -399,6 +405,7 @@ public struct ProviderFailure: Codable, Hashable, Identifiable, Sendable {
   private enum CodingKeys: String, CodingKey {
     case accountID
     case provider
+    case title
     case kind
     case message
   }
@@ -407,6 +414,7 @@ public struct ProviderFailure: Codable, Hashable, Identifiable, Sendable {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     provider = try container.decode(QuotaProvider.self, forKey: .provider)
     accountID = (try? container.decodeIfPresent(String.self, forKey: .accountID)) ?? provider.rawValue
+    title = try container.decodeIfPresent(String.self, forKey: .title)
     kind = try container.decode(QuotaErrorKind.self, forKey: .kind)
     message = try container.decode(String.self, forKey: .message)
   }
@@ -415,6 +423,7 @@ public struct ProviderFailure: Codable, Hashable, Identifiable, Sendable {
     var container = encoder.container(keyedBy: CodingKeys.self)
     try container.encode(accountID, forKey: .accountID)
     try container.encode(provider, forKey: .provider)
+    try container.encodeIfPresent(title, forKey: .title)
     try container.encode(kind, forKey: .kind)
     try container.encode(message, forKey: .message)
   }
