@@ -17,11 +17,13 @@ public final class SnapshotStore: @unchecked Sendable {
   }
 
   #if canImport(Darwin)
-  public convenience init(appGroupIdentifier: String, fileName: String) {
-    let url = FileManager.default.containerURL(
+  /// Returns nil when the App Group container cannot be resolved (missing or
+  /// mismatched entitlement) — callers must degrade rather than crash.
+  public convenience init?(appGroupIdentifier: String, fileName: String) {
+    guard let container = FileManager.default.containerURL(
       forSecurityApplicationGroupIdentifier: appGroupIdentifier
-    )!.appendingPathComponent(fileName)
-    self.init(fileURL: url, appGroupIdentifier: appGroupIdentifier)
+    ) else { return nil }
+    self.init(fileURL: container.appendingPathComponent(fileName), appGroupIdentifier: appGroupIdentifier)
   }
   #endif
 
