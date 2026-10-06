@@ -1,6 +1,6 @@
 # LLimit — analysis and shovel-ready ideas
 
-This document is the durable output of two independent full reviews of `main`
+This document is the durable output of three independent full reviews of `main`
 at `2d6ac1e` ("Add twelve widget slots and a resizable dropdown"), consolidated
 here. Between them the reviews read every surface: the macOS app
 (`LLimitApp/`), the widget extension (`LLimitWidgetExtension/`), the shared
@@ -81,6 +81,68 @@ Review pass B (parallel review, different agent):
 - **Accessibility badges** (`#N AUTO`, `ESTIMATED`) updated with larger font
   (8pt), higher contrast (0.85 opacity), and explicit VoiceOver labels.
 
+Review pass C (third independent pass; PRs open for review):
+
+- **#63 `fix/provider-error-body-excerpt`** — provider error bodies are capped
+  (~200 chars, whitespace-folded), bounded-decoded before tokenization, and
+  scrubbed of credential-shaped tokens (Bearer/JWT/API-key prefixes) before
+  they can persist into snapshots. Covers the exposure half of §1.2; the
+  structured-failure fields there remain open.
+- **#64 `fix/status-renderer-account-identity`** — failure rows name the
+  account (recorded title → stale usage title → provider name), the JSON
+  contract gains `failing`/`error`/`errorKind` per account row, duplicate
+  failures collapse to the most actionable kind, any failure escalates a
+  green bar to `warning`, and the tray keeps full error text in tooltips.
+- **#68 `fix/venice-key-invalidation`** — Venice key edits no longer run a
+  full history rewrite per keystroke: invalidation is debounced + flushed on
+  termination, and quota estimates carry a key fingerprint so a stale
+  estimate can't bind to a different key (§2.5 closed).
+- **#74 `fix/store-file-permissions`** — snapshot and history files are
+  written owner-only via a create-0600-then-`rename` helper, so no
+  world-readable window exists and chmod failures log to stderr (§7.1,
+  partially: directory mode and owner verification remain).
+- **#76 `fix/history-dedup`** — `append` skips content-equivalent snapshots
+  while the newest point is fresh (<1h) and folds the newer timestamp into it
+  when stale, so flat stretches neither grow the file nor age out of
+  `loadRecent` (§4.4's "stop appending carried values", §P3).
+- **#78 `fix/store-corruption-quarantine`** — undecodable snapshot/history
+  files move aside to `<name>.corrupt` with a logged trail
+  (`reportPersistenceIssue`: os.Logger on Darwin, stderr on Linux) instead of
+  failing forever (§7.2's quarantine half).
+- **#79 `fix/app-group-store-nil`** — the App Group `SnapshotStore`
+  convenience init is failable with an NSLog breadcrumb instead of
+  force-unwrapping the container URL.
+- **#81 `fix/opencode-go-rate-limited`** — OpenCode Go windows reporting
+  `rate-limited` at any percent render exhausted instead of failing the
+  fetch; the rule lives on `GoUsageWindow.isExhausted`/`effectivePercent`.
+- **#85 `fix/settings-save-debounce`** — per-keystroke/color-drag bindings
+  coalesce settings writes through a 400ms debounce, flushed synchronously on
+  `willTerminate` (queue: nil — async hops can be dropped mid-quit) and on
+  resign-active (§2.3's debounce half).
+- **#86 `feat/env-credential-references`** — stored credential values may be
+  `env:NAME` pointers resolved from the process environment at runtime;
+  OpenAI grant rotation and live-file adoption never overwrite a reference,
+  so secrets can live entirely outside the settings file (H6).
+- **#87 `feat/pace-eta`** — `UsageMetric.paceEstimate`: burn-rate and
+  exhaustion-ETA computed in QuotaCore from history, rendered on macOS
+  dropdown rows (§11.1's engine; CLI/tray surfaces remain).
+- **#88 `feat/cli-surface`** — `llimit compact` one-line status for prompts
+  (§6.3), `llimit resets` upcoming-reset listing, and `llimit export` history
+  export (§11.8).
+- **#91 `fix/claude-ua-version`** — the Anthropic usage UA reads the detected
+  Claude Code version (cached probe) instead of a frozen `claude-code/1.0.110`.
+- **#97 `feat/llimit-check`** — `llimit check [--below pct] [--stale-hours h]`
+  exits 1 with reason lines for low metrics, failures, and stale data —
+  the scriptable alerting half (`llimit check || notify-send`).
+- **#98 `feat/llimit-trend`** — `llimit trend [--days N]` renders per-account
+  sparklines from the history file (forward-filled, per-series normalized).
+- **#99 `feat/llimit-watch`** — `llimit status --watch [seconds]` repaints in
+  place (ANSI clear+home) tracking daemon refreshes (D5's minimal form).
+- **#100 `feat/threshold-alerts`** — `QuotaAlertEvaluator` (QuotaCore) +
+  `UNUserNotificationCenter` delivery: warning/critical band crossings and
+  per-kind failures notify once, re-arm on recovery; thresholds configurable
+  in Settings → General (§4.6 closed; §11.9 minus quiet hours/Focus).
+
 ### Review-driven refinements worth remembering
 
 Each PR absorbed one or more automated review rounds. The changes those rounds
@@ -108,35 +170,35 @@ produced are the same traps a future PR will hit:
 ## 1. Correctness and data integrity
 
 ### 1.1 Silent refresh no-op while a Codex login is in progress
-`LLimitApp/AppModel.swift:187` — `guard !isRefreshing, codexBusyAccounts.isEmpty else { return }`.
+`AppModel.refreshNow` — `guard !isRefreshing, codexBusyAccounts.isEmpty else { return }`.
 The menu-bar Refresh button appears dead: no message, no state change. Either
 surface a notice ("Waiting for an OpenAI sign-in to finish") or let the refresh
 run for the non-OpenAI accounts.
 **Done when:** pressing Refresh during a Codex sign-in gives visible feedback.
 
-### 1.2 Raw HTTP bodies reach persisted, widget-visible failure text
-`Clients/AnthropicClient.swift:58-59` appends the response body to the
-`ProviderClientError` message, which becomes `ProviderFailure.message` and is
-persisted into the snapshot/history and rendered in widgets and `llimit status`.
-The same shape appears in other clients. This is a data-exposure path, not just
-robustness.
-
-At the same time `ProviderFailure` only captures `(accountID, provider, kind,
-message)`: it lacks `failedAt: Date`, `httpStatusCode: Int?`, and
-`retryAfter: Date?`, so surfaces cannot show actionable countdowns ("rate
-limited; retries in 2m") instead of static error text.
+### 1.2 ProviderFailure carries only a display string — exposure half fixed by #63
+#63 lands the excerpt discipline: every client routes bodies through shared
+`bodyExcerpt`/`sanitizeFailureText` helpers (cap, whitespace-fold, credential-
+token scrub) before the message reaches `ProviderFailure`. What remains is the
+structured-data half: `ProviderFailure` still captures only
+`(accountID, provider, kind, message)` — no `failedAt: Date`,
+`httpStatusCode: Int?`, or `retryAfter: Date?` — so surfaces cannot show
+"failing for 3h" or "rate limited; retries in 2m", and 4.2's recency ordering
+has nothing to sort on.
 
 **Do:** persist a structured failure (kind, safe status, timestamp, retry time,
 provider code, short allowlisted message); extract `Retry-After` headers into
 `retryAfter`; keep raw diagnostics transient; redact every configured
 credential value at the coordinator boundary; strip control characters and cap
-lengths. Add serialization tests proving tokens never cross the App Group
-boundary. (Backlog: "Failure-data redaction boundary".)
+lengths. New fields are additive Codable — verify an old snapshot still
+decodes, and decide whether the archive needs a `formatVersion` gate at the
+same time (see 7.3). Add serialization tests proving tokens never cross the
+App Group boundary. (Backlog: "Failure-data redaction boundary".)
 
 ### 1.3 Dead code
 - `LLimitWidgetExtension/LLimitQuotaWidget.swift` — `resetSummaries(for:at:)`
   and `dashboardBarPercents(for:)` are never called.
-- `WidgetVisibilitySettings.showResetInfo` (`Models.swift:1247`) is stored,
+- `WidgetVisibilitySettings.showResetInfo` (Models.swift) is stored,
   decoded and round-tripped but no surface reads it. Expose it (a real "show
   reset info" toggle) or delete it.
 **Done when:** `grep` finds no unused declarations and the settings round-trip
@@ -155,53 +217,51 @@ same ground.)
 
 ### 2.1 Whole-file history rewrite on the main actor, every refresh
 `QuotaHistoryStore.append` loads, filters, sorts, re-encodes and atomically
-rewrites the whole archive; `AppModel.publishSnapshot` (`:276`) calls it on
-`@MainActor`, then `reloadRecentHistory()` (`:1759`) decodes the whole file
+rewrites the whole archive; `AppModel.publishSnapshot` calls it on
+`@MainActor`, then `reloadRecentHistory()` decodes the whole file
 again for a two-day slice. At the 3000-entry cap that is two full JSON passes
-per refresh on the UI thread.
+per refresh on the UI thread. #76 reduced *how often* a write happens
+(content-equivalent snapshots fold into the newest stored point), but each
+distinct write still rewrites the whole archive.
 **Do:** day-partitioned files or append-only records with indexed timestamps;
 move encode/I/O off `@MainActor`; enforce byte-size as well as entry-count
 retention; add a large-archive append-latency benchmark.
 
 ### 2.2 Sparklines rescan all history per metric, per render
-`LLimitApp/LLimitApp.swift:1427` (`ProviderQuotaCard.sparkPoints`) →
-`SparkSeriesBuilder.points` (`:412`) walks every recent snapshot and does a
+`ProviderQuotaCard.sparkPoints` (LLimitApp/LLimitApp.swift) →
+`SparkSeriesBuilder.points` walks every recent snapshot and does a
 linear `first(where:)` per account and metric, for every card, on every
 `TimelineView` tick, every `@Published` change, and every hover animation.
 **Do:** precompute one `[accountID: [metricID: [SparkPoint]]]` map per snapshot
 generation and hand it to the cards.
 
-### 2.3 Settings persistence is not debounced
-Every keystroke in a credential or name field runs `saveConfiguration()` →
-local encode + App Group encode + `WidgetCenter.reloadAllTimelines()`
-(`AppModel.updateAccount` → `saveConfiguration`), synchronously on
-`@MainActor`, which makes typing in Settings lag.
-**Do:** debounce text/color persistence (~500 ms after typing stops), move
-JSON encoding and file I/O off `@MainActor` (detached task or persistence
-actor), flush on focus loss, window close, termination and credential
-rotation, and skip the App Group write when the redacted payload is unchanged.
+### 2.3 Settings persistence — debounce done, still on the main actor
+#85 coalesced the hot binding paths through a 400ms debounce flushed
+synchronously on `willTerminate`/`willResignActive`, so typing and color-drag
+no longer stall the UI thread every keystroke. What remains:
+`saveConfiguration()` still performs the local encode + App Group encode +
+file writes on `@MainActor` (once per debounce flush), and the App Group copy
+is rewritten even when the redacted payload is byte-identical.
+**Do:** move JSON encoding and file I/O off `@MainActor` (detached task or
+persistence actor) behind the existing dirty flag, and skip the App Group
+write when the redacted payload is unchanged.
 
 ### 2.4 `AppModel.primaryColorsByAccountID` rebuilds `AppSettings` per access
-`AppModel.swift:1462` calls `currentSettings()` (which maps
+`AppModel.primaryColorsByAccountID` calls `currentSettings()` (which maps
 `providerStyleSettings` for all accounts) and is read from several view bodies.
 Memoize it against the accounts/style revision.
 
-### 2.5 Venice key invalidation runs a full history rewrite per keystroke
-`AppModel.updateAccount` (`:1601-1614, 1627-1638`): when an edit to a `.venice`
-account changes the key, `invalidateVeniceUsage()` runs immediately — it loads
-the whole 45-day `quota-history.json`, filters out the account, re-encodes up
-to 3,000 snapshots, and writes it back on `@MainActor`. Pasting a 32-character
-key triggers ~32 full load-decode-filter-encode-save cycles and multi-second
-hangs.
-**Do:** defer invalidation until editing finishes (focus loss, Return, or the
-account's next verified refresh), not per keystroke. Composes with 2.3's
-debounce.
+### ~~2.5 Venice key invalidation runs a full history rewrite per keystroke~~ — fixed by #68
+Deferred invalidation + a key fingerprint on VeniceQuotaEstimate, plus a
+termination flush for pending invalidations. The underlying cost of a
+full-archive rewrite per invalidation remains and is covered by 2.1.
 
 ## 3. Visual, layout and theming
 
 ### 3.1 The dashboard is hard-locked to dark — partially fixed
-`LLimitApp.swift:601` forces `.environment(\.colorScheme, .dark)` and
-`DashboardPalette` (`:241`) is a hand-tuned graphite. #73 removed the forced
+`LLimitApp.swift` (the dashboard window's content) forces
+`.environment(\.colorScheme, .dark)` and `DashboardPalette` is a hand-tuned
+graphite. #73 removed the forced
 color scheme so the window follows the system appearance, but the graphite
 palette still assumes a dark backdrop: a light desktop needs its own validated
 palette and a contrast pass (status colors, hairlines, ring tracks). Treat it
@@ -209,14 +269,15 @@ as a designed feature, not a tweak. (Backlog: make the Default background
 system-adaptive.)
 
 ### 3.2 Settings uses fixed 180 pt label columns
-`SettingsView.swift:20` (`settingsLabelWidth = 180`) and the Appearance
+`settingsLabelWidth = 180` (SettingsView.swift) and the Appearance
 section's fixed color columns get cramped at the 720 pt minimum window width
 and in localized languages where labels are longer.
 **Do:** an adaptive `Grid`/`Form` layout that stacks columns at narrow widths,
 and wrap instead of clip.
 
 ### 3.3 Menu-bar icon grows linearly and never adapts
-`LLimitApp.swift:174-218`: `totalWidth = count * 3 + (count-1) * 1.5` — twelve
+The menu-bar image builder in `LLimitApp.swift`:
+`totalWidth = count * 3 + (count-1) * 1.5` — twelve
 accounts is ~52 pt of status item, crowding other items on notched MacBooks.
 The image is `isTemplate = false` with pale provider colors, so it can wash out
 on a light menu bar and ignores Increase Contrast / Reduce Transparency.
@@ -274,7 +335,9 @@ settings lock, with tests in `LLimitdCoreTests`.
 ### 4.2 CLI ergonomics
 - No `--version` (the `.deb` and systemd units would use it).
 - No `llimit accounts list --json` for scripting.
-- `llimit status` sorts failures by `accountID`, not severity or recency.
+- `llimit status` failure rows: #64 made them severity-ranked per account;
+  cross-account ordering is still `accountID`, not severity or recency
+  (needs `failedAt` from 1.2 to do recency properly).
 
 ### 4.3 Refresh feedback is one overwritten global string
 `AppModel.statusMessage` is a single `String`; a save failure can be replaced
@@ -286,8 +349,11 @@ and do not overwrite durability failures with later success text. (Backlog.)
 Last-known usage is carried after a failure, but the aggregate snapshot time is
 presented as if every account succeeded. Define one shared freshness model
 (last attempt, last success, current failure, stale age), show it on every
-surface, count only fresh providers in summaries, and stop appending carried
-values to history as new observations. (Backlog; partially addressed by #52.)
+surface (e.g. "updated 3h ago" on a carried-stale row), count only fresh
+providers in summaries, and stop appending carried
+values to history as new observations. (Backlog; partially addressed by #52;
+#76 now deduplicates content-identical appends, and #64 surfaces failure state
+per account row, but the explicit per-account freshness model is still absent.)
 
 ### 4.5 Onboarding
 The empty state tells an unconfigured user to refresh. Make "Add your first
@@ -295,12 +361,11 @@ account" the primary action, add a guided first-run flow with opt-in discovery,
 identity selection and a test connection, and add destructive-removal
 confirmation with Undo. (Backlog.)
 
-### 4.6 Configurable warning thresholds
-The low-quota warning level is hardcoded (~20% remaining / 80% used). Let users
-set low and warning thresholds (e.g. 15% / 30% remaining) in Settings and in
-`quota-settings.json`, so power users can pick their buffer before switching
-accounts. Thresholds feed the status `class`, widget tinting and (future)
-notifications.
+### ~~4.6 Configurable warning thresholds~~ — fixed by #100
+`QuotaAlertSettings` exposes warning/critical percentages in Settings →
+General, persisted in `AppSettings`. Remaining follow-up: apply the same
+configured thresholds to the status `class` computation and widget tinting
+(today they still use the hardcoded ~20% level).
 
 ## 5. Accessibility
 
@@ -338,31 +403,34 @@ dashboard and widgets) honoring Differentiate Without Color.
 Keep the threshold in step with the daemon when new callers render the contract
 (e.g. a future `--stale-after` flag).
 
-### 6.3 Shell prompt / status line integration
-A lightweight command that emits a one-line status for `starship`, `tmux`,
-`zsh`/`bash` prompts: `llimit prompt` or `llimit status --compact` →
-`[Claude: 84% | GPT: 62%]` with ANSI colors. Continuous quota visibility in the
-terminal for near-zero cost. Same family: Raycast / Stream Deck widgets reading
-`llimit status --json`.
+### 6.3 Shell prompt / status line integration — mostly done by #88
+`llimit compact` emits the one-line `Claude:84% GPT:62%` form for `starship`,
+`tmux` and prompts. Remaining: ANSI color in compact output, and the Raycast /
+Stream Deck angle (third-party widgets reading `llimit status --json`).
 
 ## 7. Security and credential handling
 
-### 7.1 Enforce local file permissions
-`SettingsStore.save` applies `0600` with `try?` (failure ignored);
-`SnapshotStore`/`QuotaHistoryStore` request `0644` for files that contain
-account metadata. Parent directories are not explicitly restricted.
+### 7.1 Enforce local file permissions — partially done by #74
+#74 replaced the write-then-`try?`-chmod pattern with `writeOwnerOnlyAtomically`
+(create temp `0600`, write, `rename`), so snapshot/history files are `0600`
+with no world-readable window, and chmod/write failures are reported. Remaining:
+parent directories are not explicitly restricted, the App Group copy should use
+the narrowest functional mode, and nothing verifies regular-file type/owner
+after replacement.
 **Do:** create the local LLimit directory `0700`; verify regular-file type,
 owner and final mode after replacement; treat verification failure as a save
 failure; use `0600` locally and the narrowest functional mode in the App Group;
 add first-save, overwrite, wrong-owner/type and permission-failure tests.
 
-### 7.2 Stores are `@unchecked Sendable` with shared codecs
-`SettingsStore`, `SnapshotStore` and `QuotaHistoryStore` share `JSONEncoder`/
-`JSONDecoder` instances and do unlocked read-modify-write. Concurrent appends
-can lose data, and one malformed entry permanently blocks later appends.
+### 7.2 Stores are `@unchecked Sendable` with shared codecs — quarantine done by #78
+#78 quarantines undecodable archives to `<name>.corrupt` with a logged trail, so
+one malformed file no longer blocks all later loads/appends. The concurrency
+half remains: `SettingsStore`, `SnapshotStore` and `QuotaHistoryStore` share
+`JSONEncoder`/`JSONDecoder` instances and do unlocked read-modify-write, so
+concurrent appends can still lose data.
 **Do:** serialize in-process access (actors or explicit locking); create codecs
-per operation or prove synchronization; quarantine corrupt archives and reseed;
-add concurrent-append and truncated-JSON tests.
+per operation or prove synchronization; add concurrent-append and
+truncated-JSON tests.
 
 ### 7.3 Settings recovery and schema migration
 Recovery from an unreadable settings file is manual. Add a last-known-good
@@ -432,10 +500,11 @@ fields to verify — do not make speculative edits.
 Ideas that are cheap, self-contained and genuinely useful. Each should be its
 own PR.
 
-1. **Burn-rate chip** — lift the widget's `depletionWarnings` math into
-   `QuotaCore` and surface "at this rate, empty by 14:20 (before reset)" in
-   `llimit status`, the tray and the dashboard. The math already exists but is
-   invisible outside the widget.
+1. **Burn-rate chip** — #87 landed the QuotaCore engine
+   (`PaceEstimator` → `UsageMetric.paceEstimate`) and renders it on macOS
+   dropdown rows. Remaining surfaces: `llimit status` lines, the tray, and the
+   widget's `depletionWarnings` (which still uses its own math — converge on the
+   shared estimator).
 2. **Best model to burn** — #59 added the dashboard recommendation row; the
    remaining surfaces are a one-liner in `llimit status`, the menu-bar
    tooltip, and an optional `llimit recommend` command. Rank by remaining
@@ -450,32 +519,39 @@ own PR.
    "ahead of pace (burning fast)" vs "on track" from elapsed-vs-consumed
    within the window.
 6. **Menu sparkline** — 24 h history for the most constrained account in the
-   menu bar.
+   menu bar. CLI side landed in #98 (`llimit trend` renders ASCII sparklines);
+   the menu-bar/tray surfaces remain.
 7. **Honesty mode** — visually distinguish verified, inferred and stale data
    (the `estimated` flag in the JSON contract is the seed).
-8. **History export** — `llimit export --format json|csv [--days 30]` plus an
-   "Export History…" button in Settings → General, with explicit privacy
+8. **History export** — #88 landed `llimit export` (JSON and CSV). Remaining:
+   an "Export History…" button in Settings → General with explicit privacy
    controls, for self-analysis of usage trends and spend.
-9. **Threshold notifications** — per-metric 80%/95% plus reset and
-   auth-failure alerts, with deduplication, quiet hours and Focus awareness
-   (thresholds configurable per 4.6).
+9. **Threshold notifications** — core delivered by #100 (warning/critical
+   crossings + failure alerts with persisted dedup keys, thresholds from
+   `QuotaAlertSettings`) and #97 (`llimit check` for cron/`notify-send`).
+   Remaining: quiet hours, Focus awareness, and reset-moment alerts.
 10. **Shortcuts / App Intents** — read quota and trigger refresh.
 11. **Signed auto-update** — Sparkle-style, after the signing/notarization
     work.
 12. **Quota roulette / quick pick** — a button or `llimit pick` that randomly
     chooses an account with high headroom (>60%) to spread load and keep
     subscriptions balanced.
+13. **"What changed" delta** — a subtle ▲/▼ next to a metric that moved since
+    the last refresh, in the macOS dropdown and the tray. The history needed
+    already exists (compare against the previous snapshot before overwriting).
+14. **Reset radar for the macOS dropdown** — the CLI side exists (#51 `llimit
+    resets`, plus #88's listing); add a "Next resets" section to the
+    dropdown/dashboard answering "what frees up next?" across accounts.
 
 ## 12. `BACKLOG.md` items that are done or stale
 
 Do not re-open these; remove them from `BACKLOG.md` when convenient.
 
 - **"Check current failure before reporting carried usage as loaded"** — done:
-  `SettingsView.accountDataStatus` checks `accountFailure` before `accountUsage`
-  (`:1207`).
+  `SettingsView.accountDataStatus` checks `accountFailure` before `accountUsage`.
 - **"Publish one lightweight entry with `.after(nextRefreshDate)`; do not clone
   the entry every five minutes"** — done: `QuotaTimelineProvider.getTimeline`
-  (`:43-53`) emits a single entry with `.after(nextRefreshDate)`.
+  emits a single entry with `.after(nextRefreshDate)`.
 - **"Resolve whether the global 'Show percentages in all widgets' setting
   applies to provider tiles"** — the tiles never read
   `showPercentageValues`; the setting is dashboard-only in practice.
@@ -485,12 +561,15 @@ Do not re-open these; remove them from `BACKLOG.md` when convenient.
 
 ## 13. Suggested order
 
-1. Merge/review the open PRs from both passes (#50–#59, #73).
-2. Failure-text redaction + structured failures (1.2) and file-permission
+1. Merge/review the open PRs from all passes (#50–#59, #73, #63–#100 per the
+   lists above).
+2. Structured failure fields (1.2) and the remainder of file-permission
    enforcement (7.1) — the two remaining security items.
 3. History storage + main-actor persistence (2.1, 2.3) and sparkline
    precomputation (2.2) — the remaining performance items with visible effect.
-4. Burn-rate chip (11.1) and `llimit accounts set` (4.1) — cheap, high-value.
+4. `llimit accounts set` (4.1) and burn-rate surfaces for CLI/tray (11.1) —
+   cheap, high-value.
 5. Freshness model (4.4), structured notices (4.3), widget accessibility (5.1).
-6. Signing/notarization and the provider-fixture work, which are prerequisites
+6. Menu-bar icon modes (3.3), light-mode palette (3.1), provider registry (3.5).
+7. Signing/notarization and the provider-fixture work, which are prerequisites
    for a trustworthy release.
