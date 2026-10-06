@@ -335,15 +335,33 @@ func runStatus(_ args: [String]) async {
   // --watch [seconds]: re-render the status in place until Ctrl-C. The
   // snapshot is re-read every pass, so the display tracks daemon refreshes.
   var watchInterval: UInt64?
-  if let index = args.firstIndex(of: "--watch") {
-    if args.indices.contains(index + 1), let seconds = UInt64(args[index + 1]) {
+  if let equals = args.first(where: { $0.hasPrefix("--watch=") }) {
+    let raw = String(equals.dropFirst("--watch=".count))
+    if let seconds = UInt64(raw), (1...86_400).contains(seconds) {
       watchInterval = seconds
     } else {
+      FileHandle.standardError.write(Data("llimit: ignoring invalid --watch value \(raw)\n".utf8))
+      watchInterval = 5
+    }
+  } else if let index = args.firstIndex(of: "--watch") {
+    let raw = args.indices.contains(index + 1) && !args[index + 1].hasPrefix("-")
+      ? args[index + 1] : nil
+    if let raw, let seconds = UInt64(raw), (1...86_400).contains(seconds) {
+      watchInterval = seconds
+    } else {
+      // Bare `--watch` stays silent at 5s; a present-but-invalid value warns —
+      // 0 would spin hot and huge values overflow the nanosecond multiply.
+      if let raw {
+        FileHandle.standardError.write(Data("llimit: ignoring invalid --watch value \(raw)\n".utf8))
+      }
       watchInterval = 5
     }
   }
 
+  var previousLineCount = 0
   while true {
+    // makeDaemon() loads the snapshot from disk at init — rebuilding it each
+    // tick is what tracks daemon refreshes, not incidental overhead.
     let daemon = makeDaemon()
     let output = json
       ? StatusRenderer.waybarJSON(snapshot: daemon.snapshot)
@@ -352,11 +370,23 @@ func runStatus(_ args: [String]) async {
       print(output)
       return
     }
-    // ANSI clear + home instead of appending: the terminal shows one live
-    // status screen, not a scrollback of stale ones.
-    print("\u{1B}[2J\u{1B}[H\(output)")
+    if json {
+      // One clean JSON document per tick for stream parsers — no ANSI.
+      print(output)
+    } else if previousLineCount == 0 {
+      print(output)
+    } else {
+      // Redraw in place: cursor up over the previous frame, erase to end of
+      // screen, repaint — keeps scrollback above the status intact.
+      print("\u{1B}[\(previousLineCount)A\u{1B}[J\(output)")
+    }
+    previousLineCount = output.split(separator: "\n", omittingEmptySubsequences: false).count
     fflush(stdout)
-    try? await Task.sleep(nanoseconds: interval * 1_000_000_000)
+    do {
+      try await Task.sleep(nanoseconds: interval * 1_000_000_000)
+    } catch {
+      break // task cancelled — stop watching instead of spinning
+    }
   }
 }
 
