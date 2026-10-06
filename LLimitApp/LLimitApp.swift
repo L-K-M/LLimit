@@ -534,6 +534,9 @@ private struct MenuBarContent: View {
   @ObservedObject var model: AppModel
   let presentation: DashboardPresentation
 
+  @AppStorage(MenuBarPanelSize.widthKey) private var panelWidth = MenuBarPanelSize.defaultWidth
+  @AppStorage(MenuBarPanelSize.heightKey) private var panelHeight = MenuBarPanelSize.defaultHeight
+
   private static let relativeTimeFormatter: RelativeDateTimeFormatter = {
     let formatter = RelativeDateTimeFormatter()
     formatter.unitsStyle = .abbreviated
@@ -541,17 +544,18 @@ private struct MenuBarContent: View {
   }()
 
   var body: some View {
+    let menuBarSize = MenuBarPanelSize.fitted(
+      CGSize(width: panelWidth, height: panelHeight),
+      within: NSScreen.main?.visibleFrame.size
+    )
+
     VStack(spacing: 0) {
       TimelineView(.periodic(from: .now, by: 60)) { context in
         VStack(spacing: 0) {
           dashboardHeader(now: context.date)
           dashboardDivider
           dashboard(now: context.date)
-            .frame(
-              minHeight: presentation == .menuBar ? 320 : 380,
-              idealHeight: presentation == .menuBar ? 510 : nil,
-              maxHeight: presentation == .menuBar ? 510 : .infinity
-            )
+            .frame(minHeight: presentation == .menuBar ? 320 : 380, maxHeight: .infinity)
         }
       }
 
@@ -561,13 +565,26 @@ private struct MenuBarContent: View {
     // One flexible frame, never a fixed width: the macOS 26 menu panel proposes a
     // content width slightly narrower than the window, and a hard 420pt layout
     // overflows it on both sides. Every card adapts, so compressing is safe.
+    // The menu bar panel sizes itself to the ideal frame, which is the size the
+    // user last dragged it to.
     .frame(
       minWidth: 360,
-      idealWidth: presentation == .menuBar ? 420 : 430,
-      maxWidth: presentation == .floating ? .infinity : 420,
+      idealWidth: presentation == .menuBar ? menuBarSize.width : 430,
+      maxWidth: presentation == .floating ? .infinity : menuBarSize.width,
       minHeight: presentation == .floating ? 440 : nil,
-      maxHeight: presentation == .floating ? .infinity : nil
+      idealHeight: presentation == .menuBar ? menuBarSize.height : nil,
+      maxHeight: presentation == .floating ? .infinity : menuBarSize.height
     )
+    .overlay(alignment: .bottom) {
+      // The floating dashboard is a titled window AppKit already resizes.
+      if presentation == .menuBar {
+        HStack {
+          PanelResizeGrip(corner: .bottomLeading, width: $panelWidth, height: $panelHeight)
+          Spacer()
+          PanelResizeGrip(corner: .bottomTrailing, width: $panelWidth, height: $panelHeight)
+        }
+      }
+    }
     .foregroundStyle(.white)
     .background {
       LinearGradient(
@@ -858,7 +875,8 @@ private struct MenuBarContent: View {
     .buttonStyle(.borderless)
     .font(.system(size: 13, weight: .medium))
     .foregroundStyle(.white.opacity(0.88))
-    .padding(.horizontal, 14)
+    // Keeps the buttons clear of the menu bar panel's corner resize grips.
+    .padding(.horizontal, presentation == .menuBar ? PanelResizeGrip.footprint + 4 : 14)
     .padding(.vertical, 10)
     .background(Color.black.opacity(0.10))
   }
@@ -928,6 +946,129 @@ private struct ActionBarButton: View {
     .disabled(isDisabled)
     .opacity(isDisabled ? 0.5 : 1)
     .onHover { isHovering = $0 }
+  }
+}
+
+/// Corner grip that resizes the open menu bar panel and remembers its size.
+/// Sizes follow screen-space pointer deltas since the drag began: the grip
+/// moves with the panel, so translations in its own coordinates would feed
+/// back into the size.
+private struct PanelResizeGrip: View {
+  static let footprint: CGFloat = gripSize + gripInset * 2
+
+  private static let gripSize: CGFloat = 10
+  // Keeps the strokes inside the panel's rounded corner mask.
+  private static let gripInset: CGFloat = 6
+
+  let corner: MenuBarPanelCorner
+  @Binding var width: Double
+  @Binding var height: Double
+
+  @State private var panelAnchor = WindowAnchor()
+  // Gesture state resets on its own when a drag is cancelled, e.g. by the
+  // panel closing mid-drag, so a stale origin never leaks into the next drag.
+  @GestureState private var dragStart: DragStart?
+
+  private struct DragStart {
+    let pointer: NSPoint
+    let frame: NSRect
+    let size: CGSize
+  }
+
+  var body: some View {
+    Canvas { context, size in
+      // Classic window grip: three diagonals, shortest nearest the corner.
+      let leading = corner == .bottomLeading
+      for fraction in [0.3, 0.65, 1.0] {
+        let length = size.width * fraction
+        var stroke = Path()
+        stroke.move(to: CGPoint(x: leading ? 0 : size.width, y: size.height - length))
+        stroke.addLine(to: CGPoint(x: leading ? length : size.width - length, y: size.height))
+        context.stroke(stroke, with: .color(DashboardPalette.tertiaryText), lineWidth: 1)
+      }
+    }
+    .frame(width: Self.gripSize, height: Self.gripSize)
+    .padding(Self.gripInset)
+    .contentShape(Rectangle())
+    .background(HostingWindowReader(anchor: panelAnchor))
+    .modifier(FrameResizeCursor(corner: corner))
+    .gesture(
+      DragGesture(minimumDistance: 0)
+        .updating($dragStart) { _, start, _ in
+          guard start == nil, let panel = panelAnchor.window else { return }
+          let remembered = CGSize(width: width, height: height)
+          start = DragStart(
+            pointer: NSEvent.mouseLocation,
+            frame: panel.frame,
+            size: MenuBarPanelSize.fitted(remembered, within: panel.screen?.visibleFrame.size)
+          )
+        }
+        .onChanged { _ in resize(following: NSEvent.mouseLocation) }
+    )
+    .help("Drag to resize")
+    .accessibilityHidden(true)
+  }
+
+  private func resize(following pointer: NSPoint) {
+    guard let start = dragStart,
+      let panel = panelAnchor.window,
+      let screen = panel.screen ?? NSScreen.main
+    else { return }
+
+    let resized = MenuBarPanelSize.resize(
+      frame: start.frame,
+      size: start.size,
+      corner: corner,
+      pointerDelta: CGSize(width: pointer.x - start.pointer.x, height: pointer.y - start.pointer.y),
+      visibleFrame: screen.visibleFrame
+    )
+    width = Double(resized.size.width)
+    height = Double(resized.size.height)
+    // The panel only grows on its own when its content does, so set the frame
+    // directly to shrink it and to keep the top edge under the menu bar.
+    panel.setFrame(resized.frame, display: true)
+  }
+}
+
+/// Looks up the window hosting a view on demand, here the MenuBarExtra panel,
+/// without writing view state from AppKit callbacks.
+private final class WindowAnchor {
+  weak var view: NSView?
+
+  var window: NSWindow? { view?.window }
+}
+
+private struct HostingWindowReader: NSViewRepresentable {
+  let anchor: WindowAnchor
+
+  func makeNSView(context: Context) -> PassthroughView {
+    let view = PassthroughView()
+    anchor.view = view
+    return view
+  }
+
+  func updateNSView(_ view: PassthroughView, context: Context) {
+    anchor.view = view
+  }
+
+  /// Never takes clicks, so the grip's drag gesture receives them.
+  final class PassthroughView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+  }
+}
+
+/// Diagonal resize pointer where macOS offers one (15+); older systems keep the arrow.
+private struct FrameResizeCursor: ViewModifier {
+  let corner: MenuBarPanelCorner
+
+  func body(content: Content) -> some View {
+    if #available(macOS 15.0, *) {
+      content.pointerStyle(
+        .frameResize(position: corner == .bottomLeading ? .bottomLeading : .bottomTrailing, directions: .all)
+      )
+    } else {
+      content
+    }
   }
 }
 

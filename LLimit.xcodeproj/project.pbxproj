@@ -17,6 +17,7 @@
 		3A11C01DE4B02FBA9D01AA02 /* LimitKindColorScheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A11C01DE4B02FBA9D01AA01 /* LimitKindColorScheme.swift */; };
 		3A11C01DE4B02FBA9D01AA03 /* LimitKindColorScheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A11C01DE4B02FBA9D01AA01 /* LimitKindColorScheme.swift */; };
 		4A4AC618CDAE0C085BE6E421 /* LLimitApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65826397D3D90EF0FE3F1AF8 /* LLimitApp.swift */; };
+		4D3E0B1A5C2F4A6B8E9D0C12 /* MenuBarPanelGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D3E0B1A5C2F4A6B8E9D0C11 /* MenuBarPanelGeometry.swift */; };
 		7394D6C4263D47B0C75C0D50 /* SharedConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CA36F027D77628AAB911B4F /* SharedConstants.swift */; };
 		7505D82D6C3A0DA536BCAFEE /* QuotaTimelineProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F7DC2FD8B8B3CB28CBDBA50 /* QuotaTimelineProvider.swift */; };
 		7B4652AC8FCA0CBC5B22B5B9 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 660DB1B9EAE3B8BCD47F312A /* SettingsView.swift */; };
@@ -68,6 +69,7 @@
 		42923ABCF11FECE813FEBB8F /* LLimitWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLimitWidgetBundle.swift; sourceTree = "<group>"; };
 		4A209FE6A72662BD8F9B150D /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		65826397D3D90EF0FE3F1AF8 /* LLimitApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLimitApp.swift; sourceTree = "<group>"; };
+		4D3E0B1A5C2F4A6B8E9D0C11 /* MenuBarPanelGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarPanelGeometry.swift; sourceTree = "<group>"; };
 		660DB1B9EAE3B8BCD47F312A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		68C113B427C1BC19E1FF5B41 /* WidgetStylePreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetStylePreset.swift; sourceTree = "<group>"; };
 		8B4155FC0F0418AB20A7F600 /* LLimitQuotaWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLimitQuotaWidget.swift; sourceTree = "<group>"; };
@@ -156,6 +158,7 @@
 				FF27A37B7897F137AAC76BBB /* Assets.xcassets */,
 				1D80DFE1041003A3DBEC1B17 /* LLimitApp.entitlements */,
 				65826397D3D90EF0FE3F1AF8 /* LLimitApp.swift */,
+				4D3E0B1A5C2F4A6B8E9D0C11 /* MenuBarPanelGeometry.swift */,
 				68C113B427C1BC19E1FF5B41 /* WidgetStylePreset.swift */,
 				AFE05ADAB087FC3F7B7E52D9 /* Services */,
 				52F914E8DE30DE6489408458 /* Views */,
@@ -309,6 +312,7 @@
 				BCF52573CAD84156B1B5D45D /* AppModel.swift in Sources */,
 				4A4AC618CDAE0C085BE6E421 /* LLimitApp.swift in Sources */,
 				3A11C01DE4B02FBA9D01AA02 /* LimitKindColorScheme.swift in Sources */,
+				4D3E0B1A5C2F4A6B8E9D0C12 /* MenuBarPanelGeometry.swift in Sources */,
 				FC1C8D8802949AC17AA24E39 /* RefreshService.swift in Sources */,
 				6DB81FD14DEEF4F20D7D09DA /* ClaudeTerminalView.swift in Sources */,
 				CDACCF16212E46E899C75F01 /* CodexLoginView.swift in Sources */,
