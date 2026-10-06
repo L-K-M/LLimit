@@ -147,6 +147,46 @@ Dragging the grips in the running app is a manual check: open the dropdown,
 drag each bottom corner, close and reopen it, and confirm the size persists.
 Also relaunch LLimit and confirm the size survives.
 
+# Overview limiting-metric captions
+
+Native checks require macOS. In an offline debug fixture build, pass synthetic
+`ProviderUsage` values to `OverviewCard` in both the dropdown and floating
+dashboard. Use no credentials or network refreshes.
+
+1. **Minimum/default/expanded:** check the 360pt dropdown minimum, 420pt default,
+   390pt floating minimum, and 700pt expanded width with six or more accounts.
+   Gauges should wrap into balanced rows. Names and captions stay at 11pt,
+   reserve two lines, and remain inside their cells. Reset text appears only
+   when the complete caption fits; hovering still reports the full reset.
+2. **Long names:** use `Work Claude development subscription` and a long model
+   label. Check wrapping without overlap or vertical clipping. Any ellipsis must
+   retain the full account and metric names in the tooltip and VoiceOver label.
+3. **Two metrics:** give `5-hour limit` 15% with a reset in 1h, and `Weekly limit`
+   70% with a reset in 2d 3h. Expect `5-hour`, 15%, and the 1h reset. Reverse the
+   percentages and expect `Weekly` with its own reset. A primary weekly color
+   override must not change which metric the caption names. Click each gauge
+   and confirm it still jumps to that account's card in the existing order.
+4. **Ties/more metrics:** equal bounded percentages choose the first metric in
+   snapshot order, matching the existing identity accent. Include a lower
+   `Weekly (Opus)` third metric to confirm selection uses the full metric list,
+   not the provider's preferred two rings, and retains the Opus qualifier.
+5. **Unknown/unlimited/balances:** unknown or empty metrics show `--` and
+   `Unavailable`, even with an aggregate `maxUsagePercent: 0`. All-unlimited
+   metrics show infinity and `Unlimited`. Unknown mixed with unlimited must
+   not claim 100%. A `Credit balance` with only `usedDisplay: "$4.25"` shows that
+   amount and label, with no quota percentage or reset. Without bounded numeric
+   metrics, the overview's LOWEST stat is `--`.
+6. **Reset/estimate details:** check a missing reset, a past reset, and textual
+   `resetIn: "Reset in 2h 5m"`. The tooltip and VoiceOver label must respectively
+   report reset unavailable, reset due, and the normalized countdown. Absolute
+   resets also include their date/time. An estimated `Daily DIEM remaining`
+   retains `≈` on the gauge/caption and `estimated` in the full description,
+   including when a tied metric is estimated.
+
+Linux syntax parsing and the existing QuotaCore selection, color-slot, countdown,
+and Venice tests do not verify SwiftUI layout, native tooltips, VoiceOver, or
+click-to-scroll behavior. These native checks remain unverified on Linux.
+
 # Limit color integration checks
 
 On macOS, run `scripts/test-limit-colors.sh [DerivedData directory]`. The script

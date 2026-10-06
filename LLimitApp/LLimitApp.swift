@@ -641,6 +641,7 @@ private struct MenuBarContent: View {
                 kindColors: model.widgetStyle.limitKindColors,
                 primaryColors: model.primaryColorsByAccountID,
                 accounts: model.providerAccounts,
+                now: now,
                 onSelect: { accountID in
                   withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
                     proxy.scrollTo(accountID, anchor: .top)
@@ -1180,13 +1181,17 @@ private struct OverviewCard: View {
   let kindColors: LimitKindColors
   let primaryColors: [String: String]
   let accounts: [ProviderAccount]
+  let now: Date
   let onSelect: (String) -> Void
 
-  // Six gauges per row at the default 420pt panel width.
-  private static let gaugeColumns = [GridItem(.adaptive(minimum: 54), spacing: 6, alignment: .top)]
+  // Leave room for readable captions and two-line account names as rows wrap.
+  private static let gaugeColumns = [GridItem(.adaptive(minimum: 104), spacing: 6, alignment: .top)]
+  private static let gaugeFontSize: CGFloat = 11
+  private static let metricLabelSuffixes = [" remaining", " limit", " quota"]
+  private static let resetDueCountdown = "reset"
 
   private var lowestRemaining: Int? {
-    providers.compactMap(MenuBarQuotaStyling.remainingPercent).min()
+    providers.compactMap(accountGaugeRemainingPercent).min()
   }
 
   private var metricCount: Int {
@@ -1207,22 +1212,27 @@ private struct OverviewCard: View {
         // Every account gets a gauge. Rows wrap, so a wider panel fits more per row.
         LazyVGrid(columns: Self.gaugeColumns, spacing: 10) {
           ForEach(providers) { provider in
+            let remaining = accountGaugeRemainingPercent(for: provider)
+            let unlimited = provider.metrics.allSatisfy(\.isUnlimited) && !provider.metrics.isEmpty
+            let caption = accountGaugeCaption(for: provider)
+            let reset = MenuBarQuotaStyling.constrainingMetric(for: provider)?.resetCountdown(at: now)
+
             Button {
               onSelect(provider.accountID)
             } label: {
               VStack(spacing: 5) {
-                if MenuBarQuotaStyling.remainingPercent(for: provider) == nil,
-                   let balance = provider.metrics.compactMap(\.usageLine).first {
+                if remaining == nil, !unlimited,
+                   let balance = provider.metrics.first(where: { !$0.isUnlimited && $0.usageLine != nil })?.usageLine {
                   Text(balance)
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .font(.system(size: Self.gaugeFontSize, weight: .semibold, design: .rounded))
                     .monospacedDigit()
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
                     .frame(height: 40)
                 } else {
                   GlossRing(
-                    remaining: MenuBarQuotaStyling.remainingPercent(for: provider),
-                    unlimited: provider.metrics.allSatisfy(\.isUnlimited) && !provider.metrics.isEmpty,
+                    remaining: remaining,
+                    unlimited: unlimited,
                     tint: LimitKindColorScheme.accountAccent(
                       for: provider.metrics,
                       colors: kindColors,
@@ -1235,16 +1245,33 @@ private struct OverviewCard: View {
                   )
                 }
                 Text(provider.title)
-                  .font(.system(size: 9, weight: .medium))
+                  .font(.system(size: Self.gaugeFontSize, weight: .medium))
                   .foregroundStyle(DashboardPalette.secondaryText)
-                  .lineLimit(1)
+                  .lineLimit(2, reservesSpace: true)
+                  .multilineTextAlignment(.center)
+                  .fixedSize(horizontal: false, vertical: true)
                   .frame(maxWidth: .infinity)
+
+                ViewThatFits(in: .horizontal) {
+                  if let reset {
+                    Text("\(caption) · \(reset == Self.resetDueCountdown ? "Reset due" : reset)")
+                      .lineLimit(2, reservesSpace: true)
+                      .fixedSize(horizontal: true, vertical: true)
+                  }
+                  Text(caption)
+                    .lineLimit(2, reservesSpace: true)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                .font(.system(size: Self.gaugeFontSize))
+                .foregroundStyle(DashboardPalette.secondaryText)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
               }
               .frame(maxWidth: .infinity)
               .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Jump to \(provider.title)")
+            .help(accountGaugeAccessibilityLabel(for: provider))
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(accountGaugeAccessibilityLabel(for: provider))
           }
@@ -1287,21 +1314,63 @@ private struct OverviewCard: View {
       .frame(width: 1, height: 26)
   }
 
+  private func accountGaugeRemainingPercent(for provider: ProviderUsage) -> Int? {
+    // An aggregate fallback cannot identify a limiting metric or its reset.
+    guard MenuBarQuotaStyling.constrainingMetric(for: provider) != nil else { return nil }
+    return MenuBarQuotaStyling.remainingPercent(for: provider)
+  }
+
+  private func accountGaugeCaption(for provider: ProviderUsage) -> String {
+    if let metric = MenuBarQuotaStyling.constrainingMetric(for: provider) {
+      let qualifier = MenuBarQuotaStyling.isPercentageEstimated(for: provider) ? "≈ " : ""
+      return qualifier + shortMetricLabel(metric.label)
+    }
+
+    if provider.metrics.allSatisfy(\.isUnlimited), !provider.metrics.isEmpty {
+      return "Unlimited"
+    }
+
+    if let balance = provider.metrics.first(where: { !$0.isUnlimited && $0.usageLine != nil }) {
+      return balance.label
+    }
+    return "Unavailable"
+  }
+
+  private func shortMetricLabel(_ label: String) -> String {
+    let label = label.trimmingCharacters(in: .whitespacesAndNewlines)
+    for suffix in Self.metricLabelSuffixes where label.lowercased().hasSuffix(suffix) {
+      let shortened = String(label.dropLast(suffix.count))
+      if !shortened.isEmpty { return shortened }
+    }
+
+    // Preserve provider/model qualifiers, e.g. "Weekly (Opus)" and "Daily DIEM".
+    return label.isEmpty ? "Quota" : label
+  }
+
   private func accountGaugeAccessibilityLabel(for provider: ProviderUsage) -> String {
     if provider.metrics.allSatisfy(\.isUnlimited), !provider.metrics.isEmpty {
       return "\(provider.title), unlimited. Jump to card."
     }
-    if let remaining = MenuBarQuotaStyling.remainingPercent(for: provider) {
+    if let metric = MenuBarQuotaStyling.constrainingMetric(for: provider),
+       let remaining = accountGaugeRemainingPercent(for: provider) {
       let qualifier = MenuBarQuotaStyling.isPercentageEstimated(for: provider) ? "estimated " : ""
-      return "\(provider.title), \(qualifier)\(remaining) percent remaining. Jump to card."
+      return "\(provider.title), limiting metric: \(metric.label), \(qualifier)\(remaining) percent remaining. "
+        + "\(accountGaugeResetDescription(for: metric)) Jump to card."
     }
-    let balances = provider.metrics.compactMap { metric in
+    let balances = provider.metrics.filter { !$0.isUnlimited }.compactMap { metric in
       metric.usageLine.map { "\(metric.label) \($0)" }
     }
     if !balances.isEmpty {
       return "\(provider.title), \(balances.joined(separator: ", ")). Jump to card."
     }
     return "\(provider.title), quota unavailable. Jump to card."
+  }
+
+  private func accountGaugeResetDescription(for metric: UsageMetric) -> String {
+    guard let countdown = metric.resetCountdown(at: now) else { return "Reset unavailable." }
+    let description = countdown == Self.resetDueCountdown ? "Reset due" : "Resets in \(countdown)"
+    guard let resetAt = metric.resetAt else { return description + "." }
+    return "\(description) (\(resetAt.formatted(date: .abbreviated, time: .shortened)))."
   }
 }
 
@@ -1654,19 +1723,22 @@ private struct ProviderFailureCard: View {
 }
 
 private enum MenuBarQuotaStyling {
+  static func constrainingMetric(for provider: ProviderUsage) -> UsageMetric? {
+    // Match the numeric minimum and identity accent; ties retain snapshot order.
+    provider.metrics
+      .filter { !$0.isUnlimited && $0.remainingPercent != nil }
+      .min { ($0.remainingPercent ?? Int.max) < ($1.remainingPercent ?? Int.max) }
+  }
+
   static func isPercentageEstimated(for provider: ProviderUsage) -> Bool {
-    guard let remaining = remainingPercent(for: provider) else { return false }
+    guard let remaining = constrainingMetric(for: provider)?.remainingPercent else { return false }
     return provider.metrics.contains {
       !$0.isUnlimited && $0.remainingPercent == remaining && $0.isPercentageEstimated
     }
   }
 
   static func remainingPercent(for provider: ProviderUsage) -> Int? {
-    let boundedRemaining = provider.metrics
-      .filter { !$0.isUnlimited }
-      .compactMap(\.remainingPercent)
-
-    if let minimumRemaining = boundedRemaining.min() {
+    if let minimumRemaining = constrainingMetric(for: provider)?.remainingPercent {
       return clampPercent(minimumRemaining)
     }
 
@@ -1685,4 +1757,3 @@ private enum MenuBarQuotaStyling {
     max(0, min(100, value))
   }
 }
-
