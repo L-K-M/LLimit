@@ -155,8 +155,9 @@ final class QuotaHistoryStoreTests: XCTestCase {
     let fresh = makeSnapshot(at: now, fetchedAt: now)
     try store.save([expired, fresh])
 
-    // Identical to the newest entry, so nothing is added — but the row that aged
-    // past the 45-day window must still go.
+    // Dedup keys on providers/failures only, so this repeat adds nothing and
+    // keeps the stored timestamp (hence [now], not [now + 1800]) — but the row
+    // that aged past the 45-day window must still go.
     try store.append(makeSnapshot(at: now.addingTimeInterval(1800), fetchedAt: now))
 
     XCTAssertEqual(try store.load().map(\.generatedAt), [now])

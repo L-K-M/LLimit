@@ -84,8 +84,8 @@ public final class QuotaHistoryStore: @unchecked Sendable {
        newest.providers == snapshot.providers,
        newest.failures == snapshot.failures {
       if history.contains(where: { $0.generatedAt < cutoffDate }) {
-        history = history.filter { $0.generatedAt >= cutoffDate }
-        try save(history)
+        let pruned = history.filter { $0.generatedAt >= cutoffDate }
+        try save(pruned)
       }
       return
     }
