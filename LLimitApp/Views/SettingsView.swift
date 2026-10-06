@@ -638,6 +638,28 @@ struct SettingsView: View {
 
         Divider()
 
+        settingsRow(title: "Limit color palette") {
+          VStack(alignment: .leading, spacing: 6) {
+            Picker("", selection: model.limitKindPaletteBinding()) {
+              Text("Custom").tag("")
+                .selectionDisabled(true)
+              ForEach(LimitKindPalette.allCases, id: \.self) { palette in
+                Text(palette.displayName).tag(palette.rawValue)
+              }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+
+            Text("Themes every limit-window color at once — rings, bars, sparklines, the menu bar, widgets and the trend chart. Adjust a color below and the palette becomes Custom.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          }
+          .frame(minWidth: 180, maxWidth: 300, alignment: .leading)
+        }
+
+        Divider()
+
         settingsRow(title: "Limit colors") {
           VStack(alignment: .leading, spacing: 6) {
             Text("Default colors for limit windows in rings, bars, sparklines, and the trend chart. You can choose a primary color in each account's settings.")

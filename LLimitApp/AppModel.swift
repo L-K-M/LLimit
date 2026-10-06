@@ -1454,6 +1454,19 @@ final class AppModel: ObservableObject {
     )
   }
 
+  /// Applies a curated limit-window palette, replacing every identity color at
+  /// once. The empty tag means "Custom": the colors were edited by hand.
+  func limitKindPaletteBinding() -> Binding<String> {
+    Binding(
+      get: { self.widgetStyle.limitKindColors.palette?.rawValue ?? "" },
+      set: { newValue in
+        guard let palette = LimitKindPalette(rawValue: newValue) else { return }
+        self.widgetStyle.limitKindColors = palette.colors
+        self.saveConfiguration()
+      }
+    )
+  }
+
   func resetLimitKindColors() {
     widgetStyle.limitKindColors = .default
     saveConfiguration()
