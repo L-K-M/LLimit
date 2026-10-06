@@ -77,4 +77,116 @@ final class QuotaHistoryStoreTests: XCTestCase {
     XCTAssertEqual(loaded.providers.map(\.accountID), ["keep-me"])
     XCTAssertTrue(loaded.failures.isEmpty)
   }
+
+  func testRemoveWithoutMatchLeavesArchiveUntouched() throws {
+    let (store, dir) = makeStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let url = dir.appendingPathComponent("history.json")
+
+    // Nothing to purge must not create an archive.
+    try store.remove(accountIDs: ["absent"])
+    XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+
+    // Pretty-printed bytes differ from the store's compact encoding, so any
+    // rewrite would show up as changed bytes.
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    let original = try encoder.encode([snapshot(at: now, accountIDs: ["keep-me"], failedAccountIDs: ["failed"])])
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    try original.write(to: url)
+
+    try store.remove(accountIDs: ["absent"])
+    XCTAssertEqual(try Data(contentsOf: url), original)
+
+    // A match in failures alone still counts.
+    try store.remove(accountIDs: ["failed"])
+    let loaded = try XCTUnwrap(store.load().first)
+    XCTAssertTrue(loaded.failures.isEmpty)
+    XCTAssertEqual(loaded.providers.map(\.accountID), ["keep-me"])
+  }
+
+  func testPublishPathDecodesArchiveOnce() throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let decoder = CountingDecoder()
+    let store = QuotaHistoryStore(fileURL: dir.appendingPathComponent("history.json"), decoder: decoder)
+
+    // A full archive: 3,000 refreshes 15 minutes apart, the shortest interval.
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let interval: TimeInterval = 15 * 60
+    try store.save((1...3_000).map { snapshot(at: now.addingTimeInterval(-Double($0) * interval), accountIDs: ["a", "b"]) })
+    decoder.archiveDecodes = 0
+
+    // The app's publish: append the refresh, then derive the dashboard's recent slice.
+    let archive = try store.append(snapshot(at: now, accountIDs: ["a", "b"]))
+    let recent = QuotaHistoryStore.recent(archive, days: 2, now: now)
+
+    XCTAssertEqual(decoder.archiveDecodes, 1)
+    XCTAssertEqual(archive.count, 3_000)
+    XCTAssertEqual(archive.first?.generatedAt, now.addingTimeInterval(-2_999 * interval))
+    // 48 hours of 15-minute refreshes plus the new one.
+    XCTAssertEqual(recent.count, 193)
+    XCTAssertEqual(recent.last?.generatedAt, now)
+  }
+
+  func testAppendReturnsTheArchiveItWrote() throws {
+    let (store, dir) = makeStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    // Out of order, with one entry past retention and more than the cap.
+    let offsets: [Double] = [3, 1, 10, 2, 4, 0.5]
+    try store.save(offsets.map { snapshot(at: now.addingTimeInterval(-$0 * 86_400), accountIDs: ["a"]) })
+
+    let archive = try store.append(snapshot(at: now, accountIDs: ["a"]), keepDays: 5, maxEntries: 4)
+
+    XCTAssertEqual(archive, try store.load())
+    XCTAssertEqual(archive.map(\.generatedAt), [2, 1, 0.5, 0].map { now.addingTimeInterval(-$0 * 86_400) })
+    XCTAssertEqual(
+      QuotaHistoryStore.recent(archive, days: 2, now: now),
+      try store.loadRecent(days: 2, now: now)
+    )
+  }
+
+  func testRecentHonorsCutoffAndCap() {
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let hours: [Double] = [5, 49, 1, 30, 47, 0]
+    let history = hours.map { snapshot(at: now.addingTimeInterval(-$0 * 3_600), accountIDs: ["a"]) }
+
+    let windowed = QuotaHistoryStore.recent(history, days: 2, now: now)
+    XCTAssertEqual(windowed.map(\.generatedAt), [47, 30, 5, 1, 0].map { now.addingTimeInterval(-$0 * 3_600) })
+
+    let capped = QuotaHistoryStore.recent(history, days: 2, now: now, maxEntries: 2)
+    XCTAssertEqual(capped.map(\.generatedAt), [1, 0].map { now.addingTimeInterval(-$0 * 3_600) })
+  }
+
+  private func snapshot(at date: Date, accountIDs: [String], failedAccountIDs: [String] = []) -> QuotaSnapshot {
+    QuotaSnapshot(
+      generatedAt: date,
+      providers: accountIDs.map { id in
+        ProviderUsage(
+          accountID: id,
+          provider: .anthropic,
+          title: "Claude",
+          metrics: [UsageMetric(id: "weekly", label: "Weekly limit", remainingPercent: 60)],
+          fetchedAt: date
+        )
+      },
+      failures: failedAccountIDs.map { id in
+        ProviderFailure(accountID: id, provider: .anthropic, kind: .auth, message: "failed")
+      }
+    )
+  }
+}
+
+/// Counts top-level decodes; the store decodes the whole archive in one call.
+private final class CountingDecoder: JSONDecoder, @unchecked Sendable {
+  var archiveDecodes = 0
+
+  override func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
+    archiveDecodes += 1
+    return try super.decode(type, from: data)
+  }
 }

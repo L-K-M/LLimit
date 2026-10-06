@@ -40,9 +40,11 @@ final class AppModel: ObservableObject {
   @Published var accountStatuses: [ProviderAccountStatus] = []
   @Published var snapshot: QuotaSnapshot?
   /// Recent slice of the local refresh history backing the dashboard sparklines.
-  /// Two days is enough for the 24h spark window while keeping the read cheap
-  /// against the 45-day history file.
+  /// Two days covers the 24h spark window and keeps this published slice small,
+  /// but loading it still decodes the whole 45-day file. Publishes therefore derive
+  /// it from the archive `append` returns; only bootstrap and purges read the file.
   @Published private(set) var recentHistory: [QuotaSnapshot] = []
+  private static let recentHistoryDays = 2
   @Published var statusMessage: String = ""
   @Published var isRefreshing = false
   @Published var launchAtLogin = false
@@ -272,12 +274,14 @@ final class AppModel: ObservableObject {
   }
 
   private func publishSnapshot(_ refreshed: QuotaSnapshot) {
+    // A failed append writes nothing, so keep the slice already shown rather
+    // than decoding the file again.
     do {
-      try historyStore.append(refreshed)
+      let history = try historyStore.append(refreshed)
+      recentHistory = QuotaHistoryStore.recent(history, days: Self.recentHistoryDays, now: Date())
     } catch {
       print("[LLimit] Local history append failed: \(error.localizedDescription)")
     }
-    reloadRecentHistory()
 
     let widgetSyncReady = syncSnapshotToWidgetStore(refreshed)
     let historySyncReady = syncHistoryToWidgetStore(refreshed)
@@ -1757,7 +1761,7 @@ final class AppModel: ObservableObject {
   }
 
   private func reloadRecentHistory(now: Date = Date()) {
-    recentHistory = (try? historyStore.loadRecent(days: 2, now: now)) ?? []
+    recentHistory = (try? historyStore.loadRecent(days: Self.recentHistoryDays, now: now)) ?? []
   }
 
   private func restartAutoRefreshLoop() {
@@ -2010,6 +2014,9 @@ final class AppModel: ObservableObject {
         return true
       } catch {
         print("[LLimit] History sync attempt \(attempt) failed: \(error.localizedDescription)")
+        // An undecodable archive fails identically on every read; re-resolving
+        // the container cannot fix it, and a retry would decode it again.
+        if error is DecodingError { return false }
         invalidateAppGroupStores()
       }
     }
