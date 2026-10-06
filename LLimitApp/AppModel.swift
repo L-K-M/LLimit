@@ -108,6 +108,12 @@ final class AppModel: ObservableObject {
     )
     self.launchAtLogin = SMAppService.mainApp.status == .enabled
 
+    // Debounce tasks die with the process — flush pending Venice clears on
+    // termination so a quit inside the 1s window can't strand them.
+    NotificationCenter.default.addObserver(
+      forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+    ) { [weak self] _ in self?.flushVeniceInvalidations() }
+
     Task { @MainActor [weak self] in
       await self?.bootstrap()
     }
@@ -1637,6 +1643,8 @@ final class AppModel: ObservableObject {
     for accountID in pending {
       guard let account = account(withID: accountID) else { continue }
       do {
+        // ID-keyed clear: the post-edit account is the right target — it owns
+        // the storage rows regardless of which credentials produced them.
         try invalidateVeniceUsage(for: account)
       } catch {
         pendingVeniceInvalidations.insert(accountID)
