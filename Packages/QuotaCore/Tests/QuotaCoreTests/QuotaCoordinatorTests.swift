@@ -97,7 +97,9 @@ final class QuotaCoordinatorTests: XCTestCase {
         previousSnapshot: seed
       )
     }
-    for _ in 0..<1_000 where await !flag.done {
+    // Generous budget: the fast path exits on the first iteration, so a
+    // larger bound only affects loaded CI runners.
+    for _ in 0..<5_000 where await !flag.done {
       try? await Task.sleep(nanoseconds: 1_000_000)
     }
     let didFinish = await flag.done
