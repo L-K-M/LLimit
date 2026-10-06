@@ -97,12 +97,15 @@ public enum StatusRenderer {
 
   /// ISO 8601 with a trailing `Z`, the shape `resetAt` is emitted in.
   ///
-  /// Uses the value-type `ISO8601FormatStyle` rather than a cached
-  /// `ISO8601DateFormatter`: it allocates no formatter object, so there is
-  /// nothing to hoist, and it holds no shared mutable state — the corelibs
-  /// `ISO8601DateFormatter` is not thread-safe on Linux.
+  /// Deliberately a fresh formatter per call. A shared `static let`
+  /// `ISO8601DateFormatter` is a process-global mutable object, and
+  /// swift-corelibs-foundation's is not thread-safe on Linux; the value-type
+  /// `ISO8601FormatStyle` that would avoid both is unavailable there. The cost
+  /// is a handful of allocations inside `llimit status`, whose exec dominates.
   static func iso8601String(_ date: Date) -> String {
-    date.formatted(ISO8601FormatStyle())
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime]
+    return formatter.string(from: date)
   }
 
   /// One limit as a JSON row for popup consumers (the tray). Optional fields are
