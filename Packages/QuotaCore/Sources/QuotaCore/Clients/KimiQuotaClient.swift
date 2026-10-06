@@ -83,7 +83,11 @@ public struct KimiQuotaClient: QuotaProviderClient {
       }
     }
 
-    if let windows = payload["limits"] as? [[String: Any]] {
+    // Element-wise coercion: protobuf-JSON arrays can carry a non-object
+    // element, and one bad element must not drop the rolling windows the
+    // user previously saw (a whole-array cast fails on the first mismatch).
+    if let rawLimits = payload["limits"] as? [Any] {
+      let windows = rawLimits.compactMap { $0 as? [String: Any] }
       for (index, item) in windows.enumerated() {
         let detail = (item["detail"] as? [String: Any]) ?? item
         let window = (item["window"] as? [String: Any]) ?? [:]

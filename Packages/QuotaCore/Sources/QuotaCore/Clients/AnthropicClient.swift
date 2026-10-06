@@ -63,6 +63,7 @@ public struct AnthropicClient: QuotaProviderClient {
 
     var metrics: [UsageMetric] = []
     var maxUsage = 0
+    var unparsableWindows = 0
 
     let windows: [(key: String, id: String, label: String)] = [
       ("five_hour", "five_hour", "5-hour limit"),
@@ -72,7 +73,10 @@ public struct AnthropicClient: QuotaProviderClient {
 
     for window in windows {
       guard let object = payload[window.key] as? [String: Any] else { continue }
-      guard let utilization = parseNumeric(object["utilization"]) else { continue }
+      guard let utilization = parseNumeric(object["utilization"]) else {
+        unparsableWindows += 1
+        continue
+      }
 
       guard let usedPercent = roundedPercent(utilization) else { continue }
       maxUsage = max(maxUsage, usedPercent)
@@ -88,6 +92,13 @@ public struct AnthropicClient: QuotaProviderClient {
           resetIn: resetAt.map { formatResetCountdown(to: $0, now: now) }
         )
       )
+    }
+
+    if metrics.isEmpty, unparsableWindows > 0 {
+      // Every reported window had a utilization we could not read: schema
+      // drift, not an idle account. Failing keeps the last good snapshot
+      // instead of reporting a confidently healthy 0 percent used.
+      throw ProviderClientError(kind: .decoding, message: "Claude usage response had no parsable utilization values")
     }
 
     if metrics.isEmpty {

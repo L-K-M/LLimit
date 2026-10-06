@@ -133,6 +133,26 @@ final class KimiClientTests: XCTestCase {
     XCTAssertEqual(metric.remainingPercent, 60)
   }
 
+  // Regression test: one heterogenous element used to fail the whole
+  // `as? [[String: Any]]` cast and silently drop every rolling window the
+  // user previously saw.
+  func testHeterogenousLimitsArrayKeepsParsableWindows() async throws {
+    let json = #"""
+    {
+      "limits": [
+        {"window": {"duration": 300, "timeUnit": "TIME_UNIT_MINUTE"}, "detail": {"limit": "200", "used": "50"}},
+        "garbage-string"
+      ]
+    }
+    """#
+    let client = KimiQuotaClient(httpClient: MockHTTP(status: 200, body: json))
+
+    let usage = try await client.fetchUsage(configuration: config(), now: now)
+
+    let coding = try XCTUnwrap(usage.metrics.first { $0.id == "window-5-hour" })
+    XCTAssertEqual(coding.remainingPercent, 75)
+  }
+
   func testMinuteAndWeekWindowsClassify() async throws {
     let json = #"""
     {

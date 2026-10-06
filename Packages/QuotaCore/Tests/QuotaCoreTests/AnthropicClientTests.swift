@@ -69,6 +69,38 @@ final class AnthropicClientTests: XCTestCase {
     await assertThrows(kind: .rateLimit) { try await client.fetchUsage(configuration: self.config(), now: self.now) }
   }
 
+  // Regression test: windows whose utilization cannot be parsed were skipped,
+  // and an all-unparsable response produced "No usage data available" with
+  // maxUsagePercent 0 — a confidently healthy account during schema drift.
+  func testAllUnparsableWindowsFailAsDecoding() async {
+    let json = #"""
+    {
+      "five_hour": {"foo": 1},
+      "seven_day": {"bar": 2}
+    }
+    """#
+    let client = AnthropicClient(httpClient: MockHTTP(status: 200, body: json))
+    await assertThrows(kind: .decoding) { try await client.fetchUsage(configuration: self.config(), now: self.now) }
+  }
+
+  // A single unparsable window alongside parsable ones degrades gracefully:
+  // keep the readable windows rather than failing the whole account.
+  func testPartiallyUnparsableWindowsKeepReadableMetrics() async throws {
+    let json = #"""
+    {
+      "five_hour": {"foo": 1},
+      "seven_day": {"utilization": 50, "resets_at": "2026-06-20T00:00:00Z"}
+    }
+    """#
+    let client = AnthropicClient(httpClient: MockHTTP(status: 200, body: json))
+
+    let usage = try await client.fetchUsage(configuration: config(), now: now)
+
+    XCTAssertEqual(usage.metrics.count, 1)
+    XCTAssertEqual(usage.metrics.first?.id, "seven_day")
+    XCTAssertEqual(usage.metrics.first?.remainingPercent, 50)
+  }
+
   private func assertThrows(
     kind: QuotaErrorKind,
     _ block: @escaping () async throws -> ProviderUsage,
