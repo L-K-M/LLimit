@@ -3,6 +3,7 @@ import SwiftUI
 import AppKit
 import WidgetKit
 import ServiceManagement
+import UserNotifications
 import QuotaCore
 #if canImport(Security)
 import Security
@@ -30,6 +31,7 @@ struct CodexLoginPresentation: Identifiable {
 @MainActor
 final class AppModel: ObservableObject {
   @Published var refreshIntervalMinutes: Int = 30
+  @Published var alertSettings: QuotaAlertSettings = QuotaAlertSettings()
   @Published var widgetStyle: WidgetStyleSettings = .default
   @Published var widgetBackgroundSettings: WidgetBackgroundSettings = .default
   @Published var widgetVisibility: WidgetVisibilitySettings = .default
@@ -147,6 +149,7 @@ final class AppModel: ObservableObject {
     }
 
     refreshIntervalMinutes = settings.refreshIntervalMinutes
+    alertSettings = settings.alertSettings
     widgetStyle = settings.widgetStyle
     widgetBackgroundSettings = settings.widgetBackgroundSettings
     widgetVisibility = settings.widgetVisibility
@@ -288,11 +291,56 @@ final class AppModel: ObservableObject {
 
     snapshot = refreshed
     reloadAccountStatuses()
+    deliverQuotaAlerts(for: refreshed)
 
     if widgetSyncReady && historySyncReady {
       statusMessage = "Refreshed \(refreshed.providers.count) account(s), \(refreshed.failures.count) failure(s)"
     } else {
       statusMessage = "Refreshed \(refreshed.providers.count) account(s), \(refreshed.failures.count) failure(s). Widget sync partially unavailable."
+    }
+  }
+
+  /// Dedup keys for currently-suppressed alerts, persisted across relaunches
+  /// so a long low stretch notifies once rather than every refresh.
+  private var alertDedupKeys: Set<String> {
+    get { Set(UserDefaults.standard.stringArray(forKey: "LLimitAlertDedupKeys") ?? []) }
+    set { UserDefaults.standard.set(Array(newValue), forKey: "LLimitAlertDedupKeys") }
+  }
+
+  /// Posts one notification per metric that entered a threshold band or per
+  /// account that started failing. The evaluator owns band/dedup semantics;
+  /// this method owns authorization and delivery.
+  private func deliverQuotaAlerts(for snapshot: QuotaSnapshot) {
+    guard alertSettings.enabled else { return }
+    var dedup = alertDedupKeys
+    let alerts = QuotaAlertEvaluator.alerts(
+      in: snapshot, settings: alertSettings, dedupedKeys: &dedup)
+    alertDedupKeys = dedup
+    guard !alerts.isEmpty else { return }
+
+    let center = UNUserNotificationCenter.current()
+    let post = {
+      for alert in alerts {
+        let content = UNMutableNotificationContent()
+        content.title = alert.title
+        content.body = alert.body
+        content.sound = .default
+        // The dedupKey doubles as the request identifier, so re-delivery of
+        // the same alert replaces the banner instead of stacking.
+        center.add(UNNotificationRequest(identifier: alert.dedupKey, content: content, trigger: nil))
+      }
+    }
+    center.getNotificationSettings { settings in
+      switch settings.authorizationStatus {
+      case .authorized, .provisional, .ephemeral:
+        post()
+      case .notDetermined:
+        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+          if granted { post() }
+        }
+      default:
+        break
+      }
     }
   }
 
@@ -1228,6 +1276,32 @@ final class AppModel: ObservableObject {
     launchAtLogin = SMAppService.mainApp.status == .enabled
   }
 
+  /// Generic binding into the persisted alert policy — toggles and both
+  /// threshold steppers save immediately like every other settings field.
+  func alertSettingsBinding(
+    for keyPath: WritableKeyPath<QuotaAlertSettings, Bool>
+  ) -> Binding<Bool> {
+    Binding(
+      get: { self.alertSettings[keyPath: keyPath] },
+      set: { newValue in
+        self.alertSettings[keyPath: keyPath] = newValue
+        self.saveConfiguration()
+      }
+    )
+  }
+
+  func alertThresholdBinding(
+    for keyPath: WritableKeyPath<QuotaAlertSettings, Int>
+  ) -> Binding<Int> {
+    Binding(
+      get: { self.alertSettings[keyPath: keyPath] },
+      set: { newValue in
+        self.alertSettings[keyPath: keyPath] = newValue
+        self.saveConfiguration()
+      }
+    )
+  }
+
   func refreshIntervalBinding() -> Binding<Int> {
     Binding(
       get: { self.refreshIntervalMinutes },
@@ -1705,7 +1779,8 @@ final class AppModel: ObservableObject {
         providerStyle(for: account.id)
       },
       widgetVisibility: widgetVisibility,
-      providerTileSlots: providerTileSlots
+      providerTileSlots: providerTileSlots,
+      alertSettings: alertSettings
     )
   }
 
