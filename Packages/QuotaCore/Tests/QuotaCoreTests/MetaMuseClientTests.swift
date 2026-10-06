@@ -142,11 +142,11 @@ final class MetaMuseClientTests: XCTestCase {
   }
 
   // Stream-level errors arrive as HTTP 200 events — not pay-as-you-go, and
-  // the thrown error headlines the API's own message.
+  // the thrown error must give recovery advice without exposing the response.
   func testStreamErrorEventThrowsAPI() async {
     let body = sse("error", #"{"type":"error","code":"invalid_api_key","message":"bad key"}"#)
     let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 200, body: body))
-    await assertThrows(kind: .api, messageContains: "bad key") {
+    await assertThrows(kind: .api, messageContains: "Check the API key") {
       try await client.fetchUsage(configuration: self.config(), now: self.now)
     }
   }
@@ -156,7 +156,7 @@ final class MetaMuseClientTests: XCTestCase {
     let body = sse("response.created", #"{"type":"response.created","response":{"id":"r6"}}"#)
       + sse("error", #"{"type":"error","code":"invalid_api_key","message":"bad key"}"#)
     let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 200, body: body))
-    await assertThrows(kind: .api, messageContains: "bad key") {
+    await assertThrows(kind: .api, messageContains: "Check the API key") {
       try await client.fetchUsage(configuration: self.config(), now: self.now)
     }
   }
@@ -165,7 +165,7 @@ final class MetaMuseClientTests: XCTestCase {
   func testStreamFailedEventThrowsAPI() async {
     let body = sse("response.failed", #"{"type":"response.failed","response":{"id":"r7","error":{"code":"server_error","message":"upstream unavailable"}}}"#)
     let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 200, body: body))
-    await assertThrows(kind: .api, messageContains: "upstream unavailable") {
+    await assertThrows(kind: .api, messageContains: "try again later") {
       try await client.fetchUsage(configuration: self.config(), now: self.now)
     }
   }
@@ -173,7 +173,7 @@ final class MetaMuseClientTests: XCTestCase {
   // Same for a 200 whose whole body is an error envelope.
   func testJSONErrorBodyThrowsAPI() async {
     let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 200, body: #"{"error":{"message":"bad key"}}"#))
-    await assertThrows(kind: .api, messageContains: "bad key") {
+    await assertThrows(kind: .api, messageContains: "Check the API key") {
       try await client.fetchUsage(configuration: self.config(), now: self.now)
     }
   }
@@ -223,7 +223,7 @@ final class MetaMuseClientTests: XCTestCase {
 
   func testRateLimitThrowsRateLimit() async {
     let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 429, body: #"{"error":{"type":"rate_limit","message":"slow down"}}"#))
-    await assertThrows(kind: .rateLimit, messageContains: "slow down") {
+    await assertThrows(kind: .rateLimit, messageContains: "rate limiting") {
       try await client.fetchUsage(configuration: self.config(), now: self.now)
     }
   }
@@ -231,7 +231,7 @@ final class MetaMuseClientTests: XCTestCase {
   // The muse-code service answers problem+json rather than the OpenAI envelope.
   func testProblemJSONErrorThrowsAPI() async {
     let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 400, body: #"{"title":"Bad Request","detail":"model not found","status":400}"#))
-    await assertThrows(kind: .api, messageContains: "model not found") {
+    await assertThrows(kind: .api, messageContains: "HTTP 400") {
       try await client.fetchUsage(configuration: self.config(), now: self.now)
     }
   }

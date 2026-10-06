@@ -202,7 +202,7 @@ final class DevinClientTests: XCTestCase {
 
   func testConnectErrorThrowsAPI() async {
     let client = DevinQuotaClient(httpClient: MockHTTP(status: 400, body: #"{"code":"invalid_argument","message":"bad request"}"#))
-    await assertThrows(kind: .api, messageContains: "invalid_argument") {
+    await assertThrows(kind: .api, messageContains: "HTTP 400") {
       try await client.fetchUsage(configuration: self.config(), now: self.now)
     }
   }

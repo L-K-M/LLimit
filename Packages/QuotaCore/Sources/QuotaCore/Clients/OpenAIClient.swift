@@ -39,8 +39,6 @@ public struct OpenAIClient: QuotaProviderClient {
 
     let (data, response) = try await httpClient.data(for: request)
     guard (200..<300).contains(response.statusCode) else {
-      let body = String(data: data, encoding: .utf8) ?? ""
-      let trimmedBody = body.trimmingCharacters(in: .whitespacesAndNewlines)
       let kind: QuotaErrorKind = response.statusCode == 401 || response.statusCode == 403 ? .auth : .api
       if kind == .auth {
         throw ProviderClientError(
@@ -50,10 +48,9 @@ public struct OpenAIClient: QuotaProviderClient {
         )
       }
 
-      let bodySuffix = trimmedBody.isEmpty ? "" : ": \(trimmedBody)"
       throw ProviderClientError(
         kind: kind,
-        message: "OpenAI API error \(response.statusCode)\(bodySuffix)",
+        message: "OpenAI usage API failed (HTTP \(response.statusCode)). Try again later.",
         statusCode: response.statusCode
       )
     }
@@ -62,7 +59,7 @@ public struct OpenAIClient: QuotaProviderClient {
     do {
       payload = try JSONDecoder().decode(OpenAIUsageResponse.self, from: data)
     } catch {
-      throw ProviderClientError(kind: .decoding, message: "OpenAI response decoding failed: \(error.localizedDescription)")
+      throw ProviderClientError(kind: .decoding, message: "OpenAI returned invalid usage data. Try again later.")
     }
 
     var metrics: [UsageMetric] = []
