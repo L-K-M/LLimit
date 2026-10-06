@@ -30,11 +30,13 @@ final class LimitKindPaletteTests: XCTestCase {
     // palette's literal is already lowercase.
     var recolored = LimitKindPalette.ocean.colors
     let original = recolored.dailyHexColor
-    recolored.dailyHexColor = original == original.lowercased() ? original.uppercased() : original.lowercased()
+    let flipped = original == original.lowercased() ? original.uppercased() : original.lowercased()
     XCTAssertNotEqual(
-      recolored.dailyHexColor, original,
-      "Case flip was a no-op: dailyHexColor must contain letters (or the setter now normalizes case), so the palette assertion below would pass vacuously"
+      flipped, original,
+      "Precondition broken: dailyHexColor must contain letters, otherwise the case flip is a no-op and this test cannot be meaningful"
     )
+    recolored.dailyHexColor = flipped
+    XCTAssertEqual(recolored.dailyHexColor, flipped, "the setter must not normalize case")
     XCTAssertEqual(recolored.palette, .ocean)
   }
 
