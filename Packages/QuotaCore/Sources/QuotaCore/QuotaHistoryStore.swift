@@ -67,14 +67,16 @@ public final class QuotaHistoryStore: @unchecked Sendable {
   ) throws {
     var history = try load()
 
-    if let newest = history.last, Self.hasEquivalentUsage(newest, snapshot) {
+    let cutoffDays = max(1, keepDays)
+    let cutoffDate = snapshot.generatedAt.addingTimeInterval(-Double(cutoffDays) * 86_400)
+
+    if let newest = history.max(by: { $0.generatedAt < $1.generatedAt }),
+       newest.generatedAt >= cutoffDate,
+       Self.hasEquivalentUsage(newest, snapshot) {
       return
     }
 
     history.append(snapshot)
-
-    let cutoffDays = max(1, keepDays)
-    let cutoffDate = snapshot.generatedAt.addingTimeInterval(-Double(cutoffDays) * 86_400)
     history = history.filter { $0.generatedAt >= cutoffDate }
     history.sort { $0.generatedAt < $1.generatedAt }
 
