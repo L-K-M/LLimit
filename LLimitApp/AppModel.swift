@@ -1103,7 +1103,7 @@ final class AppModel: ObservableObject {
       reloadAccountStatuses()
       return ProviderFailure(
         accountID: id, provider: .anthropic,
-        title: account(withID: id)?.resolvedDisplayName,
+        title: account.resolvedDisplayName,
         kind: .auth, message: message
       )
     }
