@@ -20,11 +20,14 @@ public extension StatusRenderer {
 
     let window = dayCount(windowDays)
     let resets = snapshot.upcomingResets(now: now, within: windowInterval(windowDays))
+    // A snapshot that stopped refreshing days ago renders as a clean all-clear
+    // otherwise; say how old the data is.
+    let stale = stalenessHint(snapshot: snapshot, now: now)
     guard !resets.isEmpty else {
-      return "No resets in the next \(window)."
+      return "No resets in the next \(window)\(stale)."
     }
 
-    var lines = ["Upcoming resets (next \(window))"]
+    var lines = ["Upcoming resets (next \(window))\(stale)"]
     for entry in resets {
       let countdown = entry.countdown(at: now)
       let when = countdown == "reset" ? "reset due" : "in \(countdown)"
@@ -92,13 +95,22 @@ public extension StatusRenderer {
     return "\(value) day\(value == 1 ? "" : "s")"
   }
 
+  /// " (data from 3d 4h ago)" once the snapshot is more than a day old, so an
+  /// all-clear from stale data does not read like a fresh one.
+  private static func stalenessHint(snapshot: QuotaSnapshot, now: Date) -> String {
+    let age = now.timeIntervalSince(snapshot.generatedAt)
+    guard age.isFinite, age > 86_400 else { return "" }
+    let seconds = Int(min(age, Double(Int.max)))
+    return " (data from \(formatShortDuration(seconds: seconds)) ago)"
+  }
+
   private static func windowInterval(_ days: Int) -> TimeInterval {
     TimeInterval(max(1, days)) * 86_400
   }
 
+  /// Value-type formatting, matching `StatusRenderer.iso8601String`: no formatter
+  /// object to allocate and no shared mutable state.
   private static func iso8601String(_ date: Date) -> String {
-    let formatter = ISO8601DateFormatter()
-    formatter.formatOptions = [.withInternetDateTime]
-    return formatter.string(from: date)
+    date.formatted(ISO8601FormatStyle())
   }
 }

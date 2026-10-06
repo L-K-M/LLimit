@@ -94,6 +94,41 @@ final class ResetRadarRendererTests: XCTestCase {
     XCTAssertEqual(lines[3], "in 4d 2h — OpenAI · Weekly limit (41% left)")
   }
 
+  // MARK: - Staleness
+
+  private func staleSnapshot(metricSeconds: TimeInterval) -> QuotaSnapshot {
+    QuotaSnapshot(
+      generatedAt: now.addingTimeInterval(-3 * 86_400),
+      providers: [usage("a", "Claude", [metric("weekly", "Weekly limit", in: metricSeconds)])],
+      failures: []
+    )
+  }
+
+  func testStaleSnapshotIsFlaggedInTheEmptyMessage() {
+    // Three days old with nothing due: an all-clear that must not read as fresh.
+    XCTAssertEqual(
+      StatusRenderer.resetsHumanReadable(snapshot: staleSnapshot(metricSeconds: 40 * 86_400),
+                                         now: now, windowDays: 7),
+      "No resets in the next 7 days (data from 3d ago)."
+    )
+  }
+
+  func testStaleSnapshotIsFlaggedInTheHeader() {
+    let lines = StatusRenderer.resetsHumanReadable(snapshot: staleSnapshot(metricSeconds: 3600),
+                                                   now: now, windowDays: 7)
+      .split(separator: "\n").map(String.init)
+
+    XCTAssertEqual(lines[0], "Upcoming resets (next 7 days) (data from 3d ago)")
+  }
+
+  func testFreshSnapshotHasNoStalenessHint() {
+    let fresh = snapshot([usage("a", "Claude", [metric("weekly", "Weekly limit", in: 3600)])])
+    XCTAssertFalse(
+      StatusRenderer.resetsHumanReadable(snapshot: fresh, now: now, windowDays: 7)
+        .contains("data from")
+    )
+  }
+
   func testJSONCarriesEveryFieldAndOmitsMissingPercent() throws {
     let snap = snapshot([
       usage("claude", "Claude", [metric("five_hour", "5-hour limit", in: 3 * 3600 + 12 * 60)]),

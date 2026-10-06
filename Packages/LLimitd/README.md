@@ -125,7 +125,10 @@ rejected like any other invalid flag. `--json` prints the same radar for
 scripts, with `resetAt` (ISO 8601), a live `resetIn`, and the metric's context;
 a limit with no absolute reset (a rolling balance) is not scheduled. The JSON
 also carries `snapshot` (false when no snapshot exists yet, so "no data" is not
-confused with "nothing scheduled") plus `generatedAt` when there is one.
+confused with "nothing scheduled") plus `generatedAt` when there is one. When
+the snapshot is more than a day old the human output says so — "No resets in
+the next 7 days (data from 3d ago)." — so an all-clear from stale data does not
+read as fresh.
 
 ## Tray icon
 
