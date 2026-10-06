@@ -64,13 +64,7 @@ public struct AnthropicClient: QuotaProviderClient {
     var metrics: [UsageMetric] = []
     var maxUsage = 0
 
-    let windows: [(key: String, id: String, label: String)] = [
-      ("five_hour", "five_hour", "5-hour limit"),
-      ("seven_day", "seven_day", "Weekly limit"),
-      ("seven_day_opus", "seven_day_opus", "Weekly (Opus)")
-    ]
-
-    for window in windows {
+    for window in Self.usageWindows(in: payload) {
       guard let object = payload[window.key] as? [String: Any] else { continue }
       guard let utilization = parseNumeric(object["utilization"]) else { continue }
 
@@ -81,7 +75,7 @@ public struct AnthropicClient: QuotaProviderClient {
 
       metrics.append(
         UsageMetric(
-          id: window.id,
+          id: window.key,
           label: window.label,
           remainingPercent: clampPercent(100 - usedPercent),
           resetAt: resetAt,
@@ -94,11 +88,15 @@ public struct AnthropicClient: QuotaProviderClient {
       metrics.append(UsageMetric(id: "empty", label: "No usage data available"))
     }
 
+    // Appended after every window, so it never shifts a window's color slot.
+    if let extraUsage = Self.extraUsageMetric(from: payload) {
+      metrics.append(extraUsage)
+    }
+
     return ProviderUsage(
       accountID: configuration.accountID,
       provider: .anthropic,
       title: configuration.displayName,
-      subtitle: subtitle(from: payload),
       metrics: metrics,
       maxUsagePercent: maxUsage,
       warning: maxUsage >= 80 ? "High usage" : nil,
@@ -106,19 +104,107 @@ public struct AnthropicClient: QuotaProviderClient {
     )
   }
 
-  private func subtitle(from payload: [String: Any]) -> String? {
+  /// The established windows first, in their original order: their ids key
+  /// history and colors. Then any other `five_hour_*` / `seven_day_*` window
+  /// the endpoint adds (`seven_day_sonnet_max`, ...), sorted by key so the
+  /// order is stable. Each label names its cadence, so
+  /// `QuotaWindowKind.classify` treats it like the account-wide window of the
+  /// same length.
+  private static func usageWindows(in payload: [String: Any]) -> [(key: String, label: String)] {
+    let knownKeys = Set(knownWindows.map(\.key))
+    let additional = payload.keys.sorted().compactMap { key -> (key: String, label: String)? in
+      guard !knownKeys.contains(key) else { return nil }
+      guard let cadence = windowCadences.first(where: { key.hasPrefix($0.prefix) }) else { return nil }
+
+      let scope = String(key.dropFirst(cadence.prefix.count))
+      guard !scope.isEmpty else { return nil }
+      return (key, "\(cadence.name) (\(scopeName(scope)))")
+    }
+    return knownWindows + additional
+  }
+
+  private static let knownWindows: [(key: String, label: String)] = [
+    ("five_hour", "5-hour limit"),
+    ("seven_day", "Weekly limit"),
+    ("seven_day_opus", "Weekly (Opus)"),
+    ("seven_day_sonnet", "Weekly (Sonnet)")
+  ]
+
+  private static let windowCadences: [(prefix: String, name: String)] = [
+    ("five_hour_", "5-hour"),
+    ("seven_day_", "Weekly")
+  ]
+
+  /// `oauth_apps` caps third-party apps, not a model, so it gets a spelled-out
+  /// name; model scopes read as words ("sonnet_max" -> "Sonnet Max").
+  private static func scopeName(_ scope: String) -> String {
+    if scope == "oauth_apps" {
+      return "OAuth apps"
+    }
+    return scope
+      .split(separator: "_")
+      .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+      .joined(separator: " ")
+  }
+
+  /// Pay-as-you-go spend beyond the plan windows, as an amount-only metric: no
+  /// percentage, reset, or cadence, so it never takes a ring, the primary
+  /// color, the headline percentage, or the warning. Keep the label free of
+  /// cadence words: a "monthly" label would classify as a window and could
+  /// take the primary color. Amounts are minor units of `currency` (cents
+  /// for USD).
+  private static func extraUsageMetric(from payload: [String: Any]) -> UsageMetric? {
     guard
       let extra = payload["extra_usage"] as? [String: Any],
-      (extra["is_enabled"] as? Bool) == true,
       let used = parseNumeric(extra["used_credits"]),
       used > 0
     else {
       return nil
     }
 
-    if let limit = parseNumeric(extra["monthly_limit"]), limit > 0 {
-      return "Extra: $\(formatIntLike(used) ?? "0") / $\(formatIntLike(limit) ?? "0")"
+    let limit = parseNumeric(extra["monthly_limit"]).flatMap { $0 > 0 ? $0 : nil }
+    let isCapReached = limit.map { used >= $0 } ?? false
+    // Claude reportedly switches extra usage off once the monthly cap is
+    // spent, which is exactly when the cap matters, so a reached cap shows
+    // even when disabled.
+    guard (extra["is_enabled"] as? Bool) == true || isCapReached else { return nil }
+
+    // Responses without `currency` are treated as USD, the only currency the
+    // amounts have been observed in.
+    let currency = nonEmptyString(extra["currency"])?.uppercased() ?? usDollarCurrencyCode
+    let usedDisplay: String
+    let totalDisplay: String?
+    if currency == usDollarCurrencyCode {
+      usedDisplay = dollars(fromCents: used)
+      totalDisplay = limit.map(dollars(fromCents:))
+    } else {
+      // Other currencies differ in minor units and symbol, so show the state
+      // rather than an amount that may be off by orders of magnitude.
+      usedDisplay = isCapReached ? "Cap reached" : "On"
+      totalDisplay = nil
     }
-    return "Extra usage on"
+
+    return UsageMetric(
+      id: "extra_usage",
+      label: "Extra usage",
+      usedDisplay: usedDisplay,
+      totalDisplay: totalDisplay,
+      detail: isCapReached ? "Monthly spending cap reached." : nil
+    )
+  }
+
+  private static let usDollarCurrencyCode = "USD"
+  private static let centsPerDollar = 100.0
+
+  private static func dollars(fromCents cents: Double) -> String {
+    let formatter = NumberFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.numberStyle = .decimal
+    formatter.usesGroupingSeparator = false
+    formatter.minimumFractionDigits = 2
+    formatter.maximumFractionDigits = 2
+
+    let amount = cents / centsPerDollar
+    return "$" + (formatter.string(from: NSNumber(value: amount)) ?? String(format: "%.2f", amount))
   }
 }

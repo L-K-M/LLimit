@@ -205,7 +205,15 @@ Linux:
 - **Anthropic**: `GET https://api.anthropic.com/api/oauth/usage` with `Authorization:
   Bearer`, `anthropic-beta: oauth-2025-04-20`, and a `User-Agent: claude-code/<ver>`
   (mandatory — without it the endpoint hard rate-limits). Returns `five_hour`,
-  `seven_day`, `seven_day_opus` windows with `utilization` (0–100) + `resets_at`.
+  `seven_day`, `seven_day_opus`, `seven_day_sonnet` windows with `utilization`
+  (0–100) + `resets_at`; null windows are skipped. Any other `five_hour_*` or
+  `seven_day_*` object (e.g. `seven_day_sonnet_max`, `seven_day_oauth_apps`) is
+  parsed too and labeled "5-hour (…)" / "Weekly (…)" so `classify` keeps the
+  cadence. `extra_usage` amounts (`used_credits`, `monthly_limit`) are minor
+  units of `currency` (cents for USD; a missing `currency` is treated as USD);
+  other currencies show state text only. `is_enabled` reportedly turns false
+  once the cap is spent, so a reached cap is shown regardless. It becomes an
+  amount-only `extra_usage` metric that must keep a cadence-free label.
   Poll no faster than ~3 min; LLimit's ≥15 min interval is safe.
 - **OpenAI**: ChatGPT web endpoint `https://chatgpt.com/backend-api/wham/usage` with the
   Codex/OpenCode OAuth access token + `ChatGPT-Account-Id` for imported/manual accounts.

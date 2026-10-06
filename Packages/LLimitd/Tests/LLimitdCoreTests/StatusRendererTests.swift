@@ -330,6 +330,31 @@ final class StatusRendererTests: XCTestCase {
     XCTAssertTrue(StatusRenderer.humanReadable(snapshot: snapshot, now: now).contains("No Cline credits left"))
   }
 
+  func testClaudeExtraUsageAmountReachesLinuxWithoutBecomingTheHeadline() throws {
+    let usage = ProviderUsage(
+      accountID: "claude-account", provider: .anthropic, title: "Claude",
+      metrics: [
+        UsageMetric(id: "five_hour", label: "5-hour limit", remainingPercent: 60),
+        UsageMetric(id: "seven_day", label: "Weekly limit", remainingPercent: 25),
+        UsageMetric(id: "extra_usage", label: "Extra usage", usedDisplay: "$50.00", totalDisplay: "$50.00",
+                    detail: "Monthly spending cap reached.")
+      ],
+      maxUsagePercent: 75, fetchedAt: now
+    )
+    let snapshot = QuotaSnapshot(generatedAt: now, providers: [usage], failures: [])
+    let object = try decodedWaybar(snapshot)
+
+    XCTAssertEqual(object["text"] as? String, "Claude 25%")
+    XCTAssertEqual(object["percentage"] as? Int, 25)
+    let account = try XCTUnwrap((object["accounts"] as? [[String: Any]])?.first)
+    let extra = try XCTUnwrap((account["metrics"] as? [[String: Any]])?.last)
+    XCTAssertNil(extra["remainingPercent"])
+    XCTAssertEqual(extra["usageLine"] as? String, "$50.00 / $50.00")
+    XCTAssertEqual(extra["detail"] as? String, "Monthly spending cap reached.")
+    XCTAssertTrue(StatusRenderer.humanReadable(snapshot: snapshot, now: now)
+      .contains("Weekly limit 25% left · Extra usage $50.00 / $50.00"))
+  }
+
   func testHumanReadableWithoutSnapshotExplainsNextStep() {
     XCTAssertTrue(StatusRenderer.humanReadable(snapshot: nil, now: now).contains("llimit refresh"))
   }
