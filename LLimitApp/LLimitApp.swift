@@ -1298,7 +1298,7 @@ private struct OverviewCard: View {
             Text("\(remaining)%")
               .font(.system(size: 9, weight: .bold))
               .monospacedDigit()
-              .foregroundStyle(.green.opacity(0.85))
+              .foregroundStyle(headroomColor(for: remaining).opacity(0.85))
           }
         }
         .padding(.horizontal, 4)
@@ -1689,40 +1689,20 @@ private enum MenuBarQuotaStyling {
   }
 
   static func remainingPercent(for provider: ProviderUsage) -> Int? {
-    let boundedRemaining = provider.metrics
-      .filter { !$0.isUnlimited }
-      .compactMap(\.remainingPercent)
-
-    if let minimumRemaining = boundedRemaining.min() {
-      return clampPercent(minimumRemaining)
-    }
-
-    if provider.metrics.contains(where: \.isUnlimited) {
-      return 100
-    }
-
-    if let maxUsagePercent = provider.maxUsagePercent {
-      return clampPercent(100 - maxUsagePercent)
-    }
-
-    return nil
-  }
-
-  private static func clampPercent(_ value: Int) -> Int {
-    max(0, min(100, value))
+    effectiveRemainingPercent(for: provider)
   }
 }
 
 /// The account with the most headroom: highest bounded remaining percentage.
 private func bestModelToBurn(from providers: [ProviderUsage]) -> ProviderUsage? {
-  let candidates = providers.filter { provider in
-    provider.metrics.contains(where: { !$0.isUnlimited })
-  }
-  guard !candidates.isEmpty else { return nil }
-  let sorted = candidates.sorted { a, b in
-    (MenuBarQuotaStyling.remainingPercent(for: a) ?? 0) > (MenuBarQuotaStyling.remainingPercent(for: b) ?? 0)
-      || ((MenuBarQuotaStyling.remainingPercent(for: a) ?? 0) == (MenuBarQuotaStyling.remainingPercent(for: b) ?? 0) && a.title < b.title)
-  }
-  return sorted.first
+  bestHeadroomProvider(in: providers)
+}
+
+/// Same danger tiers as the metric value text: a "best" account that is
+/// itself nearly empty should not read as healthy green.
+private func headroomColor(for remaining: Int) -> Color {
+  if remaining <= 10 { return Color(red: 1.0, green: 0.36, blue: 0.32) }
+  if remaining <= 25 { return .orange }
+  return .green
 }
 

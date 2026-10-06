@@ -99,6 +99,46 @@ public func primaryLimitSlot(for metrics: [UsageMetric]) -> LimitSeriesSlot? {
   return nil
 }
 
+/// A provider's headline remaining percentage: the lowest bounded metric's
+/// remaining percent, 100 when only unlimited metrics exist, or a value
+/// derived from `maxUsagePercent` when no metric reports a percentage.
+public func effectiveRemainingPercent(for usage: ProviderUsage) -> Int? {
+  let boundedRemaining = usage.metrics
+    .filter { !$0.isUnlimited }
+    .compactMap(\.remainingPercent)
+
+  if let minimumRemaining = boundedRemaining.min() {
+    return max(0, min(100, minimumRemaining))
+  }
+
+  if usage.metrics.contains(where: \.isUnlimited) {
+    return 100
+  }
+
+  if let maxUsagePercent = usage.maxUsagePercent {
+    return max(0, min(100, 100 - maxUsagePercent))
+  }
+
+  return nil
+}
+
+/// The account with the most headroom: highest bounded remaining percentage,
+/// ties broken alphabetically by title. Returns nil when no account reports a
+/// bounded metric or the leader has no headroom left.
+public func bestHeadroomProvider(in providers: [ProviderUsage]) -> ProviderUsage? {
+  let best = providers
+    .filter { $0.metrics.contains(where: { !$0.isUnlimited }) }
+    .max { a, b in
+      let ra = effectiveRemainingPercent(for: a) ?? 0
+      let rb = effectiveRemainingPercent(for: b) ?? 0
+      return ra == rb ? a.title > b.title : ra < rb
+    }
+  guard let best, let remaining = effectiveRemainingPercent(for: best), remaining > 0 else {
+    return nil
+  }
+  return best
+}
+
 public extension LimitKindColors {
   func hexColor(for slot: LimitSeriesSlot) -> String {
     hexColor(for: slot.kind, otherSlot: slot.otherSlot)
