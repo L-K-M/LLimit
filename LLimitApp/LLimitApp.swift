@@ -2,6 +2,44 @@ import SwiftUI
 import AppKit
 import QuotaCore
 
+private enum QuotaWeather: String {
+  case calm = "Calm"
+  case cloudy = "Cloudy"
+  case stormy = "Stormy"
+
+  var iconName: String {
+    switch self {
+    case .calm: return "sun.max.fill"
+    case .cloudy: return "cloud.fill"
+    case .stormy: return "cloud.bolt.fill"
+    }
+  }
+
+  var tint: Color {
+    switch self {
+    case .calm: return .green
+    case .cloudy: return .orange
+    case .stormy: return .red
+    }
+  }
+
+  static func forSnapshot(_ snapshot: QuotaSnapshot?) -> QuotaWeather {
+    guard let snapshot else { return .calm }
+    if !snapshot.failures.isEmpty { return .stormy }
+    guard !snapshot.providers.isEmpty else { return .calm }
+    let bounded = snapshot.providers.flatMap { $0.metrics.filter { !$0.isUnlimited }.compactMap { $0.remainingPercent } }
+    if bounded.isEmpty { return .calm }
+    let minRemaining = bounded.min() ?? 100
+    if minRemaining < 15 || snapshot.providers.contains(where: { $0.metrics.contains(where: \.$0.isPercentageEstimated) }) {
+      return .stormy
+    }
+    if minRemaining < 40 {
+      return .cloudy
+    }
+    return .calm
+  }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
     false
@@ -723,6 +761,23 @@ private struct MenuBarContent: View {
         }
         .font(.system(size: 10.5))
         .foregroundStyle(DashboardPalette.secondaryText)
+      }
+
+      // Quota Weather: calm / cloudy / stormy based on snapshot state
+      if let snapshot = model.snapshot {
+        let weather = QuotaWeather.forSnapshot(snapshot)
+        HStack(spacing: 4) {
+          Image(systemName: weather.iconName)
+            .font(.system(size: 10, weight: .semibold))
+          Text(weather.rawValue)
+            .font(.system(size: 9, weight: .semibold))
+            .tracking(0.3)
+        }
+        .foregroundStyle(weather.tint)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(weather.tint.opacity(0.15), in: Capsule())
+        .help("Quota weather: \(weather.rawValue.lowercased()) — based on current limits and refresh state.")
       }
 
       Spacer()
