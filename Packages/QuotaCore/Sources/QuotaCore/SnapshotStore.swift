@@ -22,7 +22,13 @@ public final class SnapshotStore: @unchecked Sendable {
   public convenience init?(appGroupIdentifier: String, fileName: String) {
     guard let container = FileManager.default.containerURL(
       forSecurityApplicationGroupIdentifier: appGroupIdentifier
-    ) else { return nil }
+    ) else {
+      // Silent degradation is the point, but not invisible degradation —
+      // "widget shows no data" reports need a Console.app breadcrumb.
+      NSLog("LLimit: App Group container '%@' unavailable; snapshot persistence disabled",
+            appGroupIdentifier)
+      return nil
+    }
     self.init(fileURL: container.appendingPathComponent(fileName), appGroupIdentifier: appGroupIdentifier)
   }
   #endif
