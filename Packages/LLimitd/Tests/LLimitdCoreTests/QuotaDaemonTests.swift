@@ -253,6 +253,7 @@ final class QuotaDaemonTests: XCTestCase {
     XCTAssertEqual(attributes[.modificationDate] as? Date, date)
 
     // A repaired settings file restores normal account reconciliation.
+    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: daemon.paths.settingsFileURL.path)
     try SettingsStore(fileURL: daemon.paths.settingsFileURL).save(.default)
     daemon.loadConfiguration()
     XCTAssertTrue(daemon.snapshot?.providers.isEmpty == true)
