@@ -23,6 +23,14 @@ final class LimitKindPaletteTests: XCTestCase {
     XCTAssertNil(custom.palette)
   }
 
+  func testLowercasedHexStillResolvesToItsPalette() {
+    // The public setters do not normalize, so a value written directly can differ
+    // in case from the palette it visually matches; matching must see through it.
+    var recolored = LimitKindPalette.ocean.colors
+    recolored.dailyHexColor = recolored.dailyHexColor.lowercased()
+    XCTAssertEqual(recolored.palette, .ocean)
+  }
+
   func testThemedPalettesActuallyChangeTheHues() {
     // A typo'd hex would silently fall back to the standard color; assert each
     // non-standard palette moved every window off the default.

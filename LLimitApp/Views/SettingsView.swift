@@ -649,8 +649,9 @@ struct SettingsView: View {
             }
             .labelsHidden()
             .pickerStyle(.menu)
+            .accessibilityLabel("Limit color palette")
 
-            Text("Themes every limit-window color at once — rings, bars, sparklines, the menu bar, widgets and the trend chart. Adjust a color below and the palette becomes Custom.")
+            Text("Themes the default limit-window colors everywhere — rings, bars, sparklines, the menu bar, widgets and the trend chart. Adjust a color below and the palette becomes Custom.")
               .font(.caption)
               .foregroundStyle(.secondary)
               .fixedSize(horizontal: false, vertical: true)

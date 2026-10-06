@@ -75,8 +75,21 @@ public enum LimitKindPalette: String, CaseIterable, Codable, Sendable {
   }
 
   /// The palette whose colors equal `colors`, or nil when they are custom.
+  ///
+  /// Rebuilt through `LimitKindColors`' normalizing initializer first: the
+  /// struct's public setters do not normalize, so a value written directly (for
+  /// example a lowercased hex) would otherwise compare unequal to the palette it
+  /// visually matches.
   public static func matching(_ colors: LimitKindColors) -> LimitKindPalette? {
-    allCases.first { $0.colors == colors }
+    let normalized = LimitKindColors(
+      sessionHexColor: colors.sessionHexColor,
+      dailyHexColor: colors.dailyHexColor,
+      weeklyHexColor: colors.weeklyHexColor,
+      monthlyHexColor: colors.monthlyHexColor,
+      otherHexColors: colors.otherHexColors,
+      unlimitedHexColor: colors.unlimitedHexColor
+    )
+    return allCases.first { $0.colors == normalized }
   }
 }
 
