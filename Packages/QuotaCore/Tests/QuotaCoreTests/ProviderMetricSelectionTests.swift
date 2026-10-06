@@ -170,6 +170,74 @@ final class ProviderMetricSelectionTests: XCTestCase {
     XCTAssertTrue(chartsAsLongTermLimit(zai[1], accountKinds: zai))
   }
 
+  func testTrendFilterLeavesOutHiddenAndDisabledAccounts() {
+    let settings = AppSettings(
+      accounts: [
+        account("a1", .anthropic),
+        account("a2", .anthropic),
+        account("o1", .openAI, isEnabled: false)
+      ],
+      widgetVisibility: WidgetVisibilitySettings(trendHiddenAccountIDs: ["a2"])
+    )
+    let filter = TrendChartAccountFilter(settings: settings)
+
+    XCTAssertTrue(filter.includes(usage(accountID: "a1", provider: .anthropic)))
+    XCTAssertFalse(filter.includes(usage(accountID: "a2", provider: .anthropic)))
+    XCTAssertFalse(filter.includes(usage(accountID: "o1", provider: .openAI)))
+    XCTAssertFalse(filter.includes(usage(accountID: "removed", provider: .openAI)))
+    XCTAssertFalse(filter.hidesEveryAccount)
+  }
+
+  func testTrendFilterResolvesLegacyUsageToTheSoleEnabledAccount() {
+    // Pre-multi-account snapshots carry the provider's raw value as the ID.
+    let legacy = usage(accountID: QuotaProvider.anthropic.rawValue, provider: .anthropic)
+    let sole = [account("a1", .anthropic), account("a2", .anthropic, isEnabled: false)]
+
+    let shown = TrendChartAccountFilter(settings: AppSettings(accounts: sole))
+    XCTAssertTrue(shown.includes(legacy))
+
+    let hidden = TrendChartAccountFilter(settings: AppSettings(
+      accounts: sole,
+      widgetVisibility: WidgetVisibilitySettings(trendHiddenAccountIDs: ["a1"])
+    ))
+    XCTAssertFalse(hidden.includes(legacy))
+
+    // Two enabled Claude accounts make the legacy owner ambiguous; hiding one
+    // must not hand the legacy line to the other.
+    let ambiguous = TrendChartAccountFilter(settings: AppSettings(
+      accounts: [account("a1", .anthropic), account("a2", .anthropic)],
+      widgetVisibility: WidgetVisibilitySettings(trendHiddenAccountIDs: ["a2"])
+    ))
+    XCTAssertFalse(ambiguous.includes(legacy))
+  }
+
+  func testTrendFilterHidesEveryAccountOnlyWhenAllEnabledAccountsAreHidden() {
+    let accounts = [account("a1", .anthropic), account("o1", .openAI, isEnabled: false)]
+
+    let allHidden = AppSettings(
+      accounts: accounts,
+      widgetVisibility: WidgetVisibilitySettings(trendHiddenAccountIDs: ["a1"])
+    )
+    XCTAssertTrue(TrendChartAccountFilter(settings: allHidden).hidesEveryAccount)
+
+    let disabledHidden = AppSettings(
+      accounts: accounts,
+      widgetVisibility: WidgetVisibilitySettings(trendHiddenAccountIDs: ["o1"])
+    )
+    XCTAssertFalse(TrendChartAccountFilter(settings: disabledHidden).hidesEveryAccount)
+
+    // No accounts at all is "no history", not a user choice.
+    XCTAssertFalse(TrendChartAccountFilter(settings: AppSettings()).hidesEveryAccount)
+  }
+
+  private func account(_ id: String, _ provider: QuotaProvider, isEnabled: Bool = true) -> ProviderAccount {
+    ProviderAccount(id: id, provider: provider, displayName: id, isEnabled: isEnabled, credentials: [:])
+  }
+
+  private func usage(accountID: String, provider: QuotaProvider) -> ProviderUsage {
+    ProviderUsage(accountID: accountID, provider: provider, title: accountID, metrics: [metric("weekly")], fetchedAt: now)
+  }
+
   private func metric(_ id: String) -> UsageMetric {
     UsageMetric(id: id, label: id, remainingPercent: 50)
   }

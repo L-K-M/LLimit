@@ -438,10 +438,29 @@ struct SettingsView: View {
                 range: 1...30,
                 displayedValue: model.widgetVisibility.trendHistoryDays
               )
+
+              trendChartAccountToggles
             }
           }
           .toggleStyle(.switch)
         }
+      }
+    }
+  }
+
+  /// One switch per account, so a crowded chart can drop the lines you don't
+  /// need. New accounts start charted.
+  @ViewBuilder
+  private var trendChartAccountToggles: some View {
+    if !model.providerAccounts.isEmpty {
+      Divider()
+
+      Text("Accounts in trend chart")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+
+      ForEach(model.providerAccounts) { account in
+        Toggle(tileAccountLabel(for: account), isOn: model.trendChartAccountBinding(for: account.id))
       }
     }
   }

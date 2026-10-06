@@ -74,12 +74,11 @@ private struct TrendLineChartWidgetView: View {
 
     VStack(alignment: .leading, spacing: 4) {
       if chartData.series.isEmpty {
+        let message = emptyMessage(for: chartData)
         Spacer(minLength: 0)
-        Text(chartData.hasOnlyUnlimitedData ? "Unlimited plans only" : "No history yet")
+        Text(message.title)
           .font(.caption.weight(.semibold))
-        Text(chartData.hasOnlyUnlimitedData
-          ? "Every tracked limit reports unlimited — nothing to chart"
-          : "Waiting for automatic refresh")
+        Text(message.detail)
           .font(.caption2)
           .foregroundStyle(.secondary)
         Spacer(minLength: 0)
@@ -116,12 +115,28 @@ private struct TrendLineChartWidgetView: View {
     .accessibilityLabel(trendAccessibilityLabel(days: days))
   }
 
+  /// Most specific cause first: hiding every account is the user's choice and
+  /// fixable in Settings, so it outranks the data-driven reasons.
+  private func emptyMessage(for chartData: TrendChartData) -> (title: String, detail: String) {
+    if chartData.hidesEveryAccount {
+      return ("No accounts selected", "Choose accounts under Trend Widget in LLimit Settings")
+    }
+    if chartData.hasOnlyUnlimitedData {
+      return ("Unlimited plans only", "Every tracked limit reports unlimited — nothing to chart")
+    }
+    return ("No history yet", "Waiting for automatic refresh")
+  }
+
   private func trendAccessibilityLabel(days: Int) -> String {
     let start = entry.date.addingTimeInterval(-Double(days) * 86_400)
     let snapshots = entry.history + [entry.snapshot].compactMap { $0 }
+    // Only charted accounts count: a hidden account's estimate is not on screen.
+    let accountFilter = TrendChartAccountFilter(settings: entry.settings)
     let includesEstimates = snapshots.contains { snapshot in
       snapshot.generatedAt >= start && snapshot.generatedAt <= entry.date
-        && snapshot.providers.contains { $0.metrics.contains(where: \.isPercentageEstimated) }
+        && snapshot.providers.contains { usage in
+          accountFilter.includes(usage) && usage.metrics.contains(where: \.isPercentageEstimated)
+        }
     }
     return includesEstimates
       ? "Quota trend chart. Includes estimated remaining percentages."
@@ -319,6 +334,8 @@ private struct TrendChartData {
   // True when history exists but every tracked metric reports unlimited —
   // there is genuinely nothing to chart, which is different from "no data".
   var hasOnlyUnlimitedData = false
+  // True when the user hid every enabled account from the chart.
+  var hidesEveryAccount = false
 }
 
 private struct OverviewSmallQuotaView: View {
@@ -691,6 +708,11 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
   let now = entry.date
   let startWindow = now.addingTimeInterval(-Double(clampedDays) * 86_400)
 
+  let accountFilter = TrendChartAccountFilter(settings: entry.settings)
+  guard !accountFilter.hidesEveryAccount else {
+    return TrendChartData(series: [], startDate: startWindow, endDate: now, warnings: [], hidesEveryAccount: true)
+  }
+
   var snapshots = entry.history.filter { snapshot in
     snapshot.generatedAt >= startWindow && snapshot.generatedAt <= now
   }
@@ -721,15 +743,10 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
   var orderByAccount: [String: [String]] = [:]
   var usageByAccount: [String: ProviderUsage] = [:]
   var sawUnlimitedMetric = false
-  let enabledAccounts = entry.settings.accounts.filter(\.isEnabled)
-  let enabledAccountIDs = Set(enabledAccounts.map(\.id))
-  let enabledAccountsByProvider = Dictionary(grouping: enabledAccounts, by: \.provider)
 
   for snapshot in snapshots {
     for usage in snapshot.providers {
-      let isLegacySoleAccount = usage.accountID == usage.provider.rawValue
-        && enabledAccountsByProvider[usage.provider]?.count == 1
-      guard enabledAccountIDs.contains(usage.accountID) || isLegacySoleAccount else { continue }
+      guard accountFilter.includes(usage) else { continue }
 
       var metricOrder = orderByAccount[usage.accountID] ?? []
       usageByAccount[usage.accountID] = usage
