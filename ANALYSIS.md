@@ -4,6 +4,17 @@ This document compiles high-quality, shovel-ready architectural improvements, bu
 
 ---
 
+## Completed Work (from review session 2026-10-06)
+
+- **PR #57** — Critical bug fix: `QuotaCoordinator` applied `VeniceQuotaEstimate` to all provider results. Filtered to `.venice` only.
+- **PR #58** — Quota Weather feature: calm/cloudy/stormy state pill in dashboard header based on lowest remaining percentage, failures, and estimates.
+- **PR #59** — Best model to burn recommendation: trophy-tagged row in overview showing the account with the highest bounded remaining headroom.
+- **PR #73** — Adaptive dashboard: removed forced `.environment(\.colorScheme, .dark)`; floating window respects system light/dark preference.
+- **PR #82** — Reset Celebration glow: subtle pulsing ring glow when a metric reset is within 5 minutes (merged into reset-radar branch).
+- **Accessibility badges** (`#N AUTO`, `ESTIMATED`) updated with larger font (8pt), higher contrast (0.85 opacity), and explicit VoiceOver labels.
+
+---
+
 ## 1. Performance and Responsiveness Optimizations
 
 ### 1.1 Asynchronous & Debounced Settings Persistence
