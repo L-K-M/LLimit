@@ -120,10 +120,27 @@ final class OpenCodeGoQuotaClientTests: XCTestCase {
     }
   }
 
+  func testRateLimitedWindowBelowFullPercentIsExhaustedNotInvalid() async throws {
+    // Migrated keys may report rate-limited with a percent below 100; the
+    // status alone decides exhaustion rather than failing the fetch.
+    let body = validBody.replacingOccurrences(
+      of: #""status": "ok", "percent": 60"#, with: #""status": "rate-limited", "percent": 97"#)
+    let usage = try await OpenCodeGoQuotaClient(httpClient: RecordingGoHTTP(status: 200, body: body))
+      .fetchUsage(configuration: configuration(), now: now)
+
+    XCTAssertEqual(usage.metrics[1].remainingPercent, 0)
+    XCTAssertEqual(usage.metrics[1].usedDisplay, "97%")
+    XCTAssertEqual(usage.metrics[1].detail, "Limit reached")
+    XCTAssertEqual(usage.maxUsagePercent, 100)
+    XCTAssertEqual(usage.warning, "Limit reached")
+    // The other windows still render normally.
+    XCTAssertEqual(usage.metrics[0].remainingPercent, 75)
+    XCTAssertEqual(usage.metrics[2].remainingPercent, 90)
+  }
+
   func testRejectsInvalidStatusAndResetTimestamp() async {
     let invalidBodies = [
       validBody.replacingOccurrences(of: "\"status\": \"ok\"", with: "\"status\": \"unknown\""),
-      validBody.replacingOccurrences(of: "\"status\": \"ok\"", with: "\"status\": \"rate-limited\""),
       validBody.replacingOccurrences(of: "2026-09-27T19:34:56.123Z", with: "invalid fixture-go-key"),
       validBody.replacingOccurrences(of: "2026-09-27T19:34:56.123Z", with: "2026-09-27")
     ]

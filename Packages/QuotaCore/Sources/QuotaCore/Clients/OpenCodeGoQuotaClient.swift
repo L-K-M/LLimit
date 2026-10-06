@@ -71,7 +71,9 @@ public struct OpenCodeGoQuotaClient: QuotaProviderClient {
       metric(from: windows.weekly, id: "weekly", label: "Weekly limit", now: now),
       metric(from: windows.monthly, id: "monthly", label: "Monthly limit", now: now)
     ]
-    let maxUsage = max(windows.rolling.percent, windows.weekly.percent, windows.monthly.percent)
+    // A rate-limited window is exhausted regardless of the reported percent.
+    let maxUsage = [windows.rolling, windows.weekly, windows.monthly]
+      .map { $0.status == .rateLimited ? 100 : $0.percent }.max() ?? 0
     let limited = [windows.rolling, windows.weekly, windows.monthly].contains { $0.status == .rateLimited }
 
     return ProviderUsage(
@@ -88,19 +90,22 @@ public struct OpenCodeGoQuotaClient: QuotaProviderClient {
 
   private func metric(from window: GoUsageWindow, id: String, label: String, now: Date) throws -> UsageMetric {
     guard (0...100).contains(window.percent),
-          window.status != .rateLimited || window.percent == 100,
           window.resetsAt.contains("T"),
           let resetAt = parseISO8601(window.resetsAt) else {
       throw Self.invalidResponse
     }
+    // rate-limited means exhausted even if percent reads below 100 — the
+    // endpoint proxies migrated keys, so trust the status over the number
+    // instead of failing the whole fetch on the mismatch.
+    let limited = window.status == .rateLimited
     return UsageMetric(
       id: id,
       label: label,
-      remainingPercent: 100 - window.percent,
+      remainingPercent: limited ? 0 : 100 - window.percent,
       usedDisplay: "\(window.percent)%",
       resetAt: resetAt,
       resetIn: formatResetCountdown(to: resetAt, now: now),
-      detail: window.status == .rateLimited ? "Limit reached" : nil
+      detail: limited ? "Limit reached" : nil
     )
   }
 
