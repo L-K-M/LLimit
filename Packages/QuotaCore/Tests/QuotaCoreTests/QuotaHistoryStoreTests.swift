@@ -142,16 +142,57 @@ final class QuotaHistoryStoreTests: XCTestCase {
     defer { try? FileManager.default.removeItem(at: dir) }
 
     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let historyURL = dir.appendingPathComponent("history.json")
     let corruptData = Data("{\"not a valid json[".utf8)
-    try corruptData.write(to: dir.appendingPathComponent("history.json"))
+    try corruptData.write(to: historyURL)
 
     let loaded = try store.load()
     XCTAssertTrue(loaded.isEmpty, "Corrupted archive should load as empty instead of throwing")
+
+    var leftovers = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+    XCTAssertTrue(leftovers.contains { $0.hasPrefix("history.corrupt-") },
+                  "Corrupt file should be quarantined under a .corrupt- name")
+    XCTAssertFalse(FileManager.default.fileExists(atPath: historyURL.path))
 
     // Verify next append succeeds
     let snapshot = QuotaSnapshot(generatedAt: Date(), providers: [], failures: [])
     try store.append(snapshot)
     XCTAssertEqual(try store.load().count, 1)
+
+    // A second corruption must produce a distinct quarantine name.
+    try corruptData.write(to: historyURL)
+    XCTAssertTrue(try store.load().isEmpty)
+    leftovers = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+    XCTAssertEqual(leftovers.filter { $0.hasPrefix("history.corrupt-") }.count, 2)
+  }
+
+  func testDeduplicatedAppendStillPrunesExpiredEntries() throws {
+    let (store, dir) = makeStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let metric = UsageMetric(id: "five_hour", label: "5-hour limit", remainingPercent: 80)
+    let usage = ProviderUsage(
+      accountID: "test-acct", provider: .anthropic, title: "Claude",
+      metrics: [metric], fetchedAt: now
+    )
+
+    let expired = QuotaSnapshot(
+      generatedAt: now.addingTimeInterval(-50 * 86_400), providers: [usage], failures: []
+    )
+    let fresh = QuotaSnapshot(generatedAt: now, providers: [usage], failures: [])
+    try store.save([expired, fresh])
+
+    // Appending an equivalent snapshot must not append, but must still drop the
+    // entry that aged past keepDays.
+    let duplicate = QuotaSnapshot(
+      generatedAt: now.addingTimeInterval(300), providers: [usage], failures: []
+    )
+    try store.append(duplicate, keepDays: 45)
+
+    let loaded = try store.load()
+    XCTAssertEqual(loaded.count, 1)
+    XCTAssertEqual(loaded.first?.generatedAt, now)
   }
 
   func testStoragePermissionsAre0600() throws {

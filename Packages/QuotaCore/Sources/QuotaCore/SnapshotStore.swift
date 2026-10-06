@@ -1,5 +1,9 @@
 import Foundation
 
+/// Persists the latest quota snapshot. The file is written and read with
+/// owner-only (`0600`) permissions: snapshots contain no credentials, but they
+/// do carry account titles and usage details that don't need to be
+/// world-readable.
 public final class SnapshotStore: @unchecked Sendable {
   private let fileURL: URL
   private let appGroupIdentifier: String?
@@ -30,7 +34,9 @@ public final class SnapshotStore: @unchecked Sendable {
       return nil
     }
     let data = try Data(contentsOf: fileURL)
-    return try decoder.decode(QuotaSnapshot.self, from: data)
+    let snapshot = try decoder.decode(QuotaSnapshot.self, from: data)
+    try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+    return snapshot
   }
 
   public func save(_ snapshot: QuotaSnapshot) throws {

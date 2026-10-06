@@ -21,13 +21,21 @@ public final class QuotaHistoryStore: @unchecked Sendable {
       return []
     }
 
+    let data: Data
     do {
-      let data = try Data(contentsOf: fileURL)
-      return try decoder.decode([QuotaSnapshot].self, from: data)
+      data = try Data(contentsOf: fileURL)
+    } catch {
+      return []
+    }
+
+    do {
+      let decoded = try decoder.decode([QuotaSnapshot].self, from: data)
+      try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+      return decoded
     } catch {
       let timestamp = Int(Date().timeIntervalSince1970)
       let corruptURL = fileURL.deletingPathExtension()
-        .appendingPathExtension("corrupt-\(timestamp).json")
+        .appendingPathExtension("corrupt-\(timestamp)-\(UUID().uuidString).json")
       try? FileManager.default.moveItem(at: fileURL, to: corruptURL)
       return []
     }
@@ -70,14 +78,21 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     let cutoffDays = max(1, keepDays)
     let cutoffDate = snapshot.generatedAt.addingTimeInterval(-Double(cutoffDays) * 86_400)
 
-    if let newest = history.max(by: { $0.generatedAt < $1.generatedAt }),
+    let newest = history.max(by: { $0.generatedAt < $1.generatedAt })
+    let pruned = history.filter { $0.generatedAt >= cutoffDate }
+
+    if let newest,
        newest.generatedAt >= cutoffDate,
        Self.hasEquivalentUsage(newest, snapshot) {
+      // Duplicate snapshots still drop entries that aged out of the window.
+      if pruned.count != history.count {
+        try save(pruned)
+      }
       return
     }
 
+    history = pruned
     history.append(snapshot)
-    history = history.filter { $0.generatedAt >= cutoffDate }
     history.sort { $0.generatedAt < $1.generatedAt }
 
     let limit = max(1, maxEntries)
@@ -95,6 +110,7 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     for (p1, p2) in zip(lhs.providers, rhs.providers) {
       guard p1.accountID == p2.accountID,
             p1.provider == p2.provider,
+            p1.title == p2.title,
             p1.warning == p2.warning,
             p1.maxUsagePercent == p2.maxUsagePercent,
             p1.metrics.count == p2.metrics.count
@@ -102,6 +118,7 @@ public final class QuotaHistoryStore: @unchecked Sendable {
 
       for (m1, m2) in zip(p1.metrics, p2.metrics) {
         guard m1.id == m2.id,
+              m1.label == m2.label,
               m1.remainingPercent == m2.remainingPercent,
               m1.remainingAmount == m2.remainingAmount,
               m1.usedDisplay == m2.usedDisplay,
