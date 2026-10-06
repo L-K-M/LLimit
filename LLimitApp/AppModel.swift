@@ -109,14 +109,33 @@ final class AppModel: ObservableObject {
     self.launchAtLogin = SMAppService.mainApp.status == .enabled
 
     // A coalesced settings write may still be pending when the app quits.
+    // queue: nil runs the flush synchronously on the posting (main) thread —
+    // willTerminate is posted inside terminate(), and an async hop to
+    // OperationQueue.main is not guaranteed to drain before the process exits.
     terminationObserver = NotificationCenter.default.addObserver(
-      forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+      forName: NSApplication.willTerminateNotification, object: nil, queue: nil
+    ) { [weak self] _ in
+      self?.flushPendingConfigurationSave()
+    }
+    // Resigning active is a cheap proxy for abnormal exits (force quit, crash,
+    // logout): flush is a no-op when nothing is pending.
+    resignActiveObserver = NotificationCenter.default.addObserver(
+      forName: NSApplication.willResignActiveNotification, object: nil, queue: nil
     ) { [weak self] _ in
       self?.flushPendingConfigurationSave()
     }
 
     Task { @MainActor [weak self] in
       await self?.bootstrap()
+    }
+  }
+
+  deinit {
+    if let terminationObserver {
+      NotificationCenter.default.removeObserver(terminationObserver)
+    }
+    if let resignActiveObserver {
+      NotificationCenter.default.removeObserver(resignActiveObserver)
     }
   }
 
@@ -172,6 +191,7 @@ final class AppModel: ObservableObject {
   /// the file always reflects current in-memory state.
   private var settingsSaveTask: Task<Void, Never>?
   private var terminationObserver: NSObjectProtocol?
+  private var resignActiveObserver: NSObjectProtocol?
 
   /// Coalesced settings save for bindings that fire per keystroke/drag event.
   /// Explicit actions keep calling saveConfiguration() directly.
