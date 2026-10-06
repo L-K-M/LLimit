@@ -260,6 +260,14 @@ final class StatusRendererTests: XCTestCase {
     XCTAssertNil(object["resetAt"])
   }
 
+  func testMetricObjectTrimsAResetString() {
+    let metric = UsageMetric(id: "weekly", label: "Weekly limit",
+                             remainingPercent: 40, resetIn: " 3h ")
+    let object = StatusRenderer.metricObject(metric, now: now)
+
+    XCTAssertEqual(object["resetIn"] as? String, "3h")
+  }
+
   func testHumanReadableTicksTheResetCountdownAgainstNow() {
     let resetAt = now.addingTimeInterval(3 * 3600 + 12 * 60)
     let usage = ProviderUsage(

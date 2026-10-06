@@ -36,7 +36,8 @@ These are drop-in examples for the three most common consumers.
 | `percentage` | lowest remaining percent across accounts; omitted with no data |
 | `accounts` | per-account objects for richer widgets (id, provider, name, remainingPercent, stale) |
 | `accounts[].metrics` | every limit as its own row (`id`, `label`, `unlimited`, `remainingPercent`, `usageLine`, `detail`) |
-| `accounts[].metrics[].resetIn` | the fetch-time countdown string (frozen until the next refresh) |
+| `accounts[].metrics[].estimated` | `true` when `remainingPercent` is an estimate rather than a reported value — render the `≈` marker |
+| `accounts[].metrics[].resetIn` | the fetch-time countdown string (frozen until the next refresh); absent for an unlimited limit, a limit with no reset, or a blank string |
 | `accounts[].metrics[].resetAt` | absolute reset time, ISO 8601 UTC |
 | `accounts[].metrics[].resetSeconds` | seconds until `resetAt`, recomputed on every read — use this (or `resetAt`) for a live countdown |
 

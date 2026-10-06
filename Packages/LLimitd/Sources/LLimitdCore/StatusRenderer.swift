@@ -128,9 +128,10 @@ public enum StatusRenderer {
       object["estimated"] = true
     }
     // A blank string is not a countdown: drop it, as humanReadable does, so a
-    // consumer's fallback cannot render "resets in ".
-    if let resetIn = metric.resetIn,
-       !resetIn.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+    // consumer's fallback cannot render "resets in ". Emit the trimmed value so
+    // consumers get a normalized countdown instead of one they must strip.
+    if let resetIn = metric.resetIn?.trimmingCharacters(in: .whitespacesAndNewlines),
+       !resetIn.isEmpty {
       object["resetIn"] = resetIn
     }
     if let resetAt = metric.resetAt {
