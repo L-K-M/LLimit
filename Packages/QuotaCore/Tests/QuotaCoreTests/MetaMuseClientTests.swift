@@ -146,7 +146,7 @@ final class MetaMuseClientTests: XCTestCase {
   func testStreamErrorEventThrowsAPI() async {
     let body = sse("error", #"{"type":"error","code":"invalid_api_key","message":"bad key"}"#)
     let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 200, body: body))
-    await assertThrows(kind: .api, messageContains: "Check the API key") {
+    await assertThrows(kind: .api, messageContains: "Check the API key", messageExcludes: ["bad key", "invalid_api_key"]) {
       try await client.fetchUsage(configuration: self.config(), now: self.now)
     }
   }
@@ -156,7 +156,7 @@ final class MetaMuseClientTests: XCTestCase {
     let body = sse("response.created", #"{"type":"response.created","response":{"id":"r6"}}"#)
       + sse("error", #"{"type":"error","code":"invalid_api_key","message":"bad key"}"#)
     let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 200, body: body))
-    await assertThrows(kind: .api, messageContains: "Check the API key") {
+    await assertThrows(kind: .api, messageContains: "Check the API key", messageExcludes: ["bad key", "invalid_api_key"]) {
       try await client.fetchUsage(configuration: self.config(), now: self.now)
     }
   }
@@ -165,7 +165,7 @@ final class MetaMuseClientTests: XCTestCase {
   func testStreamFailedEventThrowsAPI() async {
     let body = sse("response.failed", #"{"type":"response.failed","response":{"id":"r7","error":{"code":"server_error","message":"upstream unavailable"}}}"#)
     let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 200, body: body))
-    await assertThrows(kind: .api, messageContains: "try again later") {
+    await assertThrows(kind: .api, messageContains: "try again later", messageExcludes: ["upstream unavailable", "server_error"]) {
       try await client.fetchUsage(configuration: self.config(), now: self.now)
     }
   }
@@ -173,7 +173,7 @@ final class MetaMuseClientTests: XCTestCase {
   // Same for a 200 whose whole body is an error envelope.
   func testJSONErrorBodyThrowsAPI() async {
     let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 200, body: #"{"error":{"message":"bad key"}}"#))
-    await assertThrows(kind: .api, messageContains: "Check the API key") {
+    await assertThrows(kind: .api, messageContains: "Check the API key", messageExcludes: ["bad key"]) {
       try await client.fetchUsage(configuration: self.config(), now: self.now)
     }
   }
@@ -223,7 +223,7 @@ final class MetaMuseClientTests: XCTestCase {
 
   func testRateLimitThrowsRateLimit() async {
     let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 429, body: #"{"error":{"type":"rate_limit","message":"slow down"}}"#))
-    await assertThrows(kind: .rateLimit, messageContains: "rate limiting") {
+    await assertThrows(kind: .rateLimit, messageContains: "rate limiting", messageExcludes: ["slow down"]) {
       try await client.fetchUsage(configuration: self.config(), now: self.now)
     }
   }
@@ -231,7 +231,7 @@ final class MetaMuseClientTests: XCTestCase {
   // The muse-code service answers problem+json rather than the OpenAI envelope.
   func testProblemJSONErrorThrowsAPI() async {
     let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 400, body: #"{"title":"Bad Request","detail":"model not found","status":400}"#))
-    await assertThrows(kind: .api, messageContains: "HTTP 400") {
+    await assertThrows(kind: .api, messageContains: "HTTP 400", messageExcludes: ["model not found", "Bad Request"]) {
       try await client.fetchUsage(configuration: self.config(), now: self.now)
     }
   }
@@ -239,6 +239,7 @@ final class MetaMuseClientTests: XCTestCase {
   private func assertThrows(
     kind: QuotaErrorKind,
     messageContains: String? = nil,
+    messageExcludes: [String] = [],
     _ block: @escaping () async throws -> ProviderUsage,
     file: StaticString = #filePath,
     line: UInt = #line
@@ -248,6 +249,9 @@ final class MetaMuseClientTests: XCTestCase {
       XCTFail("Expected error of kind \(kind)", file: file, line: line)
     } catch let error as ProviderClientError {
       XCTAssertEqual(error.kind, kind, file: file, line: line)
+      for text in messageExcludes {
+        XCTAssertFalse(error.message.contains(text), file: file, line: line)
+      }
       if let messageContains {
         XCTAssertTrue(
           error.message.contains(messageContains),
