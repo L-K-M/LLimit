@@ -32,7 +32,7 @@ func printUsage() {
       llimit accounts disable <account-id>
       llimit accounts remove <account-id>
       llimit refresh
-      llimit status [--json]
+      llimit status [--json] [--watch [seconds]]
       llimit daemon
       llimit paths
 
@@ -329,12 +329,34 @@ func runRefresh() async {
   print(StatusRenderer.humanReadable(snapshot: daemon.snapshot))
 }
 
-func runStatus(_ args: [String]) {
-  let daemon = makeDaemon()
-  if args.contains("--json") {
-    print(StatusRenderer.waybarJSON(snapshot: daemon.snapshot))
-  } else {
-    print(StatusRenderer.humanReadable(snapshot: daemon.snapshot))
+func runStatus(_ args: [String]) async {
+  let json = args.contains("--json")
+
+  // --watch [seconds]: re-render the status in place until Ctrl-C. The
+  // snapshot is re-read every pass, so the display tracks daemon refreshes.
+  var watchInterval: UInt64?
+  if let index = args.firstIndex(of: "--watch") {
+    if args.indices.contains(index + 1), let seconds = UInt64(args[index + 1]) {
+      watchInterval = seconds
+    } else {
+      watchInterval = 5
+    }
+  }
+
+  while true {
+    let daemon = makeDaemon()
+    let output = json
+      ? StatusRenderer.waybarJSON(snapshot: daemon.snapshot)
+      : StatusRenderer.humanReadable(snapshot: daemon.snapshot)
+    guard let interval = watchInterval else {
+      print(output)
+      return
+    }
+    // ANSI clear + home instead of appending: the terminal shows one live
+    // status screen, not a scrollback of stale ones.
+    print("\u{1B}[2J\u{1B}[H\(output)")
+    fflush(stdout)
+    try? await Task.sleep(nanoseconds: interval * 1_000_000_000)
   }
 }
 
@@ -405,7 +427,7 @@ case "accounts":
 case "refresh":
   await runRefresh()
 case "status":
-  runStatus(Array(arguments.dropFirst()))
+  await runStatus(Array(arguments.dropFirst()))
 case "daemon":
   await runDaemon()
 case "paths":
