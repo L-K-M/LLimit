@@ -103,6 +103,7 @@ struct SettingsView: View {
       Circle()
         .fill(accountStatusColor(for: account.id))
         .frame(width: 8, height: 8)
+        .accessibilityHidden(true)
 
       VStack(alignment: .leading, spacing: 1) {
         Text(account.resolvedDisplayName)
@@ -119,7 +120,22 @@ struct SettingsView: View {
         .accessibilityHidden(true)
     }
     .padding(.vertical, 2)
+    // The status dot is color-only, so carry the state in the row's value for
+    // VoiceOver instead of hiding it.
+    .accessibilityElement(children: .combine)
+    .accessibilityLabel("\(account.resolvedDisplayName), \(account.provider.displayName)")
+    .accessibilityValue(accountStatusDescription(for: account.id))
     .help("Drag to reorder accounts and their menu bar bars, or use Move Up and Move Down in the context menu.")
+  }
+
+  private func accountStatusDescription(for accountID: String) -> String {
+    guard let account = model.account(withID: accountID), account.isEnabled else {
+      return "Disabled"
+    }
+    if accountFailure(for: accountID) != nil {
+      return "Refresh failed"
+    }
+    return model.isAccountAvailable(accountID) ? "Ready" : "Needs attention"
   }
 
   // MARK: - Detail router
@@ -164,6 +180,7 @@ struct SettingsView: View {
           } label: {
             if model.isRefreshing {
               ProgressView().controlSize(.small)
+                .accessibilityLabel("Refreshing")
             } else {
               Label("Refresh Now", systemImage: "arrow.clockwise")
             }
@@ -367,6 +384,7 @@ struct SettingsView: View {
           .labelsHidden()
           .pickerStyle(.menu)
           .frame(minWidth: 160, maxWidth: 220, alignment: .leading)
+          .accessibilityLabel("Refresh interval")
         }
 
         Divider()
@@ -375,6 +393,7 @@ struct SettingsView: View {
           Toggle("", isOn: model.launchAtLoginBinding())
             .labelsHidden()
             .toggleStyle(.switch)
+            .accessibilityLabel("Launch at login")
         }
 
         Divider()
@@ -505,6 +524,7 @@ struct SettingsView: View {
             .labelsHidden()
             .pickerStyle(.menu)
             .frame(minWidth: 220, maxWidth: 320, alignment: .leading)
+            .accessibilityLabel("Provider Tile \(index + 1) account")
           }
         }
       }
@@ -568,6 +588,7 @@ struct SettingsView: View {
             }
             .labelsHidden()
             .pickerStyle(.menu)
+            .accessibilityLabel("Style preset")
 
             Text("Adjust any color below and the style becomes Custom.")
               .font(.caption)
@@ -583,6 +604,7 @@ struct SettingsView: View {
           Toggle("", isOn: model.widgetTransparentBackgroundBinding())
             .labelsHidden()
             .toggleStyle(.switch)
+            .accessibilityLabel("Transparent background")
         }
 
         Divider()
@@ -592,6 +614,7 @@ struct SettingsView: View {
             .labelsHidden()
             .frame(width: 48)
             .disabled(model.widgetStyle.useTransparentBackground)
+            .accessibilityLabel("Background color")
         }
 
         Divider()
@@ -604,11 +627,13 @@ struct SettingsView: View {
               HStack(spacing: 10) {
                 Toggle("Transparent", isOn: model.widgetTransparentBackgroundBinding(for: .dashboard))
                   .toggleStyle(.switch)
+                  .accessibilityLabel("Dashboard background transparent")
                 Spacer()
                 ColorPicker("", selection: model.widgetBackgroundColorBinding(for: .dashboard), supportsOpacity: true)
                   .labelsHidden()
                   .frame(width: 48)
                   .disabled(model.widgetBackgroundOverride(for: .dashboard).useTransparentBackground)
+                  .accessibilityLabel("Dashboard background color")
               }
             }
           }
@@ -625,11 +650,13 @@ struct SettingsView: View {
               HStack(spacing: 10) {
                 Toggle("Transparent", isOn: model.widgetTransparentBackgroundBinding(for: .trend))
                   .toggleStyle(.switch)
+                  .accessibilityLabel("Trend background transparent")
                 Spacer()
                 ColorPicker("", selection: model.widgetBackgroundColorBinding(for: .trend), supportsOpacity: true)
                   .labelsHidden()
                   .frame(width: 48)
                   .disabled(model.widgetBackgroundOverride(for: .trend).useTransparentBackground)
+                  .accessibilityLabel("Trend background color")
               }
             }
           }
@@ -876,6 +903,7 @@ struct SettingsView: View {
             TextField("Account name", text: model.accountDisplayNameBinding(for: accountID))
               .textFieldStyle(.roundedBorder)
               .frame(maxWidth: 340)
+              .accessibilityLabel("Display name")
           }
 
           Divider()
@@ -891,6 +919,7 @@ struct SettingsView: View {
             Toggle("", isOn: model.accountEnabledBinding(for: accountID))
               .labelsHidden()
               .toggleStyle(.switch)
+              .accessibilityLabel("Enabled")
           }
 
           Divider()
@@ -929,6 +958,7 @@ struct SettingsView: View {
                 ColorPicker("Primary color", selection: model.providerPrimaryColorBinding(for: accountID), supportsOpacity: false)
                   .labelsHidden()
                   .frame(width: 48)
+                  .accessibilityLabel("Primary color")
                 Button("Reset to automatic") {
                   model.resetProviderPrimaryColor(for: accountID)
                 }
@@ -948,6 +978,7 @@ struct SettingsView: View {
             Toggle("", isOn: model.providerOverrideEnabledBinding(for: accountID))
               .labelsHidden()
               .toggleStyle(.switch)
+              .accessibilityLabel("Override global styling")
           }
 
           if providerStyle.useCustomStyle {
@@ -964,6 +995,7 @@ struct SettingsView: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
+                .accessibilityLabel("Style preset")
 
                 Text("Choose a preset or set a background below. Unmatched combinations show as Custom. Your primary color is kept when you change presets.")
                   .font(.caption)
@@ -979,6 +1011,7 @@ struct SettingsView: View {
               Toggle("", isOn: model.providerTransparentBackgroundBinding(for: accountID))
                 .labelsHidden()
                 .toggleStyle(.switch)
+                .accessibilityLabel("Transparent background")
             }
 
             Divider()
@@ -988,6 +1021,7 @@ struct SettingsView: View {
                 .labelsHidden()
                 .frame(width: 48)
                 .disabled(providerStyle.style.useTransparentBackground)
+                .accessibilityLabel("Background color")
             }
 
           }
@@ -1002,6 +1036,7 @@ struct SettingsView: View {
                 if model.isRefreshing {
                   ProgressView()
                     .controlSize(.small)
+                    .accessibilityLabel("Refreshing")
                 } else {
                   Text("Refresh Now")
                 }
@@ -1078,6 +1113,7 @@ struct SettingsView: View {
         Circle()
           .fill(isPositive ? Color.green : Color.red)
           .frame(width: 8, height: 8)
+          .accessibilityHidden(true)
         Text(message)
           .font(.subheadline)
           .fixedSize(horizontal: false, vertical: true)
@@ -1130,6 +1166,7 @@ struct SettingsView: View {
 
       Stepper("", value: value, in: range)
         .labelsHidden()
+        .accessibilityLabel(title)
 
       Text("\(displayedValue)")
         .font(.subheadline.weight(.semibold))
@@ -1148,6 +1185,7 @@ struct SettingsView: View {
       ColorPicker("", selection: binding, supportsOpacity: false)
         .labelsHidden()
         .frame(width: 48)
+        .accessibilityLabel(title)
     }
   }
 
