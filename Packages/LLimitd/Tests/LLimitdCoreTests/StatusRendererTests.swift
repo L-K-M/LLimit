@@ -345,6 +345,25 @@ final class StatusRendererTests: XCTestCase {
     XCTAssertEqual(issues.count, 1)
     XCTAssertTrue(issues[0].contains("Claude 2"))
     XCTAssertTrue(issues[0].contains("8%"))
+    XCTAssertTrue(issues[0].contains("threshold ≤ 10%"))
+  }
+
+  func testCheckIssuesFlagsUnconfiguredSnapshot() {
+    var unconfigured = snapshot(remaining: [50])
+    unconfigured.providers = []
+    unconfigured.failures = []
+    XCTAssertEqual(
+      StatusRenderer.checkIssues(snapshot: unconfigured, now: now),
+      ["no accounts configured"]
+    )
+  }
+
+  func testCheckIssuesMarksEstimatedPercentages() {
+    var estimated = snapshot(remaining: [8])
+    estimated.providers[0].metrics[0].estimatedTotal = 100
+    let issues = StatusRenderer.checkIssues(snapshot: estimated, now: now)
+    XCTAssertEqual(issues.count, 1)
+    XCTAssertTrue(issues[0].contains("≈8%"))
   }
 
   func testCheckIssuesFlagsFailuresAndStale() {

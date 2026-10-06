@@ -14,9 +14,9 @@ import Darwin
 
 let arguments = Array(CommandLine.arguments.dropFirst())
 
-func fail(_ message: String) -> Never {
+func fail(_ message: String, exitCode: Int32 = 1) -> Never {
   FileHandle.standardError.write(Data("llimit: \(message)\n".utf8))
-  exit(1)
+  exit(exitCode)
 }
 
 func printUsage() {
@@ -340,8 +340,9 @@ func runStatus(_ args: [String]) {
 }
 
 /// Exit 1 (with reasons on stdout) when any metric is at/below the threshold,
-/// an account is failing, or data is stale — the scriptable half of threshold
-/// alerts: `llimit check || notify-send LLimit "$(llimit check)"`.
+/// an account is failing, or data is stale; exit 2 for usage errors so a typo
+/// never masquerades as a quota alert. Scriptable alerting pattern:
+/// `out="$(llimit check)" || notify-send LLimit "$out"` (runs once).
 func runCheck(_ args: [String]) {
   var minPercent = 10
   var staleHours = 2.0
@@ -351,17 +352,17 @@ func runCheck(_ args: [String]) {
     case "--below":
       i += 1
       guard i < args.count, let value = Int(args[i]), (0...100).contains(value) else {
-        fail("--below needs a percentage 0-100")
+        fail("--below needs a percentage 0-100", exitCode: 2)
       }
       minPercent = value
     case "--stale-hours":
       i += 1
       guard i < args.count, let value = Double(args[i]), value > 0 else {
-        fail("--stale-hours needs a positive number")
+        fail("--stale-hours needs a positive number", exitCode: 2)
       }
       staleHours = value
     default:
-      fail("unknown check option: \(args[i])")
+      fail("unknown check option: \(args[i])", exitCode: 2)
     }
     i += 1
   }

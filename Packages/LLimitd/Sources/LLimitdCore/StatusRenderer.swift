@@ -206,7 +206,8 @@ public enum StatusRenderer {
   /// One line per threshold violation, provider failure, or stale account —
   /// the offense list behind `llimit check`'s exit code. Stateless by design:
   /// cron users get a notification every cycle the problem persists, which is
-  /// the standard `check || notify-send` contract.
+  /// the standard `check || notify-send` contract. Keep `staleHours` at or
+  /// above the daemon's refresh interval, or fresh data reads as stale.
   public static func checkIssues(
     snapshot: QuotaSnapshot?, now: Date = Date(),
     minPercent: Int = 10, staleHours: Double = 2
@@ -226,7 +227,7 @@ public enum StatusRenderer {
       for metric in usage.metrics {
         guard let remaining = metric.remainingPercent, remaining <= minPercent else { continue }
         let qualifier = metric.isPercentageEstimated ? "≈" : ""
-        issues.append("\(usage.title) — \(metric.label) at \(qualifier)\(remaining)%")
+        issues.append("\(usage.title) — \(metric.label) at \(qualifier)\(remaining)% (threshold ≤ \(minPercent)%)")
       }
     }
 
