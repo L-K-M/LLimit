@@ -214,10 +214,105 @@ final class StatusRendererTests: XCTestCase {
   func testEstimateWithoutPercentageDoesNotClaimEstimatedPercentage() {
     let metric = UsageMetric(id: "daily-diem", label: "Daily DIEM remaining",
                              estimatedTotal: 40, usedDisplay: "0.00 DIEM")
-    let object = StatusRenderer.metricObject(metric)
+    let object = StatusRenderer.metricObject(metric, now: now)
 
     XCTAssertNil(object["remainingPercent"])
     XCTAssertNil(object["estimated"])
+  }
+
+  // MARK: - Live reset countdowns
+
+  func testMetricObjectCarriesAbsoluteResetAndLiveSeconds() throws {
+    let resetAt = now.addingTimeInterval(3 * 3600 + 12 * 60)
+    let metric = UsageMetric(id: "weekly", label: "Weekly limit",
+                             remainingPercent: 40, resetAt: resetAt, resetIn: "3h 12m")
+
+    let object = StatusRenderer.metricObject(metric, now: now)
+
+    XCTAssertEqual(object["resetSeconds"] as? Int, 3 * 3600 + 12 * 60)
+    // The frozen fetch-time string is still present for older consumers.
+    XCTAssertEqual(object["resetIn"] as? String, "3h 12m")
+    let iso = try XCTUnwrap(object["resetAt"] as? String)
+    XCTAssertTrue(iso.hasSuffix("Z"))
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime]
+    let reparsed = try XCTUnwrap(formatter.date(from: iso))
+    XCTAssertEqual(reparsed.timeIntervalSince1970, resetAt.timeIntervalSince1970, accuracy: 1)
+  }
+
+  func testMetricObjectOmitsResetFieldsWithoutResetAt() {
+    let metric = UsageMetric(id: "weekly", label: "Weekly limit", remainingPercent: 40, resetIn: "3h 12m")
+    let object = StatusRenderer.metricObject(metric, now: now)
+
+    XCTAssertNil(object["resetAt"])
+    XCTAssertNil(object["resetSeconds"])
+    XCTAssertEqual(object["resetIn"] as? String, "3h 12m")
+  }
+
+  func testHumanReadableTicksTheResetCountdownAgainstNow() {
+    let resetAt = now.addingTimeInterval(3 * 3600 + 12 * 60)
+    let usage = ProviderUsage(
+      accountID: "acct", provider: .anthropic, title: "Claude",
+      metrics: [UsageMetric(id: "weekly", label: "Weekly limit",
+                            remainingPercent: 40, resetAt: resetAt, resetIn: "3h 12m")],
+      fetchedAt: now
+    )
+    let snapshot = QuotaSnapshot(generatedAt: now, providers: [usage], failures: [])
+
+    // Read an hour later, the countdown has moved on rather than repeating the
+    // fetch-time string.
+    XCTAssertTrue(StatusRenderer.humanReadable(snapshot: snapshot, now: now)
+      .contains("Weekly limit 40% left (resets in 3h 12m)"))
+    XCTAssertTrue(StatusRenderer.humanReadable(snapshot: snapshot, now: now.addingTimeInterval(3600))
+      .contains("Weekly limit 40% left (resets in 2h 12m)"))
+  }
+
+  func testHumanReadableMarksADueReset() {
+    let usage = ProviderUsage(
+      accountID: "acct", provider: .anthropic, title: "Claude",
+      metrics: [UsageMetric(id: "weekly", label: "Weekly limit",
+                            remainingPercent: 40, resetAt: now.addingTimeInterval(-60))],
+      fetchedAt: now
+    )
+    let text = StatusRenderer.humanReadable(
+      snapshot: QuotaSnapshot(generatedAt: now, providers: [usage], failures: []), now: now)
+
+    XCTAssertTrue(text.contains("(reset due)"))
+  }
+
+  // MARK: - Interval-aware staleness
+
+  func testStaleThresholdFollowsTheRefreshInterval() {
+    XCTAssertEqual(StatusRenderer.staleThreshold(refreshIntervalMinutes: 15), 45 * 60)
+    XCTAssertEqual(StatusRenderer.staleThreshold(refreshIntervalMinutes: 30), 45 * 60)
+    XCTAssertEqual(StatusRenderer.staleThreshold(refreshIntervalMinutes: 60), 90 * 60)
+    XCTAssertEqual(StatusRenderer.staleThreshold(refreshIntervalMinutes: 180), 270 * 60)
+    // Out-of-range values clamp to the supported interval.
+    XCTAssertEqual(StatusRenderer.staleThreshold(refreshIntervalMinutes: 0), 45 * 60)
+    XCTAssertEqual(StatusRenderer.staleThreshold(refreshIntervalMinutes: 10_000), 270 * 60)
+  }
+
+  func testStaleFlagUsesTheSuppliedThreshold() throws {
+    let fetchedAt = now.addingTimeInterval(-2 * 3600)
+    let usage = ProviderUsage(
+      accountID: "acct", provider: .anthropic, title: "Claude",
+      metrics: [UsageMetric(id: "weekly", label: "Weekly limit", remainingPercent: 40)],
+      fetchedAt: fetchedAt
+    )
+    let snapshot = QuotaSnapshot(generatedAt: fetchedAt, providers: [usage], failures: [])
+
+    func stale(staleAfter: TimeInterval) throws -> Bool {
+      let json = StatusRenderer.waybarJSON(snapshot: snapshot, now: now, staleAfter: staleAfter)
+      let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+      let account = try XCTUnwrap((object["accounts"] as? [[String: Any]])?.first)
+      return account["stale"] as? Bool ?? false
+    }
+
+    // Two hours old: stale under a fast interval, fresh under a slow one, and
+    // exactly at the historical default's edge.
+    XCTAssertTrue(try stale(staleAfter: StatusRenderer.staleThreshold(refreshIntervalMinutes: 15)))
+    XCTAssertFalse(try stale(staleAfter: StatusRenderer.staleThreshold(refreshIntervalMinutes: 180)))
+    XCTAssertFalse(try stale(staleAfter: StatusRenderer.defaultStaleAfter))
   }
 
   func testWaybarWithOnlyFailuresIsError() throws {

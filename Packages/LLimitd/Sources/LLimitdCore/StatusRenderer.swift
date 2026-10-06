@@ -35,8 +35,10 @@ public enum StatusRenderer {
           if metric.isPercentageEstimated {
             text += " (estimated)"
           }
-          if let reset = metric.resetIn {
-            text += " (resets in \(reset))"
+          // Recomputed against `now`, not the fetch-time `resetIn` string, so the
+          // countdown keeps ticking between refreshes.
+          if let reset = metric.resetCountdown(at: now) {
+            text += reset == "reset" ? " (reset due)" : " (resets in \(reset))"
           }
           return text
         }
@@ -63,8 +65,16 @@ public enum StatusRenderer {
   /// accounts (the number a bar would color on); `class` is `ok`/`warning`/`critical`
   /// from that same minimum, with provider warnings elevating `ok` to `warning`;
   /// `error` when every account failed, `empty` with no data.
-  public static func waybarJSON(snapshot: QuotaSnapshot?, now: Date = Date()) -> String {
-    let object = waybarObject(snapshot: snapshot, now: now)
+  ///
+  /// `staleAfter` is how old an account's data may be before `stale` is true. Pass
+  /// `staleThreshold(refreshIntervalMinutes:)` so a slow refresh interval does not
+  /// flag healthy accounts; the default keeps the historical two hours.
+  public static func waybarJSON(
+    snapshot: QuotaSnapshot?,
+    now: Date = Date(),
+    staleAfter: TimeInterval = StatusRenderer.defaultStaleAfter
+  ) -> String {
+    let object = waybarObject(snapshot: snapshot, now: now, staleAfter: staleAfter)
     guard
       let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
       let string = String(data: data, encoding: .utf8)
@@ -74,10 +84,32 @@ public enum StatusRenderer {
     return string
   }
 
+  /// Historical default when no refresh interval is known.
+  public static let defaultStaleAfter: TimeInterval = 2 * 3600
+
+  /// Age past which an account's data counts as stale, derived from the configured
+  /// refresh interval: a snapshot is stale once it is half an interval past due.
+  /// Floored so a very fast interval cannot flag a just-fetched account.
+  public static func staleThreshold(refreshIntervalMinutes: Int) -> TimeInterval {
+    let minutes = max(15, min(180, refreshIntervalMinutes))
+    return max(45, Double(minutes) * 1.5) * 60
+  }
+
+  /// ISO 8601 with a trailing `Z`, the shape `resetAt` is emitted in.
+  static func iso8601String(_ date: Date) -> String {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime]
+    return formatter.string(from: date)
+  }
+
   /// One limit as a JSON row for popup consumers (the tray). Optional fields are
   /// omitted rather than emitted as null, so a consumer can use plain key lookup
   /// without distinguishing "absent" from "present but null".
-  static func metricObject(_ metric: UsageMetric) -> [String: Any] {
+  ///
+  /// `resetAt` (absolute) and `resetSeconds` (relative to `now`) are additive: a
+  /// consumer that polls can show a live countdown instead of the frozen
+  /// fetch-time `resetIn` string.
+  static func metricObject(_ metric: UsageMetric, now: Date) -> [String: Any] {
     var object: [String: Any] = [
       "id": metric.id,
       "label": metric.label,
@@ -92,6 +124,10 @@ public enum StatusRenderer {
     if let resetIn = metric.resetIn {
       object["resetIn"] = resetIn
     }
+    if let resetAt = metric.resetAt {
+      object["resetAt"] = iso8601String(resetAt)
+      object["resetSeconds"] = max(0, Int(resetAt.timeIntervalSince(now).rounded(.down)))
+    }
     if let usageLine = metric.usageLine {
       object["usageLine"] = usageLine
     }
@@ -101,7 +137,7 @@ public enum StatusRenderer {
     return object
   }
 
-  static func waybarObject(snapshot: QuotaSnapshot?, now: Date) -> [String: Any] {
+  static func waybarObject(snapshot: QuotaSnapshot?, now: Date, staleAfter: TimeInterval) -> [String: Any] {
     guard let snapshot else {
       return [
         "text": "LLimit: no data",
@@ -127,11 +163,11 @@ public enum StatusRenderer {
         "provider": usage.provider.rawValue,
         "name": usage.title,
         "remainingPercent": remaining as Any,
-        "stale": now.timeIntervalSince(usage.fetchedAt) > 2 * 3600,
+        "stale": now.timeIntervalSince(usage.fetchedAt) > staleAfter,
         // Per-limit breakdown. The headline `remainingPercent` above is only the
         // worst metric; a popup (the tray) needs every limit as its own row.
         // Additive: bars that read only the older keys are unaffected.
-        "metrics": usage.metrics.map(metricObject)
+        "metrics": usage.metrics.map { metricObject($0, now: now) }
       ]
       if let warning = warningText(for: usage) {
         account["warning"] = warning

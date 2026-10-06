@@ -13,7 +13,17 @@ These are drop-in examples for the three most common consumers.
   "class": "ok",
   "percentage": 45,
   "accounts": [
-    { "id": "…", "provider": "anthropic", "name": "Claude", "remainingPercent": 82, "stale": false }
+    {
+      "id": "…", "provider": "anthropic", "name": "Claude",
+      "remainingPercent": 82, "stale": false,
+      "metrics": [
+        {
+          "id": "five_hour", "label": "5-hour limit", "unlimited": false,
+          "remainingPercent": 82, "resetIn": "3h 12m",
+          "resetAt": "2023-11-15T01:25:20Z", "resetSeconds": 11520
+        }
+      ]
+    }
   ]
 }
 ```
@@ -25,6 +35,14 @@ These are drop-in examples for the three most common consumers.
 | `class` | `ok` / `warning` / `critical` / `error` / `empty` — see below |
 | `percentage` | lowest remaining percent across accounts; omitted with no data |
 | `accounts` | per-account objects for richer widgets (id, provider, name, remainingPercent, stale) |
+| `accounts[].metrics` | every limit as its own row (`id`, `label`, `unlimited`, `remainingPercent`, `usageLine`, `detail`) |
+| `accounts[].metrics[].resetIn` | the fetch-time countdown string (frozen until the next refresh) |
+| `accounts[].metrics[].resetAt` | absolute reset time, ISO 8601 UTC |
+| `accounts[].metrics[].resetSeconds` | seconds until `resetAt`, recomputed on every read — use this (or `resetAt`) for a live countdown |
+
+`stale` is true once an account's data is older than the staleness threshold, which is
+derived from the configured refresh interval (`StatusRenderer.staleThreshold`); a slow
+interval does not flag healthy accounts.
 
 `class` is derived from the lowest remaining percentage across accounts:
 

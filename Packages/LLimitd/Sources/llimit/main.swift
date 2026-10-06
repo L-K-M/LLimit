@@ -332,7 +332,12 @@ func runRefresh() async {
 func runStatus(_ args: [String]) {
   let daemon = makeDaemon()
   if args.contains("--json") {
-    print(StatusRenderer.waybarJSON(snapshot: daemon.snapshot))
+    // "stale" tracks the configured refresh interval so a slow interval does not
+    // flag healthy accounts (and a fast one flags them promptly).
+    let staleAfter = StatusRenderer.staleThreshold(
+      refreshIntervalMinutes: daemon.settings.refreshIntervalMinutes
+    )
+    print(StatusRenderer.waybarJSON(snapshot: daemon.snapshot, staleAfter: staleAfter))
   } else {
     print(StatusRenderer.humanReadable(snapshot: daemon.snapshot))
   }

@@ -68,6 +68,28 @@ class TrayModel:
     rows: list[MenuRow] = field(default_factory=list)
 
 
+def format_countdown(seconds: int) -> str:
+    """A duration the way the Swift renderer writes it: '3d 6h', '2h 5m', '45m'.
+
+    `llimit status` recomputes `resetSeconds` on every read, so the tray's
+    per-minute poll shows a countdown that keeps moving instead of the frozen
+    fetch-time `resetIn` string.
+    """
+    remaining = max(0, int(seconds))
+    days, remaining = divmod(remaining, 86_400)
+    hours, remaining = divmod(remaining, 3_600)
+    minutes = remaining // 60
+
+    parts: list[str] = []
+    if days:
+        parts.append(f"{days}d")
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes or not parts:
+        parts.append(f"{minutes}m")
+    return " ".join(parts)
+
+
 def format_metric(metric: dict[str, Any]) -> str:
     """One limit as a single line, e.g. 'Session — 62% left · resets in 3h 12m'."""
     label = metric.get("label") or metric.get("id") or "Limit"
@@ -83,9 +105,17 @@ def format_metric(metric: dict[str, Any]) -> str:
     else:
         body = "no data"
 
-    reset = metric.get("resetIn")
-    if reset and not metric.get("unlimited"):
-        body = f"{body} · resets in {reset}"
+    if not metric.get("unlimited"):
+        # Prefer the absolute reset the CLI recomputes each read; fall back to the
+        # frozen string for snapshots written before resetSeconds existed.
+        reset_seconds = metric.get("resetSeconds")
+        reset = metric.get("resetIn")
+        if isinstance(reset_seconds, int):
+            body = f"{body} · " + (
+                "reset due" if reset_seconds <= 0 else f"resets in {format_countdown(reset_seconds)}"
+            )
+        elif reset:
+            body = f"{body} · resets in {reset}"
 
     return f"{label} — {body}"
 

@@ -18,6 +18,7 @@ from llimit_tray import (  # noqa: E402
     FALLBACK_ICON,
     build_menu_model,
     format_account_header,
+    format_countdown,
     format_metric,
     main,
 )
@@ -31,10 +32,41 @@ def action_names(model):
     return [row.action for row in model.rows if row.kind == "action"]
 
 
+class CountdownFormattingTests(unittest.TestCase):
+    """Mirrors the Swift renderer's short-duration formatting."""
+
+    def test_durations_match_the_swift_shape(self):
+        cases = {
+            0: "0m",
+            59: "0m",
+            60: "1m",
+            3 * 3600 + 12 * 60: "3h 12m",
+            4 * 86_400 + 2 * 3600: "4d 2h",
+            86_400 + 3600: "1d 1h",
+        }
+        for seconds, expected in cases.items():
+            with self.subTest(seconds=seconds):
+                self.assertEqual(format_countdown(seconds), expected)
+
+    def test_negative_durations_clamp_to_zero(self):
+        self.assertEqual(format_countdown(-90), "0m")
+
+
 class FormatMetricTests(unittest.TestCase):
     def test_bounded_metric_shows_percent_and_reset(self):
         text = format_metric({"label": "Session", "remainingPercent": 62, "resetIn": "3h 12m"})
         self.assertEqual(text, "Session — 62% left · resets in 3h 12m")
+
+    def test_reset_seconds_render_a_live_countdown_and_win_over_the_frozen_string(self):
+        text = format_metric({"label": "Session", "remainingPercent": 62,
+                              "resetSeconds": 3 * 3600 + 12 * 60, "resetIn": "99h"})
+        self.assertEqual(text, "Session — 62% left · resets in 3h 12m")
+
+    def test_due_reset_reads_as_reset_due(self):
+        self.assertEqual(
+            format_metric({"label": "Weekly", "remainingPercent": 8, "resetSeconds": 0}),
+            "Weekly — 8% left · reset due",
+        )
 
     def test_metric_without_reset_omits_the_clause(self):
         self.assertEqual(format_metric({"label": "Weekly", "remainingPercent": 8}), "Weekly — 8% left")
