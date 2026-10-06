@@ -264,6 +264,25 @@ final class StoreRoundTripTests: XCTestCase {
     XCTAssertNil(settings.providerTileAutoRank(forSlot: AppSettings.providerTileSlotCount))
   }
 
+  func testSnapshotAndHistoryFilesAreOwnerOnly() throws {
+    let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+
+    let snapshotURL = tempDir.appendingPathComponent("snapshot.json")
+    let historyURL = tempDir.appendingPathComponent("history.json")
+    let snapshot = QuotaSnapshot(generatedAt: Date(timeIntervalSince1970: 1_700_000_000), providers: [], failures: [])
+
+    try SnapshotStore(fileURL: snapshotURL).save(snapshot)
+    try QuotaHistoryStore(fileURL: historyURL).save([snapshot])
+
+    for url in [snapshotURL, historyURL] {
+      let mode = try XCTUnwrap(
+        FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber
+      ).intValue & 0o777
+      XCTAssertEqual(mode, 0o600, "\(url.lastPathComponent) must not expose account metadata to other local users")
+    }
+  }
+
   func testQuotaHistoryStoreRoundTripAndRetention() throws {
     let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     let fileURL = tempDir.appendingPathComponent("history.json")

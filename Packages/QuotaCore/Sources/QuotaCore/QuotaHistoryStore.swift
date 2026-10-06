@@ -49,7 +49,8 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     let normalized = snapshots.sorted { $0.generatedAt < $1.generatedAt }
     let data = try encoder.encode(normalized)
     try data.write(to: fileURL, options: .atomic)
-    try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: fileURL.path)
+    // Same account metadata as the snapshot — owner-only, like settings.
+    try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
   }
 
   public func append(
