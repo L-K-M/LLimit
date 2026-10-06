@@ -38,6 +38,9 @@ public enum StatusRenderer {
           if let reset = metric.resetIn {
             text += " (resets in \(reset))"
           }
+          if let pace = metric.paceEstimate, pace.trend == .runsOut {
+            text += " · \(pace.summary)"
+          }
           return text
         }
         if metric.isUnlimited {
@@ -97,6 +100,10 @@ public enum StatusRenderer {
     }
     if let detail = metric.detail {
       object["detail"] = detail
+    }
+    if let pace = metric.paceEstimate {
+      object["pace"] = pace.summary
+      object["paceTrend"] = pace.trend.rawValue
     }
     return object
   }

@@ -268,6 +268,10 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
   public var resetIn: String?
   public var isUnlimited: Bool
   public var detail: String?
+  /// Burn-rate projection over the current window, filled in from recorded
+  /// history by `QuotaSnapshot.applyingPaceEstimates`. Nil when there is not
+  /// enough data to project.
+  public var paceEstimate: PaceEstimate?
 
   public init(
     id: String,
@@ -280,7 +284,8 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
     resetAt: Date? = nil,
     resetIn: String? = nil,
     isUnlimited: Bool = false,
-    detail: String? = nil
+    detail: String? = nil,
+    paceEstimate: PaceEstimate? = nil
   ) {
     self.id = id
     self.label = label
@@ -293,6 +298,7 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
     self.resetIn = resetIn
     self.isUnlimited = isUnlimited
     self.detail = detail
+    self.paceEstimate = paceEstimate
   }
 
   public var usageLine: String? {

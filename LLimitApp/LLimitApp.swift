@@ -1571,6 +1571,14 @@ private struct MetricQuotaRow: View {
         }
       }
 
+      // The only pace reading worth a line of its own: projected exhaustion
+      // before the reset.
+      if let pace = metric.paceEstimate, pace.trend == .runsOut {
+        Text(pace.summary)
+          .font(.system(size: 10, weight: .semibold))
+          .foregroundStyle(.orange)
+      }
+
       if let detail = metric.detail, !detail.isEmpty {
         Text(detail)
           .font(.system(size: 10))
