@@ -65,6 +65,10 @@ public final class QuotaHistoryStore: @unchecked Sendable {
   /// The one exception is a repeat that would also roll the retention window
   /// forward (the newest entry has aged past `keepDays`): that append still
   /// replaces the expired entry, so it is not a no-op.
+  ///
+  /// A no-op append still prunes entries older than the window. Otherwise a long
+  /// carried-stale streak — where the newest entry stays fresh but older ones age
+  /// out — would leave expired rows on disk until the content changed.
   public func append(
     _ snapshot: QuotaSnapshot,
     keepDays: Int = 45,
@@ -79,6 +83,10 @@ public final class QuotaHistoryStore: @unchecked Sendable {
        newest.generatedAt >= cutoffDate,
        newest.providers == snapshot.providers,
        newest.failures == snapshot.failures {
+      if history.contains(where: { $0.generatedAt < cutoffDate }) {
+        history = history.filter { $0.generatedAt >= cutoffDate }
+        try save(history)
+      }
       return
     }
 

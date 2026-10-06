@@ -143,6 +143,25 @@ final class QuotaHistoryStoreTests: XCTestCase {
     XCTAssertEqual(try store.load().count, 2)
   }
 
+  func testNoOpAppendStillPrunesExpiredEntries() throws {
+    let (store, dir) = makeStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let expired = makeSnapshot(
+      at: now.addingTimeInterval(-50 * 86_400),
+      fetchedAt: now.addingTimeInterval(-50 * 86_400)
+    )
+    let fresh = makeSnapshot(at: now, fetchedAt: now)
+    try store.save([expired, fresh])
+
+    // Identical to the newest entry, so nothing is added — but the row that aged
+    // past the 45-day window must still go.
+    try store.append(makeSnapshot(at: now.addingTimeInterval(1800), fetchedAt: now))
+
+    XCTAssertEqual(try store.load().map(\.generatedAt), [now])
+  }
+
   func testAppendStillRollsTheWindowWhenTheNewestEntryExpired() throws {
     let (store, dir) = makeStore()
     defer { try? FileManager.default.removeItem(at: dir) }
