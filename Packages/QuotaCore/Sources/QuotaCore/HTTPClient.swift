@@ -26,6 +26,10 @@ public struct URLSessionHTTPClient: HTTPClient {
         throw ProviderClientError(kind: .network, message: "Non-HTTP response")
       }
       return (data, httpResponse)
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch let urlError as URLError where urlError.code == .cancelled {
+      throw CancellationError()
     } catch {
       if let providerError = error as? ProviderClientError {
         throw providerError

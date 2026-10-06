@@ -43,12 +43,13 @@ public struct QuotaCoordinator: Sendable {
       .filter { $0.isEnabled }
       .filter { clientsByProvider[$0.provider] != nil }
 
-    let results = await withTaskGroup(of: RefreshResult.self) { group in
+    let results = await withTaskGroup(of: RefreshResult?.self) { group in
       for configuration in targets {
         guard let client = clientsByProvider[configuration.provider] else { continue }
 
         group.addTask {
           do {
+            try Task.checkCancellation()
             let usage = try await client.fetchUsage(configuration: configuration, now: now)
             return RefreshResult(
               accountID: configuration.accountID,
@@ -56,6 +57,10 @@ public struct QuotaCoordinator: Sendable {
               usage: usage,
               failure: nil
             )
+          } catch is CancellationError {
+            return nil
+          } catch let urlError as URLError where urlError.code == .cancelled {
+            return nil
           } catch let error as ProviderClientError {
             return RefreshResult(
               accountID: configuration.accountID,
@@ -86,7 +91,9 @@ public struct QuotaCoordinator: Sendable {
 
       var collected: [RefreshResult] = []
       for await result in group {
-        collected.append(result)
+        if let result {
+          collected.append(result)
+        }
       }
       return collected
     }
