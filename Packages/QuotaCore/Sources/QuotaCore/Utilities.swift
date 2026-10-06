@@ -1,5 +1,10 @@
 import Foundation
 import CoreFoundation
+#if canImport(Glibc)
+import Glibc
+#elseif canImport(Darwin)
+import Darwin
+#endif
 
 func clampPercent(_ value: Int) -> Int {
   max(0, min(100, value))
@@ -299,4 +304,41 @@ func startOfNextMonth(from date: Date) -> Date? {
   }
 
   return monthEndDate(year: year, month: month)
+}
+
+/// Atomically replaces `fileURL` with `data`, owner-only (0600) from the moment
+/// the temporary file exists. `Data.write(to:options:.atomic)` alone creates
+/// its temp file at the umask default (typically 0644), leaving a window where
+/// account metadata is readable by other local users.
+func writeOwnerOnlyAtomically(_ data: Data, to fileURL: URL) throws {
+  let temporaryURL = fileURL.deletingLastPathComponent()
+    .appendingPathComponent(".\(fileURL.lastPathComponent).\(UUID().uuidString).tmp")
+  guard FileManager.default.createFile(
+    atPath: temporaryURL.path, contents: nil,
+    attributes: [.posixPermissions: 0o600]
+  ) else {
+    throw CocoaError(.fileWriteFileExists)
+  }
+  do {
+    try data.write(to: temporaryURL)
+    // rename(2) atomically replaces the destination on the same filesystem and
+    // preserves the temp file's mode.
+    guard rename(temporaryURL.path, fileURL.path) == 0 else {
+      throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+    }
+  } catch {
+    try? FileManager.default.removeItem(at: temporaryURL)
+    throw error
+  }
+  // Filesystems that ignore POSIX modes (exFAT, some SMB/NFS mounts) can leave
+  // the file world-readable without any error — make the gap observable
+  // instead of silent. stderr, not stdout: `llimit status` output is a data
+  // contract other tools pipe.
+  do {
+    try FileManager.default.setAttributes(
+      [.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+  } catch {
+    FileHandle.standardError.write(Data(
+      "LLimit: could not restrict permissions on \(fileURL.lastPathComponent): \(error.localizedDescription)\n".utf8))
+  }
 }

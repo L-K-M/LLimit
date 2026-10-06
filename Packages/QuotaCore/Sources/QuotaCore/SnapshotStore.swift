@@ -39,9 +39,8 @@ public final class SnapshotStore: @unchecked Sendable {
       withIntermediateDirectories: true
     )
     let data = try encoder.encode(snapshot)
-    try data.write(to: fileURL, options: .atomic)
     // Account names and usage metadata — same protection as the settings file.
-    try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+    try writeOwnerOnlyAtomically(data, to: fileURL)
   }
 
   public func debugInfo() -> String {
