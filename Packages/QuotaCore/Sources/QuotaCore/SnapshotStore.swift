@@ -40,7 +40,7 @@ public final class SnapshotStore: @unchecked Sendable {
     )
     let data = try encoder.encode(snapshot)
     try data.write(to: fileURL, options: .atomic)
-    try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: fileURL.path)
+    try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
   }
 
   public func debugInfo() -> String {

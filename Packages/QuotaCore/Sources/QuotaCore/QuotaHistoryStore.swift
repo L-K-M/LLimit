@@ -21,8 +21,16 @@ public final class QuotaHistoryStore: @unchecked Sendable {
       return []
     }
 
-    let data = try Data(contentsOf: fileURL)
-    return try decoder.decode([QuotaSnapshot].self, from: data)
+    do {
+      let data = try Data(contentsOf: fileURL)
+      return try decoder.decode([QuotaSnapshot].self, from: data)
+    } catch {
+      let timestamp = Int(Date().timeIntervalSince1970)
+      let corruptURL = fileURL.deletingPathExtension()
+        .appendingPathExtension("corrupt-\(timestamp).json")
+      try? FileManager.default.moveItem(at: fileURL, to: corruptURL)
+      return []
+    }
   }
 
   /// Loads only the snapshots within the last `days`, capped to the newest `maxEntries`.
@@ -49,7 +57,7 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     let normalized = snapshots.sorted { $0.generatedAt < $1.generatedAt }
     let data = try encoder.encode(normalized)
     try data.write(to: fileURL, options: .atomic)
-    try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: fileURL.path)
+    try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
   }
 
   public func append(
@@ -58,6 +66,11 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     maxEntries: Int = 3_000
   ) throws {
     var history = try load()
+
+    if let newest = history.last, Self.hasEquivalentUsage(newest, snapshot) {
+      return
+    }
+
     history.append(snapshot)
 
     let cutoffDays = max(1, keepDays)
@@ -71,6 +84,32 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     }
 
     try save(history)
+  }
+
+  static func hasEquivalentUsage(_ lhs: QuotaSnapshot, _ rhs: QuotaSnapshot) -> Bool {
+    guard lhs.failures == rhs.failures else { return false }
+    guard lhs.providers.count == rhs.providers.count else { return false }
+
+    for (p1, p2) in zip(lhs.providers, rhs.providers) {
+      guard p1.accountID == p2.accountID,
+            p1.provider == p2.provider,
+            p1.warning == p2.warning,
+            p1.maxUsagePercent == p2.maxUsagePercent,
+            p1.metrics.count == p2.metrics.count
+      else { return false }
+
+      for (m1, m2) in zip(p1.metrics, p2.metrics) {
+        guard m1.id == m2.id,
+              m1.remainingPercent == m2.remainingPercent,
+              m1.remainingAmount == m2.remainingAmount,
+              m1.usedDisplay == m2.usedDisplay,
+              m1.totalDisplay == m2.totalDisplay,
+              m1.isUnlimited == m2.isUnlimited,
+              m1.resetAt == m2.resetAt
+        else { return false }
+      }
+    }
+    return true
   }
 
   public func remove(accountIDs: Set<String>) throws {
