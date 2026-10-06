@@ -1493,9 +1493,11 @@ private struct ProviderMark: View {
     case .openAI:
       return "sparkles"
     case .gitHubCopilot:
-      return "chevron.left.forwardslash.chevron.right"
-    case .zhipu, .zai:
+      return "brain.head.profile"
+    case .zhipu:
       return "bolt.fill"
+    case .zai:
+      return "bolt.horizontal.fill"
     case .kimi:
       return "moon.fill"
     case .googleAntigravity:
@@ -1505,7 +1507,7 @@ private struct ProviderMark: View {
     case .metaMuse:
       return "wand.and.stars"
     case .openCodeGo:
-      return "chevron.left.forwardslash.chevron.right"
+      return "curlybraces"
     case .venice:
       return "water.waves"
     case .cline:

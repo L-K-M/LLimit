@@ -1024,7 +1024,7 @@ private func compactProviderName(for provider: QuotaProvider) -> String {
   case .metaMuse:
     return "Muse"
   case .openCodeGo:
-    return "Go"
+    return "OpenCode"
   case .venice:
     return "Venice"
   case .cline:
