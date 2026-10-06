@@ -108,6 +108,13 @@ final class AppModel: ObservableObject {
     )
     self.launchAtLogin = SMAppService.mainApp.status == .enabled
 
+    // A coalesced settings write may still be pending when the app quits.
+    terminationObserver = NotificationCenter.default.addObserver(
+      forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+    ) { [weak self] _ in
+      self?.flushPendingConfigurationSave()
+    }
+
     Task { @MainActor [weak self] in
       await self?.bootstrap()
     }
@@ -160,7 +167,33 @@ final class AppModel: ObservableObject {
     reloadAccountStatuses()
   }
 
+  /// Pending coalesced save for high-frequency mutations (per-keystroke
+  /// credential edits, color-picker drags). An explicit save supersedes it —
+  /// the file always reflects current in-memory state.
+  private var settingsSaveTask: Task<Void, Never>?
+  private var terminationObserver: NSObjectProtocol?
+
+  /// Coalesced settings save for bindings that fire per keystroke/drag event.
+  /// Explicit actions keep calling saveConfiguration() directly.
+  private func scheduleConfigurationSave() {
+    settingsSaveTask?.cancel()
+    settingsSaveTask = Task { @MainActor [weak self] in
+      try? await Task.sleep(nanoseconds: 400_000_000)
+      guard !Task.isCancelled else { return }
+      self?.saveConfiguration()
+    }
+  }
+
+  private func flushPendingConfigurationSave() {
+    guard settingsSaveTask != nil else { return }
+    settingsSaveTask?.cancel()
+    settingsSaveTask = nil
+    saveConfiguration()
+  }
+
   func saveConfiguration(showSuccessMessage: Bool = false) {
+    settingsSaveTask?.cancel()
+    settingsSaveTask = nil
     guard !configurationLoadFailed else {
       statusMessage = "Save blocked because the existing settings file could not be read. Fix or back up the file, then relaunch LLimit."
       return
@@ -1353,7 +1386,7 @@ final class AppModel: ObservableObject {
       set: { newValue in
         self.widgetStyle.backgroundHexColor = Self.hexColor(from: newValue, allowTransparency: true)
         self.widgetStyle.useTransparentBackground = false
-        self.saveConfiguration()
+        self.scheduleConfigurationSave()
       }
     )
   }
@@ -1433,7 +1466,7 @@ final class AppModel: ObservableObject {
         }
 
         self.widgetStyle.limitKindColors.setHexColor(hex, for: kind, otherSlot: otherSlot)
-        self.saveConfiguration()
+        self.scheduleConfigurationSave()
       }
     )
   }
@@ -1449,7 +1482,7 @@ final class AppModel: ObservableObject {
         }
 
         self.widgetStyle.limitKindColors.unlimitedHexColor = hex
-        self.saveConfiguration()
+        self.scheduleConfigurationSave()
       }
     )
   }
@@ -1608,7 +1641,7 @@ final class AppModel: ObservableObject {
       reconcileSnapshotWithCurrentAccounts()
     }
     reloadAccountStatuses()
-    saveConfiguration()
+    scheduleConfigurationSave()
   }
 
   private func invalidateVeniceUsage(for account: ProviderAccount) throws {
@@ -1632,7 +1665,7 @@ final class AppModel: ObservableObject {
     style.provider = account(withID: accountID)?.provider
     mutate(&style)
     providerStyleSettings[accountID] = style
-    saveConfiguration()
+    scheduleConfigurationSave()
   }
 
   private func updateWidgetBackgroundOverride(
@@ -1650,7 +1683,7 @@ final class AppModel: ObservableObject {
       widgetBackgroundSettings.trend = override
     }
 
-    saveConfiguration()
+    scheduleConfigurationSave()
   }
 
   private func nextDisplayName(for provider: QuotaProvider) -> String {
