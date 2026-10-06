@@ -311,36 +311,50 @@ final class AppModel: ObservableObject {
   /// account that started failing. The evaluator owns band/dedup semantics;
   /// this method owns authorization and delivery.
   private func deliverQuotaAlerts(for snapshot: QuotaSnapshot) {
-    guard alertSettings.enabled else { return }
+    guard alertSettings.enabled else {
+      // Disabled mid-flight: drop suppression state so re-enabling starts
+      // fresh instead of carrying stale keys (or inherited empty state is
+      // indistinguishable from "nothing fired" — clearing is still correct).
+      alertDedupKeys = []
+      return
+    }
     var dedup = alertDedupKeys
     let alerts = QuotaAlertEvaluator.alerts(
       in: snapshot, settings: alertSettings, dedupedKeys: &dedup)
     alertDedupKeys = dedup
     guard !alerts.isEmpty else { return }
 
-    let center = UNUserNotificationCenter.current()
-    let post = {
-      for alert in alerts {
-        let content = UNMutableNotificationContent()
-        content.title = alert.title
-        content.body = alert.body
-        content.sound = .default
-        // The dedupKey doubles as the request identifier, so re-delivery of
-        // the same alert replaces the banner instead of stacking.
-        center.add(UNNotificationRequest(identifier: alert.dedupKey, content: content, trigger: nil))
-      }
-    }
-    center.getNotificationSettings { settings in
+    // Escaping notification callbacks run off-main; the async API keeps the
+    // whole path on the main actor where AppModel is isolated.
+    Task { @MainActor in
+      let center = UNUserNotificationCenter.current()
+      let settings = await center.notificationSettings()
       switch settings.authorizationStatus {
       case .authorized, .provisional, .ephemeral:
-        post()
+        await post(alerts, to: center)
       case .notDetermined:
-        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
-          if granted { post() }
+        // The foreground toggle normally requests permission up front; this
+        // covers a refresh landing before the user answered or after reset.
+        if (try? await center.requestAuthorization(options: [.alert, .sound])) == true {
+          await post(alerts, to: center)
         }
       default:
         break
       }
+    }
+  }
+
+  private func post(_ alerts: [QuotaAlert],
+                    to center: UNUserNotificationCenter) async {
+    for alert in alerts {
+      let content = UNMutableNotificationContent()
+      content.title = alert.title
+      content.body = alert.body
+      content.sound = .default
+      // The dedupKey doubles as the request identifier, so re-delivery of
+      // the same alert replaces the banner instead of stacking.
+      try? await center.add(
+        UNNotificationRequest(identifier: alert.dedupKey, content: content, trigger: nil))
     }
   }
 
@@ -1286,6 +1300,14 @@ final class AppModel: ObservableObject {
       set: { newValue in
         self.alertSettings[keyPath: keyPath] = newValue
         self.saveConfiguration()
+        // Ask while the app is frontmost — macOS foreground requests are far
+        // likelier to present the prompt than a mid-refresh background ask.
+        if keyPath == \QuotaAlertSettings.enabled, newValue {
+          Task { @MainActor in
+            _ = try? await UNUserNotificationCenter.current()
+              .requestAuthorization(options: [.alert, .sound])
+          }
+        }
       }
     )
   }
@@ -1297,6 +1319,17 @@ final class AppModel: ObservableObject {
       get: { self.alertSettings[keyPath: keyPath] },
       set: { newValue in
         self.alertSettings[keyPath: keyPath] = newValue
+        // A critical at/above warning would swallow every warning alert —
+        // keep the bands strictly ordered regardless of stepper order.
+        if self.alertSettings.criticalPercent >= self.alertSettings.warningPercent {
+          if keyPath == \QuotaAlertSettings.criticalPercent {
+            self.alertSettings.warningPercent = min(
+              QuotaAlertSettings.warningRange.upperBound, newValue + 1)
+          } else {
+            self.alertSettings.criticalPercent = max(
+              QuotaAlertSettings.criticalRange.lowerBound, newValue - 1)
+          }
+        }
         self.saveConfiguration()
       }
     )
