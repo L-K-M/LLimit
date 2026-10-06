@@ -51,7 +51,9 @@ public struct AnthropicClient: QuotaProviderClient {
       if response.statusCode == 429 {
         let retryAfter = parseRetryAfter(response.value(forHTTPHeaderField: "Retry-After"), now: now)
         let guidance: String
-        if let retryAfter {
+        // A date-form header far in the future can exceed Int; converting
+        // such a value would trap, so only humanize sane durations.
+        if let retryAfter, retryAfter < TimeInterval(Int.max) {
           guidance = "Next attempt in about \(formatShortDuration(seconds: Int(retryAfter.rounded(.up))) ?? "a few minutes")."
         } else {
           guidance = "It will recover on the next refresh."

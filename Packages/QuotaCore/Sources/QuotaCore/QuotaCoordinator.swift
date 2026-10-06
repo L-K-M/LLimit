@@ -48,9 +48,13 @@ public struct QuotaCoordinator: Sendable {
     // documented worst case). The failure carries forward unchanged so the
     // cooldown and its retryAt survive consecutive cycles, and callers
     // backfill last-known usage via mergingStaleUsage, which keys off the
-    // failure's presence.
+    // failure's presence. Accounts no longer being polled (removed or
+    // disabled since the previous snapshot) must not drag their cooldown
+    // failure into every future snapshot.
+    let configuredAccountIDs = Set(targets.map(\.accountID))
     let cooldownFailures = (previousSnapshot?.failures ?? [])
       .filter { $0.kind == .rateLimit && ($0.retryAt ?? .distantPast) > now }
+      .filter { configuredAccountIDs.contains($0.accountID) }
     let cooledAccountIDs = Set(cooldownFailures.map(\.accountID))
     let fetchTargets = targets.filter { !cooledAccountIDs.contains($0.accountID) }
 

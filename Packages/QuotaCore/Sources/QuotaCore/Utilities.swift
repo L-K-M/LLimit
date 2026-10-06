@@ -115,22 +115,29 @@ func nonEmptyString(_ value: Any?) -> String? {
 /// Parses a `Retry-After` header value (RFC 9110): either delta-seconds or an
 /// IMF-fixdate. Returns the delay in seconds from `now`, or nil when the value
 /// is absent/unusable. A non-positive delay means "retry now", which is no
-/// cooldown at all, so it also yields nil.
+/// cooldown at all, so it also yields nil. Values are capped at 24 hours: a
+/// hostile or misconfigured header must not suppress an account's polling
+/// indefinitely.
 func parseRetryAfter(_ value: String?, now: Date) -> TimeInterval? {
   guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
     return nil
   }
 
   if let seconds = Double(trimmed), seconds.isFinite, seconds > 0 {
-    return seconds
+    return min(seconds, Self.maximumRetryAfterSeconds)
   }
 
   if let date = parseHTTPDate(trimmed) {
     let delay = date.timeIntervalSince(now)
-    return delay > 0 ? delay : nil
+    guard delay > 0 else { return nil }
+    return min(delay, Self.maximumRetryAfterSeconds)
   }
 
   return nil
+}
+
+private extension TimeInterval {
+  static let maximumRetryAfterSeconds: TimeInterval = 24 * 3_600
 }
 
 private func parseHTTPDate(_ string: String) -> Date? {

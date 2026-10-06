@@ -127,6 +127,33 @@ final class QuotaCoordinatorTests: XCTestCase {
     let fetched = await client.fetchedAccountIDs
     XCTAssertEqual(fetched, [QuotaProvider.anthropic.rawValue])
   }
+
+  // A cooldown failure for an account that is no longer configured must not
+  // ride along into every future snapshot.
+  func testCooldownIsNotCarriedForRemovedAccounts() async {
+    let coordinator = QuotaCoordinator(clients: [RecordingClient(provider: .anthropic)])
+    let previous = QuotaSnapshot(
+      generatedAt: now.addingTimeInterval(-600),
+      providers: [],
+      failures: [
+        ProviderFailure(
+          accountID: "removed-account",
+          provider: .anthropic,
+          kind: .rateLimit,
+          message: "rate limited",
+          retryAt: now.addingTimeInterval(600)
+        )
+      ]
+    )
+
+    let snapshot = await coordinator.refresh(
+      configurations: [ProviderRuntimeConfiguration(accountID: "live-account", provider: .anthropic, isEnabled: true, credentials: [:])],
+      now: now,
+      previousSnapshot: previous
+    )
+
+    XCTAssertFalse(snapshot.failures.contains { $0.accountID == "removed-account" })
+  }
 }
 
 private struct MockClient: QuotaProviderClient {

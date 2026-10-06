@@ -110,6 +110,22 @@ final class AnthropicClientTests: XCTestCase {
     }
   }
 
+  // A pathological Retry-After must neither trap the Int conversion nor
+  // suppress the account's polling beyond the 24-hour cap.
+  func testRateLimitWithAstronomicalRetryAfterIsCappedAndHumanizedSafely() async {
+    let client = AnthropicClient(httpClient: MockHTTP(status: 429, body: "rate limited", headers: ["Retry-After": "99999999999999999999"]))
+    do {
+      _ = try await client.fetchUsage(configuration: config(), now: now)
+      XCTFail("Expected a rate-limit failure")
+    } catch let error as ProviderClientError {
+      XCTAssertEqual(error.kind, .rateLimit)
+      XCTAssertEqual(error.retryAfter, 24 * 3_600)
+      XCTAssertFalse(error.message.contains("Next attempt"), "an unhumanizable duration must not claim a next-attempt time")
+    } catch {
+      XCTFail("Unexpected error: \(error)")
+    }
+  }
+
   private func assertThrows(
     kind: QuotaErrorKind,
     _ block: @escaping () async throws -> ProviderUsage,
