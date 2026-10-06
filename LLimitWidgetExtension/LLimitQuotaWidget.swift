@@ -342,6 +342,8 @@ private struct OverviewSmallQuotaView: View {
   let entry: QuotaEntry
 
   var body: some View {
+    let dashboard = entry.dashboard
+
     VStack(alignment: .leading, spacing: 5) {
       HStack {
         Text("LLM Quota")
@@ -354,10 +356,10 @@ private struct OverviewSmallQuotaView: View {
         }
       }
 
-      if let snapshot = entry.snapshot, !snapshot.providers.isEmpty {
+      if dashboard.state == .ready {
         let providerLimit = max(1, min(entry.settings.widgetVisibility.smallDashboardProviderLimit, 4))
 
-        ForEach(sortedProviders(snapshot.providers).prefix(providerLimit)) { usage in
+        ForEach(dashboard.providers.prefix(providerLimit)) { usage in
           CompactProviderUsageRow(
             usage: usage,
             kindColors: entry.settings.widgetStyle.limitKindColors,
@@ -370,53 +372,22 @@ private struct OverviewSmallQuotaView: View {
         }
 
         if entry.settings.widgetVisibility.showOverviewMetricSummary {
-          Text(overviewSummary(for: snapshot.providers))
+          Text(dashboard.overviewSummary)
             .font(.caption2)
             .foregroundStyle(.secondary)
             .lineLimit(1)
         }
-
-        if entry.settings.widgetVisibility.showFailureCount, !snapshot.failures.isEmpty {
-          Text("\(snapshot.failures.count) unavailable")
-            .font(.caption2)
-            .foregroundStyle(.orange)
-        }
       } else {
-        Spacer(minLength: 0)
-        Text("No accounts configured")
-          .font(.caption.weight(.semibold))
-        Text("Add accounts in LLimit")
+        DashboardEmptyStateView(state: dashboard.state)
+      }
+
+      if entry.settings.widgetVisibility.showFailureCount, dashboard.failureCount > 0 {
+        Text("\(dashboard.failureCount) unavailable")
           .font(.caption2)
-          .foregroundStyle(.secondary)
-        Spacer(minLength: 0)
+          .foregroundStyle(.orange)
       }
     }
     .padding(8)
-  }
-
-  private func sortedProviders(_ providers: [ProviderUsage]) -> [ProviderUsage] {
-    providers.sorted { lhs, rhs in
-      let lhsRemaining = providerRemainingPercent(for: lhs) ?? Int.max
-      let rhsRemaining = providerRemainingPercent(for: rhs) ?? Int.max
-
-      if lhsRemaining != rhsRemaining {
-        return lhsRemaining < rhsRemaining
-      }
-
-      return lhs.title < rhs.title
-    }
-  }
-
-  private func overviewSummary(for providers: [ProviderUsage]) -> String {
-    guard !providers.isEmpty else {
-      return "No accounts"
-    }
-
-    if let worstRemaining = providers.compactMap({ providerRemainingPercent(for: $0) }).min() {
-      return "\(providers.count) accounts, lowest \(worstRemaining)% left"
-    }
-
-    return "\(providers.count) accounts tracked"
   }
 }
 
@@ -424,6 +395,8 @@ private struct MediumCompactQuotaView: View {
   let entry: QuotaEntry
 
   var body: some View {
+    let dashboard = entry.dashboard
+
     VStack(alignment: .leading, spacing: 6) {
       HStack {
         Text("LLM Quota")
@@ -436,10 +409,10 @@ private struct MediumCompactQuotaView: View {
         }
       }
 
-      if let snapshot = entry.snapshot, !snapshot.providers.isEmpty {
+      if dashboard.state == .ready {
         let providerLimit = max(1, min(entry.settings.widgetVisibility.mediumProviderLimit, 12))
 
-        ForEach(sortedProviders(snapshot.providers).prefix(providerLimit)) { usage in
+        ForEach(dashboard.providers.prefix(providerLimit)) { usage in
           CompactProviderUsageRow(
             usage: usage,
             kindColors: entry.settings.widgetStyle.limitKindColors,
@@ -450,35 +423,49 @@ private struct MediumCompactQuotaView: View {
             showDualLimitPercentages: entry.settings.widgetVisibility.showDualLimitPercentagesInDashboard
           )
         }
-
-        if entry.settings.widgetVisibility.showFailureCount, !snapshot.failures.isEmpty {
-          Text("\(snapshot.failures.count) unavailable")
-            .font(.caption2)
-            .foregroundStyle(.orange)
-        }
       } else {
-        Spacer(minLength: 0)
-        Text("No accounts configured")
-          .font(.caption.weight(.semibold))
-        Text("Add accounts in LLimit")
+        DashboardEmptyStateView(state: dashboard.state)
+      }
+
+      if entry.settings.widgetVisibility.showFailureCount, dashboard.failureCount > 0 {
+        Text("\(dashboard.failureCount) unavailable")
           .font(.caption2)
-          .foregroundStyle(.secondary)
-        Spacer(minLength: 0)
+          .foregroundStyle(.orange)
       }
     }
     .padding(10)
   }
+}
 
-  private func sortedProviders(_ providers: [ProviderUsage]) -> [ProviderUsage] {
-    providers.sorted { lhs, rhs in
-      let lhsRemaining = providerRemainingPercent(for: lhs) ?? Int.max
-      let rhsRemaining = providerRemainingPercent(for: rhs) ?? Int.max
+private struct DashboardEmptyStateView: View {
+  let state: DashboardPresentation.State
 
-      if lhsRemaining != rhsRemaining {
-        return lhsRemaining < rhsRemaining
-      }
+  var body: some View {
+    if let message {
+      Spacer(minLength: 0)
+      Text(message.title)
+        .font(.caption.weight(.semibold))
+      Text(message.detail)
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+      Spacer(minLength: 0)
+    }
+  }
 
-      return lhs.title < rhs.title
+  private var message: (title: String, detail: String)? {
+    switch state {
+    case .noAccounts:
+      return ("No accounts configured", "Add accounts in LLimit")
+    case .noEnabledAccounts:
+      return ("No enabled accounts", "Enable accounts in LLimit")
+    case .awaitingData:
+      return ("Awaiting quota data", "Waiting for automatic refresh")
+    case .allFailed:
+      return ("All accounts unavailable", "Check accounts in LLimit")
+    case .storageUnavailable:
+      return ("Storage unavailable", "Open LLimit to check shared data")
+    case .ready:
+      return nil
     }
   }
 }
@@ -495,8 +482,8 @@ private struct CompactProviderUsageRow: View {
   var body: some View {
     let metric = dashboardPrimaryMetric(for: usage)
     let dualPercent = showDualLimitPercentages ? dualLimitPercentText(for: usage) : nil
-    let basePercent = metric?.remainingPercent ?? providerRemainingPercent(for: usage)
-    let unlimited = metric?.isUnlimited ?? usage.metrics.contains(where: \.isUnlimited)
+    let basePercent = dashboardRemainingPercent(for: usage)
+    let unlimited = metric?.isUnlimited == true
 
     HStack(spacing: 6) {
       Text(shortName + (!showPercentages && metric?.isPercentageEstimated == true ? " ≈" : ""))
@@ -517,7 +504,9 @@ private struct CompactProviderUsageRow: View {
         Spacer(minLength: 0)
       }
 
-      if showPercentages || (basePercent == nil && metric?.usageLine != nil) {
+      // Unknown, unlimited and amount-only states remain visible when numeric
+      // percentages are hidden.
+      if showPercentages || basePercent == nil {
         // Single mode labels the SAME metric the bar fills with
         // (dashboardPrimaryMetric), so the number can never contradict the bar.
         Text(dualPercent ?? percentText(for: metric))
@@ -609,58 +598,6 @@ private struct DashboardBarStop: Identifiable {
   var id: String {
     "\(metricIndex)-\(percent)"
   }
-}
-
-private func dashboardPrimaryMetric(for usage: ProviderUsage) -> UsageMetric? {
-  let boundedMetrics = usage.metrics
-    .filter { !$0.isUnlimited }
-    .compactMap { metric -> UsageMetric? in
-      guard metric.remainingPercent != nil else {
-        return nil
-      }
-      return metric
-    }
-
-  if let mostConstrained = boundedMetrics.min(by: { ($0.remainingPercent ?? Int.max) < ($1.remainingPercent ?? Int.max) }) {
-    return mostConstrained
-  }
-
-  if let unlimitedMetric = usage.metrics.first(where: \.isUnlimited) {
-    return unlimitedMetric
-  }
-
-  return usage.metrics.first(where: { $0.remainingPercent != nil }) ?? usage.metrics.first
-}
-
-private func providerRemainingPercent(for usage: ProviderUsage) -> Int? {
-  let boundedRemaining = usage.metrics
-    .filter { !$0.isUnlimited }
-    .compactMap(\.remainingPercent)
-
-  if let minimumRemaining = boundedRemaining.min() {
-    return max(0, min(100, minimumRemaining))
-  }
-
-  if usage.metrics.contains(where: \.isUnlimited) {
-    return 100
-  }
-
-  if let maxUsagePercent = usage.maxUsagePercent {
-    return max(0, min(100, 100 - maxUsagePercent))
-  }
-
-  return nil
-}
-
-// The dashboard bar shows the same provider-preferred metric pair as the tile
-// rings (defaultRingMetrics) so both surfaces show the same two limits in the
-// same identity colors.
-private func dashboardBarMetrics(for usage: ProviderUsage) -> [UsageMetric] {
-  Array(
-    defaultRingMetrics(for: usage)
-      .filter { !$0.isUnlimited && $0.remainingPercent != nil }
-      .prefix(2)
-  )
 }
 
 private func dashboardBarStops(for usage: ProviderUsage, kindColors: LimitKindColors, step: Int, primaryHexColor: String?) -> [DashboardBarStop] {
@@ -1229,4 +1166,3 @@ private extension QuotaEntry {
     )
   }
 }
-
