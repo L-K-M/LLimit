@@ -105,7 +105,10 @@ public struct QuotaCoordinator: Sendable {
       return lhs.accountID < rhs.accountID
     }
 
-    if Task.isCancelled, let previousSnapshot {
+    if Task.isCancelled, let previousSnapshot,
+       !ordered.contains(where: { $0.usage != nil }) {
+      // A cancelled refresh that produced no fresh usage keeps the last good
+      // snapshot; fresh results that did arrive are still worth surfacing.
       return previousSnapshot
     }
 
