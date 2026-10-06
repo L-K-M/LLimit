@@ -49,10 +49,18 @@ public struct AnthropicClient: QuotaProviderClient {
         )
       }
       if response.statusCode == 429 {
+        let retryAfter = parseRetryAfter(response.value(forHTTPHeaderField: "Retry-After"), now: now)
+        let guidance: String
+        if let retryAfter {
+          guidance = "Next attempt in about \(formatShortDuration(seconds: Int(retryAfter.rounded(.up))) ?? "a few minutes")."
+        } else {
+          guidance = "It will recover on the next refresh."
+        }
         throw ProviderClientError(
           kind: .rateLimit,
-          message: "Claude usage endpoint is rate limited. It will recover on the next refresh.",
-          statusCode: response.statusCode
+          message: "Claude usage endpoint is rate limited. \(guidance)",
+          statusCode: response.statusCode,
+          retryAfter: retryAfter
         )
       }
       let suffix = body.isEmpty ? "" : ": \(body)"

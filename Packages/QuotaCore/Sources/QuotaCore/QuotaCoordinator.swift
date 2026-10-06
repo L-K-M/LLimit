@@ -43,8 +43,19 @@ public struct QuotaCoordinator: Sendable {
       .filter { $0.isEnabled }
       .filter { clientsByProvider[$0.provider] != nil }
 
+    // Honor the server's Retry-After: polling a rate-limited account before
+    // its retry time only hardens the limit (Anthropic's endpoint is the
+    // documented worst case). The failure carries forward unchanged so the
+    // cooldown and its retryAt survive consecutive cycles, and callers
+    // backfill last-known usage via mergingStaleUsage, which keys off the
+    // failure's presence.
+    let cooldownFailures = (previousSnapshot?.failures ?? [])
+      .filter { $0.kind == .rateLimit && ($0.retryAt ?? .distantPast) > now }
+    let cooledAccountIDs = Set(cooldownFailures.map(\.accountID))
+    let fetchTargets = targets.filter { !cooledAccountIDs.contains($0.accountID) }
+
     let results = await withTaskGroup(of: RefreshResult.self) { group in
-      for configuration in targets {
+      for configuration in fetchTargets {
         guard let client = clientsByProvider[configuration.provider] else { continue }
 
         group.addTask {
@@ -65,7 +76,8 @@ public struct QuotaCoordinator: Sendable {
                 accountID: configuration.accountID,
                 provider: configuration.provider,
                 kind: error.kind,
-                message: error.message
+                message: error.message,
+                retryAt: error.retryAfter.map { now.addingTimeInterval($0) }
               )
             )
           } catch {
@@ -84,7 +96,14 @@ public struct QuotaCoordinator: Sendable {
         }
       }
 
-      var collected: [RefreshResult] = []
+      var collected = cooldownFailures.map { failure in
+        RefreshResult(
+          accountID: failure.accountID,
+          provider: failure.provider,
+          usage: nil,
+          failure: failure
+        )
+      }
       for await result in group {
         collected.append(result)
       }

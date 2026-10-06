@@ -69,6 +69,47 @@ final class AnthropicClientTests: XCTestCase {
     await assertThrows(kind: .rateLimit) { try await client.fetchUsage(configuration: self.config(), now: self.now) }
   }
 
+  func testRateLimitParsesRetryAfterSeconds() async {
+    let client = AnthropicClient(httpClient: MockHTTP(status: 429, body: "rate limited", headers: ["Retry-After": "120"]))
+    do {
+      _ = try await client.fetchUsage(configuration: config(), now: now)
+      XCTFail("Expected a rate-limit failure")
+    } catch let error as ProviderClientError {
+      XCTAssertEqual(error.kind, .rateLimit)
+      XCTAssertEqual(error.retryAfter, 120)
+    } catch {
+      XCTFail("Unexpected error: \(error)")
+    }
+  }
+
+  func testRateLimitParsesRetryAfterHTTPDate() async {
+    let retryAt = now.addingTimeInterval(300)
+    let formatted = RetryAfterDateFormatter.string(from: retryAt)
+    let client = AnthropicClient(httpClient: MockHTTP(status: 429, body: "rate limited", headers: ["Retry-After": formatted]))
+    do {
+      _ = try await client.fetchUsage(configuration: config(), now: now)
+      XCTFail("Expected a rate-limit failure")
+    } catch let error as ProviderClientError {
+      XCTAssertEqual(error.kind, .rateLimit)
+      XCTAssertEqual(error.retryAfter ?? 0, 300, accuracy: 5)
+    } catch {
+      XCTFail("Unexpected error: \(error)")
+    }
+  }
+
+  func testRateLimitWithoutHeaderHasNoRetryAfter() async {
+    let client = AnthropicClient(httpClient: MockHTTP(status: 429, body: "rate limited"))
+    do {
+      _ = try await client.fetchUsage(configuration: config(), now: now)
+      XCTFail("Expected a rate-limit failure")
+    } catch let error as ProviderClientError {
+      XCTAssertEqual(error.kind, .rateLimit)
+      XCTAssertNil(error.retryAfter)
+    } catch {
+      XCTFail("Unexpected error: \(error)")
+    }
+  }
+
   private func assertThrows(
     kind: QuotaErrorKind,
     _ block: @escaping () async throws -> ProviderUsage,
@@ -89,14 +130,30 @@ final class AnthropicClientTests: XCTestCase {
 private struct MockHTTP: HTTPClient {
   let status: Int
   let body: String
+  var headers: [String: String] = [:]
 
   func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
     let response = HTTPURLResponse(
       url: request.url!,
       statusCode: status,
       httpVersion: "HTTP/1.1",
-      headerFields: nil
+      headerFields: headers.isEmpty ? nil : headers
     )!
     return (body.data(using: .utf8)!, response)
+  }
+}
+
+/// Formats an IMF-fixdate the way servers send `Retry-After` (RFC 9110).
+enum RetryAfterDateFormatter {
+  private static let formatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = TimeZone(identifier: "GMT")
+    formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss 'GMT'"
+    return formatter
+  }()
+
+  static func string(from date: Date) -> String {
+    formatter.string(from: date)
   }
 }

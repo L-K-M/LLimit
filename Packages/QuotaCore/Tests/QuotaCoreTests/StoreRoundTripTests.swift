@@ -29,6 +29,42 @@ final class StoreRoundTripTests: XCTestCase {
     XCTAssertEqual(loaded?.providers.first?.metrics.first?.remainingPercent, 70)
   }
 
+  // retryAt is optional and newly added: snapshots written before it existed
+  // must still decode (nil), and round trips must preserve it.
+  func testSnapshotFailureRetryAtRoundTripAndLegacyDecode() throws {
+    let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let fileURL = tempDir.appendingPathComponent("snapshot.json")
+    let store = SnapshotStore(fileURL: fileURL)
+
+    let retryAt = Date(timeIntervalSince1970: 1_700_00_360)
+    let snapshot = QuotaSnapshot(
+      generatedAt: Date(timeIntervalSince1970: 1_700_000_000),
+      providers: [],
+      failures: [
+        ProviderFailure(provider: .anthropic, kind: .rateLimit, message: "limited", retryAt: retryAt)
+      ]
+    )
+
+    try store.save(snapshot)
+    let loaded = try store.load()
+    XCTAssertEqual(loaded?.failures.first?.retryAt, retryAt)
+
+    // Synthesize a pre-retryAt snapshot by encoding a real one and dropping
+    // the new key's line (sorted keys put it last, so the JSON stays valid).
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    encoder.dateEncodingStrategy = .iso8601
+    let encoded = try String(data: encoder.encode(snapshot), encoding: .utf8)!
+    let legacyJSON = encoded
+      .split(separator: "\n")
+      .filter { !$0.contains("\"retryAt\"") }
+      .joined(separator: "\n")
+    try legacyJSON.data(using: .utf8)!.write(to: fileURL)
+    let legacy = try store.load()
+    XCTAssertEqual(legacy?.failures.first?.message, "limited")
+    XCTAssertNil(legacy?.failures.first?.retryAt)
+  }
+
   func testSettingsStoreDefaultsWhenMissing() throws {
     let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     let fileURL = tempDir.appendingPathComponent("settings.json")

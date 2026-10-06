@@ -112,6 +112,38 @@ func nonEmptyString(_ value: Any?) -> String? {
   return trimmed.isEmpty ? nil : trimmed
 }
 
+/// Parses a `Retry-After` header value (RFC 9110): either delta-seconds or an
+/// IMF-fixdate. Returns the delay in seconds from `now`, or nil when the value
+/// is absent/unusable. A non-positive delay means "retry now", which is no
+/// cooldown at all, so it also yields nil.
+func parseRetryAfter(_ value: String?, now: Date) -> TimeInterval? {
+  guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+    return nil
+  }
+
+  if let seconds = Double(trimmed), seconds.isFinite, seconds > 0 {
+    return seconds
+  }
+
+  if let date = parseHTTPDate(trimmed) {
+    let delay = date.timeIntervalSince(now)
+    return delay > 0 ? delay : nil
+  }
+
+  return nil
+}
+
+private func parseHTTPDate(_ string: String) -> Date? {
+  // Per-call allocation: refreshes run provider fetches concurrently, and
+  // DateFormatter is not thread-safe. This is the rare 429 cold path, so the
+  // cost is irrelevant next to getting the answer right.
+  let formatter = DateFormatter()
+  formatter.locale = Locale(identifier: "en_US_POSIX")
+  formatter.timeZone = TimeZone(secondsFromGMT: 0)
+  formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss 'GMT'"
+  return formatter.date(from: string)
+}
+
 func formatIntLike(_ value: Double?) -> String? {
   guard let value, value.isFinite else { return nil }
   if let integer = roundedInt(value), Double(integer) == value {
