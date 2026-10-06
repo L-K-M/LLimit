@@ -195,6 +195,51 @@ final class QuotaHistoryStoreTests: XCTestCase {
     XCTAssertEqual(loaded.first?.generatedAt, now)
   }
 
+  func testTitleOrLabelChangeBreaksDedupe() throws {
+    let (store, dir) = makeStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let usage = ProviderUsage(
+      accountID: "a", provider: .anthropic, title: "Claude",
+      metrics: [UsageMetric(id: "five_hour", label: "5-hour", remainingPercent: 80)],
+      fetchedAt: now
+    )
+    try store.append(QuotaSnapshot(generatedAt: now, providers: [usage], failures: []))
+
+    // Same numbers, different display names: a rename must be recorded.
+    let renamed = ProviderUsage(
+      accountID: "a", provider: .anthropic, title: "Claude Work",
+      metrics: [UsageMetric(id: "five_hour", label: "Session limit", remainingPercent: 80)],
+      fetchedAt: now.addingTimeInterval(300)
+    )
+    try store.append(QuotaSnapshot(
+      generatedAt: now.addingTimeInterval(300), providers: [renamed], failures: []
+    ))
+
+    XCTAssertEqual(try store.load().count, 2,
+                   "Title/label changes are real history, not duplicates")
+  }
+
+  func testQuarantineKeepsOnlyNewestCorruptFiles() throws {
+    let (store, dir) = makeStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let historyURL = dir.appendingPathComponent("history.json")
+    let corruptData = Data("{\"bad[".utf8)
+
+    for _ in 0..<8 {
+      try corruptData.write(to: historyURL)
+      XCTAssertTrue(try store.load().isEmpty)
+    }
+
+    let leftovers = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+      .filter { $0.hasPrefix("history.corrupt-") }
+    XCTAssertEqual(leftovers.count, 5,
+                   "Quarantine must be bounded; oldest corrupt files are dropped")
+  }
+
   func testStoragePermissionsAre0600() throws {
     let (store, dir) = makeStore()
     defer { try? FileManager.default.removeItem(at: dir) }

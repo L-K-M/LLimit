@@ -34,7 +34,10 @@ public final class SnapshotStore: @unchecked Sendable {
       return nil
     }
     let data = try Data(contentsOf: fileURL)
-    let snapshot = try decoder.decode(QuotaSnapshot.self, from: data)
+    guard let snapshot = try? decoder.decode(QuotaSnapshot.self, from: data) else {
+      quarantineCorruptFile(fileURL)
+      return nil
+    }
     try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
     return snapshot
   }

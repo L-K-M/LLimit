@@ -27,6 +27,29 @@ final class StoreRoundTripTests: XCTestCase {
 
     XCTAssertEqual(loaded?.providers.first?.provider, .openAI)
     XCTAssertEqual(loaded?.providers.first?.metrics.first?.remainingPercent, 70)
+
+    let attrs = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+    XCTAssertEqual(attrs[.posixPermissions] as? Int, 0o600,
+                   "Snapshot file must be owner-only")
+  }
+
+  func testSnapshotStoreQuarantinesCorruptFile() throws {
+    let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+    let fileURL = tempDir.appendingPathComponent("snapshot.json")
+    let store = SnapshotStore(fileURL: fileURL)
+
+    try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+    try Data("{\"bad[".utf8).write(to: fileURL)
+
+    XCTAssertNil(try store.load(), "Corrupt snapshot must recover to nil")
+    XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+    let leftovers = try FileManager.default.contentsOfDirectory(atPath: tempDir.path)
+    XCTAssertTrue(leftovers.contains { $0.hasPrefix("snapshot.corrupt-") })
+
+    // The store is usable again afterwards.
+    try store.save(QuotaSnapshot(generatedAt: Date(), providers: [], failures: []))
+    XCTAssertNotNil(try store.load())
   }
 
   func testSettingsStoreDefaultsWhenMissing() throws {

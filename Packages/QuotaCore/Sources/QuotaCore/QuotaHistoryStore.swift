@@ -33,10 +33,7 @@ public final class QuotaHistoryStore: @unchecked Sendable {
       try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
       return decoded
     } catch {
-      let timestamp = Int(Date().timeIntervalSince1970)
-      let corruptURL = fileURL.deletingPathExtension()
-        .appendingPathExtension("corrupt-\(timestamp)-\(UUID().uuidString).json")
-      try? FileManager.default.moveItem(at: fileURL, to: corruptURL)
+      quarantineCorruptFile(fileURL)
       return []
     }
   }
@@ -143,5 +140,25 @@ public final class QuotaHistoryStore: @unchecked Sendable {
       )
     }
     try save(filtered)
+  }
+}
+
+/// Moves a corrupted file aside under a collision-proof name and keeps only
+/// the newest few quarantined siblings so repeated corruption cannot fill the
+/// container. All failures are ignored: cleanup must never break loading.
+func quarantineCorruptFile(_ fileURL: URL, keep: Int = 5) {
+  let timestamp = Int(Date().timeIntervalSince1970)
+  let base = fileURL.deletingPathExtension().lastPathComponent
+  let quarantined = fileURL.deletingPathExtension()
+    .appendingPathExtension("corrupt-\(timestamp)-\(UUID().uuidString).json")
+  try? FileManager.default.moveItem(at: fileURL, to: quarantined)
+
+  // Epoch-second names sort newest-first lexicographically.
+  let siblings = ((try? FileManager.default.contentsOfDirectory(
+    at: fileURL.deletingLastPathComponent(), includingPropertiesForKeys: nil)) ?? [])
+    .filter { $0.lastPathComponent.hasPrefix("\(base).corrupt-") }
+    .sorted { $0.lastPathComponent > $1.lastPathComponent }
+  for stale in siblings.dropFirst(keep) {
+    try? FileManager.default.removeItem(at: stale)
   }
 }
