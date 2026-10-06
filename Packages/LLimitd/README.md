@@ -120,9 +120,12 @@ in 4d 2h — OpenAI · Weekly limit (41% left)
 in 6d — Zhipu AI · MCP monthly (unlimited)
 ```
 
-`--days N` widens the window (1–90, default 7). `--json` prints the same radar
-for scripts, with `resetAt` (ISO 8601), a live `resetIn`, and the metric's
-context; a limit with no absolute reset (a rolling balance) is not scheduled.
+`--days N` widens the window (1–90, default 7); a value outside that range is
+rejected like any other invalid flag. `--json` prints the same radar for
+scripts, with `resetAt` (ISO 8601), a live `resetIn`, and the metric's context;
+a limit with no absolute reset (a rolling balance) is not scheduled. The JSON
+also carries `snapshot` (false when no snapshot exists yet, so "no data" is not
+confused with "nothing scheduled") plus `generatedAt` when there is one.
 
 ## Tray icon
 

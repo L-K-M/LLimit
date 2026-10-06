@@ -17,8 +17,11 @@ func runResets(_ args: [String]) {
       guard index + 1 < args.count, let value = Int(args[index + 1]) else {
         fail("--days needs a whole number of days")
       }
+      guard (1...90).contains(value) else {
+        fail("--days must be between 1 and 90")
+      }
       index += 1
-      days = min(max(value, 1), 90)
+      days = value
     default:
       fail("unknown option: \(args[index])")
     }
@@ -27,11 +30,10 @@ func runResets(_ args: [String]) {
 
   let daemon = makeDaemon()
   let now = Date()
-  let resets = daemon.snapshot?.upcomingResets(now: now, within: TimeInterval(days) * 86_400) ?? []
 
   if asJSON {
-    print(StatusRenderer.resetsJSON(resets, now: now, windowDays: days))
+    print(StatusRenderer.resetsJSON(snapshot: daemon.snapshot, now: now, windowDays: days))
   } else {
-    print(StatusRenderer.resetsHumanReadable(resets, now: now, windowDays: days))
+    print(StatusRenderer.resetsHumanReadable(snapshot: daemon.snapshot, now: now, windowDays: days))
   }
 }

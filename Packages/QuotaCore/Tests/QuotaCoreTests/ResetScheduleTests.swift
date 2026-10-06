@@ -98,6 +98,29 @@ final class ResetScheduleTests: XCTestCase {
     XCTAssertTrue(snapshot.upcomingResets(now: now, within: .infinity).isEmpty)
   }
 
+  func testEqualKeysAreFullyOrdered() {
+    let instant = now.addingTimeInterval(1800)
+    // Same title, same metric label, same instant: only the account id can
+    // order these, and `sorted` is not stable, so the comparator must be total.
+    let snapshot = QuotaSnapshot(
+      generatedAt: now,
+      providers: [
+        ProviderUsage(
+          accountID: "zzz", provider: .anthropic, title: "Claude",
+          metrics: [metric("weekly", "Weekly limit", resetAt: instant)], fetchedAt: now
+        ),
+        ProviderUsage(
+          accountID: "aaa", provider: .anthropic, title: "Claude",
+          metrics: [metric("weekly", "Weekly limit", resetAt: instant)], fetchedAt: now
+        )
+      ],
+      failures: []
+    )
+
+    let resets = snapshot.upcomingResets(now: now, within: 86_400)
+    XCTAssertEqual(resets.map(\.accountID), ["aaa", "zzz"])
+  }
+
   func testCarriesTheMetricContextForRendering() {
     let resetAt = now.addingTimeInterval(3 * 3600 + 12 * 60)
     let snapshot = QuotaSnapshot(

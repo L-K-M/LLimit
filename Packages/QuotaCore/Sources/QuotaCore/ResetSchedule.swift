@@ -71,7 +71,12 @@ public extension QuotaSnapshot {
     return entries.sorted { lhs, rhs in
       if lhs.resetAt != rhs.resetAt { return lhs.resetAt < rhs.resetAt }
       if lhs.accountName != rhs.accountName { return lhs.accountName < rhs.accountName }
-      return lhs.metricLabel < rhs.metricLabel
+      if lhs.metricLabel != rhs.metricLabel { return lhs.metricLabel < rhs.metricLabel }
+      // Fully order equal keys: `sorted` is not stable, so identical triples
+      // (two accounts sharing a title, or duplicate metric labels) would
+      // otherwise flip between invocations.
+      if lhs.accountID != rhs.accountID { return lhs.accountID < rhs.accountID }
+      return lhs.metricID < rhs.metricID
     }
   }
 }

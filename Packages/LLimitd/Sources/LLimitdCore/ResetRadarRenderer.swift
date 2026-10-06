@@ -6,12 +6,20 @@ import QuotaCore
 /// `StatusRenderer`, and kept in its own file so the bar contract stays put.
 public extension StatusRenderer {
   /// One line per upcoming reset, soonest first.
+  ///
+  /// A missing snapshot is called out rather than reported as an empty schedule:
+  /// "no data yet" and "nothing resets this week" must not read the same.
   static func resetsHumanReadable(
-    _ resets: [UpcomingReset],
+    snapshot: QuotaSnapshot?,
     now: Date = Date(),
     windowDays: Int = 7
   ) -> String {
+    guard let snapshot else {
+      return "No quota data yet. Run `llimit refresh` (or start `llimit daemon`)."
+    }
+
     let window = dayCount(windowDays)
+    let resets = snapshot.upcomingResets(now: now, within: windowInterval(windowDays))
     guard !resets.isEmpty else {
       return "No resets in the next \(window)."
     }
@@ -33,30 +41,42 @@ public extension StatusRenderer {
 
   /// The same radar as JSON for scripts and popups. This is its own contract, so
   /// the `llimit status --json` bar contract is untouched.
+  ///
+  /// `snapshot` (and `generatedAt` when present) let a consumer tell "no data
+  /// yet" from "nothing scheduled".
   static func resetsJSON(
-    _ resets: [UpcomingReset],
+    snapshot: QuotaSnapshot?,
     now: Date = Date(),
     windowDays: Int = 7
   ) -> String {
-    let object: [String: Any] = [
+    var object: [String: Any] = [
       "windowDays": max(1, windowDays),
-      "resets": resets.map { entry -> [String: Any] in
-        var row: [String: Any] = [
-          "accountID": entry.accountID,
-          "name": entry.accountName,
-          "provider": entry.provider.rawValue,
-          "metricID": entry.metricID,
-          "metricLabel": entry.metricLabel,
-          "resetAt": iso8601String(entry.resetAt),
-          "resetIn": entry.countdown(at: now),
-          "unlimited": entry.isUnlimited
-        ]
-        if let remaining = entry.remainingPercent {
-          row["remainingPercent"] = remaining
-        }
-        return row
-      }
+      "snapshot": snapshot != nil
     ]
+
+    if let snapshot {
+      object["generatedAt"] = iso8601String(snapshot.generatedAt)
+      object["resets"] = snapshot
+        .upcomingResets(now: now, within: windowInterval(windowDays))
+        .map { entry -> [String: Any] in
+          var row: [String: Any] = [
+            "accountID": entry.accountID,
+            "name": entry.accountName,
+            "provider": entry.provider.rawValue,
+            "metricID": entry.metricID,
+            "metricLabel": entry.metricLabel,
+            "resetAt": iso8601String(entry.resetAt),
+            "resetIn": entry.countdown(at: now),
+            "unlimited": entry.isUnlimited
+          ]
+          if let remaining = entry.remainingPercent {
+            row["remainingPercent"] = remaining
+          }
+          return row
+        }
+    } else {
+      object["resets"] = [Any]()
+    }
 
     guard
       let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
@@ -70,6 +90,10 @@ public extension StatusRenderer {
   private static func dayCount(_ days: Int) -> String {
     let value = max(1, days)
     return "\(value) day\(value == 1 ? "" : "s")"
+  }
+
+  private static func windowInterval(_ days: Int) -> TimeInterval {
+    TimeInterval(max(1, days)) * 86_400
   }
 
   private static func iso8601String(_ date: Date) -> String {
