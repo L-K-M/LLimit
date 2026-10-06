@@ -821,6 +821,12 @@ public enum QuotaWindowKind: String, Codable, CaseIterable, Sendable {
       return minutes >= 1_200 ? .daily : .session
     }
 
+    // Sub-minute windows (labelled by OpenAIClient's exact-unit formatter)
+    // are session-scoped like short-minute ones.
+    if leadingCount(beforeUnit: "second", in: tokens) != nil {
+      return .session
+    }
+
     if let days = leadingCount(beforeUnit: "day", in: tokens) {
       if days <= 1 {
         return .daily

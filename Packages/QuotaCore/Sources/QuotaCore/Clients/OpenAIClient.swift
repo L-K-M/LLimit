@@ -129,6 +129,9 @@ public struct OpenAIClient: QuotaProviderClient {
     if seconds >= 60, seconds % 60 == 0 {
       return "\(seconds / 60)-minute limit"
     }
+    if seconds > 0 {
+      return "\(seconds)-second limit"
+    }
 
     let hours = max(1, Int((Double(seconds) / 3_600.0).rounded()))
     return "\(hours)-hour limit"

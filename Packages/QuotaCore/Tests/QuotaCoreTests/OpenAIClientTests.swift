@@ -97,7 +97,8 @@ final class OpenAIClientTests: XCTestCase {
       (5_400, "90-minute limit"),
       (90_000, "25-hour limit"),
       (18_000, "5-hour limit"),
-      (604_800, "7-day limit")
+      (604_800, "7-day limit"),
+      (30, "30-second limit")
     ] {
       let body = #"{"plan_type":"plus","rate_limit":{"limit_reached":false,"primary_window":{"used_percent":20,"limit_window_seconds":\#(seconds),"reset_after_seconds":3600}}}"#
       let http = RecordingOpenAIHTTP(status: 200, body: body)
@@ -106,7 +107,19 @@ final class OpenAIClientTests: XCTestCase {
         CredentialField.openAIAccessToken: "manual-access"
       ]), now: now)
 
-      XCTAssertEqual(usage.metrics.first?.label, expectedLabel, "for \(seconds) seconds")
+      let label = try XCTUnwrap(usage.metrics.first?.label, "for \(seconds) seconds")
+      XCTAssertEqual(label, expectedLabel, "for \(seconds) seconds")
+      // The label is the classifier's input: pin the label-to-kind contract
+      // so a future wording change cannot silently rekey identity colors.
+      let metricID = try XCTUnwrap(usage.metrics.first?.id)
+      switch seconds {
+      case 604_800:
+        XCTAssertEqual(QuotaWindowKind.classify(metricID: metricID, label: label), .weekly)
+      case 90_000:
+        XCTAssertEqual(QuotaWindowKind.classify(metricID: metricID, label: label), .daily)
+      default:
+        XCTAssertEqual(QuotaWindowKind.classify(metricID: metricID, label: label), .session)
+      }
     }
   }
 

@@ -285,7 +285,8 @@ public struct CopilotClient: QuotaProviderClient {
           throw ProviderClientError(kind: .rateLimit, message: "Copilot token exchange rate limited: \(body)")
         }
         if (500...599).contains(response.statusCode) {
-          throw ProviderClientError(kind: .api, message: "Copilot token exchange error \(response.statusCode)")
+          let body = String(data: data, encoding: .utf8) ?? ""
+          throw ProviderClientError(kind: .api, message: "Copilot token exchange error \(response.statusCode): \(body)")
         }
         continue
       }

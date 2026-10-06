@@ -85,7 +85,8 @@ final class CopilotClientTests: XCTestCase {
 
   // Regression test: a GitHub server error used to fall through the whole
   // auth-mode fallback chain and surface as `.auth` ("Configure a PAT…"),
-  // telling the user their token was broken during an outage.
+  // telling the user their token was broken during an outage. The OAuth path
+  // hits `copilot_internal/user` first, so the 503 pins the quota-API hunk.
   func testInternalServerErrorFailsAsAPIError() async {
     let client = CopilotClient(httpClient: MockHTTP(status: 503, body: "upstream unavailable"))
     do {
@@ -93,7 +94,31 @@ final class CopilotClientTests: XCTestCase {
       XCTFail("Expected an API failure")
     } catch let error as ProviderClientError {
       XCTAssertEqual(error.kind, .api)
-      XCTAssertTrue(error.message.contains("503"))
+      XCTAssertTrue(error.message.hasPrefix("Copilot quota API error 503"), "got: \(error.message)")
+    } catch {
+      XCTFail("Unexpected error: \(error)")
+    }
+  }
+
+  // Covers the other 5xx hunk: both auth modes rejected (401 -> try next),
+  // then the session-token exchange fails with a server error. It must fail
+  // as `.api` with the response body instead of continuing the chain into a
+  // misleading `.auth`.
+  func testTokenExchangeServerErrorFailsAsAPIError() async {
+    let client = CopilotClient(httpClient: SequencedMockHTTP(responses: [
+      (401, #"{"message":"Bad credentials"}"#),
+      (401, #"{"message":"Bad credentials"}"#),
+      (503, "proxy unavailable")
+    ]))
+    do {
+      _ = try await client.fetchUsage(configuration: oauthConfig(), now: now)
+      XCTFail("Expected an API failure")
+    } catch let error as ProviderClientError {
+      XCTAssertEqual(error.kind, .api)
+      XCTAssertTrue(
+        error.message.hasPrefix("Copilot token exchange error 503") && error.message.contains("proxy unavailable"),
+        "got: \(error.message)"
+      )
     } catch {
       XCTFail("Unexpected error: \(error)")
     }
@@ -124,5 +149,26 @@ private struct MockHTTP: HTTPClient {
       headerFields: nil
     )!
     return (body.data(using: .utf8)!, response)
+  }
+}
+
+/// Serves the given (status, body) responses in request order, so a test can
+/// drive a specific position in Copilot's sequential fallback chain.
+private actor SequencedMockHTTP: HTTPClient {
+  private var responses: [(status: Int, body: String)]
+
+  init(responses: [(status: Int, body: String)]) {
+    self.responses = responses
+  }
+
+  func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+    let response = responses.isEmpty ? (status: 404, body: "") : responses.removeFirst()
+    let httpResponse = HTTPURLResponse(
+      url: request.url!,
+      statusCode: response.status,
+      httpVersion: "HTTP/1.1",
+      headerFields: nil
+    )!
+    return (response.body.data(using: .utf8)!, httpResponse)
   }
 }
