@@ -114,23 +114,24 @@ final class SettingsStorePermissionTests: XCTestCase {
     )
 
     let store = makeStore()
-    var observed: [Int: Int] = [:]
-    let sampler = Task {
+    let sampler = ModeSampler()
+    let samplerTask = Task {
       while !Task.isCancelled {
         let names = (try? FileManager.default.contentsOfDirectory(atPath: self.directory.path)) ?? []
         for name in names where name != "quota-settings.json" {
           // An entry that vanishes between listing and stat (already renamed
           // away) is unobservable, not evidence.
           if let mode = try? self.modeBits(self.directory.appendingPathComponent(name)) {
-            observed[mode, default: 0] += 1
+            await sampler.record(mode)
           }
         }
       }
     }
-    defer { sampler.cancel() }
+    defer { samplerTask.cancel() }
 
     try store.save(huge)
 
+    let observed = await sampler.observed
     guard !observed.isEmpty else {
       throw XCTSkip("No intermediate file was observed during the save window")
     }
@@ -140,5 +141,15 @@ final class SettingsStorePermissionTests: XCTestCase {
         "intermediate file observed \(count)x with mode 0o\(String(mode, radix: 8)) — group/world bits must never be set"
       )
     }
+  }
+}
+
+/// Counts observed intermediate-file modes from the polling task; an actor
+/// because the macOS build enforces strict concurrency on captured vars.
+private actor ModeSampler {
+  private(set) var observed: [Int: Int] = [:]
+
+  func record(_ mode: Int) {
+    observed[mode, default: 0] += 1
   }
 }
