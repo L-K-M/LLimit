@@ -429,6 +429,12 @@ public struct QuotaSnapshot: Codable, Hashable, Sendable {
   /// True when the two snapshots differ only in volatile fields — timestamps
   /// and the derived `resetIn` countdown text — so recording the newer one
   /// adds no information to the trend.
+  ///
+  /// Assumes every remaining field (e.g. `resetAt`, `failures`) is stable
+  /// across refreshes for unchanged quota. If a provider ever recomputes
+  /// `resetAt` as "now + interval", or `ProviderFailure` gains a per-refresh
+  /// timestamp, normalize it here too — otherwise snapshots taken during a
+  /// rolling reset or an outage will never dedupe.
   public func isContentEquivalent(to other: QuotaSnapshot) -> Bool {
     func normalized(_ snapshot: QuotaSnapshot) -> QuotaSnapshot {
       var copy = snapshot

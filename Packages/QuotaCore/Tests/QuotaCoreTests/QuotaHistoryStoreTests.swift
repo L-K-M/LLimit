@@ -80,7 +80,8 @@ final class QuotaHistoryStoreTests: XCTestCase {
 
   private let fixedReset = Date(timeIntervalSince1970: 1_800_000_000)
 
-  private func snapshot(at now: Date, percent: Int, fetchedAt: Date? = nil, resetIn: String? = nil) -> QuotaSnapshot {
+  private func snapshot(at now: Date, percent: Int, fetchedAt: Date? = nil, resetIn: String? = nil,
+                        resetAt: Date? = nil) -> QuotaSnapshot {
     QuotaSnapshot(
       generatedAt: now,
       providers: [
@@ -90,7 +91,7 @@ final class QuotaHistoryStoreTests: XCTestCase {
           title: "Claude",
           metrics: [
             UsageMetric(id: "session", label: "Session", remainingPercent: percent,
-                        resetAt: fixedReset, resetIn: resetIn)
+                        resetAt: resetAt ?? fixedReset, resetIn: resetIn)
           ],
           maxUsagePercent: 100 - percent,
           fetchedAt: fetchedAt ?? now
@@ -137,5 +138,19 @@ final class QuotaHistoryStoreTests: XCTestCase {
     let loaded = try store.load()
     XCTAssertEqual(loaded.count, 1)
     XCTAssertEqual(loaded.last?.generatedAt, now.addingTimeInterval(7_200))
+  }
+
+  func testAppendRecordsAShiftedResetDeadline() throws {
+    let (store, dir) = makeStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+
+    try store.append(snapshot(at: now, percent: 70))
+    // A moved resetAt is real content, not volatile — a rolling
+    // "now + interval" provider would otherwise never dedupe.
+    try store.append(snapshot(at: now.addingTimeInterval(900), percent: 70,
+                              fetchedAt: now.addingTimeInterval(900),
+                              resetAt: fixedReset.addingTimeInterval(3_600)))
+    XCTAssertEqual(try store.load().count, 2)
   }
 }
