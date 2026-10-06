@@ -59,6 +59,50 @@ public enum StatusRenderer {
     return lines.joined(separator: "\n")
   }
 
+  /// Formatted chronological list of upcoming quota resets across accounts.
+  public static func resetsHumanReadable(snapshot: QuotaSnapshot?, now: Date = Date(), maxCount: Int = 10) -> String {
+    let items = ResetRadar.upcomingResets(from: snapshot, now: now, maxCount: maxCount)
+    if items.isEmpty {
+      return "No upcoming resets found in current quota snapshot."
+    }
+
+    var lines: [String] = ["Upcoming Resets:"]
+    for item in items {
+      let remainingText = item.remainingPercent.map { "\($0)% left" } ?? item.usedDisplay ?? ""
+      let remainingSuffix = remainingText.isEmpty ? "" : " (\(remainingText))"
+      lines.append("  \(item.accountName) — \(item.metricLabel): resets in \(item.countdown)\(remainingSuffix)")
+    }
+    return lines.joined(separator: "\n")
+  }
+
+  /// JSON output for upcoming resets.
+  public static func resetsJSON(snapshot: QuotaSnapshot?, now: Date = Date(), maxCount: Int = 10) -> String {
+    let items = ResetRadar.upcomingResets(from: snapshot, now: now, maxCount: maxCount)
+    let array = resetsArray(items)
+    guard let data = try? JSONSerialization.data(withJSONObject: array, options: [.prettyPrinted, .sortedKeys]),
+          let string = String(data: data, encoding: .utf8) else {
+      return "[]"
+    }
+    return string
+  }
+
+  static func resetsArray(_ items: [ResetRadarItem]) -> [[String: Any]] {
+    items.map { item in
+      var dict: [String: Any] = [
+        "account": item.accountName,
+        "provider": item.provider.rawValue,
+        "metric": item.metricLabel,
+        "window": item.windowKind.displayName,
+        "countdown": item.countdown,
+        "secondsUntilReset": Int(item.secondsUntilReset.rounded())
+      ]
+      if let pct = item.remainingPercent {
+        dict["remainingPercent"] = pct
+      }
+      return dict
+    }
+  }
+
   /// Waybar `custom`-module JSON. `percentage` is the lowest remaining percent across
   /// accounts (the number a bar would color on); `class` is `ok`/`warning`/`critical`
   /// from that same minimum, with provider warnings elevating `ok` to `warning`;
@@ -181,16 +225,23 @@ public enum StatusRenderer {
     }
 
     var tooltipLines = ["Updated \(relativeAge(snapshot.generatedAt, now: now))"]
-    tooltipLines.append(humanReadable(snapshot: snapshot, now: now)
+    let details = humanReadable(snapshot: snapshot, now: now)
       .split(separator: "\n")
       .dropFirst()
-      .joined(separator: "\n"))
+      .joined(separator: "\n")
+    if !details.isEmpty {
+      tooltipLines.append(details)
+    }
+
+    let upcomingResets = ResetRadar.upcomingResets(from: snapshot, now: now)
+    let resetsList = resetsArray(upcomingResets)
 
     var object: [String: Any] = [
       "text": text,
       "tooltip": tooltipLines.joined(separator: "\n"),
       "class": statusClass.rawValue,
-      "accounts": accounts
+      "accounts": accounts,
+      "resets": resetsList
     ]
     if let minimum = remainingPercents.min() {
       object["percentage"] = minimum

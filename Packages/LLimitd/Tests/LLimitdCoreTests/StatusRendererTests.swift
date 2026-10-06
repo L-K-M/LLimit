@@ -333,4 +333,45 @@ final class StatusRendererTests: XCTestCase {
   func testHumanReadableWithoutSnapshotExplainsNextStep() {
     XCTAssertTrue(StatusRenderer.humanReadable(snapshot: nil, now: now).contains("llimit refresh"))
   }
+
+  func testResetsHumanReadableAndJSON() throws {
+    let usage = ProviderUsage(
+      accountID: "claude-test",
+      provider: .anthropic,
+      title: "Claude Test",
+      metrics: [
+        UsageMetric(
+          id: "five_hour",
+          label: "5-hour limit",
+          remainingPercent: 35,
+          resetAt: now.addingTimeInterval(5_400) // 1h 30m
+        )
+      ],
+      fetchedAt: now
+    )
+    let snapshot = QuotaSnapshot(generatedAt: now, providers: [usage], failures: [])
+
+    let text = StatusRenderer.resetsHumanReadable(snapshot: snapshot, now: now)
+    XCTAssertTrue(text.contains("Upcoming Resets:"))
+    XCTAssertTrue(text.contains("Claude Test — 5-hour limit: resets in 1h 30m (35% left)"))
+
+    let json = StatusRenderer.resetsJSON(snapshot: snapshot, now: now)
+    let data = try XCTUnwrap(json.data(using: .utf8))
+    let array = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+    XCTAssertEqual(array.count, 1)
+    XCTAssertEqual(array[0]["account"] as? String, "Claude Test")
+    XCTAssertEqual(array[0]["metric"] as? String, "5-hour limit")
+    XCTAssertEqual(array[0]["countdown"] as? String, "1h 30m")
+    XCTAssertEqual(array[0]["remainingPercent"] as? Int, 35)
+
+    let emptyText = StatusRenderer.resetsHumanReadable(snapshot: nil, now: now)
+    XCTAssertTrue(emptyText.contains("No upcoming resets"))
+
+    let waybar = try decodedWaybar(snapshot)
+    let waybarResets = try XCTUnwrap(waybar["resets"] as? [[String: Any]])
+    XCTAssertEqual(waybarResets.count, 1)
+    XCTAssertEqual(waybarResets[0]["account"] as? String, "Claude Test")
+    XCTAssertEqual(waybarResets[0]["metric"] as? String, "5-hour limit")
+    XCTAssertEqual(waybarResets[0]["countdown"] as? String, "1h 30m")
+  }
 }

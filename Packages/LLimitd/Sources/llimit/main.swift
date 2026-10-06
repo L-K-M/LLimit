@@ -33,6 +33,7 @@ func printUsage() {
       llimit accounts remove <account-id>
       llimit refresh
       llimit status [--json]
+      llimit resets [--json]
       llimit daemon
       llimit paths
 
@@ -338,6 +339,15 @@ func runStatus(_ args: [String]) {
   }
 }
 
+func runResets(_ args: [String]) {
+  let daemon = makeDaemon()
+  if args.contains("--json") {
+    print(StatusRenderer.resetsJSON(snapshot: daemon.snapshot))
+  } else {
+    print(StatusRenderer.resetsHumanReadable(snapshot: daemon.snapshot))
+  }
+}
+
 /// Retained so the signal sources stay alive for the process lifetime.
 var shutdownSignalSources: [DispatchSourceSignal] = []
 
@@ -406,6 +416,8 @@ case "refresh":
   await runRefresh()
 case "status":
   runStatus(Array(arguments.dropFirst()))
+case "resets":
+  runResets(Array(arguments.dropFirst()))
 case "daemon":
   await runDaemon()
 case "paths":
