@@ -128,6 +128,184 @@ final class DevinClientTests: XCTestCase {
     XCTAssertEqual(usage.warning, "Ask your account admin to raise it")
   }
 
+  // The percents are implicit-presence proto3 int32s, so protobuf-JSON omits
+  // them at 0: an exhausted window arrives as its reset epoch alone.
+  func testOmittedPercentWithResetIsExhaustedWindow() async throws {
+    let json = #"""
+    {"userStatus": {"planStatus": {
+      "planInfo": {"planName": "Pro", "billingStrategy": "BILLING_STRATEGY_QUOTA"},
+      "availablePromptCredits": -1,
+      "weeklyQuotaRemainingPercent": 87,
+      "dailyQuotaResetAtUnix": "1789372800",
+      "weeklyQuotaResetAtUnix": "1789891200"
+    }}}
+    """#
+    let client = DevinQuotaClient(httpClient: MockHTTP(status: 200, body: json))
+
+    let usage = try await client.fetchUsage(configuration: config(), now: now)
+
+    XCTAssertEqual(usage.metrics.map(\.id), ["quota-daily", "quota-weekly"])
+    let daily = try XCTUnwrap(usage.metrics.first { $0.id == "quota-daily" })
+    XCTAssertEqual(daily.remainingPercent, 0)
+    XCTAssertEqual(daily.resetAt, Date(timeIntervalSince1970: 1_789_372_800))
+    XCTAssertEqual(usage.metrics.first { $0.id == "quota-weekly" }?.remainingPercent, 87)
+    XCTAssertEqual(usage.maxUsagePercent, 100)
+    XCTAssertEqual(usage.warning, "Quota exhausted")
+  }
+
+  func testBothWindowsExhaustedDoNotFallBackToPlaceholder() async throws {
+    let json = #"""
+    {"userStatus": {"planStatus": {
+      "planInfo": {"devinInfo": {"requestUsageAction": {"label": "Ask your account admin to raise it"}}},
+      "dailyQuotaResetAtUnix": 1789372800,
+      "weeklyQuotaResetAtUnix": "1789891200"
+    }}}
+    """#
+    let client = DevinQuotaClient(httpClient: MockHTTP(status: 200, body: json))
+
+    let usage = try await client.fetchUsage(configuration: config(), now: now)
+
+    XCTAssertEqual(usage.metrics.map(\.id), ["quota-daily", "quota-weekly"])
+    XCTAssertEqual(usage.metrics.map(\.remainingPercent), [0, 0])
+    XCTAssertEqual(usage.metrics.last?.resetAt, Date(timeIntervalSince1970: 1_789_891_200))
+    XCTAssertEqual(usage.maxUsagePercent, 100)
+    XCTAssertEqual(usage.warning, "Ask your account admin to raise it")
+  }
+
+  // A plan without a daily window sends neither the percent nor the reset;
+  // a zero reset is the same proto default and must not invent a window.
+  func testOmittedPercentWithoutResetIsNoWindow() async throws {
+    let json = #"""
+    {"userStatus": {"planStatus": {
+      "weeklyQuotaRemainingPercent": 60,
+      "weeklyQuotaResetAtUnix": "1789891200",
+      "dailyQuotaResetAtUnix": "0"
+    }}}
+    """#
+    let client = DevinQuotaClient(httpClient: MockHTTP(status: 200, body: json))
+
+    let usage = try await client.fetchUsage(configuration: config(), now: now)
+
+    XCTAssertEqual(usage.metrics.map(\.id), ["quota-weekly"])
+    XCTAssertEqual(usage.maxUsagePercent, 40)
+    XCTAssertNil(usage.warning)
+  }
+
+  // Protobuf-JSON never writes null for a scalar, so a null percent is a
+  // malformed reading rather than the implicit zero.
+  func testNullPercentIsNotTreatedAsExhausted() async throws {
+    let json = #"""
+    {"userStatus": {"planStatus": {
+      "dailyQuotaRemainingPercent": null,
+      "dailyQuotaResetAtUnix": "1789372800",
+      "weeklyQuotaRemainingPercent": 87
+    }}}
+    """#
+    let client = DevinQuotaClient(httpClient: MockHTTP(status: 200, body: json))
+
+    let usage = try await client.fetchUsage(configuration: config(), now: now)
+
+    XCTAssertEqual(usage.metrics.map(\.id), ["quota-weekly"])
+  }
+
+  func testHideQuotaFlagsSuppressMatchingWindows() async throws {
+    let json = #"""
+    {"userStatus": {"planStatus": {
+      "planInfo": {"hideDailyQuota": true, "hideWeeklyQuota": false},
+      "dailyQuotaRemainingPercent": 42,
+      "dailyQuotaResetAtUnix": "1789372800",
+      "weeklyQuotaResetAtUnix": "1789891200"
+    }}}
+    """#
+    let client = DevinQuotaClient(httpClient: MockHTTP(status: 200, body: json))
+
+    let usage = try await client.fetchUsage(configuration: config(), now: now)
+
+    XCTAssertEqual(usage.metrics.map(\.id), ["quota-weekly"])
+    XCTAssertEqual(usage.metrics.first?.remainingPercent, 0)
+  }
+
+  func testHiddenExhaustedWindowDoesNotWarn() async throws {
+    let json = #"""
+    {"userStatus": {"planStatus": {
+      "planInfo": {"hideWeeklyQuota": true},
+      "dailyQuotaRemainingPercent": 70,
+      "dailyQuotaResetAtUnix": "1789372800",
+      "weeklyQuotaResetAtUnix": "1789891200"
+    }}}
+    """#
+    let client = DevinQuotaClient(httpClient: MockHTTP(status: 200, body: json))
+
+    let usage = try await client.fetchUsage(configuration: config(), now: now)
+
+    XCTAssertEqual(usage.metrics.map(\.id), ["quota-daily"])
+    XCTAssertEqual(usage.maxUsagePercent, 30)
+    XCTAssertNil(usage.warning)
+  }
+
+  // A spent credit balance is the omitted int32 zero.
+  func testCreditPlanWithoutCreditsKeyShowsZero() async throws {
+    let json = #"""
+    {"userStatus": {"planStatus": {
+      "planInfo": {"planName": "Core", "billingStrategy": "BILLING_STRATEGY_CREDITS"},
+      "planEnd": "2026-10-13T19:56:36Z"
+    }}}
+    """#
+    let client = DevinQuotaClient(httpClient: MockHTTP(status: 200, body: json))
+
+    let usage = try await client.fetchUsage(configuration: config(), now: now)
+
+    XCTAssertEqual(usage.metrics.map(\.id), ["credits"])
+    XCTAssertEqual(usage.metrics.first?.usedDisplay, "0")
+    XCTAssertNotNil(usage.metrics.first?.resetAt)
+  }
+
+  func testNonCreditPlanWithoutCreditsKeyShowsNoCredits() async throws {
+    let json = #"""
+    {"userStatus": {"planStatus": {
+      "planInfo": {"billingStrategy": "BILLING_STRATEGY_QUOTA"},
+      "dailyQuotaRemainingPercent": 42
+    }}}
+    """#
+    let client = DevinQuotaClient(httpClient: MockHTTP(status: 200, body: json))
+
+    let usage = try await client.fetchUsage(configuration: config(), now: now)
+
+    XCTAssertEqual(usage.metrics.map(\.id), ["quota-daily"])
+  }
+
+  // int64 micro-dollars, sent as a JSON string by protobuf-JSON.
+  func testOverageBalanceMicrosShowsDollars() async throws {
+    let json = #"""
+    {"userStatus": {"planStatus": {
+      "dailyQuotaRemainingPercent": 42,
+      "overageBalanceMicros": "4250000",
+      "usageBalance": 15
+    }}}
+    """#
+    let client = DevinQuotaClient(httpClient: MockHTTP(status: 200, body: json))
+
+    let usage = try await client.fetchUsage(configuration: config(), now: now)
+
+    XCTAssertEqual(usage.metrics.map(\.id), ["quota-daily", "balance"])
+    let balance = try XCTUnwrap(usage.metrics.first { $0.id == "balance" })
+    XCTAssertEqual(balance.label, "Extra usage balance")
+    XCTAssertEqual(balance.usedDisplay, "$4.25")
+    XCTAssertNil(balance.remainingPercent)
+    XCTAssertEqual(usage.maxUsagePercent, 58)
+  }
+
+  func testNegativeOverageBalanceKeepsSign() async throws {
+    let json = #"""
+    {"userStatus": {"planStatus": {"overageBalanceMicros": -1500000}}}
+    """#
+    let client = DevinQuotaClient(httpClient: MockHTTP(status: 200, body: json))
+
+    let usage = try await client.fetchUsage(configuration: config(), now: now)
+
+    XCTAssertEqual(usage.metrics.first { $0.id == "balance" }?.usedDisplay, "-$1.50")
+  }
+
   func testEmptyPayloadYieldsPlaceholderMetric() async throws {
     let client = DevinQuotaClient(httpClient: MockHTTP(status: 200, body: "{}"))
 
