@@ -144,4 +144,29 @@ final class ResetScheduleTests: XCTestCase {
     XCTAssertEqual(entry?.countdown(at: now), "3h 12m")
     XCTAssertEqual(entry?.countdown(at: resetAt.addingTimeInterval(1)), "reset")
   }
+
+  func testUnlimitedMetricsWithAResetDateAreStillScheduled() {
+    // An unlimited metric has no remainingPercent to rank on, but a real reset
+    // the renderer displays with its "(unlimited)" suffix. Pin it so a future
+    // filter on remainingPercent == nil cannot drop it silently.
+    let snapshot = QuotaSnapshot(
+      generatedAt: now,
+      providers: [
+        ProviderUsage(
+          accountID: "a", provider: .anthropic, title: "Claude",
+          metrics: [metric(
+            "weekly", "Weekly limit",
+            resetAt: now.addingTimeInterval(3600), remaining: nil, unlimited: true
+          )],
+          fetchedAt: now
+        )
+      ],
+      failures: []
+    )
+
+    let entry = snapshot.upcomingResets(now: now, within: 86_400).first
+    XCTAssertEqual(entry?.metricID, "weekly")
+    XCTAssertEqual(entry?.isUnlimited, true)
+    XCTAssertNil(entry?.remainingPercent)
+  }
 }
