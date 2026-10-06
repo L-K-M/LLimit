@@ -993,6 +993,9 @@ private struct OverviewCard: View {
   let accounts: [ProviderAccount]
   let onSelect: (String) -> Void
 
+  // Six gauges per row at the default 420pt panel width.
+  private static let gaugeColumns = [GridItem(.adaptive(minimum: 54), spacing: 6, alignment: .top)]
+
   private var lowestRemaining: Int? {
     providers.compactMap(MenuBarQuotaStyling.remainingPercent).min()
   }
@@ -1012,8 +1015,9 @@ private struct OverviewCard: View {
       }
 
       if !providers.isEmpty {
-        HStack(alignment: .top, spacing: 6) {
-          ForEach(Array(providers.prefix(5))) { provider in
+        // Every account gets a gauge. Rows wrap, so a wider panel fits more per row.
+        LazyVGrid(columns: Self.gaugeColumns, spacing: 10) {
+          ForEach(providers) { provider in
             Button {
               onSelect(provider.accountID)
             } label: {
@@ -1054,23 +1058,6 @@ private struct OverviewCard: View {
             .help("Jump to \(provider.title)")
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(accountGaugeAccessibilityLabel(for: provider))
-          }
-
-          if providers.count > 5 {
-            VStack(spacing: 5) {
-              ZStack {
-                Circle()
-                  .stroke(Color.white.opacity(0.08), lineWidth: 4.5)
-                Text("+\(providers.count - 5)")
-                  .font(.system(size: 11, weight: .bold, design: .rounded))
-                  .foregroundStyle(DashboardPalette.secondaryText)
-              }
-              .frame(width: 40, height: 40)
-              Text("more")
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(DashboardPalette.tertiaryText)
-            }
-            .frame(maxWidth: .infinity)
           }
         }
 
