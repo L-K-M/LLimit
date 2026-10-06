@@ -108,9 +108,12 @@ public extension StatusRenderer {
     TimeInterval(max(1, days)) * 86_400
   }
 
-  /// Value-type formatting, matching `StatusRenderer.iso8601String`: no formatter
-  /// object to allocate and no shared mutable state.
+  /// Matches `StatusRenderer.iso8601String`: a fresh formatter per call, because
+  /// a shared one is a process-global mutable object (not thread-safe in
+  /// swift-corelibs-foundation) and `ISO8601FormatStyle` does not exist there.
   private static func iso8601String(_ date: Date) -> String {
-    date.formatted(ISO8601FormatStyle())
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime]
+    return formatter.string(from: date)
   }
 }
