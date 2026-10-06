@@ -63,7 +63,9 @@ public enum StatusRenderer {
   public static func resetsHumanReadable(snapshot: QuotaSnapshot?, now: Date = Date(), maxCount: Int = 10) -> String {
     let items = ResetRadar.upcomingResets(from: snapshot, now: now, maxCount: maxCount)
     if items.isEmpty {
-      return "No upcoming resets found in current quota snapshot."
+      return snapshot == nil
+        ? "No quota snapshot available. Run `llimit refresh` first."
+        : "No upcoming resets found in current quota snapshot."
     }
 
     var lines: [String] = ["Upcoming Resets:"]
@@ -90,14 +92,22 @@ public enum StatusRenderer {
     items.map { item in
       var dict: [String: Any] = [
         "account": item.accountName,
+        "accountID": item.accountID,
         "provider": item.provider.rawValue,
         "metric": item.metricLabel,
+        "metricID": item.metricID,
         "window": item.windowKind.displayName,
         "countdown": item.countdown,
-        "secondsUntilReset": Int(item.secondsUntilReset.rounded())
+        "secondsUntilReset": Int(item.secondsUntilReset.rounded()),
+        "resetAt": ISO8601DateFormatter.string(
+          from: item.resetAt, timeZone: TimeZone(identifier: "UTC")!,
+          formatOptions: [.withInternetDateTime])
       ]
       if let pct = item.remainingPercent {
         dict["remainingPercent"] = pct
+      }
+      if let amount = item.remainingAmount {
+        dict["remainingAmount"] = amount
       }
       return dict
     }

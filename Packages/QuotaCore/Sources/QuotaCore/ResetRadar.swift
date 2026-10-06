@@ -60,7 +60,9 @@ public enum ResetRadar {
       for (index, metric) in usage.metrics.enumerated() {
         guard let resetAt = metric.resetAt, resetAt > now else { continue }
         let interval = resetAt.timeIntervalSince(now)
-        let kind = index < slots.count ? slots[index].kind : QuotaWindowKind.classify(metricID: metric.id, label: metric.label)
+        let kind = slots.count == usage.metrics.count
+          ? slots[index].kind
+          : QuotaWindowKind.classify(metricID: metric.id, label: metric.label)
         let item = ResetRadarItem(
           accountID: usage.accountID,
           accountName: usage.title,

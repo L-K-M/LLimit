@@ -360,12 +360,23 @@ final class StatusRendererTests: XCTestCase {
     let array = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
     XCTAssertEqual(array.count, 1)
     XCTAssertEqual(array[0]["account"] as? String, "Claude Test")
+    XCTAssertEqual(array[0]["accountID"] as? String, "claude-test")
     XCTAssertEqual(array[0]["metric"] as? String, "5-hour limit")
+    XCTAssertEqual(array[0]["metricID"] as? String, "five_hour")
     XCTAssertEqual(array[0]["countdown"] as? String, "1h 30m")
     XCTAssertEqual(array[0]["remainingPercent"] as? Int, 35)
+    XCTAssertNotNil(array[0]["resetAt"] as? String)
+    XCTAssertEqual(array[0]["secondsUntilReset"] as? Int, 5_400)
 
+    // nil snapshot tells the user to refresh; a real snapshot without resets
+    // says so differently.
     let emptyText = StatusRenderer.resetsHumanReadable(snapshot: nil, now: now)
-    XCTAssertTrue(emptyText.contains("No upcoming resets"))
+    XCTAssertTrue(emptyText.contains("No quota snapshot available"))
+    XCTAssertTrue(emptyText.contains("llimit refresh"))
+
+    let noResets = QuotaSnapshot(generatedAt: now, providers: [], failures: [])
+    let noResetsText = StatusRenderer.resetsHumanReadable(snapshot: noResets, now: now)
+    XCTAssertTrue(noResetsText.contains("No upcoming resets"))
 
     let waybar = try decodedWaybar(snapshot)
     let waybarResets = try XCTUnwrap(waybar["resets"] as? [[String: Any]])
