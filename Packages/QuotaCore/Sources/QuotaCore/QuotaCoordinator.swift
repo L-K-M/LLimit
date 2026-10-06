@@ -105,6 +105,10 @@ public struct QuotaCoordinator: Sendable {
       return lhs.accountID < rhs.accountID
     }
 
+    if Task.isCancelled, let previousSnapshot {
+      return previousSnapshot
+    }
+
     let previousByID = Dictionary(
       (previousSnapshot?.providers ?? []).filter { $0.provider == .venice }.map { ($0.accountID, $0) },
       uniquingKeysWith: { $0.fetchedAt >= $1.fetchedAt ? $0 : $1 }

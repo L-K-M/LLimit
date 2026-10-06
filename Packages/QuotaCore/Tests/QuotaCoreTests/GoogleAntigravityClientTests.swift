@@ -54,10 +54,9 @@ final class GoogleAntigravityClientTests: XCTestCase {
     XCTAssertEqual(usage.title, "Google Test")
     XCTAssertEqual(usage.subtitle, "user@example.com")
     XCTAssertEqual(usage.metrics.count, 2)
-    XCTAssertEqual(usage.metrics[0].id, "gemini-3-pro-high")
-    XCTAssertEqual(usage.metrics[0].remainingPercent, 85)
-    XCTAssertEqual(usage.metrics[1].id, "gemini-3-flash")
-    XCTAssertEqual(usage.metrics[1].remainingPercent, 50)
+    let metricsByID = Dictionary(uniqueKeysWithValues: usage.metrics.map { ($0.id, $0) })
+    XCTAssertEqual(metricsByID["gemini-3-pro-high"]?.remainingPercent, 85)
+    XCTAssertEqual(metricsByID["gemini-3-flash"]?.remainingPercent, 50)
     XCTAssertEqual(usage.maxUsagePercent, 50)
     XCTAssertNil(usage.warning)
   }
@@ -85,6 +84,32 @@ final class GoogleAntigravityClientTests: XCTestCase {
     XCTAssertNil(usage.metrics[0].remainingPercent, "Missing remainingFraction must NOT default to 0")
     XCTAssertEqual(usage.maxUsagePercent, 0)
     XCTAssertNil(usage.warning, "Missing fraction must not trigger a high usage warning")
+  }
+
+  func testUnparseableFractionYieldsNilRemainingPercent() async throws {
+    let tokenJSON = #"{"access_token": "token-abc", "expires_in": 3600}"#
+    let modelsJSON = #"""
+    {
+      "models": {
+        "gemini-3-pro-high": {
+          "quotaInfo": {
+            "remainingFraction": "n/a",
+            "resetTime": "2023-11-15T00:00:00Z"
+          }
+        }
+      }
+    }
+    """#
+
+    let http = MockGoogleHTTP(tokenResponse: tokenJSON, modelsResponse: modelsJSON)
+    let client = GoogleAntigravityClient(httpClient: http)
+    let usage = try await client.fetchUsage(configuration: configuration(), now: now)
+
+    XCTAssertEqual(usage.metrics.count, 1)
+    XCTAssertEqual(usage.metrics[0].id, "gemini-3-pro-high")
+    XCTAssertNil(usage.metrics[0].remainingPercent, "Non-numeric fraction must NOT yield a percentage")
+    XCTAssertEqual(usage.maxUsagePercent, 0)
+    XCTAssertNil(usage.warning)
   }
 
   func testMissingCredentialsThrowsNotConfigured() async {

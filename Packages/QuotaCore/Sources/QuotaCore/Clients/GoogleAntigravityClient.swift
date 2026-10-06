@@ -56,17 +56,11 @@ public struct GoogleAntigravityClient: QuotaProviderClient {
       guard let modelInfo else { continue }
 
       let quotaInfo = modelInfo["quotaInfo"] as? [String: Any]
-      let remainingPercent: Int?
-      if let rawFraction = quotaInfo?["remainingFraction"],
-         let remainingFraction = parseNumeric(rawFraction) {
-        let percent = roundedPercent(remainingFraction * 100)
-        remainingPercent = percent
-        if let percent {
-          let usagePercent = 100 - percent
-          maxUsage = max(maxUsage, usagePercent)
-        }
-      } else {
-        remainingPercent = nil
+      let remainingPercent = quotaInfo?["remainingFraction"]
+        .flatMap { parseNumeric($0) }
+        .flatMap { roundedPercent($0 * 100) }
+      if let remainingPercent {
+        maxUsage = max(maxUsage, 100 - remainingPercent)
       }
 
       let resetDate = parseISO8601(quotaInfo?["resetTime"] as? String)
