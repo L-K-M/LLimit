@@ -333,4 +333,47 @@ final class StatusRendererTests: XCTestCase {
   func testHumanReadableWithoutSnapshotExplainsNextStep() {
     XCTAssertTrue(StatusRenderer.humanReadable(snapshot: nil, now: now).contains("llimit refresh"))
   }
+
+  func testAccountQuotaSummaryNamesWorstRemainingPercent() {
+    let usage = ProviderUsage(
+      accountID: "acct-1", provider: .anthropic, title: "Claude",
+      metrics: [
+        UsageMetric(id: "five_hour", label: "5-hour limit", remainingPercent: 40),
+        UsageMetric(id: "seven_day", label: "Weekly limit", remainingPercent: 65)
+      ],
+      fetchedAt: now
+    )
+    let snapshot = QuotaSnapshot(generatedAt: now, providers: [usage], failures: [])
+
+    XCTAssertEqual(StatusRenderer.accountQuotaSummary(for: "acct-1", snapshot: snapshot), "40% left")
+  }
+
+  func testAccountQuotaSummaryMarksEstimatesAndBalances() {
+    let estimated = ProviderUsage(
+      accountID: "acct-est", provider: .venice, title: "Venice",
+      metrics: [UsageMetric(
+        id: "diem", label: "Daily DIEM", remainingPercent: 30,
+        remainingAmount: 12, estimatedTotal: 40, usedDisplay: "12.00 DIEM"
+      )],
+      fetchedAt: now
+    )
+    let balanceOnly = ProviderUsage(
+      accountID: "acct-bal", provider: .cline, title: "Cline",
+      metrics: [UsageMetric(id: "credit", label: "Credit balance", usedDisplay: "$4.25")],
+      fetchedAt: now
+    )
+    let snapshot = QuotaSnapshot(generatedAt: now, providers: [estimated, balanceOnly], failures: [])
+
+    XCTAssertEqual(StatusRenderer.accountQuotaSummary(for: "acct-est", snapshot: snapshot), "≈30% left")
+    XCTAssertEqual(StatusRenderer.accountQuotaSummary(for: "acct-bal", snapshot: snapshot), "$4.25")
+  }
+
+  func testAccountQuotaSummaryReportsFailuresAndMissingData() {
+    let failure = ProviderFailure(accountID: "acct-bad", provider: .kimi, kind: .rateLimit, message: "limited")
+    let snapshot = QuotaSnapshot(generatedAt: now, providers: [], failures: [failure])
+
+    XCTAssertEqual(StatusRenderer.accountQuotaSummary(for: "acct-bad", snapshot: snapshot), "refresh failed (rateLimit)")
+    XCTAssertEqual(StatusRenderer.accountQuotaSummary(for: "acct-other", snapshot: snapshot), "no data yet")
+    XCTAssertEqual(StatusRenderer.accountQuotaSummary(for: "acct-any", snapshot: nil), "no data yet")
+  }
 }

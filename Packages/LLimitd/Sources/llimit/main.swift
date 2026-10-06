@@ -35,6 +35,7 @@ func printUsage() {
       llimit status [--json]
       llimit daemon
       llimit paths
+      llimit version
 
     Providers: \(QuotaProvider.allCases.map(\.rawValue).joined(separator: ", "))
     Account IDs may be shortened to any unique prefix.
@@ -91,8 +92,9 @@ func accountsList() {
     let state = account.isEnabled ? "enabled" : "disabled"
     let missing = account.missingCredentialLabels
     let readiness = missing.isEmpty ? "ready" : "missing: \(missing.joined(separator: ", "))"
+    let quota = StatusRenderer.accountQuotaSummary(for: account.id, snapshot: daemon.snapshot)
     print("\(account.id)")
-    print("    \(account.resolvedDisplayName) [\(account.provider.rawValue)] — \(state), \(readiness)")
+    print("    \(account.resolvedDisplayName) [\(account.provider.rawValue)] — \(state), \(readiness), \(quota)")
   }
 }
 
@@ -413,6 +415,8 @@ case "paths":
   print("settings: \(paths.settingsFileURL.path)")
   print("snapshot: \(paths.snapshotFileURL.path)")
   print("history:  \(paths.historyFileURL.path)")
+case "version", "--version", "-v":
+  print("llimit \(LLimitdInfo.version) (LLimitd, QuotaCore)")
 case "help", "--help", "-h":
   printUsage()
 default:

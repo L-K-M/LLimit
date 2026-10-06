@@ -219,6 +219,37 @@ public enum StatusRenderer {
     return "\(hours / 24) d ago"
   }
 
+  /// One account's data state for `llimit accounts list`: the worst bounded
+  /// remaining percent when live, the failure kind when the last refresh
+  /// failed, and a hint while no data exists yet. Snapshot-only
+  /// (credential-free), so the CLI never touches the settings secrets to
+  /// answer "is this account working?".
+  public static func accountQuotaSummary(for accountID: String, snapshot: QuotaSnapshot?) -> String {
+    guard let snapshot else { return "no data yet" }
+
+    if let usage = snapshot.providers.first(where: { $0.accountID == accountID }) {
+      if let remaining = usage.metrics.compactMap(\.remainingPercent).min() {
+        let estimated = usage.metrics.contains {
+          $0.remainingPercent == remaining && $0.isPercentageEstimated
+        }
+        return "\(estimated ? "≈" : "")\(remaining)% left"
+      }
+      if usage.metrics.contains(where: \.isUnlimited) {
+        return "unlimited"
+      }
+      if let balance = usage.metrics.compactMap(\.usageLine).first {
+        return balance
+      }
+      return "no quota data"
+    }
+
+    if let failure = snapshot.failures.first(where: { $0.accountID == accountID }) {
+      return "refresh failed (\(failure.kind.rawValue))"
+    }
+
+    return "no data yet"
+  }
+
   private static let titleOrder: (ProviderUsage, ProviderUsage) -> Bool = { lhs, rhs in
     if lhs.provider.rawValue != rhs.provider.rawValue {
       return lhs.provider.rawValue < rhs.provider.rawValue
