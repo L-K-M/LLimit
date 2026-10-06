@@ -467,9 +467,13 @@ public struct ProviderAccount: Codable, Hashable, Identifiable, Sendable {
   }
 
   public var missingCredentialLabels: [String] {
+    missingCredentialLabels(environment: ProcessInfo.processInfo.environment)
+  }
+
+  func missingCredentialLabels(environment: [String: String]) -> [String] {
     // env:NAME references count as present only when the variable is set —
     // an unset reference is reported as a missing credential.
-    provider.missingCredentialLabels(in: credentials.resolvingEnvironmentReferences())
+    provider.missingCredentialLabels(in: credentials.resolvingEnvironmentReferences(environment))
   }
 
   public var hasRequiredCredentials: Bool {

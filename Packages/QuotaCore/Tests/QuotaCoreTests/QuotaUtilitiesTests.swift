@@ -161,17 +161,16 @@ final class QuotaUtilitiesTests: XCTestCase {
   }
 
   func testEnvironmentReferencedCredentialReadiness() {
+    // ProcessInfo.environment may be a cached snapshot (swift-corelibs-
+    // foundation caches after first access), so the environment is injected
+    // rather than mutated via setenv.
     let varName = "LLIMIT_TEST_CREDENTIAL_READINESS"
-    unsetenv(varName)
     let account = ProviderAccount(
       provider: .venice,
       credentials: [CredentialField.veniceAPIKey: "env:\(varName)"]
     )
-    XCTAssertFalse(account.hasRequiredCredentials)
-
-    setenv(varName, "live-secret", 1)
-    defer { unsetenv(varName) }
-    XCTAssertTrue(account.hasRequiredCredentials)
+    XCTAssertFalse(account.missingCredentialLabels(environment: [:]).isEmpty)
+    XCTAssertTrue(account.missingCredentialLabels(environment: [varName: "live-secret"]).isEmpty)
     // The stored value stays the pointer, not the resolved secret.
     XCTAssertEqual(account.credentials[CredentialField.veniceAPIKey], "env:\(varName)")
   }

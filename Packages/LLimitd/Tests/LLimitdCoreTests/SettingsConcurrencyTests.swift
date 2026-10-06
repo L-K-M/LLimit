@@ -185,6 +185,25 @@ final class SettingsConcurrencyTests: XCTestCase {
     )
   }
 
+  func testMergePreservesEnvironmentReferences() {
+    // env:NAME pointers flow through the merge untouched — the daemon's
+    // runtime copies hold the literal pointer, and write-back sites skip them.
+    let base = settingsWithAccounts([account(.anthropic, token: "env:LLIMIT_TOKEN")])
+    var current = base
+    current.accounts[0].credentials[CredentialField.anthropicEmail] = "new@example.com"
+    var disk = base
+    disk.accounts[0].isEnabled = false
+
+    let merged = QuotaDaemon.mergingCredentialChanges(base: base, current: current, onto: disk)
+
+    XCTAssertEqual(
+      merged.accounts[0].credentials[CredentialField.anthropicAccessToken],
+      "env:LLIMIT_TOKEN"
+    )
+    XCTAssertEqual(merged.accounts[0].credentials[CredentialField.anthropicEmail], "new@example.com")
+    XCTAssertFalse(merged.accounts[0].isEnabled)
+  }
+
   func testMergeIgnoresAccountsTheCLIRemoved() {
     let base = settingsWithAccounts([account(.anthropic, token: "T0")])
     let id = base.accounts[0].id

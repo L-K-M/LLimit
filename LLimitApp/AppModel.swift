@@ -665,6 +665,10 @@ final class AppModel: ObservableObject {
       let access = credentials.resolvingEnvironmentReferences()[CredentialField.openAIAccessToken] ?? ""
       if !access.isEmpty, !ChatGPTOAuth.isAccessTokenExpired(access) { continue }
 
+      // A pointer-managed access token cannot persist a rotated grant either —
+      // refreshing would repeat forever against the same stale external value.
+      if credentials[CredentialField.openAIAccessToken]?.isEnvironmentReference == true { continue }
+
       if await refreshOpenAIAccount(id: accountID, refreshToken: refreshToken) {
         didChange = true
       }
@@ -764,6 +768,7 @@ final class AppModel: ObservableObject {
       // An env: reference is externally managed — rotating can't be persisted.
       let refreshToken = providerAccounts[index].credentials[CredentialField.openAIRefreshToken] ?? ""
       if !refreshToken.isEmpty, !refreshToken.isEnvironmentReference,
+         providerAccounts[index].credentials[CredentialField.openAIAccessToken]?.isEnvironmentReference != true,
          await refreshOpenAIAccount(id: accountID, refreshToken: refreshToken) {
         recovered.insert(accountID)
       }

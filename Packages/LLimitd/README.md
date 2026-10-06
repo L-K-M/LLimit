@@ -51,6 +51,11 @@ automatic ChatGPT token refresh skips accounts whose refresh token is an
 only ones whose credentials LLimit rotates; every other provider's key is
 read-only and safe to indirection.
 
+On macOS the menu-bar app resolves references against its launch environment
+(e.g. `launchctl setenv`), not your shell — a variable set in `.zshrc` will not
+be visible to it. The environment-file flow above is the supported setup on
+Linux.
+
 ## Usage
 
 ```
