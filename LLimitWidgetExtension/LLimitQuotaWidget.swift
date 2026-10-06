@@ -338,6 +338,39 @@ private struct TrendChartData {
   var hidesEveryAccount = false
 }
 
+/// The dashboard's empty state, split by cause. A failure-only snapshot is not
+/// "no accounts configured": the accounts exist and need attention, and saying
+/// otherwise hides the one thing the user has to act on.
+private struct DashboardEmptyState {
+  let title: String
+  let detail: String
+  var isWarning = false
+}
+
+private func dashboardEmptyState(for entry: QuotaEntry) -> DashboardEmptyState {
+  guard let snapshot = entry.snapshot else {
+    return DashboardEmptyState(title: "No data yet", detail: "Open LLimit to refresh")
+  }
+  if snapshot.providers.isEmpty, !snapshot.failures.isEmpty {
+    return DashboardEmptyState(
+      title: "\(snapshot.failures.count) unavailable",
+      detail: "Open LLimit for details",
+      isWarning: true
+    )
+  }
+  return DashboardEmptyState(title: "No accounts configured", detail: "Add accounts in LLimit")
+}
+
+/// Names of the accounts in a failure-only snapshot, for the roomier medium
+/// widget. A legacy provider-keyed failure falls back to the provider name.
+private func unavailableAccountNames(for entry: QuotaEntry) -> [String] {
+  guard let snapshot = entry.snapshot, snapshot.providers.isEmpty else { return [] }
+  return snapshot.failures.map { failure in
+    entry.settings.account(withID: failure.accountID)?.resolvedDisplayName
+      ?? failure.provider.displayName
+  }
+}
+
 private struct OverviewSmallQuotaView: View {
   let entry: QuotaEntry
 
@@ -382,10 +415,12 @@ private struct OverviewSmallQuotaView: View {
             .foregroundStyle(.orange)
         }
       } else {
+        let state = dashboardEmptyState(for: entry)
         Spacer(minLength: 0)
-        Text("No accounts configured")
+        Text(state.title)
           .font(.caption.weight(.semibold))
-        Text("Add accounts in LLimit")
+          .foregroundStyle(state.isWarning ? Color.orange : Color.primary)
+        Text(state.detail)
           .font(.caption2)
           .foregroundStyle(.secondary)
         Spacer(minLength: 0)
@@ -457,10 +492,19 @@ private struct MediumCompactQuotaView: View {
             .foregroundStyle(.orange)
         }
       } else {
+        let state = dashboardEmptyState(for: entry)
         Spacer(minLength: 0)
-        Text("No accounts configured")
+        Text(state.title)
           .font(.caption.weight(.semibold))
-        Text("Add accounts in LLimit")
+          .foregroundStyle(state.isWarning ? Color.orange : Color.primary)
+        // The medium family has room to name who is unavailable.
+        ForEach(Array(unavailableAccountNames(for: entry).prefix(4).enumerated()), id: \.offset) { _, name in
+          Text(name)
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        }
+        Text(state.detail)
           .font(.caption2)
           .foregroundStyle(.secondary)
         Spacer(minLength: 0)
