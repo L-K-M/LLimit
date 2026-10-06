@@ -72,7 +72,14 @@ public struct AnthropicClient: QuotaProviderClient {
     ]
 
     for window in windows {
-      guard let object = payload[window.key] as? [String: Any] else { continue }
+      guard let object = payload[window.key] as? [String: Any] else {
+        // A present-but-non-dictionary window is as much drift evidence as
+        // an unparsable utilization; an absent key is not.
+        if payload[window.key] != nil {
+          unparsableWindows += 1
+        }
+        continue
+      }
       guard let utilization = parseNumeric(object["utilization"]) else {
         unparsableWindows += 1
         continue

@@ -83,6 +83,19 @@ final class AnthropicClientTests: XCTestCase {
     await assertThrows(kind: .decoding) { try await client.fetchUsage(configuration: self.config(), now: self.now) }
   }
 
+  // Non-dictionary window values count as drift too: the keys exist but the
+  // shape changed, which is the same "confidently healthy" hazard.
+  func testNonDictionaryWindowsFailAsDecoding() async {
+    let json = #"""
+    {
+      "five_hour": 42,
+      "seven_day": "soon"
+    }
+    """#
+    let client = AnthropicClient(httpClient: MockHTTP(status: 200, body: json))
+    await assertThrows(kind: .decoding) { try await client.fetchUsage(configuration: self.config(), now: self.now) }
+  }
+
   // A single unparsable window alongside parsable ones degrades gracefully:
   // keep the readable windows rather than failing the whole account.
   func testPartiallyUnparsableWindowsKeepReadableMetrics() async throws {
