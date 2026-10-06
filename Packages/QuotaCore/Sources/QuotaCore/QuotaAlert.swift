@@ -16,13 +16,18 @@ public struct QuotaAlertSettings: Codable, Hashable, Sendable {
   /// Notify when an account's fetch starts failing (stale data risk).
   public var notifyOnFailure: Bool
 
-  public init(enabled: Bool = true, warningPercent: Int = 25,
+  public init(enabled: Bool = false, warningPercent: Int = 25,
               criticalPercent: Int = 10, notifyOnFailure: Bool = true) {
     self.enabled = enabled
     self.warningPercent = min(max(warningPercent, Self.warningRange.lowerBound),
                               Self.warningRange.upperBound)
     self.criticalPercent = min(max(criticalPercent, Self.criticalRange.lowerBound),
                                Self.criticalRange.upperBound)
+    // Defense in depth: a critical at/above warning would swallow every
+    // warning alert — the evaluator checks critical first.
+    if self.criticalPercent >= self.warningPercent {
+      self.criticalPercent = max(Self.criticalRange.lowerBound, self.warningPercent - 1)
+    }
     self.notifyOnFailure = notifyOnFailure
   }
 }
@@ -53,9 +58,14 @@ public struct QuotaAlert: Equatable, Sendable {
 ///
 /// `dedupedKeys` is caller-persisted state holding the dedup keys currently
 /// suppressed. A metric alerts once per band it enters (critical implies and
-/// suppresses warning), and re-arms when it climbs back above the warning
-/// band or when a different failure kind appears for an account.
+/// suppresses warning), and re-arms only when it climbs past the warning
+/// threshold plus `rearmHysteresisPercent` — oscillating values can't
+/// re-fire every refresh. Failure keys re-arm when that kind disappears.
 public enum QuotaAlertEvaluator {
+  /// Points above the warning band a suppressed metric must recover before it
+  /// can alert again — kills flapping for values oscillating at a threshold.
+  static let rearmHysteresisPercent = 5
+
   public static func alerts(
     in snapshot: QuotaSnapshot,
     settings: QuotaAlertSettings,
@@ -69,6 +79,10 @@ public enum QuotaAlertEvaluator {
 
     var fired: [QuotaAlert] = []
     var liveMetricKeys: Set<String> = []
+
+    // A suppressed metric stays suppressed until it clears the warning band
+    // plus this margin — an oscillating value can't re-fire every refresh.
+    let margin = Self.rearmHysteresisPercent
 
     for usage in snapshot.providers {
       for metric in usage.metrics {
@@ -88,19 +102,24 @@ public enum QuotaAlertEvaluator {
           // Critical implies warning — suppress a later warning re-fire.
           dedupedKeys.formUnion([criticalKey, warningKey])
           liveMetricKeys.formUnion([criticalKey, warningKey])
-        } else if remaining <= settings.warningPercent {
-          if !dedupedKeys.contains(warningKey) {
+        } else if remaining <= settings.warningPercent + margin {
+          // In the band: fire/suppress warning. In the margin above it: no
+          // firing, but the metric stays live so suppression isn't re-armed
+          // until remaining clears warningPercent + margin.
+          if remaining <= settings.warningPercent,
+             !dedupedKeys.contains(warningKey) {
             fired.append(QuotaAlert(
               dedupKey: warningKey, severity: .warning,
               title: "\(usage.title) — \(metric.label)",
               body: body(remaining: remaining, metric: metric, now: now)
             ))
           }
-          dedupedKeys.insert(warningKey)
-          dedupedKeys.remove(criticalKey)
-          liveMetricKeys.insert(warningKey)
+          if remaining <= settings.warningPercent {
+            dedupedKeys.insert(warningKey)
+          }
+          liveMetricKeys.formUnion([criticalKey, warningKey])
         }
-        // Recovered above warning → neither key is live; the subtract below
+        // Above warning + margin → neither key is live; the intersect below
         // re-arms the metric so a later dip alerts again.
       }
     }

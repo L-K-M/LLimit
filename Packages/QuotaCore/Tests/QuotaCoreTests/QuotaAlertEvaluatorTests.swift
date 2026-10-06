@@ -25,14 +25,14 @@ final class QuotaAlertEvaluatorTests: XCTestCase {
   func testHealthySnapshotFiresNothing() {
     var dedup: Set<String> = []
     let alerts = QuotaAlertEvaluator.alerts(
-      in: snapshot(percent: 80), settings: QuotaAlertSettings(), dedupedKeys: &dedup, now: now)
+      in: snapshot(percent: 80), settings: QuotaAlertSettings(enabled: true), dedupedKeys: &dedup, now: now)
     XCTAssertTrue(alerts.isEmpty)
     XCTAssertTrue(dedup.isEmpty)
   }
 
   func testCrossingWarningFiresOnce() {
     var dedup: Set<String> = []
-    let settings = QuotaAlertSettings()
+    let settings = QuotaAlertSettings(enabled: true)
     let first = QuotaAlertEvaluator.alerts(
       in: snapshot(percent: 20), settings: settings, dedupedKeys: &dedup, now: now)
     XCTAssertEqual(first.map(\.severity), [.warning])
@@ -46,7 +46,7 @@ final class QuotaAlertEvaluatorTests: XCTestCase {
 
   func testEscalationToCriticalFiresWithoutRepeatingWarning() {
     var dedup: Set<String> = []
-    let settings = QuotaAlertSettings()
+    let settings = QuotaAlertSettings(enabled: true)
     _ = QuotaAlertEvaluator.alerts(
       in: snapshot(percent: 20), settings: settings, dedupedKeys: &dedup, now: now)
     let escalated = QuotaAlertEvaluator.alerts(
@@ -56,7 +56,7 @@ final class QuotaAlertEvaluatorTests: XCTestCase {
 
   func testCriticalImpliesAndSuppressesWarning() {
     var dedup: Set<String> = []
-    let settings = QuotaAlertSettings()
+    let settings = QuotaAlertSettings(enabled: true)
     let first = QuotaAlertEvaluator.alerts(
       in: snapshot(percent: 5), settings: settings, dedupedKeys: &dedup, now: now)
     XCTAssertEqual(first.map(\.severity), [.critical])
@@ -67,7 +67,7 @@ final class QuotaAlertEvaluatorTests: XCTestCase {
 
   func testRecoveryRearmsTheMetric() {
     var dedup: Set<String> = []
-    let settings = QuotaAlertSettings()
+    let settings = QuotaAlertSettings(enabled: true)
     _ = QuotaAlertEvaluator.alerts(
       in: snapshot(percent: 20), settings: settings, dedupedKeys: &dedup, now: now)
     _ = QuotaAlertEvaluator.alerts(
@@ -83,20 +83,20 @@ final class QuotaAlertEvaluatorTests: XCTestCase {
     let failure = ProviderFailure(provider: .kimi, kind: .auth, message: "bad token")
     let first = QuotaAlertEvaluator.alerts(
       in: snapshot(percent: 80, failures: [failure]),
-      settings: QuotaAlertSettings(), dedupedKeys: &dedup, now: now)
+      settings: QuotaAlertSettings(enabled: true), dedupedKeys: &dedup, now: now)
     XCTAssertEqual(first.map(\.severity), [.failure])
     XCTAssertEqual(first[0].body, "bad token")
 
     let repeat_ = QuotaAlertEvaluator.alerts(
       in: snapshot(percent: 80, failures: [failure]),
-      settings: QuotaAlertSettings(), dedupedKeys: &dedup, now: now)
+      settings: QuotaAlertSettings(enabled: true), dedupedKeys: &dedup, now: now)
     XCTAssertTrue(repeat_.isEmpty)
 
     // A different failure kind for the same account is a new alert.
     let other = ProviderFailure(provider: .kimi, kind: .network, message: "offline")
     let second = QuotaAlertEvaluator.alerts(
       in: snapshot(percent: 80, failures: [failure, other]),
-      settings: QuotaAlertSettings(), dedupedKeys: &dedup, now: now)
+      settings: QuotaAlertSettings(enabled: true), dedupedKeys: &dedup, now: now)
     XCTAssertEqual(second.map(\.severity), [.failure])
   }
 
@@ -122,12 +122,50 @@ final class QuotaAlertEvaluatorTests: XCTestCase {
         fetchedAt: now)],
       failures: [])
     XCTAssertTrue(QuotaAlertEvaluator.alerts(
-      in: snapshot, settings: QuotaAlertSettings(), dedupedKeys: &dedup, now: now).isEmpty)
+      in: snapshot, settings: QuotaAlertSettings(enabled: true), dedupedKeys: &dedup, now: now).isEmpty)
   }
 
   func testThresholdsClampIntoRange() {
     let settings = QuotaAlertSettings(warningPercent: 500, criticalPercent: -3)
     XCTAssertEqual(settings.warningPercent, QuotaAlertSettings.warningRange.upperBound)
     XCTAssertEqual(settings.criticalPercent, QuotaAlertSettings.criticalRange.lowerBound)
+  }
+
+  func testDefaultsToDisabled() {
+    // Alerts are opt-in — existing users shouldn't be surprised by banners
+    // appearing after an update.
+    XCTAssertFalse(QuotaAlertSettings().enabled)
+  }
+
+  func testCriticalCanNeverMeetOrExceedWarning() {
+    // A decoded/constructed config with inverted bands would silently swallow
+    // every warning alert — the initializer restores the invariant.
+    let inverted = QuotaAlertSettings(enabled: true, warningPercent: 10, criticalPercent: 40)
+    XCTAssertLessThan(inverted.criticalPercent, inverted.warningPercent)
+    XCTAssertEqual(inverted.warningPercent, 10)
+    XCTAssertEqual(inverted.criticalPercent, 9)
+  }
+
+  func testHysteresisKeepsSuppressionThroughThresholdFlapping() {
+    var dedup: Set<String> = []
+    let settings = QuotaAlertSettings(enabled: true, warningPercent: 25, criticalPercent: 10)
+    // Enter the band → fires once.
+    XCTAssertEqual(QuotaAlertEvaluator.alerts(
+      in: snapshot(percent: 24), settings: settings, dedupedKeys: &dedup, now: now
+    ).map(\.severity), [.warning])
+    // Oscillate inside the 5pt re-arm margin (25…30) → never re-fires.
+    for percent in [26, 24, 27, 25, 29] {
+      XCTAssertTrue(QuotaAlertEvaluator.alerts(
+        in: snapshot(percent: percent), settings: settings, dedupedKeys: &dedup, now: now
+      ).isEmpty, "percent \(percent) should not re-fire inside the hysteresis margin")
+    }
+    // Clear warning + margin (30) → re-arms.
+    XCTAssertTrue(QuotaAlertEvaluator.alerts(
+      in: snapshot(percent: 31), settings: settings, dedupedKeys: &dedup, now: now).isEmpty)
+    XCTAssertTrue(dedup.isEmpty)
+    // Next dip alerts again.
+    XCTAssertEqual(QuotaAlertEvaluator.alerts(
+      in: snapshot(percent: 24), settings: settings, dedupedKeys: &dedup, now: now
+    ).map(\.severity), [.warning])
   }
 }
