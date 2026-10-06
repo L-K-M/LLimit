@@ -398,4 +398,36 @@ final class StatusRendererTests: XCTestCase {
     let tooltip = try XCTUnwrap(object["tooltip"] as? String)
     XCTAssertFalse(tooltip.hasSuffix("\n"))
   }
+
+  func testDuplicateFailuresForOneAccountCollapseToMostActionableRow() throws {
+    let object = try decodedWaybar(snapshot(remaining: [80], failures: [
+      ProviderFailure(accountID: "acct-9", provider: .venice, title: "Venice B",
+                      kind: .network, message: "connection dropped"),
+      ProviderFailure(accountID: "acct-9", provider: .venice, title: "Venice B",
+                      kind: .auth, message: "401 unauthorized"),
+    ]))
+    let accounts = try XCTUnwrap(object["accounts"] as? [[String: Any]])
+    let rows = accounts.filter { $0["id"] as? String == "acct-9" }
+    XCTAssertEqual(rows.count, 1)
+    XCTAssertEqual(rows[0]["error"] as? String, "401 unauthorized")
+    XCTAssertEqual(rows[0]["name"] as? String, "Venice B")
+  }
+
+  func testEmptyRecordedFailureTitleFallsBackToProviderName() throws {
+    let object = try decodedWaybar(snapshot(remaining: [80], failures: [
+      ProviderFailure(accountID: "acct-9", provider: .venice, title: "",
+                      kind: .network, message: "dropped"),
+    ]))
+    let accounts = try XCTUnwrap(object["accounts"] as? [[String: Any]])
+    let row = accounts.first { $0["id"] as? String == "acct-9" }
+    XCTAssertEqual(row?["name"] as? String, "Venice")
+  }
+
+  func testFailureEscalatesHealthyHeadlineToWarning() throws {
+    let object = try decodedWaybar(snapshot(remaining: [80], failures: [
+      ProviderFailure(accountID: "acct-9", provider: .venice, title: "Venice B",
+                      kind: .network, message: "dropped"),
+    ]))
+    XCTAssertEqual(object["class"] as? String, "warning")
+  }
 }

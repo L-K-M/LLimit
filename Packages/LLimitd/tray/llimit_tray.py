@@ -153,7 +153,7 @@ def build_menu_model(status: dict[str, Any] | None) -> TrayModel:
                 rows.append(MenuRow("metric", format_metric(metric), tooltip=metric.get("detail") or ""))
             error = (account.get("error") or "").strip()
             if error:
-                rows.append(MenuRow("metric", f"Error: {error[:120]}"))
+                rows.append(MenuRow("metric", f"Error: {error[:120]}", tooltip=error))
             elif not (account.get("metrics") or []):
                 rows.append(MenuRow("metric", "No limits reported"))
     elif status_class == "error":

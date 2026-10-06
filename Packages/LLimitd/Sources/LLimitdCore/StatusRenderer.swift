@@ -112,9 +112,11 @@ public enum StatusRenderer {
     }
 
     let providers = snapshot.providers.sorted(by: titleOrder)
+    // One failure row per account: keep the most actionable kind (auth and
+    // config errors need the user; network blips resolve themselves).
     let failuresByAccount = Dictionary(
       snapshot.failures.map { ($0.accountID, $0) },
-      uniquingKeysWith: { $0.kind.rawValue <= $1.kind.rawValue ? $0 : $1 }
+      uniquingKeysWith: { failureRank($0.kind) <= failureRank($1.kind) ? $0 : $1 }
     )
     var accounts: [[String: Any]] = []
     var remainingPercents: [Int] = []
@@ -155,12 +157,12 @@ public enum StatusRenderer {
 
     // A failure with no usage row at all (the account has never succeeded, or
     // its stale usage was reconciled away) still deserves a named row.
-    for failure in snapshot.failures.sorted(by: { $0.accountID < $1.accountID })
+    for failure in failuresByAccount.values.sorted(by: { $0.accountID < $1.accountID })
     where !providers.contains(where: { $0.accountID == failure.accountID }) {
       accounts.append([
         "id": failure.accountID,
         "provider": failure.provider.rawValue,
-        "name": failure.title ?? failure.provider.displayName,
+        "name": failureName(failure, in: snapshot),
         "failing": true,
         "error": failure.message,
         "errorKind": failure.kind.rawValue
@@ -200,6 +202,11 @@ public enum StatusRenderer {
       }
     } else {
       statusClass = .ok
+    }
+    // A failing account's preserved quota still feeds the percentages above —
+    // never let the bar read fully green while its data is going stale.
+    if !snapshot.failures.isEmpty && statusClass == .ok {
+      statusClass = .warning
     }
     if statusClass == .ok, providers.contains(where: { warningText(for: $0) != nil }) {
       statusClass = .warning
@@ -245,6 +252,21 @@ public enum StatusRenderer {
       return "\(hours) h ago"
     }
     return "\(hours / 24) d ago"
+  }
+
+  /// Most-actionable-first ranking when one account has multiple recorded
+  /// failures: credentials and config problems need the user, rate limits and
+  /// server errors resolve on their own, network blips are the least useful.
+  private static func failureRank(_ kind: QuotaErrorKind) -> Int {
+    switch kind {
+    case .auth: return 0
+    case .notConfigured: return 1
+    case .rateLimit: return 2
+    case .api: return 3
+    case .decoding: return 4
+    case .network: return 5
+    case .unknown: return 6
+    }
   }
 
   /// Display name for a failure: the account title the coordinator recorded,
