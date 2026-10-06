@@ -27,7 +27,14 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     } catch {
       // Unreadable-by-corruption is recoverable: preserve the bytes once
       // and start an empty history instead of throwing on every cycle.
-      quarantineCorruptFile(at: fileURL)
+      // This also fires on schema drift after an update, so it must leave a
+      // trail — silent quarantine would wipe 45 days of history invisibly.
+      reportPersistenceIssue(
+        "History at \(fileURL.lastPathComponent) failed to decode; quarantining: \(error.localizedDescription)")
+      if !quarantineCorruptFile(at: fileURL) {
+        reportPersistenceIssue(
+          "Could not quarantine \(fileURL.lastPathComponent); corrupt bytes remain in place")
+      }
       return []
     }
   }

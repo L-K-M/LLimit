@@ -34,8 +34,14 @@ public final class SnapshotStore: @unchecked Sendable {
       return try decoder.decode(QuotaSnapshot.self, from: data)
     } catch {
       // A file that cannot decode would fail every load forever. Move it
-      // aside once and recover empty rather than wedge the refresh loop.
-      quarantineCorruptFile(at: fileURL)
+      // aside once and recover empty rather than wedge the refresh loop —
+      // with a log line so schema drift isn't indistinguishable from rot.
+      reportPersistenceIssue(
+        "Snapshot at \(fileURL.lastPathComponent) failed to decode; quarantining: \(error.localizedDescription)")
+      if !quarantineCorruptFile(at: fileURL) {
+        reportPersistenceIssue(
+          "Could not quarantine \(fileURL.lastPathComponent); corrupt bytes remain in place")
+      }
       return nil
     }
   }

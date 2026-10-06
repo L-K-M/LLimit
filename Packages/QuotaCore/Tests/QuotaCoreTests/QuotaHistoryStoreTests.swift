@@ -97,5 +97,12 @@ final class QuotaHistoryStoreTests: XCTestCase {
     let snapshot = QuotaSnapshot(generatedAt: Date(), providers: [], failures: [])
     try store.append(snapshot)
     XCTAssertEqual(try store.load().count, 1)
+
+    // A newer quarantine replaces the older `.corrupt` file, not appends.
+    try Data("broken again".utf8).write(to: url)
+    XCTAssertEqual(try store.load(), [])
+    XCTAssertEqual(
+      String(decoding: try Data(contentsOf: url.appendingPathExtension("corrupt")), as: UTF8.self),
+      "broken again")
   }
 }

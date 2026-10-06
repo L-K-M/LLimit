@@ -1,5 +1,8 @@
 import Foundation
 import CoreFoundation
+#if canImport(os)
+import os
+#endif
 
 func clampPercent(_ value: Int) -> Int {
   max(0, min(100, value))
@@ -137,13 +140,35 @@ func roundedPercent(_ value: Double) -> Int? {
   return Int(min(100, max(0, value)).rounded())
 }
 
+/// Reports a persistence-layer problem. os.Logger lands in Console.app on
+/// Darwin; on Linux (and as fallback) the message goes to stderr — never
+/// stdout, which is the `llimit status` data contract other tools pipe.
+func reportPersistenceIssue(_ message: String) {
+  #if canImport(os)
+  Logger(subsystem: "app.llimit.LLimit", category: "persistence").error("\(message, privacy: .public)")
+  #else
+  FileHandle.standardError.write(Data("LLimit: \(message)\n".utf8))
+  #endif
+}
+
 /// Moves a store file that failed to decode aside so the store can start
 /// fresh instead of failing on the same bytes forever. The corrupt file is
 /// kept as `<name>.corrupt` for inspection; a newer quarantine replaces it.
-func quarantineCorruptFile(at fileURL: URL) {
+/// - Returns: `false` if the bytes could not be moved aside — the corrupt file
+///   stays in place, every load re-enters this path, and the caller should log
+///   so the wedge is diagnosable.
+@discardableResult
+func quarantineCorruptFile(at fileURL: URL) -> Bool {
   let quarantined = fileURL.appendingPathExtension("corrupt")
   try? FileManager.default.removeItem(at: quarantined)
-  try? FileManager.default.moveItem(at: fileURL, to: quarantined)
+  do {
+    try FileManager.default.moveItem(at: fileURL, to: quarantined)
+    return true
+  } catch {
+    // Best effort: leave the bytes in place rather than deleting data we
+    // failed to preserve.
+    return false
+  }
 }
 
 func parseJSONObject(from data: Data) throws -> [String: Any] {
