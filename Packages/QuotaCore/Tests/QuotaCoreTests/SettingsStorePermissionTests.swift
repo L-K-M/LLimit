@@ -77,8 +77,11 @@ final class SettingsStorePermissionTests: XCTestCase {
   }
 
   // A save that cannot write must fail loudly and leave the previous
-  // credential file byte-for-byte intact.
+  // credential file byte-for-byte intact. Skipped under root, which bypasses
+  // directory permission checks entirely.
   func testFailedSaveLeavesExistingFileUntouched() throws {
+    try XCTSkipIf(geteuid() == 0, "root bypasses directory permission checks")
+
     let store = makeStore()
     try store.save(sampleSettings)
     let fileURL = directory.appendingPathComponent("quota-settings.json")

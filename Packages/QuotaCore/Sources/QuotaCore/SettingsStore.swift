@@ -53,6 +53,15 @@ public final class SettingsStore: @unchecked Sendable {
       throw SettingsStoreError.writeFailed(String(cString: strerror(errno)))
     }
 
+    // Pin the mode on the descriptor: open()'s mode argument can be altered
+    // by the process umask on some platforms/filesystems.
+    guard fchmod(descriptor, 0o600) == 0 else {
+      let reason = String(cString: strerror(errno))
+      close(descriptor)
+      try? FileManager.default.removeItem(at: temporaryURL)
+      throw SettingsStoreError.writeFailed(reason)
+    }
+
     do {
       try writeAll(data, to: descriptor)
       guard fsync(descriptor) == 0 else {
@@ -65,9 +74,21 @@ public final class SettingsStore: @unchecked Sendable {
     }
     close(descriptor)
 
+    // Capture the failure reason before any cleanup syscall can clobber
+    // errno.
     guard rename(temporaryURL.path, fileURL.path) == 0 else {
+      let reason = String(cString: strerror(errno))
       try? FileManager.default.removeItem(at: temporaryURL)
-      throw SettingsStoreError.writeFailed(String(cString: strerror(errno)))
+      throw SettingsStoreError.writeFailed(reason)
+    }
+
+    // Make the replacement durable: without a directory fsync a crash can
+    // lose the rename and resurrect the previous (rotated-out) credential
+    // file. Best effort — failing here does not undo a correct rename.
+    let directoryDescriptor = open(directory.path, O_RDONLY)
+    if directoryDescriptor >= 0 {
+      fsync(directoryDescriptor)
+      close(directoryDescriptor)
     }
 
     try verifySecured(fileURL)
@@ -81,6 +102,10 @@ public final class SettingsStore: @unchecked Sendable {
       var offset = 0
       while offset < buffer.count {
         let written = write(descriptor, base + offset, buffer.count - offset)
+        // A signal can interrupt write() before any byte lands; retry.
+        if written == -1, errno == EINTR {
+          continue
+        }
         guard written > 0 else {
           throw SettingsStoreError.writeFailed(String(cString: strerror(errno)))
         }
