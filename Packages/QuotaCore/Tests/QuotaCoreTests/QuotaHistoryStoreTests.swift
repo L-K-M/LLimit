@@ -142,4 +142,23 @@ final class QuotaHistoryStoreTests: XCTestCase {
 
     XCTAssertEqual(try store.load().count, 2)
   }
+
+  func testAppendStillRollsTheWindowWhenTheNewestEntryExpired() throws {
+    let (store, dir) = makeStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let empty = QuotaSnapshot(generatedAt: now, providers: [], failures: [])
+    try store.save([empty])
+
+    // Identical content three days on, but with two-day retention the append
+    // replaces the expired entry rather than being a no-op.
+    let later = QuotaSnapshot(
+      generatedAt: now.addingTimeInterval(3 * 86_400), providers: [], failures: [])
+    try store.append(later, keepDays: 2, maxEntries: 10)
+
+    let loaded = try store.load()
+    XCTAssertEqual(loaded.count, 1)
+    XCTAssertEqual(loaded.first?.generatedAt, later.generatedAt)
+  }
 }

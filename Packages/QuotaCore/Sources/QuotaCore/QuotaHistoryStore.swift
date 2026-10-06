@@ -61,6 +61,10 @@ public final class QuotaHistoryStore: @unchecked Sendable {
   /// Storing it only grows the file (and the widget's per-render decode) and adds
   /// a flat repeated point to the trend. A *successful* refresh always advances
   /// `ProviderUsage.fetchedAt`, so genuine observations are never skipped.
+  ///
+  /// The one exception is a repeat that would also roll the retention window
+  /// forward (the newest entry has aged past `keepDays`): that append still
+  /// replaces the expired entry, so it is not a no-op.
   public func append(
     _ snapshot: QuotaSnapshot,
     keepDays: Int = 45,
@@ -68,7 +72,11 @@ public final class QuotaHistoryStore: @unchecked Sendable {
   ) throws {
     var history = try load()
 
+    let cutoffDays = max(1, keepDays)
+    let cutoffDate = snapshot.generatedAt.addingTimeInterval(-Double(cutoffDays) * 86_400)
+
     if let newest = history.max(by: { $0.generatedAt < $1.generatedAt }),
+       newest.generatedAt >= cutoffDate,
        newest.providers == snapshot.providers,
        newest.failures == snapshot.failures {
       return
@@ -76,8 +84,6 @@ public final class QuotaHistoryStore: @unchecked Sendable {
 
     history.append(snapshot)
 
-    let cutoffDays = max(1, keepDays)
-    let cutoffDate = snapshot.generatedAt.addingTimeInterval(-Double(cutoffDays) * 86_400)
     history = history.filter { $0.generatedAt >= cutoffDate }
     history.sort { $0.generatedAt < $1.generatedAt }
 
