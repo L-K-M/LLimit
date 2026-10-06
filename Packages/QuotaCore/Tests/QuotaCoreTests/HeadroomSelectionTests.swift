@@ -96,4 +96,27 @@ final class HeadroomSelectionTests: XCTestCase {
   func testBestHeadroomEmptyInputReturnsNil() {
     XCTAssertNil(bestHeadroomProvider(in: []))
   }
+
+  func testEffectiveRemainingPercentClampsOutOfRangeValues() {
+    let high = usage("a", title: "A", metrics: [
+      UsageMetric(id: "m", label: "m", remainingPercent: 150)
+    ])
+    let negative = usage("b", title: "B", metrics: [
+      UsageMetric(id: "m", label: "m", remainingPercent: -20)
+    ])
+    let overdrawn = usage("c", title: "C", metrics: [], maxUsagePercent: 150)
+    XCTAssertEqual(effectiveRemainingPercent(for: high), 100)
+    XCTAssertEqual(effectiveRemainingPercent(for: negative), 0)
+    XCTAssertEqual(effectiveRemainingPercent(for: overdrawn), 0)
+  }
+
+  func testBestHeadroomRanksByMaxUsagePercentFallback() {
+    let explicit = usage("a", title: "A", metrics: [
+      UsageMetric(id: "m", label: "m", remainingPercent: 50)
+    ])
+    let fallback = usage("b", title: "B", metrics: [
+      UsageMetric(id: "m", label: "m", remainingAmount: 5.0)
+    ], maxUsagePercent: 20)
+    XCTAssertEqual(bestHeadroomProvider(in: [explicit, fallback])?.accountID, "b")
+  }
 }

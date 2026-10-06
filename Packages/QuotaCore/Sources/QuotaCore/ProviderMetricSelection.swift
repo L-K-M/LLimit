@@ -124,7 +124,9 @@ public func effectiveRemainingPercent(for usage: ProviderUsage) -> Int? {
 
 /// The account with the most headroom: highest bounded remaining percentage,
 /// ties broken alphabetically by title. Returns nil when no account reports a
-/// bounded metric or the leader has no headroom left.
+/// bounded metric, when percentages are unknown, or when the leader has no
+/// headroom left — the "all depleted" case hides the recommendation rather
+/// than nominating an empty account.
 public func bestHeadroomProvider(in providers: [ProviderUsage]) -> ProviderUsage? {
   let best = providers
     .filter { $0.metrics.contains(where: { !$0.isUnlimited }) }

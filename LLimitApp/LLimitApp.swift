@@ -1298,7 +1298,7 @@ private struct OverviewCard: View {
             Text("\(remaining)%")
               .font(.system(size: 9, weight: .bold))
               .monospacedDigit()
-              .foregroundStyle(headroomColor(for: remaining).opacity(0.85))
+              .foregroundStyle(MenuBarQuotaStyling.dangerTierColor(for: remaining, healthy: .green).opacity(0.85))
           }
         }
         .padding(.horizontal, 4)
@@ -1628,9 +1628,7 @@ private struct MetricQuotaRow: View {
   private var valueColor: Color {
     if metric.isUnlimited { return tint }
     guard let remaining else { return .white.opacity(0.92) }
-    if remaining <= 10 { return Color(red: 1.0, green: 0.36, blue: 0.32) }
-    if remaining <= 25 { return .orange }
-    return .white.opacity(0.92)
+    return MenuBarQuotaStyling.dangerTierColor(for: remaining, healthy: .white.opacity(0.92))
   }
 
   private var secondaryUsageLine: String? {
@@ -1691,18 +1689,18 @@ private enum MenuBarQuotaStyling {
   static func remainingPercent(for provider: ProviderUsage) -> Int? {
     effectiveRemainingPercent(for: provider)
   }
+
+  /// Shared danger tiers: <=10 red, <=25 orange, otherwise the caller's
+  /// healthy color (metric values stay neutral, the trophy row stays green).
+  static func dangerTierColor(for remaining: Int, healthy: Color) -> Color {
+    if remaining <= 10 { return Color(red: 1.0, green: 0.36, blue: 0.32) }
+    if remaining <= 25 { return .orange }
+    return healthy
+  }
 }
 
 /// The account with the most headroom: highest bounded remaining percentage.
 private func bestModelToBurn(from providers: [ProviderUsage]) -> ProviderUsage? {
   bestHeadroomProvider(in: providers)
-}
-
-/// Same danger tiers as the metric value text: a "best" account that is
-/// itself nearly empty should not read as healthy green.
-private func headroomColor(for remaining: Int) -> Color {
-  if remaining <= 10 { return Color(red: 1.0, green: 0.36, blue: 0.32) }
-  if remaining <= 25 { return .orange }
-  return .green
 }
 
