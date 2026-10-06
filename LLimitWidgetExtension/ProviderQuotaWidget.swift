@@ -432,7 +432,8 @@ private struct ProviderQuotaTileView: View {
         ProviderConcentricRings(
           metrics: metrics,
           name: account.displayName,
-          tints: tints
+          tints: tints,
+          date: entry.date
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -700,12 +701,19 @@ private struct ProviderQuotaTileView: View {
     }
     return expanded ? "reset time unknown" : "--"
   }
+
+  /// True when the metric's reset is within 5 minutes of the given date.
+  private func isResetImminent(metric: UsageMetric, at date: Date) -> Bool {
+    guard let resetAt = metric.resetAt else { return false }
+    return abs(resetAt.timeIntervalSince(date)) < 300
+  }
 }
 
 private struct ProviderConcentricRings: View {
   let metrics: [UsageMetric]
   let name: String
   let tints: [Color]
+  let date: Date
 
   var body: some View {
     GeometryReader { proxy in
@@ -718,7 +726,8 @@ private struct ProviderConcentricRings: View {
           ProviderTileRing(
             metric: outer,
             color: tints.first ?? .white,
-            lineWidth: max(9, side * 0.095)
+            lineWidth: max(9, side * 0.095),
+            showResetGlow: isResetImminent(metric: outer, at: date)
           )
           .frame(width: side, height: side)
         }
@@ -727,7 +736,8 @@ private struct ProviderConcentricRings: View {
           ProviderTileRing(
             metric: inner,
             color: tints.dropFirst().first ?? .white,
-            lineWidth: max(7, side * 0.08)
+            lineWidth: max(7, side * 0.08),
+            showResetGlow: isResetImminent(metric: inner, at: date)
           )
           .frame(width: side * 0.62, height: side * 0.62)
         }
@@ -751,6 +761,7 @@ private struct ProviderTileRing: View {
   let metric: UsageMetric
   let color: Color
   let lineWidth: CGFloat
+  let showResetGlow: Bool
 
   var body: some View {
     ZStack {
@@ -771,6 +782,14 @@ private struct ProviderTileRing: View {
           .rotationEffect(.degrees(-90))
           .shadow(color: color.opacity(0.45), radius: 2.5)
           .padding(lineWidth / 2)
+      }
+      // Reset celebration: subtle glow when reset is imminent (within 5 min)
+      if showResetGlow {
+        Circle()
+          .strokeBorder(color.opacity(0.35), lineWidth: 2.5)
+          .blur(radius: 4)
+          .scaleEffect(1.15)
+          .animation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true), value: progress)
       }
     }
   }
