@@ -73,6 +73,43 @@ final class OpenAIClientTests: XCTestCase {
     XCTAssertEqual(requests[0].value(forHTTPHeaderField: "ChatGPT-Account-Id"), "workspace")
   }
 
+  // 429 is a rate limit, not a generic API error: consumers suppress warnings
+  // and keep stale data for .rateLimit but fail loudly for .api.
+  func testRateLimitedResponseMapsToRateLimitKind() async {
+    let client = OpenAIClient(httpClient: RecordingOpenAIHTTP(status: 429, body: #"{"detail":"Too many requests"}"#))
+    do {
+      _ = try await client.fetchUsage(configuration: config(credentials: [
+        CredentialField.openAIAccessToken: "manual-access"
+      ]), now: now)
+      XCTFail("Expected a rate-limit failure")
+    } catch let error as ProviderClientError {
+      XCTAssertEqual(error.kind, .rateLimit)
+    } catch {
+      XCTFail("Unexpected error: \(error)")
+    }
+  }
+
+  // Odd window durations must label their exact unit: a rounded "1-hour
+  // limit" for a 45-minute window also misclassifies the identity color.
+  func testWindowLabelsUseExactUnits() async throws {
+    for (seconds, expectedLabel) in [
+      (2_700, "45-minute limit"),
+      (5_400, "90-minute limit"),
+      (90_000, "25-hour limit"),
+      (18_000, "5-hour limit"),
+      (604_800, "7-day limit")
+    ] {
+      let body = #"{"plan_type":"plus","rate_limit":{"limit_reached":false,"primary_window":{"used_percent":20,"limit_window_seconds":\#(seconds),"reset_after_seconds":3600}}}"#
+      let http = RecordingOpenAIHTTP(status: 200, body: body)
+      let client = OpenAIClient(httpClient: http)
+      let usage = try await client.fetchUsage(configuration: config(credentials: [
+        CredentialField.openAIAccessToken: "manual-access"
+      ]), now: now)
+
+      XCTAssertEqual(usage.metrics.first?.label, expectedLabel, "for \(seconds) seconds")
+    }
+  }
+
   private func config(credentials: [String: String]) -> ProviderRuntimeConfiguration {
     ProviderRuntimeConfiguration(accountID: "llimit-account", provider: .openAI, displayName: "OpenAI Work", isEnabled: true, credentials: credentials)
   }
@@ -94,10 +131,16 @@ private actor RecordingManagedSource: ManagedOpenAIUsageSource {
 
 private actor RecordingOpenAIHTTP: HTTPClient {
   private(set) var requests: [URLRequest] = []
+  private let status: Int
+  private let body: String
+
+  init(status: Int = 200, body: String = #"{"plan_type":"plus","rate_limit":{"limit_reached":false,"primary_window":{"used_percent":20,"limit_window_seconds":18000,"reset_after_seconds":3600}}}"#) {
+    self.status = status
+    self.body = body
+  }
 
   func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
     requests.append(request)
-    let body = #"{"plan_type":"plus","rate_limit":{"limit_reached":false,"primary_window":{"used_percent":20,"limit_window_seconds":18000,"reset_after_seconds":3600}}}"#
-    return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
   }
 }

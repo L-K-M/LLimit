@@ -75,8 +75,10 @@ public struct CopilotClient: QuotaProviderClient {
     let (data, response) = try await httpClient.data(for: request)
     guard (200..<300).contains(response.statusCode) else {
       let body = String(data: data, encoding: .utf8) ?? ""
-      let kind: QuotaErrorKind = response.statusCode == 401 || response.statusCode == 403 ? .auth : .api
-      throw ProviderClientError(kind: kind, message: "Copilot billing API failed \(response.statusCode): \(body)")
+      throw ProviderClientError(
+        kind: errorKind(forStatusCode: response.statusCode),
+        message: "Copilot billing API failed \(response.statusCode): \(body)"
+      )
     }
 
     let payload: BillingUsageResponse
@@ -219,8 +221,13 @@ public struct CopilotClient: QuotaProviderClient {
         let body = String(data: data, encoding: .utf8) ?? ""
         throw ProviderClientError(kind: .rateLimit, message: "Copilot quota API rate limited: \(body)")
       }
-      if [401, 403, 404].contains(response.statusCode) {
-        return nil
+      // Only "this auth mode is not accepted" falls through to the next mode.
+      // A server error must fail the refresh as `.api`: walking the whole
+      // fallback chain ended in a misleading `.auth` ("Configure a PAT…")
+      // during GitHub outages.
+      if ![401, 403, 404].contains(response.statusCode) {
+        let body = String(data: data, encoding: .utf8) ?? ""
+        throw ProviderClientError(kind: .api, message: "Copilot quota API error \(response.statusCode): \(body)")
       }
       return nil
     }
@@ -276,6 +283,9 @@ public struct CopilotClient: QuotaProviderClient {
         if response.statusCode == 429 {
           let body = String(data: data, encoding: .utf8) ?? ""
           throw ProviderClientError(kind: .rateLimit, message: "Copilot token exchange rate limited: \(body)")
+        }
+        if (500...599).contains(response.statusCode) {
+          throw ProviderClientError(kind: .api, message: "Copilot token exchange error \(response.statusCode)")
         }
         continue
       }

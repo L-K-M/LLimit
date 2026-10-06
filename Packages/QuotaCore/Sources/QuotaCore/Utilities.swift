@@ -73,19 +73,49 @@ func parseNumeric(_ value: Any?) -> Double? {
       return direct
     }
 
-    let pattern = "^-?\\d+(?:\\.\\d+)?"
-    guard
-      let regex = try? NSRegularExpression(pattern: pattern),
-      let match = regex.firstMatch(in: normalized, range: NSRange(location: 0, length: normalized.count)),
-      let range = Range(match.range, in: normalized)
-    else {
-      return nil
-    }
-    guard let parsed = Double(normalized[range]), parsed.isFinite else { return nil }
-    return parsed
+    return leadingNumberPrefix(in: normalized)
+
   default:
     return nil
   }
+}
+
+/// Extracts an optional minus, ASCII digits, and one dot-separated fractional
+/// group from the start of `text` (the previous regex, minus the per-call
+/// compile). Also immune to the grapheme-vs-UTF-16 length mismatch the old
+/// NSRange-based match had for non-BMP input.
+private func leadingNumberPrefix(in text: String) -> Double? {
+  let characters = Array(text)
+  var index = 0
+
+  if index < characters.count, characters[index] == "-" {
+    index += 1
+  }
+
+  let integerStart = index
+  while index < characters.count, isASCIIDigit(characters[index]) {
+    index += 1
+  }
+  let integerEnd = index
+
+  if index < characters.count, characters[index] == "." {
+    let fractionStart = index + 1
+    var fractionEnd = fractionStart
+    while fractionEnd < characters.count, isASCIIDigit(characters[fractionEnd]) {
+      fractionEnd += 1
+    }
+    if fractionEnd > fractionStart {
+      index = fractionEnd
+    }
+  }
+
+  guard integerEnd > integerStart else { return nil }
+  guard let parsed = Double(String(characters[..<index])), parsed.isFinite else { return nil }
+  return parsed
+}
+
+private func isASCIIDigit(_ character: Character) -> Bool {
+  ("0"..."9").contains(character)
 }
 
 func firstNumeric(in dictionary: [String: Any], keys: [String]) -> Double? {
@@ -110,6 +140,21 @@ func nonEmptyString(_ value: Any?) -> String? {
   guard let string = value as? String else { return nil }
   let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
   return trimmed.isEmpty ? nil : trimmed
+}
+
+/// Shared status-to-kind mapping so every client agrees: 401/403 mean the
+/// credential was rejected, 429 means back off, anything else is an API
+/// failure. Consumers keep stale data for `.rateLimit` but fail loudly for
+/// `.api` and `.auth`, so a mislabelled 429 changes user-visible behavior.
+func errorKind(forStatusCode statusCode: Int) -> QuotaErrorKind {
+  switch statusCode {
+  case 401, 403:
+    return .auth
+  case 429:
+    return .rateLimit
+  default:
+    return .api
+  }
 }
 
 func formatIntLike(_ value: Double?) -> String? {

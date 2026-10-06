@@ -41,7 +41,7 @@ public struct OpenAIClient: QuotaProviderClient {
     guard (200..<300).contains(response.statusCode) else {
       let body = String(data: data, encoding: .utf8) ?? ""
       let trimmedBody = body.trimmingCharacters(in: .whitespacesAndNewlines)
-      let kind: QuotaErrorKind = response.statusCode == 401 || response.statusCode == 403 ? .auth : .api
+      let kind = errorKind(forStatusCode: response.statusCode)
       if kind == .auth {
         throw ProviderClientError(
           kind: kind,
@@ -117,9 +117,17 @@ public struct OpenAIClient: QuotaProviderClient {
   }
 
   private func formatWindowName(seconds: Int) -> String {
-    let days = Int((Double(seconds) / 86_400.0).rounded())
-    if days >= 1 {
-      return "\(days)-day limit"
+    // Exact units first: rounding made a 45-minute window "1-hour limit" and
+    // a 25-hour window "1-day limit", which also miskeys window identity
+    // colors (QuotaWindowKind.classify parses this label).
+    if seconds >= 86_400, seconds % 86_400 == 0 {
+      return "\(seconds / 86_400)-day limit"
+    }
+    if seconds >= 3_600, seconds % 3_600 == 0 {
+      return "\(seconds / 3_600)-hour limit"
+    }
+    if seconds >= 60, seconds % 60 == 0 {
+      return "\(seconds / 60)-minute limit"
     }
 
     let hours = max(1, Int((Double(seconds) / 3_600.0).rounded()))

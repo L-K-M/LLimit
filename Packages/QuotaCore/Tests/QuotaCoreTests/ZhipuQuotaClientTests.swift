@@ -75,6 +75,62 @@ final class ZhipuQuotaClientTests: XCTestCase {
     )
   }
 
+  // 429 is a rate limit, not a generic API error: consumers keep stale data
+  // for .rateLimit but fail loudly for .api.
+  func testRateLimitedResponseMapsToRateLimitKind() async {
+    let endpoint = URL(string: "https://api.z.ai/api/monitor/usage/quota/limit")!
+    let client = ZhipuQuotaClient(
+      provider: .zai,
+      endpoint: endpoint,
+      accountLabel: "Z.ai",
+      httpClient: MockZhipuHTTP(status: 429, body: "{}", expectedKey: Self.apiKey)
+    )
+    let configuration = ProviderRuntimeConfiguration(
+      provider: .zai,
+      isEnabled: true,
+      credentials: [CredentialField.zaiAPIKey: Self.apiKey]
+    )
+
+    do {
+      _ = try await client.fetchUsage(configuration: configuration, now: now)
+      XCTFail("Expected a rate-limit failure")
+    } catch let error as ProviderClientError {
+      XCTAssertEqual(error.kind, .rateLimit)
+    } catch {
+      XCTFail("Unexpected error: \(error)")
+    }
+  }
+
+  // A deployment that reports success without a numeric code is a success;
+  // requiring `code == 200` rejected payloads it should have accepted.
+  func testSuccessWithoutCodeIsAccepted() async throws {
+    let body = """
+    {
+      "success": true,
+      "data": {
+        "limits": [
+          {"type": "TOKENS_LIMIT", "percentage": 40, "currentValue": 4000000, "usage": 10000000}
+        ]
+      }
+    }
+    """
+    let endpoint = URL(string: "https://api.z.ai/api/monitor/usage/quota/limit")!
+    let client = ZhipuQuotaClient(
+      provider: .zai,
+      endpoint: endpoint,
+      accountLabel: "Z.ai",
+      httpClient: MockZhipuHTTP(status: 200, body: body, expectedKey: Self.apiKey)
+    )
+    let configuration = ProviderRuntimeConfiguration(
+      provider: .zai,
+      isEnabled: true,
+      credentials: [CredentialField.zaiAPIKey: Self.apiKey]
+    )
+
+    let usage = try await client.fetchUsage(configuration: configuration, now: now)
+    XCTAssertEqual(usage.metrics.first?.remainingPercent, 60)
+  }
+
   /// Both endpoints are the ones `QuotaCoordinator.live()` registers: same path
   /// on two hosts, which is why one client serves both providers.
   private func fetch(_ body: String, provider: QuotaProvider = .zai) async throws -> ProviderUsage {

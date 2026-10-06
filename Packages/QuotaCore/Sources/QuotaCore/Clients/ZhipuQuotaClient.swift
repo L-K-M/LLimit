@@ -36,16 +36,18 @@ public struct ZhipuQuotaClient: QuotaProviderClient {
     let (data, response) = try await httpClient.data(for: request)
     guard (200..<300).contains(response.statusCode) else {
       let body = String(data: data, encoding: .utf8) ?? ""
-      let kind: QuotaErrorKind = response.statusCode == 401 || response.statusCode == 403 ? .auth : .api
-      throw ProviderClientError(kind: kind, message: "\(provider.displayName) API error \(response.statusCode): \(body)")
+      throw ProviderClientError(
+        kind: errorKind(forStatusCode: response.statusCode),
+        message: "\(provider.displayName) API error \(response.statusCode): \(body)"
+      )
     }
 
     let payload = try parseJSONObject(from: data)
-    guard
-      (payload["success"] as? Bool) == true,
-      let responseCode = parseNumeric(payload["code"]),
-      responseCode == 200
-    else {
+    // `success` is authoritative when present; a deployment that omits it
+    // in favor of the numeric `code` is still accepted.
+    let successFlag = payload["success"] as? Bool
+    let codeOK = parseNumeric(payload["code"]).map { $0 == 200 }
+    guard successFlag ?? codeOK ?? false else {
       let message = payload["msg"] as? String ?? "Unknown response"
       throw ProviderClientError(kind: .api, message: "\(provider.displayName) API returned non-success payload: \(message)")
     }

@@ -82,6 +82,34 @@ final class CopilotClientTests: XCTestCase {
     XCTAssertEqual(premium?.totalDisplay, "300") // pro tier limit
     XCTAssertEqual(premium?.remainingPercent, 89) // (300-33.75)/300 -> 88.75 -> 89
   }
+
+  // Regression test: a GitHub server error used to fall through the whole
+  // auth-mode fallback chain and surface as `.auth` ("Configure a PAT…"),
+  // telling the user their token was broken during an outage.
+  func testInternalServerErrorFailsAsAPIError() async {
+    let client = CopilotClient(httpClient: MockHTTP(status: 503, body: "upstream unavailable"))
+    do {
+      _ = try await client.fetchUsage(configuration: oauthConfig(), now: now)
+      XCTFail("Expected an API failure")
+    } catch let error as ProviderClientError {
+      XCTAssertEqual(error.kind, .api)
+      XCTAssertTrue(error.message.contains("503"))
+    } catch {
+      XCTFail("Unexpected error: \(error)")
+    }
+  }
+
+  func testBillingRateLimitMapsToRateLimit() async {
+    let client = CopilotClient(httpClient: MockHTTP(status: 429, body: "rate limited"))
+    do {
+      _ = try await client.fetchUsage(configuration: patConfig(), now: now)
+      XCTFail("Expected a rate-limit failure")
+    } catch let error as ProviderClientError {
+      XCTAssertEqual(error.kind, .rateLimit)
+    } catch {
+      XCTFail("Unexpected error: \(error)")
+    }
+  }
 }
 
 private struct MockHTTP: HTTPClient {

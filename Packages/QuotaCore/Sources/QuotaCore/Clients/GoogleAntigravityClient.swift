@@ -45,7 +45,7 @@ public struct GoogleAntigravityClient: QuotaProviderClient {
     }
 
     var metrics: [UsageMetric] = []
-    var maxUsage = 0
+    var maxUsagePercent: Int?
 
     for spec in modelSpecs {
       var modelInfo = modelsObject[spec.key] as? [String: Any]
@@ -56,22 +56,35 @@ public struct GoogleAntigravityClient: QuotaProviderClient {
       guard let modelInfo else { continue }
 
       let quotaInfo = modelInfo["quotaInfo"] as? [String: Any]
-      let remainingFraction = parseNumeric(quotaInfo?["remainingFraction"]) ?? 0
-      guard let remainingPercent = roundedPercent(remainingFraction * 100) else { continue }
-      let usagePercent = 100 - remainingPercent
-      maxUsage = max(maxUsage, usagePercent)
-
       let resetDate = parseISO8601(quotaInfo?["resetTime"] as? String)
+      let resetIn = resetDate.map { formatResetCountdown(to: $0, now: now) }
 
-      metrics.append(
-        UsageMetric(
-          id: spec.key,
-          label: spec.label,
-          remainingPercent: remainingPercent,
-          resetAt: resetDate,
-          resetIn: resetDate.map { formatResetCountdown(to: $0, now: now) }
+      if let remainingFraction = parseNumeric(quotaInfo?["remainingFraction"]),
+         let remainingPercent = roundedPercent(remainingFraction * 100) {
+        let usagePercent = 100 - remainingPercent
+        maxUsagePercent = max(maxUsagePercent ?? 0, usagePercent)
+        metrics.append(
+          UsageMetric(
+            id: spec.key,
+            label: spec.label,
+            remainingPercent: remainingPercent,
+            resetAt: resetDate,
+            resetIn: resetIn
+          )
         )
-      )
+      } else {
+        // A model without a parsable remaining fraction is unknown, never
+        // exhausted: fabricating zero showed the account as fully depleted
+        // and raised the high-usage warning on schema drift.
+        metrics.append(
+          UsageMetric(
+            id: spec.key,
+            label: spec.label,
+            resetAt: resetDate,
+            resetIn: resetIn
+          )
+        )
+      }
     }
 
     if metrics.isEmpty {
@@ -84,8 +97,8 @@ public struct GoogleAntigravityClient: QuotaProviderClient {
       title: configuration.displayName,
       subtitle: email,
       metrics: metrics,
-      maxUsagePercent: maxUsage,
-      warning: maxUsage >= 80 ? "High usage" : nil,
+      maxUsagePercent: maxUsagePercent,
+      warning: (maxUsagePercent ?? 0) >= 80 ? "High usage" : nil,
       fetchedAt: now
     )
   }
