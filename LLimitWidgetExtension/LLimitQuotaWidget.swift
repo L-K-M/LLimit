@@ -485,10 +485,12 @@ private enum DashboardEmptyState {
   case allUnavailable(failureCount: Int)
 
   init(snapshot: QuotaSnapshot?, accounts: [ProviderAccount]) {
-    if let snapshot, !snapshot.failures.isEmpty {
-      self = .allUnavailable(failureCount: snapshot.failures.count)
-    } else if accounts.isEmpty {
+    // Zero configured accounts wins over a lingering failure-only snapshot,
+    // so removal can't shadow the "add an account" guidance.
+    if accounts.isEmpty {
       self = .noAccounts
+    } else if let snapshot, !snapshot.failures.isEmpty {
+      self = .allUnavailable(failureCount: snapshot.failures.count)
     } else {
       self = .waitingForData
     }
