@@ -37,12 +37,12 @@ public enum LimitKindPalette: String, CaseIterable, Codable, Sendable {
       return .default
     case .ocean:
       return LimitKindColors(
-        sessionHexColor: "#3ED8F0",
-        dailyHexColor: "#2FB6C9",
-        weeklyHexColor: "#4E8BFF",
-        monthlyHexColor: "#8B7BFF",
-        otherHexColors: ["#5FD0A8", "#2E6FD8"],
-        unlimitedHexColor: "#C2E5FF"
+        sessionHexColor: "#35D0E0",
+        dailyHexColor: "#2E86E0",
+        weeklyHexColor: "#6C5CE7",
+        monthlyHexColor: "#B14AED",
+        otherHexColors: ["#31C48D", "#1B5FA8"],
+        unlimitedHexColor: "#B3E5FC"
       )
     case .sunset:
       return LimitKindColors(
