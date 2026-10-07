@@ -188,11 +188,14 @@ public enum HeadroomRanking {
       candidates.append(candidate)
     }
 
-    // An account that failed before it ever reported usage exists only as a failure.
-    let reported = Set(snapshot.providers.map { AccountKey(provider: $0.provider, accountID: $0.accountID) })
-    for failure in snapshot.failures
-    where !reported.contains(AccountKey(provider: failure.provider, accountID: failure.accountID))
-      && filter.includes(accountID: failure.accountID, provider: failure.provider) {
+    // An account that failed before it ever reported usage exists only as a
+    // failure. Accounts that reported are handled above, and repeated failures
+    // of one account count once: its first failure, as in the lookup above.
+    var seen = Set(snapshot.providers.map { AccountKey(provider: $0.provider, accountID: $0.accountID) })
+    for failure in snapshot.failures where filter.includes(accountID: failure.accountID, provider: failure.provider) {
+      guard seen.insert(AccountKey(provider: failure.provider, accountID: failure.accountID)).inserted else {
+        continue
+      }
       exclusions.append(
         Exclusion(
           accountID: failure.accountID,

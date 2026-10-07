@@ -109,6 +109,14 @@ final class StatusTemplateTests: XCTestCase {
     )
   }
 
+  func testClassUsesTheJSONContractCutoffs() {
+    let accounts = [14, 15, 39, 40].map { (percent: Int) -> ProviderUsage in
+      usage("p\(percent)", title: "P\(percent)", metrics: [UsageMetric(id: "weekly", label: "Weekly", remainingPercent: percent)])
+    }
+
+    XCTAssertEqual(render("{name} {class}", accounts, separator: ", "), "P14 critical, P15 warning, P39 warning, P40 ok")
+  }
+
   func testAFailureMarksOnlyTheAccountWithTheSameProviderAndID() {
     let claude = usage("work", title: "Claude", metrics: [UsageMetric(id: "weekly", label: "Weekly", remainingPercent: 90)])
     let openAI = usage("work", provider: .openAI, title: "OpenAI", metrics: [UsageMetric(id: "weekly", label: "Weekly", remainingPercent: 90)])

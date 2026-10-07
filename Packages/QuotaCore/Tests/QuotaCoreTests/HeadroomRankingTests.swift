@@ -207,6 +207,20 @@ final class HeadroomRankingTests: XCTestCase {
     XCTAssertEqual(ranking.exclusions.map(\.reason), [.failing(.auth), .failing(.network)])
   }
 
+  func testAccountThatFailedRepeatedlyIsExcludedOnce() {
+    let ranking = rank(
+      [],
+      failures: [
+        ProviderFailure(accountID: "z", provider: .zai, kind: .auth, message: "401"),
+        ProviderFailure(accountID: "z", provider: .zai, kind: .network, message: "offline"),
+        ProviderFailure(accountID: "z", provider: .kimi, kind: .auth, message: "401")
+      ]
+    )
+
+    XCTAssertEqual(ranking.exclusions.map(\.provider), [.zai, .kimi])
+    XCTAssertEqual(ranking.exclusions.map(\.reason), [.failing(.auth), .failing(.auth)])
+  }
+
   func testLegacyProviderKeyedEntriesStillPairUp() throws {
     // Snapshots from before multi-account support carry no accountID; both
     // sides decode it as the provider's raw value.

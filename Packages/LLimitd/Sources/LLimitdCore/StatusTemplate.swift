@@ -39,8 +39,9 @@ public enum StatusTemplate {
   /// `llimit pick`'s default line: account id, a tab, account name.
   public static let pickDefault = "{id}\t{name}"
 
-  /// The `--json` contract's class cutoffs, so a template's `{class}` and the
-  /// bar modules agree on when an account turns warning or critical.
+  /// Mirrors the class cutoffs in `StatusRenderer.waybarObject` (the `--json`
+  /// contract, the source of truth), so a template's `{class}` and the bar
+  /// modules agree on when an account turns warning or critical.
   private static let criticalBelowPercent = 15
   private static let warningBelowPercent = 40
 

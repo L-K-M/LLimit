@@ -11,13 +11,13 @@ import Darwin
 // only the credential-free snapshot. Bars and prompts poll them constantly, so
 // they never open the settings file.
 
-/// The snapshot as last written by a refresh. An unreadable file is reported on
-/// stderr and rendered as "no data", as `llimit status` always has.
-func loadDisplaySnapshot() -> QuotaSnapshot? {
+/// The snapshot as last written by a refresh. An unreadable file is reported
+/// through `warn` and rendered as "no data", as `llimit status` always has.
+func loadDisplaySnapshot(warn: (String) -> Void = writeStandardError) -> QuotaSnapshot? {
   do {
     return try SnapshotStore(fileURL: LinuxPaths().snapshotFileURL).load()
   } catch {
-    writeStandardError("llimit: could not read the snapshot: \(error.localizedDescription)")
+    warn("llimit: could not read the snapshot: \(error.localizedDescription)")
     return nil
   }
 }
@@ -26,18 +26,29 @@ func writeStandardError(_ line: String) {
   FileHandle.standardError.write(Data((line + "\n").utf8))
 }
 
+/// Writes each distinct diagnostic once, so `--watch` does not repeat the same
+/// warning on stderr every interval.
+final class StatusWarnings {
+  private var written: Set<String> = []
+
+  func warn(_ line: String) {
+    guard written.insert(line).inserted else { return }
+    writeStandardError(line)
+  }
+}
+
 /// One `llimit status` render. Flushed so a `--watch` consumer reading a pipe
 /// gets each render as it happens instead of when the stdio buffer fills.
-func printStatus(_ options: StatusOptions) {
+func printStatus(_ options: StatusOptions, warnings: StatusWarnings) {
   let rendering: StatusCommand.Rendering
   do {
-    rendering = try StatusCommand.render(options, snapshot: loadDisplaySnapshot(), now: Date())
+    rendering = try StatusCommand.render(options, snapshot: loadDisplaySnapshot(warn: warnings.warn), now: Date())
   } catch {
     fail(error.localizedDescription)
   }
 
   for target in rendering.unmatchedTargets {
-    writeStandardError("llimit: no data for account \"\(target)\"")
+    warnings.warn("llimit: no data for account \"\(target)\"")
   }
   print(rendering.text)
   fflush(stdout)

@@ -95,7 +95,7 @@ public struct StatusOptions: Equatable, Sendable {
       case "--json":
         wantsJSON = true
       case "--format":
-        template = try CommandLineValues.value(after: arg, in: args, at: &index)
+        template = try CommandLineValues.template(after: arg, in: args, at: &index)
       case "--account":
         options.accountTargets.append(try CommandLineValues.value(after: arg, in: args, at: &index))
       case "--worst":
@@ -147,7 +147,8 @@ public enum StatusCommand {
   public struct Rendering: Equatable, Sendable {
     public let text: String
     /// `--account` values that match nothing in the snapshot (for example an
-    /// account that has not been refreshed yet). They select nothing.
+    /// account that has not been refreshed yet, or a provider without
+    /// accounts). They select nothing.
     public let unmatchedTargets: [String]
   }
 
@@ -162,6 +163,8 @@ public enum StatusCommand {
       var accountIDs: Set<String> = []
       for target in options.accountTargets {
         switch AccountTarget.resolve(target, in: snapshot) {
+        case .matched(let ids) where ids.isEmpty:
+          unmatched.append(target)
         case .matched(let ids):
           accountIDs.formUnion(ids)
         case .ambiguous(let ids):
@@ -328,7 +331,7 @@ public struct PickOptions: Equatable, Sendable {
           options.providers = (options.providers ?? []).union([provider])
         }
       case "--format":
-        options.template = try CommandLineValues.value(after: arg, in: args, at: &index)
+        options.template = try CommandLineValues.template(after: arg, in: args, at: &index)
       default:
         throw CommandLineError("unknown pick option: \(arg)")
       }
@@ -466,6 +469,15 @@ enum CommandLineValues {
     }
     index += 1
     return args[index]
+  }
+
+  /// An empty template would print blank lines that look like success.
+  static func template(after option: String, in args: [String], at index: inout Int) throws -> String {
+    let template = try value(after: option, in: args, at: &index)
+    guard !template.isEmpty else {
+      throw CommandLineError("\(option) needs a non-empty template")
+    }
+    return template
   }
 
   static func kind(_ text: String) throws -> QuotaWindowKind {

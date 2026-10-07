@@ -33,7 +33,7 @@ func printUsage() {
       llimit accounts remove <account-id>
       llimit refresh
       llimit status [--json | --format <template> [--separator <text>]] [--account <id|provider>]…
-                    [--worst] [--kind <kind>] [--watch [seconds]]
+                    [--worst] [--kind <kind>] [--watch [<duration>]]
       llimit daemon
       llimit paths
       llimit check <account-id|provider> [--min <pct>] [--max-age <duration>] [--kind <kind>]
@@ -41,9 +41,10 @@ func printUsage() {
                   [--format <template>]
 
     check and pick exit 0 ok, 1 below --min (default 1), 2 stale (older than --max-age,
-    default 2h) or failing, 3 no data, 64 usage error. Window kinds: session, daily,
-    weekly, monthly, other. Template placeholders: {id} {name} {provider} {remaining}
-    {metric} {kind} {reset} {class} {age} {stale}.
+    default 2h) or failing, 3 no data, 64 usage error. Durations: 90 or 90s, 30m, 2h,
+    1d; --watch defaults to 60s. Window kinds: session, daily, weekly, monthly, other.
+    Template placeholders: {id} {name} {provider} {remaining} {metric} {kind} {reset}
+    {class} {age} {stale}.
 
     Providers: \(QuotaProvider.allCases.map(\.rawValue).joined(separator: ", "))
     Account IDs may be shortened to any unique prefix.
@@ -348,8 +349,9 @@ func runStatus(_ args: [String]) {
     fail(error.localizedDescription)
   }
 
+  let warnings = StatusWarnings()
   while true {
-    printStatus(options)
+    printStatus(options, warnings: warnings)
     guard let interval = options.watchInterval else { return }
     Thread.sleep(forTimeInterval: interval)
   }

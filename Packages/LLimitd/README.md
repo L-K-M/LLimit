@@ -156,9 +156,12 @@ The other status options also work with the default and `--json` output:
 - `--worst` shows only the account with the least quota left, including stale or
   failing accounts with data on record.
 - `--kind <kind>` ranks `--worst` and fills `{remaining}` from one window kind.
-- `--watch [seconds]` re-renders every interval (default 60) until interrupted,
-  flushing each render, for consumers that read a stream (i3blocks
-  `interval=persist`, waybar without `interval`).
+- `--watch [duration]` re-renders every interval (default 60s; a bare number is
+  seconds, as in `--max-age`) until interrupted, flushing each render, for
+  consumers that read a stream (i3blocks `interval=persist`, waybar without
+  `interval`). Each distinct warning is printed to stderr only once.
+- A provider or account with nothing in the snapshot selects nothing and gets a
+  warning on stderr. An empty `--format` template is an error.
 
 Without these options, `llimit status` and `llimit status --json` print exactly
 what they always have.

@@ -61,6 +61,15 @@ final class ScriptCommandsTests: XCTestCase {
     XCTAssertEqual(QuotaCheckStatus.usage.rawValue, 64)
   }
 
+  func testCheckingAProviderWithoutAccountsIsNoDataNotAnotherProvidersQuota() throws {
+    // The fixture has fresh Claude and OpenAI accounts with quota left, but no Venice.
+    let verdict = try check(["venice", "--min", "0"])
+
+    XCTAssertEqual(verdict.status, .noData)
+    XCTAssertNil(verdict.candidate)
+    XCTAssertEqual(try pick(["--provider", "venice", "--min", "0"]).status, .noData)
+  }
+
   func testCheckingAProviderUsesItsBestAccount() throws {
     let verdict = try check(["anthropic", "--min", "20"])
 
@@ -152,7 +161,7 @@ final class ScriptCommandsTests: XCTestCase {
     XCTAssertEqual(defaults.criteria.maxAge, 7_200)
     XCTAssertEqual(defaults.template, "{id}\t{name}")
 
-    for bad in [["--provider", "claude"], ["--provider", ","], ["--kind", "yearly"], ["--min", "101"], ["--min", "x"], ["--max-age", "0"], ["--max-age"], ["extra"]] {
+    for bad in [["--provider", "claude"], ["--provider", ","], ["--format", ""], ["--kind", "yearly"], ["--min", "101"], ["--min", "x"], ["--max-age", "0"], ["--max-age"], ["extra"]] {
       XCTAssertThrowsError(try PickOptions.parse(bad), "\(bad)")
     }
   }
@@ -205,6 +214,11 @@ final class ScriptCommandsTests: XCTestCase {
     XCTAssertEqual(unmatched.text, "")
     XCTAssertEqual(unmatched.unmatchedTargets, ["nope"])
 
+    // A provider with no account in the snapshot selects nothing, and says so.
+    let noVenice = try status(["--format", "{id}", "--account", "venice", "--account", "bb33"])
+    XCTAssertEqual(noVenice.text, "bb33")
+    XCTAssertEqual(noVenice.unmatchedTargets, ["venice"])
+
     XCTAssertThrowsError(try status(["--account", "aa"]))
   }
 
@@ -239,7 +253,7 @@ final class ScriptCommandsTests: XCTestCase {
     XCTAssertEqual(try StatusOptions.parse(["--watch", "2m"]).watchInterval, 120)
     XCTAssertEqual(try StatusOptions.parse(["--worst", "--kind", "daily"]).selection, .worst)
 
-    for bad in [["--json", "--format", "x"], ["--separator", "x"], ["--kind", "weekly"], ["--watch", "0.5"], ["--watch", "soon"], ["--format"], ["--bogus"], ["stray"]] {
+    for bad in [["--json", "--format", "x"], ["--format", ""], ["--separator", "x"], ["--kind", "weekly"], ["--watch", "0.5"], ["--watch", "soon"], ["--format"], ["--bogus"], ["stray"]] {
       XCTAssertThrowsError(try StatusOptions.parse(bad), "\(bad)")
     }
   }
