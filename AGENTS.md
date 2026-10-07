@@ -330,7 +330,10 @@ Requires macOS 14+, Xcode 16+, [XcodeGen](https://github.com/yonaskolb/XcodeGen)
   an exact color scheme, and the chart deliberately has no legend of its own.
   The menu bar graph is identity-colored too: each bar wears its account's
   primary (longest bounded window) color, follows the persisted Settings account
-  order, and carries the level in its height. Reordering accounts must not change
+  order, and carries the level in its height. Failing, stale, and exhausted
+  bars are marked by shape (dashed frame, thin stem, outline) plus the reserved
+  status accents, never by repainting the fill (rules in QuotaCore
+  `MenuBarGraph`). Reordering accounts must not change
   `stableAccountOrder`, automatic tile assignments, or color variants. Magnitude is
   geometry (arc, bar, line height); danger is the reserved status accents
   (warning chips, low-value text). `WidgetRingColors` survives only for

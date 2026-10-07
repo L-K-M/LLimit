@@ -29,7 +29,8 @@ struct LLimitApp: App {
         snapshot: model.snapshot,
         kindColors: model.widgetStyle.limitKindColors,
         primaryColors: model.primaryColorsByAccountID,
-        accounts: model.providerAccounts
+        accounts: model.providerAccounts,
+        refreshIntervalMinutes: model.refreshIntervalMinutes
       )
     }
     .menuBarExtraStyle(.window)
@@ -165,71 +166,217 @@ private struct MenuBarIcon: View {
   let kindColors: LimitKindColors
   let primaryColors: [String: String]
   let accounts: [ProviderAccount]
+  let refreshIntervalMinutes: Int
+
+  /// Refreshes re-render the label, but they can stall (sleep, App Nap, a
+  /// broken schedule) exactly when data goes stale. This tick re-judges
+  /// staleness meanwhile and re-renders only when a bar's state changes.
+  private static let stalenessTicks = Timer.publish(every: 60, tolerance: 15, on: .main, in: .common).autoconnect()
+
+  /// The latest tick that changed a bar's state.
+  @State private var stalenessCheckDate = Date()
 
   var body: some View {
-    Image(nsImage: iconImage())
-      .accessibilityLabel("LLimit")
+    let bars = projectedBars(at: max(stalenessCheckDate, Date()))
+    let toolTip = MenuBarGraph.tooltip(for: bars)
+    let accessibilityLabel = MenuBarGraph.accessibilityLabel(for: bars)
+
+    return Image(nsImage: iconImage(for: bars, accessibilityLabel: accessibilityLabel))
+      .accessibilityLabel(accessibilityLabel)
+      .help(toolTip)
+      .onChange(of: [toolTip, accessibilityLabel], initial: true) {
+        StatusItemButtonSummary.apply(toolTip: toolTip, accessibilityLabel: accessibilityLabel)
+      }
+      .onReceive(Self.stalenessTicks) { date in
+        // For a given snapshot, time only moves bars from current to stale, so
+        // any difference since the last state-changing tick means the drawn
+        // state is out of date.
+        if projectedBars(at: date).map(\.freshness) != projectedBars(at: stalenessCheckDate).map(\.freshness) {
+          stalenessCheckDate = date
+        }
+      }
   }
 
-  private func iconImage() -> NSImage {
-    let barWidth: CGFloat = 3
-    let barSpacing: CGFloat = 1.5
-    let iconHeight: CGFloat = 16
-    let cornerRadius: CGFloat = 1
+  private func projectedBars(at date: Date) -> [MenuBarGraph.Bar] {
+    MenuBarGraph.bars(
+      snapshot: snapshot,
+      accounts: accounts,
+      now: date,
+      staleAfter: MenuBarGraph.staleInterval(refreshIntervalMinutes: refreshIntervalMinutes)
+    )
+  }
 
-    let providers = orderedProviders()
-    guard !providers.isEmpty else {
-      return fallbackIcon()
+  private func iconImage(for bars: [MenuBarGraph.Bar], accessibilityLabel: String) -> NSImage {
+    guard !bars.isEmpty else {
+      return fallbackIcon(accessibilityLabel: accessibilityLabel)
     }
 
-    let totalWidth = CGFloat(providers.count) * barWidth + CGFloat(max(0, providers.count - 1)) * barSpacing
+    // Color matches the account's primary ring and chart line regardless of
+    // which limit is most constrained.
+    let accents = bars.map { bar in
+      NSColor(LimitKindColorScheme.primaryAccountAccent(
+        for: bar.usage?.metrics ?? [],
+        colors: kindColors,
+        step: accountColorStep(forAccountID: bar.accountID, in: accounts),
+        primaryHexColor: primaryColors[bar.accountID]
+      ))
+    }
 
-    let image = NSImage(size: NSSize(width: totalWidth, height: iconHeight), flipped: false) { _ in
-      for (index, provider) in providers.enumerated() {
-        let x = CGFloat(index) * (barWidth + barSpacing)
-        // Height carries the level; color matches the account's primary ring
-        // and chart line regardless of which limit is most constrained.
-        let accent = LimitKindColorScheme.primaryAccountAccent(
-          for: provider.metrics,
-          colors: kindColors,
-          step: accountColorStep(forAccountID: provider.accountID, in: accounts),
-          primaryHexColor: primaryColors[provider.accountID]
-        )
-        if let remaining = MenuBarQuotaStyling.remainingPercent(for: provider) {
-          let normalized = CGFloat(max(0, min(100, remaining))) / 100.0
-          let barHeight = max(2, normalized * iconHeight)
-          let barRect = NSRect(x: x, y: 0, width: barWidth, height: barHeight)
-          let barPath = NSBezierPath(roundedRect: barRect, xRadius: cornerRadius, yRadius: cornerRadius)
-          NSColor(accent).setFill()
-          barPath.fill()
-        } else {
-          // A balance without a quota total has no meaningful bar height.
-          let marker = NSBezierPath(ovalIn: NSRect(x: x + 0.5, y: 6.5, width: barWidth - 1, height: 3))
-          marker.lineWidth = 1
-          NSColor(accent).setStroke()
-          marker.stroke()
-        }
+    let image = NSImage(size: MenuBarBarRenderer.imageSize(barCount: bars.count), flipped: false) { _ in
+      for (index, bar) in bars.enumerated() {
+        MenuBarBarRenderer.draw(bar, accent: accents[index], in: MenuBarBarRenderer.column(at: index))
       }
       return true
     }
 
     image.isTemplate = false
+    image.accessibilityDescription = accessibilityLabel
     return image
   }
 
-  private func orderedProviders() -> [ProviderUsage] {
-    guard let snapshot else {
-      return []
-    }
-
-    return orderedUsageForAccounts(snapshot.providers, accounts: accounts)
-  }
-
-  private func fallbackIcon() -> NSImage {
-    let image = NSImage(systemSymbolName: "chart.bar.fill", accessibilityDescription: "LLimit")
+  private func fallbackIcon(accessibilityLabel: String) -> NSImage {
+    let image = NSImage(systemSymbolName: "chart.bar.fill", accessibilityDescription: accessibilityLabel)
       ?? NSImage(size: NSSize(width: 18, height: 16))
     image.isTemplate = true
     return image
+  }
+}
+
+/// Draws one status-item bar per account. Height carries the level and the
+/// account's identity color stays on the fill. State never relies on hue alone:
+/// - current: full-width fill on a faint full-height track
+/// - stale: a 1 pt stem at the last known level instead of the full fill
+/// - failing: a dashed orange frame replaces the track, with the stem when a
+///   level was carried from an earlier success
+/// - exhausted: a red frame around the empty track
+/// - amount without a total: a dotted full-height outline, since it has no height
+private enum MenuBarBarRenderer {
+  private static let barWidth: CGFloat = 3
+  private static let barSpacing: CGFloat = 1.5
+  private static let iconHeight: CGFloat = 16
+  private static let cornerRadius: CGFloat = 1
+  private static let outlineWidth: CGFloat = 1
+  private static let stemWidth: CGFloat = 1
+  private static let outdatedAlpha: CGFloat = 0.5
+  private static let failingDash: [CGFloat] = [2, 1.5]
+  private static let amountDash: [CGFloat] = [1, 1.5]
+  /// The image is not a template, and the menu bar's appearance is not
+  /// guaranteed to reach its drawing, so the track is a fixed mid-gray that
+  /// reads on light and dark menu bars instead of a dynamic label color.
+  private static let trackColor = NSColor(white: 0.5, alpha: 0.35)
+  /// Reserved status accents, fixed in sRGB like the track: the dashboard's
+  /// failure orange (SwiftUI `.orange` under its forced dark scheme) and its
+  /// low-value red.
+  private static let failingColor = NSColor(srgbRed: 1.0, green: 159.0 / 255.0, blue: 10.0 / 255.0, alpha: 1)
+  private static let exhaustedColor = NSColor(srgbRed: 1.0, green: 0.36, blue: 0.32, alpha: 1)
+
+  static func imageSize(barCount: Int) -> NSSize {
+    let width = CGFloat(barCount) * barWidth + CGFloat(max(0, barCount - 1)) * barSpacing
+    return NSSize(width: width, height: iconHeight)
+  }
+
+  static func column(at index: Int) -> NSRect {
+    NSRect(x: CGFloat(index) * (barWidth + barSpacing), y: 0, width: barWidth, height: iconHeight)
+  }
+
+  static func draw(_ bar: MenuBarGraph.Bar, accent: NSColor, in column: NSRect) {
+    let isFailing = bar.freshness.isFailing
+    if isFailing {
+      stroke(column, color: failingColor, dash: failingDash)
+    } else {
+      fill(column, color: trackColor)
+    }
+
+    guard let height = MenuBarGraph.barHeight(for: bar.level, fullHeight: Double(column.height)) else {
+      // A failing bar's frame already outlines the column.
+      if bar.level == .amountOnly, !isFailing {
+        let alpha = bar.freshness == .current ? 1 : outdatedAlpha
+        stroke(column, color: accent.withAlphaComponent(alpha), dash: amountDash)
+      }
+      return
+    }
+
+    guard height > 0 else {
+      if !isFailing {
+        stroke(column, color: exhaustedColor, dash: nil)
+      }
+      return
+    }
+
+    if bar.freshness == .current {
+      fill(NSRect(x: column.minX, y: column.minY, width: column.width, height: CGFloat(height)), color: accent)
+      return
+    }
+
+    // Centered so it clears a failing frame's side edges; like a current fill,
+    // it rises from the bottom edge.
+    let stem = NSRect(x: column.midX - stemWidth / 2, y: column.minY, width: stemWidth, height: CGFloat(height))
+    fill(stem, color: accent)
+  }
+
+  private static func fill(_ rect: NSRect, color: NSColor) {
+    color.setFill()
+    NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius).fill()
+  }
+
+  /// Strokes inside `rect`, so an outline keeps the bar's footprint.
+  private static func stroke(_ rect: NSRect, color: NSColor, dash: [CGFloat]?) {
+    let inset = outlineWidth / 2
+    let path = NSBezierPath(roundedRect: rect.insetBy(dx: inset, dy: inset), xRadius: cornerRadius, yRadius: cornerRadius)
+    path.lineWidth = outlineWidth
+    if let dash {
+      path.setLineDash(dash, count: dash.count, phase: 0)
+    }
+    color.setStroke()
+    path.stroke()
+  }
+}
+
+/// MenuBarExtra exposes no NSStatusItem, and its label is turned into the
+/// status button's image, so `.help` and accessibility modifiers may not reach
+/// the button. Uses public AppKit API only.
+/// Assumption: LLimit owns the only status item in this process, so every
+/// NSStatusBarButton (one per display) is its button. Revisit this scan if
+/// another status item, or a framework that creates one, is added.
+@MainActor
+private enum StatusItemButtonSummary {
+  /// The button can appear a few runloop turns after launch, so attempts follow
+  /// a short bounded schedule and stop at the first one that finds it.
+  private static let attemptDelays: [Duration] = [.zero, .milliseconds(250), .seconds(1), .seconds(3), .seconds(10)]
+  private static var pendingApply: Task<Void, Never>?
+
+  /// Applies the latest summary, replacing any attempt still waiting for the button.
+  static func apply(toolTip: String, accessibilityLabel: String) {
+    pendingApply?.cancel()
+    pendingApply = Task {
+      for delay in attemptDelays {
+        try? await Task.sleep(for: delay)
+        guard !Task.isCancelled else { return }
+        if applyToButtons(toolTip: toolTip, accessibilityLabel: accessibilityLabel) {
+          return
+        }
+      }
+    }
+  }
+
+  private static func applyToButtons(toolTip: String, accessibilityLabel: String) -> Bool {
+    var applied = false
+    for window in NSApp.windows {
+      guard let contentView = window.contentView else { continue }
+      for button in statusBarButtons(in: contentView) {
+        button.toolTip = toolTip
+        button.setAccessibilityLabel(accessibilityLabel)
+        applied = true
+      }
+    }
+    return applied
+  }
+
+  private static func statusBarButtons(in view: NSView) -> [NSStatusBarButton] {
+    if let button = view as? NSStatusBarButton {
+      return [button]
+    }
+    return view.subviews.flatMap { statusBarButtons(in: $0) }
   }
 }
 
