@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Keep llimit --version aligned with project.yml or a release tag.
+"""Keep llimit --version aligned with project.yml, a release tag or static CI.
 
 Usage: python3 scripts/stamp-llimit-version.py [VERSION] [--check]
 """
@@ -10,10 +10,12 @@ import re
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 VERSION_FILE = ROOT / "Packages/LLimitd/Sources/LLimitdCore/Version.swift"
 DECLARATION = re.compile(r'(public static let version = ")[^"]+("\s*)')
+# The static job packages this explicit Debian prerelease, outside release semver.
+CI_VERSION = "0.0.0~ci"
 
 
 def stamped(source, version):
-    if not re.fullmatch(r"[0-9]+\.[0-9]+(?:\.[0-9]+)?(?:-[0-9A-Za-z.]+)?", version):
+    if version != CI_VERSION and not re.fullmatch(r"[0-9]+\.[0-9]+(?:\.[0-9]+)?(?:-[0-9A-Za-z.]+)?", version):
         raise ValueError("invalid release version")
     updated, count = DECLARATION.subn(lambda match: match[1] + version + match[2], source)
     if count != 1:

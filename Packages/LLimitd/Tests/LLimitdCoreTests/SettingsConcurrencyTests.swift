@@ -150,15 +150,60 @@ final class SettingsConcurrencyTests: XCTestCase {
     try await assertObsoleteFetchRejected(.disable)
   }
 
+  func testCancelledOldAuthResultDoesNotReviveUpdatedAccount() async throws {
+    try await assertObsoleteFetchRejected(.replaceCredentials, outcome: .failure, completion: .cancelled)
+  }
+
+  func testCancelledEmptyFirstRefreshDoesNotCreateDisplayStores() async throws {
+    let daemon = makeDaemon(coordinator: QuotaCoordinator(clients: []))
+    daemon.loadConfiguration()
+    _ = try daemon.editingSettings { try $0.addAccount(provider: .zhipu, credentials: [CredentialField.zhipuAPIKey: "test-key"]) }
+    let cycle = Task {
+      withUnsafeCurrentTask { $0?.cancel() }
+      await daemon.refreshNow()
+    }
+    await cycle.value
+
+    XCTAssertNil(daemon.snapshot)
+    XCTAssertFalse(FileManager.default.fileExists(atPath: paths.snapshotFileURL.path))
+    XCTAssertFalse(FileManager.default.fileExists(atPath: paths.historyFileURL.path))
+  }
+
+  func testCancellationDoesNotDropCompletedAuthFailure() async throws {
+    let gate = FetchGate()
+    let daemon = makeDaemon(coordinator: QuotaCoordinator(clients: [
+      GatedClient(provider: .zhipu, gate: gate, outcome: .failure)
+    ]))
+    daemon.loadConfiguration()
+    let account = try daemon.editingSettings { try $0.addAccount(provider: .zhipu, credentials: [CredentialField.zhipuAPIKey: "test-key"]) }
+    let cycle = Task { await daemon.refreshNow() }
+    await gate.waitUntilEntered()
+    cycle.cancel()
+    gate.release()
+    await cycle.value
+
+    let snapshot = try XCTUnwrap(SnapshotStore(fileURL: paths.snapshotFileURL).load(policy: .preserve))
+    XCTAssertTrue(snapshot.providers.isEmpty)
+    XCTAssertEqual(snapshot.failures.map(\.accountID), [account.id])
+    XCTAssertEqual(snapshot.failures.first?.kind, .auth)
+    XCTAssertEqual(try QuotaHistoryStore(fileURL: paths.historyFileURL).load(policy: .preserve).last?.failures, snapshot.failures)
+  }
+
   private enum ConcurrentEdit {
     case replaceCredentials
     case remove
     case disable
   }
 
+  private enum FetchCompletion {
+    case normal
+    case cancelled
+  }
+
   private func assertObsoleteFetchRejected(
     _ change: ConcurrentEdit,
-    outcome: GatedClient.Outcome = .success
+    outcome: GatedClient.Outcome = .success,
+    completion: FetchCompletion = .normal
   ) async throws {
     let gate = FetchGate()
     let daemon = makeDaemon(coordinator: QuotaCoordinator(clients: [
@@ -179,7 +224,7 @@ final class SettingsConcurrencyTests: XCTestCase {
     await gate.waitUntilEntered()
 
     // The second writer must finish while the provider is still waiting.
-    let completion = CompletionFlag()
+    let editCompletion = CompletionFlag()
     let edit = Task {
       let cli = makeDaemon(coordinator: QuotaCoordinator(clients: []))
       try cli.editingSettings { transaction in
@@ -192,12 +237,13 @@ final class SettingsConcurrencyTests: XCTestCase {
           try transaction.setAccountEnabled(obsolete.id, false)
         }
       }
-      completion.mark()
+      editCompletion.mark()
     }
-    for _ in 0..<40 where !completion.isMarked {
+    for _ in 0..<40 where !editCompletion.isMarked {
       try? await Task.sleep(nanoseconds: 50_000_000)
     }
-    XCTAssertTrue(completion.isMarked, "Settings lock spans the provider fetch")
+    XCTAssertTrue(editCompletion.isMarked, "Settings lock spans the provider fetch")
+    if completion == .cancelled { cycle.cancel() }
     gate.release()
     try await edit.value
     await cycle.value

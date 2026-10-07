@@ -168,9 +168,10 @@ final class QuotaCoordinatorTests: XCTestCase {
   func testCancelledOnlyRefreshKeepsTimestampAndActiveScope() async {
     let now = Date(timeIntervalSince1970: 1_700_000_000)
     let coordinator = QuotaCoordinator(clients: [CancelledClient(provider: .anthropic)])
-    let previous = QuotaSnapshot(generatedAt: now, providers: [.anthropic, .openAI].map { sampleUsage(provider: $0, at: now) }, failures: [])
+    let previous = QuotaSnapshot(generatedAt: now, providers: [.anthropic, .openAI].map { sampleUsage(provider: $0, at: now) }, failures: [], refreshIntervalMinutes: 90)
     let snapshot = await coordinator.refresh(configurations: [configuration(provider: .anthropic)], now: now.addingTimeInterval(60), previousSnapshot: previous)
     XCTAssertEqual(snapshot.generatedAt, now)
+    XCTAssertEqual(snapshot.refreshIntervalMinutes, 90)
     XCTAssertEqual(snapshot.providers.map(\.provider), [.anthropic])
     XCTAssertTrue(snapshot.failures.isEmpty)
 

@@ -8,7 +8,7 @@ func runExport(_ args: [String]) {
   catch { failUsage(error) }
   do {
     // Export the complete archive, without the widget-oriented loadRecent cap.
-    var history = try QuotaHistoryStore(fileURL: LinuxPaths().historyFileURL).load()
+    var history = try QuotaHistoryStore(fileURL: LinuxPaths().historyFileURL).load(policy: .preserve)
     if let days = options.days {
       let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
       history.removeAll { $0.generatedAt < cutoff }
