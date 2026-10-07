@@ -379,6 +379,12 @@ struct SettingsView: View {
 
         Divider()
 
+        settingsRow(title: "Dashboard shortcut") {
+          DashboardShortcutPicker(hotkeys: .shared)
+        }
+
+        Divider()
+
         settingsRow(title: "Visible information") {
           VStack(alignment: .leading, spacing: 10) {
             settingsGroupCard(title: "All Widgets") {
@@ -443,6 +449,36 @@ struct SettingsView: View {
             }
           }
           .toggleStyle(.switch)
+        }
+      }
+    }
+  }
+
+  /// Chooses the optional global shortcut that shows or hides the floating
+  /// dashboard. Observes the hotkey service so a failed registration shows
+  /// next to the choice that caused it.
+  private struct DashboardShortcutPicker: View {
+    @ObservedObject var hotkeys: GlobalHotkeyService
+
+    var body: some View {
+      VStack(alignment: .leading, spacing: 6) {
+        Picker("", selection: Binding(get: { hotkeys.shortcut }, set: { hotkeys.select($0) })) {
+          ForEach(DashboardHotkey.allCases, id: \.self) { hotkey in
+            Text(hotkey.displayName).tag(hotkey)
+          }
+        }
+        .labelsHidden()
+        .pickerStyle(.menu)
+        .frame(minWidth: 160, maxWidth: 220, alignment: .leading)
+
+        if let registrationError = hotkeys.registrationError {
+          Label(registrationError, systemImage: "exclamationmark.triangle.fill")
+            .font(.caption)
+            .foregroundStyle(.orange)
+        } else {
+          Text("Shows or hides the floating dashboard from any app.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
       }
     }

@@ -25,6 +25,9 @@ already signed in to (Claude Code, Codex, GitHub Copilot, Kimi, OpenCode, Devin,
 them into a new account with one click — so for the common case you never hunt for a
 token. You can always add accounts manually too.
 
+On macOS, an optional global shortcut (Settings → General → Dashboard shortcut, off
+by default) shows or hides the floating dashboard from any app.
+
 ![screenshot floating window](screenshot-window.png)
 
 ## Linux quickstart
