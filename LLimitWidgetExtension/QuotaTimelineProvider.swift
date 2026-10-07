@@ -98,7 +98,7 @@ struct QuotaTimelineProvider: TimelineProvider {
       let settingsURL = try SharedPaths.settingsFileURL()
       guard FileManager.default.fileExists(atPath: settingsURL.path) else { return .missing }
       let store = SettingsStore(fileURL: settingsURL)
-      return .loaded(try store.load(policy: .preserve))
+      return .loaded(try store.load())
     } catch {
       print("[LLimit Widget] Failed to load settings: \(error)")
       return .unavailable
