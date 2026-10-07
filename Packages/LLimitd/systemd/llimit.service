@@ -6,6 +6,11 @@ Wants=network-online.target
 [Service]
 Type=simple
 ExecStart=%h/.local/bin/llimit daemon
+# Quota alerts are off by default. To turn on desktop notifications, run
+# `systemctl --user edit llimit.service` and add:
+#   [Service]
+#   Environment=LLIMIT_NOTIFY=1
+# A hook (--on-event) needs an ExecStart= override there; see the README, "Alerts".
 Restart=on-failure
 RestartSec=30s
 

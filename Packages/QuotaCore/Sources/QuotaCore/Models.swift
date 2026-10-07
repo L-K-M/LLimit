@@ -1428,6 +1428,8 @@ public struct AppSettings: Codable, Hashable, Sendable {
   /// Account ID per provider-tile slot; "" means automatic (first enabled account).
   /// Always normalized to exactly `providerTileSlotCount` entries.
   public var providerTileSlots: [String]
+  /// Quota alert thresholds + toggles; delivery is platform-specific.
+  public var alertSettings: QuotaAlertSettings
 
   public init(
     refreshIntervalMinutes: Int = 30,
@@ -1436,7 +1438,8 @@ public struct AppSettings: Codable, Hashable, Sendable {
     widgetBackgroundSettings: WidgetBackgroundSettings = .default,
     providerStyleSettings: [ProviderStyleSettings] = [],
     widgetVisibility: WidgetVisibilitySettings = .default,
-    providerTileSlots: [String] = []
+    providerTileSlots: [String] = [],
+    alertSettings: QuotaAlertSettings = QuotaAlertSettings()
   ) {
     self.refreshIntervalMinutes = AppSettings.clampedRefreshInterval(refreshIntervalMinutes)
     self.accounts = AppSettings.normalizedAccounts(accounts)
@@ -1445,6 +1448,7 @@ public struct AppSettings: Codable, Hashable, Sendable {
     self.providerStyleSettings = AppSettings.normalizedProviderStyleSettings(providerStyleSettings, accounts: self.accounts)
     self.widgetVisibility = AppSettings.normalizedWidgetVisibility(widgetVisibility, accounts: self.accounts)
     self.providerTileSlots = AppSettings.normalizedProviderTileSlots(providerTileSlots)
+    self.alertSettings = alertSettings
   }
 
   public static var `default`: AppSettings {
@@ -1540,6 +1544,7 @@ public struct AppSettings: Codable, Hashable, Sendable {
     case providerStyleSettings
     case widgetVisibility
     case providerTileSlots
+    case alertSettings
   }
 
   public init(from decoder: Decoder) throws {
@@ -1575,6 +1580,11 @@ public struct AppSettings: Codable, Hashable, Sendable {
     providerTileSlots = AppSettings.normalizedProviderTileSlots(
       (try? container.decodeIfPresent([String].self, forKey: .providerTileSlots)) ?? []
     )
+
+    alertSettings = (try? container.decodeIfPresent(
+      QuotaAlertSettings.self,
+      forKey: .alertSettings
+    )) ?? QuotaAlertSettings()
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -1586,6 +1596,7 @@ public struct AppSettings: Codable, Hashable, Sendable {
     try container.encode(providerStyleSettings, forKey: .providerStyleSettings)
     try container.encode(widgetVisibility, forKey: .widgetVisibility)
     try container.encode(AppSettings.normalizedProviderTileSlots(providerTileSlots), forKey: .providerTileSlots)
+    try container.encode(alertSettings, forKey: .alertSettings)
   }
 
   private static func normalizedAccounts(_ values: [ProviderAccount]) -> [ProviderAccount] {

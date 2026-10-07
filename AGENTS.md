@@ -64,6 +64,9 @@ Google Antigravity, Devin, Meta Muse, OpenCode Go, Venice, Cline.
   - `Sources/LLimitdCore/StatusRenderer.swift` — `llimit status` output and the
     `status --json` bar contract (`text`/`tooltip`/`class`/`percentage` +
     `accounts`), built only from the snapshot.
+  - `Sources/LLimitdCore/QuotaAlerts.swift`, `AlertDelivery.swift`: opt-in
+    `daemon --notify`/`--on-event` delivery of QuotaCore's `QuotaEvents`. Hooks get
+    an env-only payload: never provider error text or credentials.
   - `Sources/llimit/main.swift` — the CLI (accounts add/list/import/enable/
     disable/remove, refresh, status, daemon, paths).
   - `examples/` — waybar/polybar/eww modules consuming the JSON contract.
