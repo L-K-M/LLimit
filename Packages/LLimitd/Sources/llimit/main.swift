@@ -371,7 +371,8 @@ func runDaemon(_ args: [String]) async {
       FileHandle.standardOutput.write(Data((line + "\n").utf8))
     }
     if let alerts {
-      daemon.onSnapshotSaved = { [unowned daemon] previous, current in
+      daemon.onSnapshotSaved = { [weak daemon] previous, current in
+        guard let daemon else { return }
         let names = daemon.settings.accounts.map { ($0.id, $0.resolvedDisplayName) }
         alerts.process(previous: previous, current: current, accountNames: Dictionary(names) { first, _ in first })
       }

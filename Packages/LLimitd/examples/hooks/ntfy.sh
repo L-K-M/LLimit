@@ -12,6 +12,12 @@
 set -eu
 
 : "${NTFY_TOPIC:?set NTFY_TOPIC to your ntfy topic}"
+case "$NTFY_TOPIC" in
+  *[!A-Za-z0-9_-]*)
+    echo "NTFY_TOPIC may only contain letters, digits, '-' and '_'" >&2
+    exit 1
+    ;;
+esac
 server="${NTFY_SERVER:-https://ntfy.sh}"
 
 priority=default

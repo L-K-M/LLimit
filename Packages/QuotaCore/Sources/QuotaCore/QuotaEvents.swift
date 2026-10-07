@@ -67,6 +67,11 @@ public struct QuotaEventConfig: Hashable, Sendable {
   /// mostly unused.
   public var expiringUnusedMinimumRemaining = 50
 
+  /// Values outside `validThresholds` are dropped and duplicates collapse, so
+  /// `thresholds` is always sorted highest first. If nothing survives, no
+  /// `threshold` or `reset` event is ever produced: callers taking thresholds
+  /// from users must reject such input instead (`llimit daemon --thresholds`
+  /// does).
   public init(thresholds: [Int] = QuotaEventConfig.defaultThresholds) {
     self.thresholds = Array(Set(thresholds.filter { Self.validThresholds.contains($0) })).sorted(by: >)
   }
@@ -92,14 +97,23 @@ public struct QuotaEventState: Codable, Hashable, Sendable {
     var resetAt: Date
   }
 
+  struct ResetMark: Codable, Hashable, Sendable {
+    var accountID: String
+    var metricID: String
+    /// The low window whose end was announced.
+    var endedAt: Date
+    /// When the window that reset opened ends, if the provider said.
+    var nextResetAt: Date?
+  }
+
   struct FailureLatch: Codable, Hashable, Sendable {
     var accountID: String
     var kind: QuotaErrorKind
   }
 
   var thresholdLatches: [ThresholdLatch] = []
-  /// The ended window each metric last announced a `reset` for.
-  var resetMarks: [WindowMark] = []
+  /// The window change each metric last announced a `reset` for.
+  var resetMarks: [ResetMark] = []
   /// The window each metric last announced `expiringUnused` for.
   var expiringUnusedMarks: [WindowMark] = []
   var failureLatches: [FailureLatch] = []
@@ -116,7 +130,7 @@ public struct QuotaEventState: Codable, Hashable, Sendable {
   public init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     thresholdLatches = try container.decodeIfPresent([ThresholdLatch].self, forKey: .thresholdLatches) ?? []
-    resetMarks = try container.decodeIfPresent([WindowMark].self, forKey: .resetMarks) ?? []
+    resetMarks = try container.decodeIfPresent([ResetMark].self, forKey: .resetMarks) ?? []
     expiringUnusedMarks = try container.decodeIfPresent([WindowMark].self, forKey: .expiringUnusedMarks) ?? []
     failureLatches = try container.decodeIfPresent([FailureLatch].self, forKey: .failureLatches) ?? []
   }
@@ -183,17 +197,19 @@ public enum QuotaEvents {
     // A failing account's usage is carried over from an earlier refresh, so it
     // says nothing new: its alerts neither fire nor re-arm until it refreshes.
     for usage in current.providers where !failingIDs.contains(usage.accountID) {
-      next.keepMetrics(Set(usage.metrics.map(\.id)), of: usage.accountID)
       let previousMetrics = Dictionary(
         (previousUsage[usage.accountID]?.metrics ?? []).map { ($0.id, $0) },
         uniquingKeysWith: { first, _ in first }
       )
+      // A metric a provider leaves out of one response keeps its alerts, so it
+      // does not alert again when it comes back. Absent twice, it is forgotten.
+      next.keepMetrics(Set(usage.metrics.map(\.id)).union(previousMetrics.keys), of: usage.accountID)
 
       for metric in usage.metrics where !metric.isUnlimited {
         guard let remaining = metric.remainingPercent else { continue }
         let reading = Reading(usage: usage, metric: metric, remaining: remaining)
 
-        if let event = detectReset(reading, previous: previousMetrics[metric.id], config: config, state: &next) {
+        if let event = detectReset(reading, previous: previousMetrics[metric.id], now: now, config: config, state: &next) {
           events.append(event)
         }
         if let event = detectThreshold(reading, now: now, config: config, state: &next) {
@@ -279,10 +295,13 @@ public enum QuotaEvents {
 
   /// Fires when a window that had reached the highest threshold ended and its
   /// quota came back: the previous reading's reset time has passed by the time
-  /// of this fetch and remaining rose by at least the hysteresis.
+  /// of this fetch and remaining rose by at least the hysteresis. Fires once
+  /// per ended window, and not again while the window the reset opened is
+  /// still running, even if a provider glitch makes it look like it ended.
   private static func detectReset(
     _ reading: Reading,
     previous: UsageMetric?,
+    now: Date,
     config: QuotaEventConfig,
     state: inout QuotaEventState
   ) -> QuotaEvent? {
@@ -297,13 +316,20 @@ public enum QuotaEvents {
       reading.remaining >= previousRemaining + config.hysteresis
     else { return nil }
 
-    let alreadyAnnounced = state.resetMarks.contains {
-      reading.isSame(accountID: $0.accountID, metricID: $0.metricID) && isSameWindow($0.resetAt, endedAt)
+    let alreadyAnnounced = state.resetMarks.contains { mark in
+      guard reading.isSame(accountID: mark.accountID, metricID: mark.metricID) else { return false }
+      let openedWindowRunning = mark.nextResetAt.map { $0 > now } ?? false
+      return openedWindowRunning || isSameWindow(mark.endedAt, endedAt)
     }
     guard !alreadyAnnounced else { return nil }
 
     state.resetMarks.removeAll { reading.isSame(accountID: $0.accountID, metricID: $0.metricID) }
-    state.resetMarks.append(.init(accountID: reading.usage.accountID, metricID: reading.metric.id, resetAt: endedAt))
+    state.resetMarks.append(.init(
+      accountID: reading.usage.accountID,
+      metricID: reading.metric.id,
+      endedAt: endedAt,
+      nextResetAt: reading.metric.resetAt
+    ))
     return reading.event(.reset, severity: .normal)
   }
 
@@ -351,7 +377,9 @@ public enum QuotaEvents {
   }
 
   /// Fires once per window when a weekly or monthly window is within the lead
-  /// time of its reset with at least the minimum still unused.
+  /// time of its reset with at least the minimum still unused. A mark whose
+  /// reset is still ahead belongs to the window in progress (a metric has one
+  /// at a time), so a provider moving that window's reset does not repeat it.
   private static func detectExpiringUnused(
     _ reading: Reading,
     now: Date,
@@ -369,7 +397,8 @@ public enum QuotaEvents {
     guard timeLeft > 0, timeLeft <= config.expiringUnusedLeadTime else { return nil }
 
     let alreadyAnnounced = state.expiringUnusedMarks.contains {
-      reading.isSame(accountID: $0.accountID, metricID: $0.metricID) && isSameWindow($0.resetAt, resetAt)
+      reading.isSame(accountID: $0.accountID, metricID: $0.metricID)
+        && ($0.resetAt > now || isSameWindow($0.resetAt, resetAt))
     }
     guard !alreadyAnnounced else { return nil }
 
@@ -421,7 +450,7 @@ public extension QuotaEvent {
     case .threshold:
       return "\(percent) left\(estimate)\(resets)."
     case .reset:
-      return "\(percent) left again\(estimate)."
+      return "\(percent) left again\(estimate)\(resets)."
     case .failure:
       switch failureKind {
       case .auth:
