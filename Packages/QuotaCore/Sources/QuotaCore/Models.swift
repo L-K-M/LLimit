@@ -396,15 +396,18 @@ public struct ProviderFailure: Codable, Hashable, Identifiable, Sendable {
   public var provider: QuotaProvider
   public var kind: QuotaErrorKind
   public var message: String
+  /// Names failed-only accounts without reading settings. Older snapshots omit it.
+  public var title: String?
   /// Optional server cooldown, compatible with older snapshots.
   public var retryAt: Date?
 
   public init(accountID: String? = nil, provider: QuotaProvider, kind: QuotaErrorKind, message: String,
-              retryAt: Date? = nil) {
+              title: String? = nil, retryAt: Date? = nil) {
     self.accountID = accountID ?? provider.rawValue
     self.provider = provider
     self.kind = kind
     self.message = message
+    self.title = title
     self.retryAt = retryAt
   }
 
@@ -413,6 +416,7 @@ public struct ProviderFailure: Codable, Hashable, Identifiable, Sendable {
     case provider
     case kind
     case message
+    case title
     case retryAt
   }
 
@@ -422,6 +426,7 @@ public struct ProviderFailure: Codable, Hashable, Identifiable, Sendable {
     accountID = (try? container.decodeIfPresent(String.self, forKey: .accountID)) ?? provider.rawValue
     kind = try container.decode(QuotaErrorKind.self, forKey: .kind)
     message = try container.decode(String.self, forKey: .message)
+    title = try container.decodeIfPresent(String.self, forKey: .title)
     retryAt = try? container.decodeIfPresent(Date.self, forKey: .retryAt)
   }
 
@@ -431,6 +436,7 @@ public struct ProviderFailure: Codable, Hashable, Identifiable, Sendable {
     try container.encode(provider, forKey: .provider)
     try container.encode(kind, forKey: .kind)
     try container.encode(message, forKey: .message)
+    try container.encodeIfPresent(title, forKey: .title)
     try container.encodeIfPresent(retryAt, forKey: .retryAt)
   }
 }
