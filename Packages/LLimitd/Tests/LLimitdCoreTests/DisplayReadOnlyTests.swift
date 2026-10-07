@@ -4,6 +4,15 @@ import LLimitdCore
 
 final class DisplayReadOnlyTests: XCTestCase {
   func testStatusNeverLoadsSettingsOrRecoversCorruptSnapshot() throws {
+    try assertDisplayReadOnly(arguments: ["status", "--json"],
+                              settings: Data("invalid settings with fixture-private-value".utf8))
+  }
+
+  func testAccountListingPreservesCorruptSnapshot() throws {
+    try assertDisplayReadOnly(arguments: ["accounts", "list"], settings: Data("{\"accounts\":[]}".utf8))
+  }
+
+  private func assertDisplayReadOnly(arguments: [String], settings: Data) throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
     let paths = LinuxPaths(configHome: directory.appendingPathComponent("config"),
@@ -12,7 +21,7 @@ final class DisplayReadOnlyTests: XCTestCase {
     try FileManager.default.createDirectory(at: paths.configDirectory, withIntermediateDirectories: true)
     let original = Data("malformed snapshot".utf8)
     try original.write(to: paths.snapshotFileURL)
-    try Data("invalid settings with fixture-private-value".utf8).write(to: paths.settingsFileURL)
+    try settings.write(to: paths.settingsFileURL)
     let attributes = try FileManager.default.attributesOfItem(atPath: paths.snapshotFileURL.path)
 
     var buildDirectory = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent()
@@ -21,7 +30,7 @@ final class DisplayReadOnlyTests: XCTestCase {
     #endif
     let process = Process()
     process.executableURL = buildDirectory.appendingPathComponent("llimit")
-    process.arguments = ["status", "--json"]
+    process.arguments = arguments
     var environment = ProcessInfo.processInfo.environment
     environment["HOME"] = directory.path
     environment["XDG_CONFIG_HOME"] = paths.configHome.path
@@ -37,9 +46,13 @@ final class DisplayReadOnlyTests: XCTestCase {
     let output = String(decoding: stdout.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
     let errors = String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
     XCTAssertEqual(process.terminationStatus, 0)
-    XCTAssertEqual(output, StatusRenderer.waybarJSON(snapshot: nil) + "\n")
-    // Decode warnings stay on stderr; stdout remains one no-data JSON object.
-    XCTAssertEqual(errors, "llimit: could not read the snapshot\n")
+    if arguments.first == "status" {
+      XCTAssertEqual(output, StatusRenderer.waybarJSON(snapshot: nil) + "\n")
+      // Decode warnings stay on stderr; stdout remains one no-data JSON object.
+      XCTAssertEqual(errors, "llimit: could not read the snapshot\n")
+    } else {
+      XCTAssertTrue(errors.isEmpty, errors)
+    }
     XCTAssertFalse(output.contains("fixture-private-value"))
     XCTAssertFalse(errors.contains("fixture-private-value"))
     XCTAssertEqual(try Data(contentsOf: paths.snapshotFileURL), original)

@@ -60,9 +60,9 @@ func printUsage() {
   )
 }
 
-func makeDaemon() -> QuotaDaemon {
+func makeDaemon(access: QuotaDaemon.ConfigurationAccess = .owner) -> QuotaDaemon {
   let daemon = QuotaDaemon(paths: LinuxPaths())
-  daemon.loadConfiguration()
+  daemon.loadConfiguration(access: access)
   if let error = daemon.settingsLoadError { fail(error.localizedDescription) }
   return daemon
 }
@@ -113,7 +113,7 @@ func runAccounts(_ args: [String]) {
 }
 
 func accountsList() {
-  let daemon = makeDaemon()
+  let daemon = makeDaemon(access: .inspect)
 
   if daemon.settings.accounts.isEmpty {
     print("No accounts. Add one with `llimit accounts add --provider <id>` or import a")
