@@ -448,7 +448,9 @@ public struct QuotaSnapshot: Codable, Hashable, Sendable {
           return metric
         }
         return provider
-      }
+      // Provider order follows fetch order, which isn't guaranteed stable —
+      // normalize it so equivalence compares content, not arrangement.
+      }.sorted { $0.accountID < $1.accountID }
       return copy
     }
     return normalized(self) == normalized(other)
