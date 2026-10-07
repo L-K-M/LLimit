@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		97AF8D326AAA45F2B15B66F1 /* QuotaNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97AF8D326AAA45F2B15B66F2 /* QuotaNotifications.swift */; };
 		CDACCF16212E46E899C75F01 /* CodexLoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDACCF16212E46E899C75F02 /* CodexLoginView.swift */; };
 		90D9D53D985F3F47F8B0E80E /* ClaudeProfileService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B3F60D8AF12A17811395014 /* ClaudeProfileService.swift */; };
 		2D98F2F1CE89C1FB3DFE15BF /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = EE6A1797238B5E85DDF52167 /* SwiftTerm */; };
@@ -57,6 +58,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		97AF8D326AAA45F2B15B66F2 /* QuotaNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaNotifications.swift; sourceTree = "<group>"; };
 		CDACCF16212E46E899C75F02 /* CodexLoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexLoginView.swift; sourceTree = "<group>"; };
 		6B3F60D8AF12A17811395014 /* ClaudeProfileService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeProfileService.swift; sourceTree = "<group>"; };
 		0F28142772B4697E21774DC0 /* ClaudeTerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeTerminalView.swift; sourceTree = "<group>"; };
@@ -190,6 +192,7 @@
 				6B3F60D8AF12A17811395014 /* ClaudeProfileService.swift */,
 				C70211A98D88A5AEA8688233 /* ClaudeTerminalSession.swift */,
 				0F5E31A2797200183F69625A /* RefreshService.swift */,
+				97AF8D326AAA45F2B15B66F2 /* QuotaNotifications.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -310,6 +313,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				BCF52573CAD84156B1B5D45D /* AppModel.swift in Sources */,
+				97AF8D326AAA45F2B15B66F1 /* QuotaNotifications.swift in Sources */,
 				4A4AC618CDAE0C085BE6E421 /* LLimitApp.swift in Sources */,
 				3A11C01DE4B02FBA9D01AA02 /* LimitKindColorScheme.swift in Sources */,
 				4D3E0B1A5C2F4A6B8E9D0C12 /* MenuBarPanelGeometry.swift in Sources */,
