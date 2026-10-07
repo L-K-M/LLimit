@@ -399,6 +399,31 @@ final class StatusRendererTests: XCTestCase {
     XCTAssertEqual(object["percentage"] as? Int, 5)
   }
 
+  func testStaleAccountsLastKnownValueNeverRaisesClassAboveWarning() throws {
+    var snapshot = snapshot(remaining: [80, 5])
+    snapshot.providers[1].fetchedAt = now.addingTimeInterval(-7 * 3_600)
+    var object = try decodedWaybar(snapshot)
+
+    XCTAssertEqual(object["class"] as? String, "warning")
+    XCTAssertEqual(object["percentage"] as? Int, 5)
+
+    snapshot.providers.removeFirst()
+    object = try decodedWaybar(snapshot)
+    XCTAssertEqual(object["class"] as? String, "warning")
+  }
+
+  func testCarriedReadingTakenAfterItsResetIsKeptAtRenderTime() throws {
+    var snapshot = snapshot(
+      remaining: [80, 30],
+      failures: [ProviderFailure(accountID: "account-1", provider: .anthropic, kind: .auth, message: "expired")]
+    )
+    // Fetched 5 min ago, after the provider's reported reset 10 min ago.
+    snapshot.providers[1].metrics[0].resetAt = now.addingTimeInterval(-600)
+    let rows = try accounts(decodedWaybar(snapshot))
+
+    XCTAssertEqual(rows[1]["remainingPercent"] as? Int, 30)
+  }
+
   func testCarriedValuePastItsResetIsNotPresentedAsCurrent() throws {
     var snapshot = snapshot(
       remaining: [80, 8],
@@ -520,7 +545,7 @@ final class StatusRendererTests: XCTestCase {
 
   func testErrorTextIsOneBoundedLineWithoutMarkupOrControls() throws {
     let body = "HTTP 502: <!DOCTYPE html>\n<html><head><style>body { color: red }</style>"
-      + "<title>502 Bad Gateway</title></head>\r\n<body>\u{1B}[31mnginx\u{7}"
+      + "<title>502 Bad Gateway</title></head>\r\n<body>\u{1B}[31mnginx\u{7}%{A1:rm -rf ~:}"
       + String(repeating: " filler", count: 60) + "</body></html>"
     let snapshot = QuotaSnapshot(
       generatedAt: now,
@@ -533,13 +558,24 @@ final class StatusRendererTests: XCTestCase {
     let error = try XCTUnwrap(try accounts(object)[0]["error"] as? String)
 
     XCTAssertEqual(error, String(errorLine.dropFirst("OpenAI: ERROR ".count)))
-    XCTAssertTrue(error.hasPrefix("HTTP 502: 502 Bad Gateway nginx filler"))
+    // Polybar would parse "%{A1:…:}" as a click-to-run region.
+    XCTAssertTrue(error.hasPrefix("HTTP 502: 502 Bad Gateway nginx % {A1:rm -rf ~:} filler"))
     XCTAssertTrue(error.hasSuffix("…"))
     XCTAssertLessThanOrEqual(error.count, 160)
-    for forbidden in ["<", ">", "color", "\u{1B}", "\u{7}", "\r", "\n", "  "] {
+    for forbidden in ["<", ">", "color", "\u{1B}", "\u{7}", "\r", "\n", "  ", "%{"] {
       XCTAssertFalse(error.contains(forbidden), "error text contains \(forbidden.debugDescription)")
     }
     XCTAssertTrue((object["tooltip"] as? String)?.contains("OpenAI: ERROR \(error)") == true)
+  }
+
+  func testErrorTextScanIsBounded() {
+    // Text past the scan limit is never read, so a huge unterminated page stays cheap.
+    let padding = String(repeating: " ", count: StatusRenderer.maximumScannedErrorLength)
+    XCTAssertEqual(StatusRenderer.sanitizedErrorText(padding + "late detail"), "")
+
+    let unterminated = String(repeating: "<style>", count: 20_000)
+    XCTAssertEqual(StatusRenderer.sanitizedErrorText("HTTP 503 " + unterminated), "HTTP 503")
+    XCTAssertEqual(StatusRenderer.sanitizedErrorText("Blocked <script>var a = 1;\nvar b = 2;"), "Blocked")
   }
 
   func testErrorTextKeepsComparisonsThatAreNotMarkup() {

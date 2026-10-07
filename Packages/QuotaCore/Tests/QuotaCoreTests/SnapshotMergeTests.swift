@@ -139,6 +139,37 @@ final class SnapshotMergeTests: XCTestCase {
     XCTAssertNil(carried.maxUsagePercent)
   }
 
+  func testCarriedReadingTakenAfterItsResetIsKept() throws {
+    // The provider reported a reset time at or before the fetch (clock skew, or a fetch
+    // just after a rollover): the reading already describes the current window.
+    var previousUsage = usage("claude-1", provider: .anthropic, remaining: 8, at: t0)
+    previousUsage.metrics[0].resetAt = t0
+    let previous = QuotaSnapshot(generatedAt: t0, providers: [previousUsage], failures: [])
+    let fresh = QuotaSnapshot(
+      generatedAt: t0.addingTimeInterval(900),
+      providers: [],
+      failures: [failure("claude-1", provider: .anthropic)]
+    )
+
+    XCTAssertEqual(fresh.mergingStaleUsage(from: previous).providers, [previousUsage])
+  }
+
+  func testCarriedUnlimitedAndResetlessMetricsAreNeverCleared() throws {
+    let unlimited = UsageMetric(id: "unlimited", label: "Unlimited", resetAt: t0.addingTimeInterval(60),
+                                isUnlimited: true)
+    let resetless = UsageMetric(id: "no-reset", label: "No reset", remainingPercent: 40, usedDisplay: "60%")
+    var previousUsage = usage("claude-1", provider: .anthropic, remaining: 8, at: t0)
+    previousUsage.metrics = [unlimited, resetless]
+    let previous = QuotaSnapshot(generatedAt: t0, providers: [previousUsage], failures: [])
+    let fresh = QuotaSnapshot(
+      generatedAt: t0.addingTimeInterval(900),
+      providers: [],
+      failures: [failure("claude-1", provider: .anthropic)]
+    )
+
+    XCTAssertEqual(fresh.mergingStaleUsage(from: previous).providers, [previousUsage])
+  }
+
   func testFreshUsageIsNotClearedByTheCarryRule() {
     var freshUsage = usage("claude-1", provider: .anthropic, remaining: 8, at: t0.addingTimeInterval(900))
     freshUsage.metrics[0].resetAt = t0

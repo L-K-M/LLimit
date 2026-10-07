@@ -50,7 +50,7 @@ STATUS_SENTENCES = {
     "ok": "LLimit: quota OK.",
     "warning": "LLimit: needs attention.",
     "critical": "LLimit: a quota is nearly used up.",
-    "error": "LLimit: every account failed to refresh.",
+    "error": "LLimit: refresh failed.",
     "empty": "LLimit: no quota data yet.",
 }
 
@@ -100,7 +100,10 @@ class MenuUpdate(Enum):
 
 
 def plan_menu_update(previous: TrayModel | None, current: TrayModel) -> MenuUpdate:
-    """Rebuilding replaces every item, which can close an open menu or reset its
+    """Plans the menu rows only; the caller applies the icon, label and
+    description on every update, whatever this returns.
+
+    Rebuilding replaces every item, which can close an open menu or reset its
     keyboard focus. Countdowns change the text every minute, so a menu with the
     same row layout is relabeled in place instead."""
     if previous is None:
@@ -113,7 +116,8 @@ def plan_menu_update(previous: TrayModel | None, current: TrayModel) -> MenuUpda
 
 
 def format_duration(seconds: int) -> str:
-    """Same shape as QuotaCore's countdowns, e.g. '4d 2h', '3h 12m', '0m'."""
+    """Matches QuotaCore's formatShortDuration: days, hours and minutes, each only
+    when non-zero, and '0m' when all are, e.g. '4d 2h 5m', '3h', '12m', '0m'."""
     seconds = max(0, seconds)
     days, hours, minutes = seconds // 86_400, (seconds % 86_400) // 3_600, (seconds % 3_600) // 60
     parts = [f"{value}{unit}" for value, unit in ((days, "d"), (hours, "h")) if value]
@@ -134,6 +138,14 @@ def parse_timestamp(value: Any) -> datetime | None:
     return parsed if parsed.tzinfo is not None else None
 
 
+def aware_now(now: datetime | None) -> datetime:
+    """`now` as an aware datetime. A naive value is taken as local time, which is
+    what datetime.now() returns."""
+    if now is None:
+        return datetime.now(timezone.utc)
+    return now if now.tzinfo is not None else now.astimezone()
+
+
 def reset_clause(metric: dict[str, Any], now: datetime) -> str:
     """'resets in 3h 12m', counted down from `resetAt` so the popup stays right
     between snapshot reads, or 'reset due' once it has passed. Older payloads
@@ -149,7 +161,7 @@ def reset_clause(metric: dict[str, Any], now: datetime) -> str:
 def format_metric(metric: dict[str, Any], now: datetime | None = None) -> str:
     """One limit as a single line, e.g. 'Session — 62% left · resets in 3h 12m'."""
     label = metric.get("label") or metric.get("id") or "Limit"
-    reset = "" if metric.get("unlimited") else reset_clause(metric, now or datetime.now(timezone.utc))
+    reset = "" if metric.get("unlimited") else reset_clause(metric, aware_now(now))
 
     if metric.get("unlimited"):
         body = "unlimited"
@@ -200,16 +212,17 @@ def format_account_error(account: dict[str, Any]) -> str:
 
 
 def failure_note(failed: int, total: int) -> str:
-    if failed >= total:
+    if failed and failed >= total:
         return "Every account failed to refresh"
     return f"{failed} of {total} accounts failed to refresh"
 
 
 def describe_status(status_class: str, label: str, failed: int, total: int) -> str:
     """The tray icon's accessible description, e.g. 'LLimit: needs attention.
-    1 of 2 accounts failed to refresh. Claude 82%! · ChatGPT 45%'."""
+    1 of 2 accounts failed to refresh. Claude 82%! · ChatGPT 45%'. It carries the
+    same failure note as the menu."""
     sentences = [STATUS_SENTENCES.get(status_class, "LLimit.")]
-    if 0 < failed < total:
+    if failed:
         sentences.append(f"{failure_note(failed, total)}.")
     if label:
         sentences.append(label)

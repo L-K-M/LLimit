@@ -58,22 +58,23 @@ passed; `resetAt` is the ISO 8601 reset time, for consumers that count down them
 When a failed account's window resets, its last-known reading is dropped, because it
 describes the previous window.
 
-`class` is derived from the lowest remaining percentage among accounts refreshed in the
-latest cycle:
+`class` is derived from the lowest remaining percentage among accounts with current data
+(neither failed nor stale):
 
 | class | when |
 | --- | --- |
 | `ok` | every account ≥ 40% remaining, none failed or stale |
 | `warning` | some account 15–39% remaining, or an account failed, is stale, or reports a warning |
-| `critical` | some account < 15% remaining |
+| `critical` | some account with current data < 15% remaining |
 | `error` | every account failed to refresh |
 | `empty` | no snapshot yet |
 
-A failed account raises the class to `warning` at most: its numbers are last known, not
-current.
+A failed or stale account raises the class to `warning` at most: its numbers are last
+known, not current.
 
 Error text, account names and limit labels are plain text. Bars that parse markup must
-escape them, as the waybar example does with `"escape": true`.
+escape them, as the waybar example does with `"escape": true` and the polybar script does
+for polybar's `%{…}` tags.
 
 Backward compatibility: keys are only ever **added**, never renamed or removed.
 

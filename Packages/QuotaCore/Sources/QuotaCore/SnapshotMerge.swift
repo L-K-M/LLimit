@@ -22,7 +22,7 @@ public extension QuotaSnapshot {
     guard !failedAccountIDs.isEmpty else { return self }
 
     let carried = previous.providers
-      .filter { failedAccountIDs.contains($0.accountID) && !freshAccountIDs.contains($0.accountID) }
+      .filter { failedAccountIDs.contains($0.accountID) }
       .map { $0.clearingElapsedWindows(at: generatedAt) }
     guard !carried.isEmpty else { return self }
 
@@ -114,19 +114,24 @@ public extension ProviderUsage {
   /// Shown in place of a reading that a reset has made obsolete.
   private static let elapsedWindowDetail = "Window reset since the last successful refresh"
 
-  /// Drops the readings of windows whose reset is at or before `now`.
+  /// Drops the readings of windows that reset after they were read (`fetchedAt`) and at
+  /// or before `now`.
   ///
   /// Only meaningful for usage carried from an earlier refresh: once a window resets,
   /// its last-known percentage, amount and usage text describe the previous window, so
   /// they are known to be wrong rather than merely old. The metric itself stays, with
   /// its `resetAt`, so surfaces can say the window reset. Windows still running keep
-  /// their reading: within a window it is the best value available.
+  /// their reading: within a window it is the best value available. So does a reading
+  /// taken at or after its reported reset (clock skew, or a fetch just after a
+  /// rollover): it already describes the current window.
   func clearingElapsedWindows(at now: Date) -> ProviderUsage {
     var cleared = self
     var clearedAny = false
     for index in cleared.metrics.indices {
       let metric = cleared.metrics[index]
-      guard !metric.isUnlimited, let resetAt = metric.resetAt, resetAt <= now else { continue }
+      guard !metric.isUnlimited, let resetAt = metric.resetAt, fetchedAt < resetAt, resetAt <= now else {
+        continue
+      }
 
       cleared.metrics[index].remainingPercent = nil
       cleared.metrics[index].remainingAmount = nil
@@ -138,6 +143,10 @@ public extension ProviderUsage {
     }
     guard clearedAny else { return self }
 
+    // Every client derives maxUsagePercent as the largest `100 - remainingPercent` over
+    // the windows it reports, so recomputing drops exactly the cleared windows. With no
+    // bounded window left it becomes nil rather than a client's 0 default: the menu-bar
+    // headline falls back to it, and must not show the pre-reset value again.
     cleared.maxUsagePercent = cleared.metrics.compactMap(\.remainingPercent).map { 100 - $0 }.max()
     return cleared
   }

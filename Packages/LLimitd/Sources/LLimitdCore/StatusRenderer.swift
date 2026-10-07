@@ -25,16 +25,27 @@ public enum StatusRenderer {
 
   /// Longest error text any surface prints. Provider errors can carry whole HTML pages.
   static let maximumErrorLength = 160
+  /// How much raw error text is scanned. The rest of a page cannot reach the output.
+  static let maximumScannedErrorLength = 16_384
 
-  /// What `UsageMetric.resetCountdown(at:)` returns once the reset time has passed.
+  /// What `UsageMetric.resetCountdown(at:)` returns for a reset that had already
+  /// passed when a metric without `resetAt` was fetched.
   private static let passedResetCountdown = "reset"
 
-  /// Script and style blocks of an HTML error page, removed with their content.
-  private static let embeddedCodePattern = #"(?is)<(script|style)\b[^>]*>.*?</\1\s*>"#
-  /// Tag-shaped text only, so a comparison such as "a < b" is kept.
-  private static let markupTagPattern = #"</?[A-Za-z!][^<>]*>"#
-  /// ANSI CSI sequences (colors, cursor movement) a terminal would obey.
-  private static let terminalEscapePattern = #"\x{1B}\[[0-?]*[ -/]*[@-~]"#
+  /// Removed from error text, each replaced by a space. Compiled once: every bar poll
+  /// renders the snapshot again. The patterns are constants, so `try!` cannot fail.
+  private static let errorTextNoise = [
+    // Script and style blocks of an HTML error page, with their content. An unclosed
+    // block (a page cut short) runs to the end, so no later opening is scanned again.
+    #"(?is)<(script|style)\b[^>]*>.*?(?:</\1\s*>|$)"#,
+    // Tag-shaped text only, so a comparison such as "a < b" is kept.
+    #"</?[A-Za-z!][^<>]*>"#,
+    // ANSI CSI sequences (colors, cursor movement) a terminal would obey.
+    #"\x{1B}\[[0-?]*[ -/]*[@-~]"#
+  ].map { try! NSRegularExpression(pattern: $0) }
+  /// Polybar parses "%{…}" in script output as formatting, including click-to-run
+  /// "%{A1:command:}" regions; a space makes it plain text.
+  private static let polybarTagOpener = "%{"
 
   /// One account as the status surfaces present it at render time.
   private struct AccountStatus {
@@ -191,10 +202,12 @@ public enum StatusRenderer {
   /// Reduces provider error text to one plain line that is safe on every surface: a bar
   /// may parse it as markup (waybar's default) and a terminal obeys escape sequences.
   static func sanitizedErrorText(_ message: String) -> String {
-    var text = message
-    for pattern in [embeddedCodePattern, markupTagPattern, terminalEscapePattern] {
-      text = text.replacingOccurrences(of: pattern, with: " ", options: .regularExpression)
+    var text = String(message.prefix(maximumScannedErrorLength))
+    for pattern in errorTextNoise {
+      let range = NSRange(text.startIndex..., in: text)
+      text = pattern.stringByReplacingMatches(in: text, range: range, withTemplate: " ")
     }
+    text = text.replacingOccurrences(of: polybarTagOpener, with: "% {")
 
     let separators = CharacterSet.whitespacesAndNewlines.union(.controlCharacters)
     let oneLine = text.components(separatedBy: separators)
@@ -267,9 +280,9 @@ public enum StatusRenderer {
     guard !statuses.isEmpty else { return .empty }
     if statuses.allSatisfy(\.isFailed) { return .error }
 
-    // Only accounts refreshed this cycle can make the class critical: a failing
-    // account's numbers are unverified, so it raises the class to warning at most.
-    let minimum = statuses.filter { !$0.isFailed }.compactMap(\.headline).min()
+    // Only current numbers can make the class critical: a failed or stale account's
+    // numbers are last known, so it raises the class to warning at most.
+    let minimum = statuses.filter { !$0.needsAttention }.compactMap(\.headline).min()
     let byQuota = minimum.map(quotaClass(remainingPercent:)) ?? .ok
     guard byQuota == .ok else { return byQuota }
 
@@ -392,6 +405,10 @@ public enum StatusRenderer {
   /// Counted at render time: the fetch-time `resetIn` text would be frozen.
   private static func resetState(of metric: UsageMetric, now: Date) -> ResetState? {
     guard let countdown = metric.resetCountdown(at: now) else { return nil }
+    if let resetAt = metric.resetAt {
+      return resetAt <= now ? .passed : .upcoming(countdown)
+    }
+    // Without `resetAt` only the fetch-time text is known.
     return countdown == passedResetCountdown ? .passed : .upcoming(countdown)
   }
 
@@ -401,7 +418,7 @@ public enum StatusRenderer {
   }
 
   private static func iso8601(_ date: Date) -> String {
-    ISO8601DateFormatter().string(from: date)
+    date.formatted(.iso8601)
   }
 
   private static func warningText(for usage: ProviderUsage) -> String? {

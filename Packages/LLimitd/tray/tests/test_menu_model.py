@@ -21,7 +21,10 @@ from llimit_tray import (  # noqa: E402
     MenuUpdate,
     TrayModel,
     build_menu_model,
+    describe_status,
+    failure_note,
     format_account_header,
+    format_duration,
     format_metric,
     main,
     plan_menu_update,
@@ -82,8 +85,21 @@ class FormatMetricTests(unittest.TestCase):
 
     def test_cleared_window_of_a_failed_account_says_it_reset(self):
         metric = {"label": "Session", "resetAt": "2026-10-07T11:00:00Z",
-                  "detail": "Window reset since the last successful refresh"}
+                  "detail": "Provider detail that must not be echoed"}
         self.assertEqual(format_metric(metric, NOW), "Session — reset since the last successful refresh")
+
+    def test_naive_now_is_taken_as_local_time(self):
+        metric = {"label": "Session", "remainingPercent": 62, "resetAt": "2026-10-07T13:30:00Z"}
+        naive_local = NOW.astimezone().replace(tzinfo=None)
+        self.assertEqual(format_metric(metric, naive_local), format_metric(metric, NOW))
+
+    def test_durations_match_quotacore(self):
+        # Same cases as QuotaCore's formatShortDuration.
+        cases = {-5: "0m", 0: "0m", 59: "0m", 60: "1m", 3_600: "1h", 3_701: "1h 1m",
+                 86_400: "1d", 90_061: "1d 1h 1m", 86_460: "1d 1m"}
+        for seconds, expected in cases.items():
+            with self.subTest(seconds=seconds):
+                self.assertEqual(format_duration(seconds), expected)
 
     def test_invalid_reset_at_falls_back_to_reset_in(self):
         metric = {"label": "Session", "remainingPercent": 62, "resetIn": "3h", "resetAt": "soon"}
@@ -247,6 +263,13 @@ class BuildMenuModelTests(unittest.TestCase):
         payload["accounts"][0].update(failed=True, errorKind="auth")
         self.assertIn("Error: auth", rows_of_kind(build_menu_model(payload, NOW), "error"))
 
+    def test_failure_note_without_accounts_does_not_claim_every_account_failed(self):
+        self.assertEqual(failure_note(0, 0), "0 of 0 accounts failed to refresh")
+
+    def test_description_names_every_failure_when_all_accounts_failed(self):
+        self.assertEqual(describe_status("error", "Claude Work! · Kimi!", 2, 2),
+                         "LLimit: refresh failed. Every account failed to refresh. Claude Work! · Kimi!")
+
     def test_icon_description_is_a_sentence_with_the_failure_count(self):
         model = build_menu_model(self.mixed(), NOW)
         self.assertEqual(model.description,
@@ -283,6 +306,12 @@ class PlanMenuUpdateTests(unittest.TestCase):
         before = self.model(MenuRow("metric", "Session — resets in 3h 12m"), MenuRow("separator"))
         after = self.model(MenuRow("metric", "Session — resets in 3h 11m"), MenuRow("separator"))
         self.assertIs(plan_menu_update(before, after), MenuUpdate.RELABEL)
+
+    def test_icon_only_change_leaves_the_menu_alone(self):
+        rows = [MenuRow("header", "Claude — 8% left")]
+        before = TrayModel(label="LLimit", icon="llimit-ok", tooltip="", rows=list(rows), description="a")
+        after = TrayModel(label="LLimit!", icon="llimit-warning", tooltip="", rows=list(rows), description="b")
+        self.assertIs(plan_menu_update(before, after), MenuUpdate.UNCHANGED)
 
     def test_layout_changes_rebuild(self):
         before = self.model(MenuRow("header", "Claude"), MenuRow("metric", "Session"))
