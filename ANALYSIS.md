@@ -1,9 +1,9 @@
 # LLimit project analysis and remaining work
 
-Consolidated on 2026-10-06 from the full pre-implementation review in `tmp.md`,
+Consolidated on 2026-10-07 from the full pre-implementation review in `tmp.md`,
 the earlier document at `756ce3c`, and fetched `origin/main:ANALYSIS.md` at
 `8b11179` (including `e2d5e02`, pass C at `54d423e`, and pass D).
-The #72 scope correction is preserved in local commit `c1d0d19`.
+The #72 scope correction is preserved in commit `c1d0d19`.
 
 The source reviews examined baseline `2d6ac1e652ac33724961a5a8bf8f43f0f8d31d2f`:
 macOS app, widgets, QuotaCore, Linux CLI/daemon/tray, scripts, CI/release, and
@@ -35,8 +35,9 @@ Check the implementation references before coding overlapping work.
   **Swift 6.2.3**, observing each regression test fail before its fix. Widget changes
   were reportedly parse-checked locally and compile-gated on macOS CI. These are
   source-document reports, not independently verified results in this worktree.
-- The coordinating agent reports the latest combined code passed **492 QuotaCore**
-  and **57 LLimitd** tests. These are reported results, not rerun for this doc edit.
+- The coordinating agent verified all six final PR heads together on 2026-10-07:
+  **496 QuotaCore** and **57 LLimitd** tests passed on Linux Swift 6.3.3 with the
+  supplied SDK and `--jobs 2`. The temporary integration merge was not published.
 - Native rendering, Instruments, VoiceOver, live authentication, installed widgets,
   systemd upgrades, and packaged TLS were not exercised in this consolidation.
   Source counterexamples, reported implementations, and runtime hypotheses remain
@@ -50,12 +51,24 @@ Check the implementation references before coding overlapping work.
 
 ### Our six implemented slices: open PRs
 
-These scopes and open status come from the task handoff. CI/review monitoring and
-final status updates belong to the coordinating agent. They are not merged work.
-At the follow-up handoff, main reported two completed GLM rounds without agreed
-important findings and latest CI green for **#66/#67/#70/#72**. **#69's first GLM
-round was running; #75's second was queued.** These are reported checkpoints,
-not independently checked approval or completion; all six remain open.
+The coordinating agent checked all six PRs on 2026-10-07: each remains **open and
+unmerged**, with latest-head macOS Build & Test, Linux SwiftPM, Linux tray, and GLM
+checks green. Two completed GLM rounds per PR were assessed without agreed important
+production findings. Findings were evaluated from review comments, not inferred
+from successful reviewer jobs. This is the requested review stop, not merge approval.
+
+Verified heads: **#66 `245c7cc`**, **#67 `d76dabe`**, **#70 `543e0e9`**,
+**#69 `c1554af`**, **#72 `ef6fcd9`**, and **#75 `c9afb8b`**. #69's final follow-up
+also passed 72 focused tests and all 443 QuotaCore tests on its own branch. Its
+fixture-route and nil-URL regressions were observed failing before the fixture fix;
+terminal-error/last-good and spec-compliant multiline SSE coverage preserve policy.
+
+Rejected suggestions include accepting a terminally failed Muse stream as fresh
+success, treating present malformed/null windows as absent, exempting short
+configured secrets from redaction, and inventing observed-now history endpoints.
+Synthetic-token blockers were inert test fixtures. Minor inherited copy/diagnostic/
+metadata suggestions are deferred; cancellation/publication remains C10. Document
+overlaps and partial implementation claims are reconciled in the ledger below.
 
 | PR | Branch | Retired instructions and retained implementation scope |
 |---|---|---|
@@ -778,9 +791,10 @@ bounded follow-up with its acceptance condition; do not rebuild recorded feature
    observations and forecast correctness. Legacy-style migration M13 preserves
    account identity; signing/provider fixtures gate release claims.
 
-The coordinating agent owns CI/GLM monitoring, final PR/status reconciliation, and
-publication of this document. `tmp.md` records an original GLM exit target of two
-rounds without applicable important findings or the requested timeout. The follow-up
-checkpoints above are reported only; no overall approval/completion is inferred.
-Feature PRs remain open per the handoff. Retain `tmp.md` until final `ANALYSIS.md`
-is pushed to main.
+The requested review stop has been reached for the six owned PRs; their final heads,
+CI, reviewed findings, and combined checks are recorded above. Feature PRs remain
+open and unmerged by request, with #70 preceding #69. Other workers' references
+remain unverified source-document reports. This consolidated document is published
+directly to main; it retains the original review evidence and remaining instructions
+so the temporary `tmp.md` can be removed after successful publication. Native/live
+verification remains outstanding as specified above.
