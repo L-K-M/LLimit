@@ -184,13 +184,131 @@ final class CodexAccountServiceTests: XCTestCase {
     XCTAssertEqual(try requestLog(profile).filter { $0["method"] as? String == "account/read" }.count, 1)
   }
 
-  func testVersionGateRequiresTestedOfficialCLIAndRejectsLegacyOrPrereleaseOutput() {
-    for output in ["codex-cli 0.144.4\n", "codex-cli 0.145.0", "codex-cli 1.0.0"] {
-      XCTAssertTrue(CodexCLIProbe.isSupported(output))
+  func testProfileEnvironmentKeepsProxyAndCertificateSettings() {
+    let network = [
+      "HTTPS_PROXY": "http://proxy.example.invalid:8080", "https_proxy": "http://lower.example.invalid:8080",
+      "HTTP_PROXY": "http://proxy.example.invalid:8080", "http_proxy": "http://lower.example.invalid:8080",
+      "NO_PROXY": "localhost", "no_proxy": "localhost", "ALL_PROXY": "http://all.example.invalid:8080",
+      "all_proxy": "http://all.example.invalid:8080", "NODE_EXTRA_CA_CERTS": "/etc/corporate/ca.pem",
+      "SSL_CERT_FILE": "/etc/corporate/bundle.pem", "SSL_CERT_DIR": "/etc/corporate/certs",
+      "CODEX_CA_CERTIFICATE": "/etc/corporate/codex.pem"
+    ]
+    let directory = temporary.appendingPathComponent("profile")
+    let executable = temporary.appendingPathComponent("bin/codex")
+    let environment = CodexAccountService.environment(
+      parent: network.merging(["OPENAI_API_KEY": "fake-global-key", "REQUESTS_CA_BUNDLE": "/etc/python.pem"]) { $1 },
+      directory: directory, executable: executable)
+    for (key, value) in network { XCTAssertEqual(environment[key], value, key) }
+    XCTAssertNil(environment["OPENAI_API_KEY"])
+    XCTAssertNil(environment["REQUESTS_CA_BUNDLE"])
+    XCTAssertEqual(environment["CODEX_HOME"], directory.path)
+    XCTAssertEqual(environment["PATH"]?.split(separator: ":").first.map(String.init), executable.deletingLastPathComponent().path)
+  }
+
+  func testVersionGateRequiresTestedOfficialCLIAndOrdersPrereleases() {
+    let supported = [
+      "codex-cli 0.144.4\n", "codex-cli 0.145.0", "codex-cli 1.0.0", "codex-cli 0.150.0-alpha.2",
+      "codex-cli 0.144.4+build.7", "codex-cli 0.145.0-rc.1+abc.5", "codex-cli 0.144.5-0"
+    ]
+    for output in supported {
+      XCTAssertTrue(isSupported(output), output)
     }
-    for output in ["0.1.0", "codex 0.144.4", "codex-cli 0.144.3", "codex-cli 0.1.0", "codex-cli 0.144.4-beta", "codex-cli 999999999999999999999999.0.0", "codex-cli 0.144.4\nadditional output"] {
-      XCTAssertFalse(CodexCLIProbe.isSupported(output))
+    // A prerelease of the minimum precedes that release, so it stays too old.
+    let unsupported = [
+      "0.1.0", "codex 0.144.4", "codex-cli 0.144.3", "codex-cli 0.1.0", "codex-cli 0.144.4-beta",
+      "codex-cli 0.144.3+build.9", "codex-cli 999999999999999999999999.0.0", "codex-cli 0.144.4\nadditional output",
+      "codex-cli 0.144.4-", "codex-cli 0.144.4+", "codex-cli 0.150.0-alpha..2", "codex-cli 0.150.0-al_pha",
+      "codex-cli 0.150", "codex-cli v0.150.0", "codex-cli 0.150.0.1"
+    ]
+    for output in unsupported {
+      XCTAssertFalse(isSupported(output), output)
     }
+  }
+
+  func testVersionPrecedenceFollowsSemanticVersioning() throws {
+    let ordered = ["1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta", "1.0.0-beta.2",
+                   "1.0.0-beta.11", "1.0.0-rc.1", "1.0.0", "1.0.1-0", "1.0.1", "1.10.0"]
+    let versions = try ordered.map { try XCTUnwrap(CodexCLIVersion(versionOutput: "codex-cli " + $0), $0) }
+    for (lower, higher) in zip(versions, versions.dropFirst()) {
+      XCTAssertLessThan(lower, higher, "\(lower) < \(higher)")
+      XCTAssertFalse(higher < lower, "\(higher) < \(lower)")
+    }
+    XCTAssertEqual(versions.map(\.description), ordered)
+    XCTAssertEqual(CodexCLIVersion(versionOutput: "codex-cli 0.150.0-alpha.2+build.1"),
+                   CodexCLIVersion(versionOutput: "codex-cli 0.150.0-alpha.2+build.9"))
+  }
+
+  func testVersionProbeReportsWhyNoCandidateIsUsable() async throws {
+    let missing = temporary.appendingPathComponent("missing-codex")
+    await assertProbeError([missing], .cliNotFound)
+
+    let failing = try versionFixture("failing", body: "exit 127")
+    let old = try versionFixture("old", body: "printf 'codex-cli 0.140.0-beta.1\\n'")
+    let unrelated = try versionFixture("unrelated", body: "printf 'usage: something else\\n'")
+    // The preferred, first install is the one the user needs to repair.
+    await assertProbeError([missing, failing, old], .cliFailed(path: failing.path, .exit(127)))
+    await assertProbeError([old, failing], .cliTooOld(path: old.path, version: "0.140.0-beta.1"))
+    await assertProbeError([unrelated], .cliFailed(path: unrelated.path, .unrecognizedVersion))
+
+    let message = CodexConnectionError.cliFailed(path: failing.path, .exit(127)).localizedDescription
+    XCTAssertTrue(message.contains(failing.path) && message.contains("exit 127"), message)
+    XCTAssertTrue(CodexConnectionError.cliTooOld(path: old.path, version: "0.140.0").localizedDescription.contains("0.144.4"))
+  }
+
+  func testVersionProbeTimeoutKillsTheChild() async throws {
+    let stuck = try versionFixture("stuck", body: #"sleep 1; printf survived > "$(dirname "$0")/survived""#)
+    await assertProbeError([stuck], .cliFailed(path: stuck.path, .timeout), timeout: 0.2)
+    try await Task.sleep(nanoseconds: 1_500_000_000)
+    XCTAssertFalse(FileManager.default.fileExists(atPath: temporary.appendingPathComponent("survived").path))
+  }
+
+  func testNpmShimStartsSessionWhenInterpreterIsOnlyBesideIt() async throws {
+    let bin = temporary.appendingPathComponent("node-prefix/bin", isDirectory: true)
+    let shim = try discoverableFixture(in: bin)
+    let profile = try prepare()
+    let service = CodexAccountService(root: store.root, executable: nil, candidates: [shim],
+                                      environment: ["PATH": "/usr/bin:/bin", "HOME": temporary.path])
+    let usage = try await service.fetchUsage(configuration: configuration(profile), now: Date())
+    XCTAssertEqual(usage.metrics.first?.remainingPercent, 63)
+    let path = store.directory(for: profile).appendingPathComponent("work/environment.json")
+    let environment = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: String])
+    XCTAssertEqual(environment["PATH"]?.split(separator: ":").first.map(String.init), bin.path)
+  }
+
+  func testVersionProbeRunsOnceUntilTheExecutableChanges() async throws {
+    let shim = try discoverableFixture(in: temporary.appendingPathComponent("node-prefix/bin", isDirectory: true))
+    let profile = try prepare()
+    let service = CodexAccountService(root: store.root, executable: nil, candidates: [shim],
+                                      environment: ["PATH": "/usr/bin:/bin", "HOME": temporary.path])
+    let probes = shim.deletingLastPathComponent().appendingPathComponent("version-probes")
+    _ = try await service.fetchUsage(configuration: configuration(profile), now: Date())
+    _ = try await service.fetchUsage(configuration: configuration(profile), now: Date())
+    XCTAssertEqual(try String(contentsOf: probes, encoding: .utf8).split(separator: "\n").count, 1)
+
+    let handle = try FileHandle(forWritingTo: shim)
+    try handle.seekToEnd()
+    try handle.write(contentsOf: Data("# updated install\n".utf8))
+    try handle.close()
+    _ = try await service.fetchUsage(configuration: configuration(profile), now: Date())
+    XCTAssertEqual(try String(contentsOf: probes, encoding: .utf8).split(separator: "\n").count, 2)
+  }
+
+  func testVersionProbeRunsNpmShimWhoseInterpreterIsBesideIt() async throws {
+    // npm installs `#!/usr/bin/env node` shims beside node, a directory that a
+    // Finder-launched app's PATH does not contain.
+    let bin = temporary.appendingPathComponent("node-prefix/bin", isDirectory: true)
+    try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+    let interpreter = bin.appendingPathComponent("fakenode")
+    try "#!/bin/sh\nexec /bin/sh \"$@\"\n".write(to: interpreter, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: interpreter.path)
+    let shim = bin.appendingPathComponent("codex")
+    try "#!/usr/bin/env fakenode\nprintf 'codex-cli 0.144.4\\n'\n".write(to: shim, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: shim.path)
+
+    let discovered = try await CodexCLIProbe.firstSupported([shim], environment: [
+      "PATH": "/usr/bin:/bin", "HOME": temporary.path
+    ])
+    XCTAssertEqual(discovered, shim)
   }
 
   func testVersionProbeSkipsLegacyExecutableAndRunsWithoutUserAuthentication() async throws {
@@ -198,6 +316,7 @@ final class CodexAccountServiceTests: XCTestCase {
     let supported = try versionFixture("new", body: #"""
       [ "$1" = '--version' ] && [ "$#" -eq 1 ] || exit 7
       [ "$HOME" = "$CODEX_HOME" ] && [ "$HOME" != '/ordinary-home' ] || exit 8
+      [ "$VOLTA_HOME" = '/ordinary-home/.volta' ] || exit 10
       [ -z "${OPENAI_API_KEY+x}" ] && [ -z "${BASH_ENV+x}" ] || exit 9
       printf 'codex-cli 0.144.4\n'
       """#)
@@ -214,6 +333,34 @@ final class CodexAccountServiceTests: XCTestCase {
     let discovered = try await CodexCLIProbe.firstSupported([stuck, supported], environment: [:], timeout: 0.5)
     XCTAssertEqual(discovered, supported)
     XCTAssertLessThan(Date().timeIntervalSince(started), 3)
+  }
+
+  private func isSupported(_ output: String) -> Bool {
+    CodexCLIVersion(versionOutput: output).map { $0 >= CodexCLIProbe.minimumVersion } ?? false
+  }
+
+  private func assertProbeError(_ candidates: [URL], _ expected: CodexConnectionError, timeout: TimeInterval = 2,
+                                file: StaticString = #filePath, line: UInt = #line) async {
+    do {
+      let found = try await CodexCLIProbe.firstSupported(candidates, environment: ["PATH": "/usr/bin:/bin"], timeout: timeout)
+      XCTFail("Unexpectedly selected \(found.path)", file: file, line: line)
+    } catch {
+      XCTAssertEqual(error as? CodexConnectionError, expected, file: file, line: line)
+    }
+  }
+
+  /// The app-server fixture as an npm-style shim: `#!/usr/bin/env fakenode`
+  /// with the interpreter only in its own directory. Each probe is counted.
+  private func discoverableFixture(in bin: URL) throws -> URL {
+    try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+    let interpreter = bin.appendingPathComponent("fakenode")
+    try "#!/bin/sh\nexec python3 \"$@\"\n".write(to: interpreter, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: interpreter.path)
+    let shim = bin.appendingPathComponent("codex")
+    let script = Self.fixture.replacingOccurrences(of: "#!/usr/bin/env python3", with: "#!/usr/bin/env fakenode")
+    try script.write(to: shim, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: shim.path)
+    return shim
   }
 
   private func versionFixture(_ name: String, body: String) throws -> URL {
@@ -254,6 +401,11 @@ final class CodexAccountServiceTests: XCTestCase {
   private static let fixture = #"""
     #!/usr/bin/env python3
     import json, os, pathlib, sys, threading, time
+    if sys.argv[1:] == ['--version']:
+        with open(pathlib.Path(__file__).with_name('version-probes'), 'a') as log:
+            log.write('probe\n')
+        print('codex-cli 0.144.4')
+        sys.exit(0)
     root = pathlib.Path(os.environ['CODEX_HOME'])
     mode = pathlib.Path('mode').read_text()
     pathlib.Path('environment.json').write_text(json.dumps(dict(os.environ)))

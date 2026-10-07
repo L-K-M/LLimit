@@ -974,7 +974,7 @@ final class AppModel: ObservableObject {
       let session = ClaudeTerminalSession(
         executable: executable, arguments: ["auth", "login", "--claudeai"],
         environment: ClaudeCodeProcess.environment(parent: ProcessInfo.processInfo.environment,
-                                                    profileDirectory: directory),
+                                                    profileDirectory: directory, executable: executable),
         workingDirectory: directory.appendingPathComponent("work", isDirectory: true))
       session.onExit = { [weak self] status in
         self?.completeClaudeLogin(accountID: accountID, profile: profile, status: status)
@@ -1118,7 +1118,8 @@ final class AppModel: ObservableObject {
     let result = try await claudeProcess.run(
       executable: executable, arguments: ["auth", "login", "--claudeai"],
       environment: ClaudeCodeProcess.environment(parent: ProcessInfo.processInfo.environment,
-                                                  profileDirectory: directory, renewal: material),
+                                                  profileDirectory: directory, executable: executable,
+                                                  renewal: material),
       workingDirectory: directory.appendingPathComponent("work", isDirectory: true), timeout: 45)
     switch result {
     case .completed(let status):
