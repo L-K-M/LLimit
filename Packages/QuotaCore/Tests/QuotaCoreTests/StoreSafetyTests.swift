@@ -121,7 +121,7 @@ final class StoreSafetyTests: XCTestCase {
     try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
     defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path) }
 
-    XCTAssertThrowsError(try SnapshotStore(fileURL: url).load())
+    XCTAssertThrowsError(try SnapshotStore(fileURL: url).load(policy: .recover))
     XCTAssertEqual(try Data(contentsOf: url), original)
     XCTAssertEqual(try artifacts().map(\.lastPathComponent), ["snapshot.json"])
   }
@@ -154,6 +154,27 @@ final class StoreSafetyTests: XCTestCase {
     XCTAssertThrowsError(try store.save(AppSettings(refreshIntervalMinutes: 60)))
     XCTAssertEqual(try Data(contentsOf: url), original)
     XCTAssertEqual(try modeBits(url), 0o600)
+  }
+
+  func testDisplayReadsLeaveCorruptFilesAndPermissionsUntouched() throws {
+    let original = Data("malformed display document".utf8)
+    for name in ["snapshot.json", "history.json"] {
+      let url = directory.appendingPathComponent(name)
+      try original.write(to: url)
+      let before = try FileManager.default.attributesOfItem(atPath: url.path)
+
+      if name == "snapshot.json" {
+        XCTAssertThrowsError(try SnapshotStore(fileURL: url).load())
+      } else {
+        XCTAssertThrowsError(try QuotaHistoryStore(fileURL: url).load())
+      }
+
+      XCTAssertEqual(try Data(contentsOf: url), original)
+      let after = try FileManager.default.attributesOfItem(atPath: url.path)
+      XCTAssertEqual(before[.posixPermissions] as? NSNumber, after[.posixPermissions] as? NSNumber)
+      XCTAssertEqual(before[.modificationDate] as? Date, after[.modificationDate] as? Date)
+    }
+    XCTAssertEqual(Set(try artifacts().map(\.lastPathComponent)), ["snapshot.json", "history.json"])
   }
 
   func testCredentialIntermediatesAreOwnerOnlyFromCreation() async throws {
@@ -190,9 +211,9 @@ final class StoreSafetyTests: XCTestCase {
 
   private func assertRecoveredStore(at url: URL) throws {
     if url.lastPathComponent == "snapshot.json" {
-      XCTAssertNil(try SnapshotStore(fileURL: url).load())
+      XCTAssertNil(try SnapshotStore(fileURL: url).load(policy: .recover))
     } else {
-      XCTAssertEqual(try QuotaHistoryStore(fileURL: url).load(), [])
+      XCTAssertEqual(try QuotaHistoryStore(fileURL: url).load(policy: .recover), [])
     }
   }
 

@@ -1612,7 +1612,7 @@ final class AppModel: ObservableObject {
   }
 
   private func invalidateVeniceUsage(for account: ProviderAccount) throws {
-    let current = try snapshotStore.load() ?? snapshot
+    let current = try snapshotStore.load(policy: .recover) ?? snapshot
       ?? QuotaSnapshot(generatedAt: Date(), providers: [], failures: [])
     let empty = QuotaSnapshot(generatedAt: current.generatedAt, providers: [], failures: [])
     let cleared = current.replacingResults(forAccountIDs: [account.id], from: empty)
@@ -1692,7 +1692,7 @@ final class AppModel: ObservableObject {
   }
 
   private func loadSnapshotFromPreferredStore() throws -> QuotaSnapshot? {
-    return try snapshotStore.load()
+    return try snapshotStore.load(policy: .recover)
   }
 
   private func currentSettings() -> AppSettings {

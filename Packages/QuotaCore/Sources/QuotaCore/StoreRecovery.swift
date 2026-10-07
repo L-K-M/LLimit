@@ -5,6 +5,12 @@ import os
 
 private let maximumStoreQuarantines = 5
 
+/// Display consumers preserve files; the owning refresh process may recover them.
+public enum StoreReadPolicy: Sendable {
+  case preserve
+  case recover
+}
+
 func reportPersistenceIssue(_ message: String) {
   #if canImport(os)
   Logger(subsystem: "app.llimit.LLimit", category: "persistence").error("\(message, privacy: .public)")
