@@ -4,10 +4,20 @@ import QuotaCore
 
 struct QuotaEntry: TimelineEntry {
   let date: Date
-  let snapshot: QuotaSnapshot?
+  let storedSnapshot: DashboardStoredValue<QuotaSnapshot>
   let history: [QuotaSnapshot]
   let refreshIntervalMinutes: Int
-  let settings: AppSettings
+  let storedSettings: DashboardStoredValue<AppSettings>
+
+  // Trend/background consumers keep their fallbacks; dashboard reads outcomes.
+  var snapshot: QuotaSnapshot? { storedSnapshot.value }
+  var settings: AppSettings { storedSettings.value ?? .default }
+  var dashboard: DashboardPresentation { DashboardPresentation(settings: storedSettings, snapshot: storedSnapshot) }
+
+  func at(_ date: Date) -> QuotaEntry {
+    QuotaEntry(date: date, storedSnapshot: storedSnapshot, history: history,
+               refreshIntervalMinutes: refreshIntervalMinutes, storedSettings: storedSettings)
+  }
 }
 
 struct QuotaTimelineProvider: TimelineProvider {
@@ -16,10 +26,10 @@ struct QuotaTimelineProvider: TimelineProvider {
   func placeholder(in context: Context) -> QuotaEntry {
     QuotaEntry(
       date: Date(),
-      snapshot: SampleSnapshotFactory.make(now: Date()),
+      storedSnapshot: .loaded(SampleSnapshotFactory.make(now: Date())),
       history: includesHistory ? SampleSnapshotFactory.makeHistory(now: Date()) : [],
       refreshIntervalMinutes: 30,
-      settings: SampleSnapshotFactory.makeSettings()
+      storedSettings: .loaded(SampleSnapshotFactory.makeSettings())
     )
   }
 
@@ -28,10 +38,10 @@ struct QuotaTimelineProvider: TimelineProvider {
       completion(
         QuotaEntry(
           date: Date(),
-          snapshot: SampleSnapshotFactory.make(now: Date()),
+          storedSnapshot: .loaded(SampleSnapshotFactory.make(now: Date())),
           history: includesHistory ? SampleSnapshotFactory.makeHistory(now: Date()) : [],
           refreshIntervalMinutes: 30,
-          settings: SampleSnapshotFactory.makeSettings()
+          storedSettings: .loaded(SampleSnapshotFactory.makeSettings())
         )
       )
       return
@@ -49,44 +59,49 @@ struct QuotaTimelineProvider: TimelineProvider {
     )
     let refreshIntervalSeconds = TimeInterval(refreshMinutes * 60)
     let nextRefreshDate = now.addingTimeInterval(refreshIntervalSeconds)
-    completion(Timeline(entries: [entry], policy: .after(nextRefreshDate)))
+    let dates = includesHistory ? [now] : DashboardTimeline.entryDates(snapshot: entry.snapshot,
+      accounts: entry.settings.accounts, now: now, refreshIntervalMinutes: refreshMinutes)
+    completion(Timeline(entries: dates.map { entry.at($0) }, policy: .after(nextRefreshDate)))
   }
 
   private func makeStoredEntry(now: Date) -> QuotaEntry {
-    let settings = loadSettings()
-    let snapshot = loadSnapshot()
+    let storedSettings = loadSettings()
+    let storedSnapshot = loadSnapshot()
+    let settings = storedSettings.value ?? .default
     let history = includesHistory
-      ? loadHistory(windowDays: max(1, settings.widgetVisibility.trendHistoryDays), fallbackSnapshot: snapshot)
+      ? loadHistory(windowDays: max(1, settings.widgetVisibility.trendHistoryDays), fallbackSnapshot: storedSnapshot.value)
       : []
     let refreshInterval = settings.refreshIntervalMinutes
     return QuotaEntry(
       date: now,
-      snapshot: snapshot,
+      storedSnapshot: storedSnapshot,
       history: history,
       refreshIntervalMinutes: refreshInterval,
-      settings: settings
+      storedSettings: storedSettings
     )
   }
 
-  private func loadSnapshot() -> QuotaSnapshot? {
+  private func loadSnapshot() -> DashboardStoredValue<QuotaSnapshot> {
     do {
       let fileURL = try SharedPaths.snapshotFileURL()
       let store = SnapshotStore(fileURL: fileURL, appGroupIdentifier: SharedConstants.appGroupIdentifier)
-      return try store.load()
+      guard let snapshot = try store.load(policy: .preserve) else { return .missing }
+      return .loaded(snapshot)
     } catch {
       print("[LLimit Widget] Failed to load snapshot: \(error)")
-      return nil
+      return .unavailable
     }
   }
 
-  private func loadSettings() -> AppSettings {
+  private func loadSettings() -> DashboardStoredValue<AppSettings> {
     do {
       let settingsURL = try SharedPaths.settingsFileURL()
+      guard FileManager.default.fileExists(atPath: settingsURL.path) else { return .missing }
       let store = SettingsStore(fileURL: settingsURL)
-      return try store.load()
+      return .loaded(try store.load(policy: .preserve))
     } catch {
-      print("[LLimit Widget] Failed to load settings, using defaults: \(error)")
-      return .default
+      print("[LLimit Widget] Failed to load settings: \(error)")
+      return .unavailable
     }
   }
 

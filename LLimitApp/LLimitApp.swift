@@ -1,8 +1,19 @@
 import SwiftUI
 import AppKit
+import Combine
 import QuotaCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+  func applicationDidFinishLaunching(_ notification: Notification) {
+    GlobalHotkeyService.shared.start {
+      DashboardWindowController.shared.toggleFromShortcut(model: AppModel.shared)
+    }
+  }
+
+  func applicationWillTerminate(_ notification: Notification) {
+    GlobalHotkeyService.shared.stop()
+  }
+
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
     false
   }
@@ -15,7 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct LLimitApp: App {
   @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-  @StateObject private var model = AppModel()
+  @StateObject private var model = AppModel.shared
 
   var body: some Scene {
     // Menu-bar-only app. The settings window is a normal, freely resizable AppKit
@@ -29,7 +40,8 @@ struct LLimitApp: App {
         snapshot: model.snapshot,
         kindColors: model.widgetStyle.limitKindColors,
         primaryColors: model.primaryColorsByAccountID,
-        accounts: model.providerAccounts
+        accounts: model.providerAccounts,
+        refreshIntervalMinutes: model.refreshIntervalMinutes
       )
     }
     .menuBarExtraStyle(.window)
@@ -91,13 +103,21 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
   }
 }
 
+extension AppModel {
+  /// Menu bar, settings and shortcut share one refresh owner.
+  @MainActor static let shared = AppModel()
+}
+
 /// Owns the optional always-on-top quota dashboard detached from the menu bar.
 @MainActor
 final class DashboardWindowController {
   static let shared = DashboardWindowController()
   private var window: NSPanel?
+  /// App that was frontmost when the dashboard came forward while LLimit was
+  /// inactive. A shortcut press that puts the dashboard away hands focus back.
+  private var appToRestore: NSRunningApplication?
 
-  func show(model: AppModel, near screenPoint: NSPoint? = nil, activate: Bool = true) {
+  private func makeWindowIfNeeded(model: AppModel) {
     if window == nil {
       let hosting = NSHostingController(
         rootView: MenuBarContent(model: model, presentation: .floating)
@@ -120,6 +140,14 @@ final class DashboardWindowController {
       panel.setFrameAutosaveName("LLimitFloatingDashboard")
       window = panel
     }
+  }
+
+  func show(model: AppModel, near screenPoint: NSPoint? = nil, activate: Bool = true) {
+    makeWindowIfNeeded(model: model)
+    // Read before activating, which makes LLimit the frontmost app. Nothing is
+    // restored when LLimit was already active, such as from Settings.
+    let previous = NSWorkspace.shared.frontmostApplication
+    appToRestore = NSApp.isActive || previous?.processIdentifier == ProcessInfo.processInfo.processIdentifier ? nil : previous
 
     if let screenPoint {
       positionWindow(near: screenPoint)
@@ -145,6 +173,57 @@ final class DashboardWindowController {
     window?.makeKeyAndOrderFront(nil)
   }
 
+  /// The dashboard shortcut. A dashboard you are using goes away. A hidden one,
+  /// or one left visible while you work in another app, comes forward on the
+  /// screen under the pointer with keyboard focus, so Cmd-R and Cmd-, work.
+  func toggleFromShortcut(model: AppModel) {
+    if NSApp.isActive, let window, window.isKeyWindow {
+      dismissFromShortcut(window)
+      return
+    }
+
+    makeWindowIfNeeded(model: model)
+    moveOntoScreen(containing: NSEvent.mouseLocation)
+    show(model: model)
+  }
+
+  private func dismissFromShortcut(_ window: NSPanel) {
+    let heldFocus = NSApp.isActive && window.isKeyWindow
+      && NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier
+    window.orderOut(nil)
+
+    // Ordering the panel out leaves LLimit active with nothing to type into,
+    // so hand focus back to the app you were in when the dashboard came forward.
+    // Only restore when LLimit still holds focus; if the user already moved
+    // elsewhere, leave their current app alone.
+    if heldFocus, NSApp.isActive, NSApp.keyWindow == nil,
+       let appToRestore, !appToRestore.isTerminated {
+      appToRestore.activate(options: [])
+    }
+    appToRestore = nil
+  }
+
+  /// Leaves the dashboard where you put it when that is on the pointer's
+  /// screen. Otherwise centers it on that screen.
+  private func moveOntoScreen(containing point: NSPoint) {
+    guard let window,
+          let screen = NSScreen.screens.first(where: { NSMouseInRect(point, $0.frame, false) }) else {
+      return
+    }
+
+    let frame = window.frame
+    guard !screen.frame.contains(NSPoint(x: frame.midX, y: frame.midY)) else { return }
+
+    let visibleFrame = screen.visibleFrame
+    let centered = NSRect(
+      x: visibleFrame.midX - frame.width / 2,
+      y: visibleFrame.midY - frame.height / 2,
+      width: frame.width,
+      height: frame.height
+    )
+    window.setFrame(window.constrainFrameRect(centered, to: screen), display: false)
+  }
+
   private func positionWindow(near screenPoint: NSPoint) {
     guard let window else { return }
 
@@ -165,71 +244,152 @@ private struct MenuBarIcon: View {
   let kindColors: LimitKindColors
   let primaryColors: [String: String]
   let accounts: [ProviderAccount]
+  let refreshIntervalMinutes: Int
+  private static let ticks = Timer.publish(every: 60, tolerance: 15, on: .main, in: .common).autoconnect()
+  @State private var checkedAt = Date()
 
   var body: some View {
-    Image(nsImage: iconImage())
-      .accessibilityLabel("LLimit")
+    let bars = projectedBars(at: max(checkedAt, Date()))
+    let label = MenuBarGraph.accessibilityLabel(for: bars)
+    let tooltip = MenuBarGraph.tooltip(for: bars)
+
+    Image(nsImage: iconImage(for: bars, accessibilityLabel: label))
+      .accessibilityLabel(label)
+      .help(tooltip)
+      .onChange(of: [tooltip, label], initial: true) {
+        StatusItemButtonSummary.apply(toolTip: tooltip, accessibilityLabel: label)
+      }
+      .onReceive(Self.ticks) { date in
+        if projectedBars(at: date).map(\.freshness) != projectedBars(at: checkedAt).map(\.freshness) {
+          checkedAt = date
+        }
+      }
   }
 
-  private func iconImage() -> NSImage {
-    let barWidth: CGFloat = 3
-    let barSpacing: CGFloat = 1.5
-    let iconHeight: CGFloat = 16
-    let cornerRadius: CGFloat = 1
+  private func projectedBars(at date: Date) -> [MenuBarGraph.Bar] {
+    MenuBarGraph.bars(snapshot: snapshot, accounts: accounts, now: date,
+                      staleAfter: QuotaFreshness.maxAge(refreshIntervalMinutes: refreshIntervalMinutes))
+  }
 
-    let providers = orderedProviders()
-    guard !providers.isEmpty else {
-      return fallbackIcon()
+  private func iconImage(for bars: [MenuBarGraph.Bar], accessibilityLabel: String) -> NSImage {
+    guard !bars.isEmpty else {
+      return fallbackIcon(accessibilityLabel: accessibilityLabel)
     }
 
-    let totalWidth = CGFloat(providers.count) * barWidth + CGFloat(max(0, providers.count - 1)) * barSpacing
-
-    let image = NSImage(size: NSSize(width: totalWidth, height: iconHeight), flipped: false) { _ in
-      for (index, provider) in providers.enumerated() {
-        let x = CGFloat(index) * (barWidth + barSpacing)
-        // Height carries the level; color matches the account's primary ring
-        // and chart line regardless of which limit is most constrained.
-        let accent = LimitKindColorScheme.primaryAccountAccent(
-          for: provider.metrics,
-          colors: kindColors,
-          step: accountColorStep(forAccountID: provider.accountID, in: accounts),
-          primaryHexColor: primaryColors[provider.accountID]
-        )
-        if let remaining = MenuBarQuotaStyling.remainingPercent(for: provider) {
-          let normalized = CGFloat(max(0, min(100, remaining))) / 100.0
-          let barHeight = max(2, normalized * iconHeight)
-          let barRect = NSRect(x: x, y: 0, width: barWidth, height: barHeight)
-          let barPath = NSBezierPath(roundedRect: barRect, xRadius: cornerRadius, yRadius: cornerRadius)
-          NSColor(accent).setFill()
-          barPath.fill()
-        } else {
-          // A balance without a quota total has no meaningful bar height.
-          let marker = NSBezierPath(ovalIn: NSRect(x: x + 0.5, y: 6.5, width: barWidth - 1, height: 3))
-          marker.lineWidth = 1
-          NSColor(accent).setStroke()
-          marker.stroke()
-        }
+    let accents = bars.map { bar in
+      NSColor(LimitKindColorScheme.primaryAccountAccent(
+        for: bar.usage?.metrics ?? [], colors: kindColors,
+        step: accountColorStep(forAccountID: bar.accountID, in: accounts),
+        primaryHexColor: primaryColors[bar.accountID]
+      ))
+    }
+    let image = NSImage(size: MenuBarBarRenderer.imageSize(barCount: bars.count), flipped: false) { _ in
+      for (index, bar) in bars.enumerated() {
+        MenuBarBarRenderer.draw(bar, accent: accents[index], in: MenuBarBarRenderer.column(at: index))
       }
       return true
     }
 
     image.isTemplate = false
+    image.accessibilityDescription = accessibilityLabel
     return image
   }
 
-  private func orderedProviders() -> [ProviderUsage] {
-    guard let snapshot else {
-      return []
-    }
-
-    return orderedUsageForAccounts(snapshot.providers, accounts: accounts)
-  }
-
-  private func fallbackIcon() -> NSImage {
-    let image = NSImage(systemSymbolName: "chart.bar.fill", accessibilityDescription: "LLimit")
+  private func fallbackIcon(accessibilityLabel: String) -> NSImage {
+    let image = NSImage(systemSymbolName: "chart.bar.fill", accessibilityDescription: accessibilityLabel)
       ?? NSImage(size: NSSize(width: 18, height: 16))
     image.isTemplate = true
     return image
+  }
+}
+
+/// Identity fills carry level; stems and dashed frames carry freshness/failure.
+private enum MenuBarBarRenderer {
+  private static let barWidth: CGFloat = 3
+  private static let barSpacing: CGFloat = 1.5
+  private static let iconHeight: CGFloat = 16
+  private static let cornerRadius: CGFloat = 1
+  private static let outlineWidth: CGFloat = 1
+  private static let stemWidth: CGFloat = 1
+  private static let failingDash: [CGFloat] = [2, 1.5]
+  private static let amountDash: [CGFloat] = [1, 1.5]
+  private static let track = NSColor(white: 0.5, alpha: 0.35)
+  private static let failing = NSColor(srgbRed: 1, green: 159 / 255, blue: 10 / 255, alpha: 1)
+  private static let exhausted = NSColor(srgbRed: 1, green: 0.36, blue: 0.32, alpha: 1)
+
+  static func imageSize(barCount: Int) -> NSSize {
+    NSSize(width: CGFloat(barCount) * barWidth + CGFloat(max(0, barCount - 1)) * barSpacing, height: iconHeight)
+  }
+
+  static func column(at index: Int) -> NSRect {
+    NSRect(x: CGFloat(index) * (barWidth + barSpacing), y: 0, width: barWidth, height: iconHeight)
+  }
+
+  static func draw(_ bar: MenuBarGraph.Bar, accent: NSColor, in column: NSRect) {
+    if bar.freshness.isFailing {
+      stroke(column, color: failing, dash: failingDash)
+    } else {
+      fill(column, color: track)
+    }
+
+    guard let height = MenuBarGraph.barHeight(for: bar.level, fullHeight: Double(column.height)) else {
+      if bar.level == .amountOnly, !bar.freshness.isFailing {
+        stroke(column, color: accent, dash: amountDash)
+      }
+      return
+    }
+
+    guard height > 0 else {
+      if !bar.freshness.isFailing { stroke(column, color: exhausted, dash: nil) }
+      return
+    }
+
+    let width = bar.freshness == .current ? column.width : stemWidth
+    fill(NSRect(x: column.midX - width / 2, y: column.minY, width: width, height: CGFloat(height)), color: accent)
+  }
+
+  private static func fill(_ rect: NSRect, color: NSColor) {
+    color.setFill()
+    NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius).fill()
+  }
+
+  private static func stroke(_ rect: NSRect, color: NSColor, dash: [CGFloat]?) {
+    let path = NSBezierPath(roundedRect: rect.insetBy(dx: outlineWidth / 2, dy: outlineWidth / 2),
+                            xRadius: cornerRadius, yRadius: cornerRadius)
+    path.lineWidth = outlineWidth
+    if let dash { path.setLineDash(dash, count: dash.count, phase: 0) }
+    color.setStroke()
+    path.stroke()
+  }
+}
+
+/// MenuBarExtra can discard label modifiers when building its status button.
+/// LLimit owns the process's only status item; use public AppKit APIs to label it.
+@MainActor
+private enum StatusItemButtonSummary {
+  private static let attemptDelays: [Duration] = [.zero, .milliseconds(250), .seconds(1), .seconds(3), .seconds(10)]
+  private static var pendingApply: Task<Void, Never>?
+
+  static func apply(toolTip: String, accessibilityLabel: String) {
+    pendingApply?.cancel()
+    pendingApply = Task {
+      for delay in attemptDelays {
+        try? await Task.sleep(for: delay)
+        guard !Task.isCancelled else { return }
+        let buttons = NSApp.windows.compactMap(\.contentView).flatMap(statusBarButtons)
+        guard !buttons.isEmpty else { continue }
+        for button in buttons {
+          button.toolTip = toolTip
+          button.setAccessibilityLabel(accessibilityLabel)
+        }
+        return
+      }
+    }
+  }
+
+  private static func statusBarButtons(in view: NSView) -> [NSStatusBarButton] {
+    if let button = view as? NSStatusBarButton { return [button] }
+    return view.subviews.flatMap(statusBarButtons)
   }
 }
 
@@ -239,17 +399,30 @@ private struct MenuBarIcon: View {
 /// come from the limit-kind identity palette (LimitKindColorScheme); nothing
 /// here should compete with those signal colors.
 private enum DashboardPalette {
-  static let backgroundTop = Color(red: 0.114, green: 0.122, blue: 0.153)
-  static let backgroundBottom = Color(red: 0.062, green: 0.066, blue: 0.086)
-  static let card = Color.white.opacity(0.055)
-  static let cardHover = Color.white.opacity(0.085)
-  static let hairline = Color.white.opacity(0.10)
-  static let rimBottom = Color.white.opacity(0.03)
-  static let sectionTitle = Color.white.opacity(0.48)
-  static let secondaryText = Color.white.opacity(0.62)
-  static let tertiaryText = Color.white.opacity(0.42)
-  static let barTrack = Color.white.opacity(0.09)
-  static let brandGradient = [Color(red: 0.33, green: 0.53, blue: 0.98), Color(red: 0.58, green: 0.40, blue: 0.95)]
+  static let backgroundTop = adaptive(\.backgroundTopHex)
+  static let backgroundBottom = adaptive(\.backgroundBottomHex)
+  static let primaryText = adaptive(\.primaryTextHex)
+  static let card = adaptive(\.cardHex)
+  static let cardHover = adaptive(\.cardHoverHex)
+  static let hairline = primaryText.opacity(0.14)
+  static let rimBottom = primaryText.opacity(0.04)
+  static let sectionTitle = adaptive(\.tertiaryTextHex)
+  static let secondaryText = adaptive(\.secondaryTextHex)
+  static let tertiaryText = adaptive(\.tertiaryTextHex)
+  static let warning = adaptive(\.warningHex)
+  static let danger = adaptive(\.dangerHex)
+  static let success = adaptive(\.successHex)
+  static let barTrack = primaryText.opacity(0.12)
+  static let markBacking = Color(red: 29 / 255, green: 31 / 255, blue: 39 / 255)
+  static let brandGradient = [Color(red: 52 / 255, green: 107 / 255, blue: 194 / 255),
+                              Color(red: 123 / 255, green: 73 / 255, blue: 184 / 255)]
+
+  private static func adaptive(_ key: KeyPath<DashboardAppearance, String>) -> Color {
+    Color(nsColor: NSColor(name: nil) { appearance in
+      let scheme: DashboardAppearance = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? .dark : .light
+      return NSColor(LimitKindColorScheme.color(hex: scheme[keyPath: key]) ?? .primary)
+    })
+  }
 }
 
 /// Card chrome shared by every dashboard tile: soft fill, top-lit rim, drop shadow.
@@ -269,7 +442,7 @@ private struct DashboardCardChrome: ViewModifier {
           .strokeBorder(
             LinearGradient(
               colors: [
-                (accent ?? .white).opacity(accent == nil ? 0.14 : 0.30),
+                (accent ?? DashboardPalette.primaryText).opacity(accent == nil ? 0.14 : 0.30),
                 DashboardPalette.rimBottom
               ],
               startPoint: .top,
@@ -317,17 +490,27 @@ private struct GlossRing: View {
     return Double(max(0, min(100, remaining ?? 0))) / 100
   }
 
+  private var innerDiameter: CGFloat { diameter - lineWidth * 2 }
+
   var body: some View {
     ZStack {
       Circle()
-        .stroke(Color.white.opacity(0.08), lineWidth: lineWidth)
+        .inset(by: lineWidth / 2)
+        .stroke(DashboardPalette.barTrack, lineWidth: lineWidth)
 
       if progress > 0.001 {
         Circle()
+          .inset(by: lineWidth / 2)
+          .trim(from: 0, to: progress)
+          .stroke(DashboardPalette.markBacking, style: StrokeStyle(lineWidth: lineWidth + 1.5, lineCap: .round))
+          .rotationEffect(.degrees(-90))
+
+        Circle()
+          .inset(by: lineWidth / 2)
           .trim(from: 0, to: progress)
           .stroke(
             AngularGradient(
-              gradient: Gradient(colors: [tint.opacity(0.45), tint]),
+              gradient: Gradient(colors: [tint, tint]),
               center: .center,
               startAngle: .degrees(0),
               endAngle: .degrees(360 * progress)
@@ -340,13 +523,13 @@ private struct GlossRing: View {
       }
 
       Text(centerText)
-        .font(.system(size: diameter * 0.27, weight: .bold, design: .rounded))
+        .font(.system(size: innerDiameter * 0.33, weight: .bold, design: .rounded))
         .monospacedDigit()
-        .foregroundStyle(.white.opacity(0.94))
+        .foregroundStyle(DashboardPalette.primaryText)
         .contentTransition(.numericText())
         .minimumScaleFactor(0.6)
         .lineLimit(1)
-        .frame(width: diameter - lineWidth * 2.6)
+        .frame(width: innerDiameter * 0.88)
     }
     .frame(width: diameter, height: diameter)
     .accessibilityLabel(accessibilityText)
@@ -378,8 +561,12 @@ private struct GlossBar: View {
 
         if progress > 0 {
           Capsule()
+            .fill(DashboardPalette.markBacking)
+            .frame(width: max(6, geometry.size.width * min(1, progress)))
+
+          Capsule()
             .fill(
-              LinearGradient(colors: [tint.opacity(0.78), tint], startPoint: .leading, endPoint: .trailing)
+              LinearGradient(colors: [tint, tint], startPoint: .leading, endPoint: .trailing)
             )
             .overlay(alignment: .top) {
               Capsule()
@@ -391,6 +578,7 @@ private struct GlossBar: View {
             }
             .frame(width: max(6, geometry.size.width * min(1, progress)))
             .shadow(color: tint.opacity(0.35), radius: 2)
+            .overlay(Capsule().strokeBorder(DashboardPalette.markBacking, lineWidth: 0.75))
         }
       }
     }
@@ -522,7 +710,7 @@ private struct ResetChip: View {
         .font(.system(size: 10, weight: .semibold))
         .monospacedDigit()
     }
-    .foregroundStyle(isDue ? Color.orange : DashboardPalette.tertiaryText)
+    .foregroundStyle(isDue ? DashboardPalette.warning : DashboardPalette.tertiaryText)
     .lineLimit(1)
     .accessibilityLabel(isDue ? "Reset due" : "Resets in \(countdown)")
   }
@@ -538,12 +726,6 @@ private struct MenuBarContent: View {
   @AppStorage(MenuBarPanelSize.heightKey) private var panelHeight = MenuBarPanelSize.defaultHeight
   @State private var panelAnchor = WindowAnchor()
   @State private var panelScreenSize: CGSize?
-
-  private static let relativeTimeFormatter: RelativeDateTimeFormatter = {
-    let formatter = RelativeDateTimeFormatter()
-    formatter.unitsStyle = .abbreviated
-    return formatter
-  }()
 
   var body: some View {
     // Fitted to the panel's own screen. NSScreen.main follows keyboard focus and
@@ -590,7 +772,7 @@ private struct MenuBarContent: View {
         .background(PanelWindowReader(anchor: panelAnchor) { panelScreenSize = $0 })
       }
     }
-    .foregroundStyle(.white)
+    .foregroundStyle(DashboardPalette.primaryText)
     .background {
       LinearGradient(
         colors: [DashboardPalette.backgroundTop, DashboardPalette.backgroundBottom],
@@ -598,7 +780,6 @@ private struct MenuBarContent: View {
         endPoint: .bottom
       )
     }
-    .environment(\.colorScheme, .dark)
   }
 
   private var dashboardDivider: some View {
@@ -611,15 +792,15 @@ private struct MenuBarContent: View {
   private func dashboard(now: Date) -> some View {
     if let snapshot = model.snapshot {
       let providers = providersForMenu(from: snapshot)
-      let failuresByAccount = snapshot.failures.reduce(into: [String: ProviderFailure]()) { failures, failure in
+      let currentFailures = orderedFailuresForAccounts(snapshot.failures, accounts: model.providerAccounts)
+      let failuresByAccount = currentFailures.reduce(into: [String: ProviderFailure]()) { failures, failure in
         failures[failure.accountID] = failure
       }
       let providerIDs = Set(providers.map(\.accountID))
-      let standaloneFailures = snapshot.failures
+      let standaloneFailures = currentFailures
         .filter { !providerIDs.contains($0.accountID) }
         .sorted { failureTitle(for: $0) < failureTitle(for: $1) }
-      let resultAccountCount = providerIDs.union(snapshot.failures.map(\.accountID)).count
-      let accountCount = max(model.providerAccounts.filter(\.isEnabled).count, resultAccountCount)
+      let accountCount = model.providerAccounts.filter(\.isEnabled).count
 
       if providers.isEmpty && standaloneFailures.isEmpty {
         emptyState
@@ -636,11 +817,14 @@ private struct MenuBarContent: View {
               OverviewCard(
                 providers: providers,
                 accountCount: accountCount,
-                failureCount: snapshot.failures.count,
+                failureCount: currentFailures.count,
                 tint: summaryTint(for: providers),
                 kindColors: model.widgetStyle.limitKindColors,
                 primaryColors: model.primaryColorsByAccountID,
                 accounts: model.providerAccounts,
+                now: now,
+                bestAccount: DashboardBestAccount.best(snapshot: snapshot, accounts: model.providerAccounts, now: now,
+                                                       staleAfter: QuotaFreshness.maxAge(refreshIntervalMinutes: model.refreshIntervalMinutes)),
                 onSelect: { accountID in
                   withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
                     proxy.scrollTo(accountID, anchor: .top)
@@ -679,7 +863,7 @@ private struct MenuBarContent: View {
                 )
               }
             }
-            .padding(12)
+            .padding(OverviewGaugeLayout.dashboardPadding)
           }
           .scrollIndicators(.automatic)
         }
@@ -690,7 +874,14 @@ private struct MenuBarContent: View {
   }
 
   private func dashboardHeader(now: Date) -> some View {
-    HStack(spacing: 10) {
+    let current = model.snapshot.map { snapshot -> QuotaSnapshot in
+      var projected = snapshot
+      projected.providers = orderedUsageForAccounts(snapshot.providers, accounts: model.providerAccounts)
+      projected.failures = orderedFailuresForAccounts(snapshot.failures, accounts: model.providerAccounts)
+      return projected
+    }
+
+    return HStack(spacing: 10) {
       ZStack {
         RoundedRectangle(cornerRadius: 8, style: .continuous)
           .fill(
@@ -714,9 +905,9 @@ private struct MenuBarContent: View {
 
         Group {
           if model.isRefreshing {
-            Text("Updating quotas...")
+            Text("Refreshing…")
           } else if let snapshot = model.snapshot {
-            Text("Updated \(relativeTimeString(from: snapshot.generatedAt, relativeTo: now))")
+            Text("Updated \(QuotaDisplayText.relativeAge(snapshot.generatedAt, now: now))")
           } else {
             Text("Waiting for quota data")
           }
@@ -730,28 +921,22 @@ private struct MenuBarContent: View {
       if model.isRefreshing {
         ProgressView()
           .controlSize(.small)
-      } else if let snapshot = model.snapshot {
-        if snapshot.failures.isEmpty {
-          Image(systemName: "checkmark.circle.fill")
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(.green.opacity(0.9))
-            .help("All accounts reporting")
-            .accessibilityLabel("All accounts reporting")
-        } else {
-          HStack(spacing: 3) {
-            Image(systemName: "exclamationmark.triangle.fill")
-              .font(.system(size: 9, weight: .bold))
-            Text("\(snapshot.failures.count)")
-              .font(.system(size: 10.5, weight: .bold))
-              .monospacedDigit()
-          }
-          .foregroundStyle(.orange)
+          .accessibilityLabel("Refreshing")
+      } else {
+        let weather = QuotaWeather.forSnapshot(current, now: now,
+          staleAfter: QuotaFreshness.maxAge(refreshIntervalMinutes: model.refreshIntervalMinutes))
+        let issues = current?.failures.count ?? 0
+        let description = "Quota weather: \(weather.rawValue). " +
+          QuotaDisplayText.countPhrase(issues, singular: "account issue", plural: "account issues")
+
+        Label(weather.rawValue, systemImage: weather.iconName)
+          .font(.system(size: 10, weight: .semibold))
+          .foregroundStyle(weatherTint(weather))
           .padding(.horizontal, 7)
           .padding(.vertical, 3)
-          .background(.orange.opacity(0.15), in: Capsule())
-          .help("\(snapshot.failures.count) account issue(s)")
-          .accessibilityLabel("\(snapshot.failures.count) account issues")
-        }
+          .background(weatherTint(weather).opacity(0.12), in: Capsule())
+          .help(description)
+          .accessibilityLabel(description)
       }
 
       if presentation == .menuBar {
@@ -773,7 +958,16 @@ private struct MenuBarContent: View {
     }
     .padding(.horizontal, 14)
     .padding(.vertical, 11)
-    .background(Color.black.opacity(0.10))
+    .background(DashboardPalette.card)
+  }
+
+  private func weatherTint(_ weather: QuotaWeather) -> Color {
+    switch weather {
+    case .calm: return DashboardPalette.success
+    case .cloudy, .stale: return DashboardPalette.warning
+    case .stormy: return DashboardPalette.danger
+    case .unknown, .estimated: return DashboardPalette.secondaryText
+    }
   }
 
   private var emptyState: some View {
@@ -790,7 +984,7 @@ private struct MenuBarContent: View {
           .frame(width: 64, height: 64)
         Image(systemName: "gauge.with.dots.needle.0percent")
           .font(.system(size: 26, weight: .light))
-          .foregroundStyle(.white.opacity(0.85))
+          .foregroundStyle(DashboardPalette.primaryText)
       }
       .accessibilityHidden(true)
 
@@ -876,10 +1070,11 @@ private struct MenuBarContent: View {
           .frame(width: 18)
       }
       .help("More")
+      .accessibilityLabel("More actions")
     }
     .buttonStyle(.borderless)
     .font(.system(size: 13, weight: .medium))
-    .foregroundStyle(.white.opacity(0.88))
+    .foregroundStyle(DashboardPalette.primaryText)
     // Keeps the buttons clear of the menu bar panel's corner resize grips.
     .padding(.horizontal, presentation == .menuBar ? PanelResizeGrip.footprint + 4 : 14)
     .padding(.vertical, 10)
@@ -887,7 +1082,7 @@ private struct MenuBarContent: View {
   }
 
   private func providersForMenu(from snapshot: QuotaSnapshot) -> [ProviderUsage] {
-    snapshot.providers.sorted { lhs, rhs in
+    orderedUsageForAccounts(snapshot.providers, accounts: model.providerAccounts).sorted { lhs, rhs in
       let lhsRemaining = MenuBarQuotaStyling.remainingPercent(for: lhs) ?? Int.max
       let rhsRemaining = MenuBarQuotaStyling.remainingPercent(for: rhs) ?? Int.max
 
@@ -921,9 +1116,6 @@ private struct MenuBarContent: View {
     model.account(withID: failure.accountID)?.displayName ?? failure.provider.displayName
   }
 
-  private func relativeTimeString(from date: Date, relativeTo now: Date) -> String {
-    Self.relativeTimeFormatter.localizedString(for: date, relativeTo: now)
-  }
 }
 
 private struct ActionBarButton: View {
@@ -941,7 +1133,7 @@ private struct ActionBarButton: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
         .background(
-          Color.white.opacity(isHovering && !isDisabled ? 0.09 : 0),
+          DashboardPalette.primaryText.opacity(isHovering && !isDisabled ? 0.09 : 0),
           in: RoundedRectangle(cornerRadius: 7, style: .continuous)
         )
         .contentShape(Rectangle())
@@ -1138,9 +1330,9 @@ private struct DetachDashboardControl: View {
     } label: {
       Image(systemName: "macwindow")
         .font(.system(size: 13, weight: .semibold))
-        .foregroundStyle(isHovering ? .white : DashboardPalette.secondaryText)
+        .foregroundStyle(isHovering ? DashboardPalette.primaryText : DashboardPalette.secondaryText)
         .frame(width: 28, height: 28)
-        .background(Color.white.opacity(isHovering ? 0.11 : 0.05), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .background(DashboardPalette.primaryText.opacity(isHovering ? 0.11 : 0.05), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
         .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
@@ -1180,10 +1372,13 @@ private struct OverviewCard: View {
   let kindColors: LimitKindColors
   let primaryColors: [String: String]
   let accounts: [ProviderAccount]
+  let now: Date
+  let bestAccount: HeadroomRanking.Candidate?
   let onSelect: (String) -> Void
 
-  // Six gauges per row at the default 420pt panel width.
-  private static let gaugeColumns = [GridItem(.adaptive(minimum: 54), spacing: 6, alignment: .top)]
+  private static let captionFontSize: CGFloat = 11
+  private static let metricLabelSuffixes = [" remaining", " limit", " quota"]
+  private static let resetDue = "reset"
 
   private var lowestRemaining: Int? {
     providers.compactMap(MenuBarQuotaStyling.remainingPercent).min()
@@ -1197,7 +1392,7 @@ private struct OverviewCard: View {
     VStack(spacing: 12) {
       HStack(alignment: .firstTextBaseline) {
         SectionTitle(text: "OVERVIEW")
-        Text("\(metricCount) METRICS")
+        Text(QuotaDisplayText.countPhrase(metricCount, singular: "METRIC", plural: "METRICS"))
           .font(.system(size: 9, weight: .semibold))
           .tracking(0.6)
           .foregroundStyle(DashboardPalette.tertiaryText)
@@ -1205,23 +1400,28 @@ private struct OverviewCard: View {
 
       if !providers.isEmpty {
         // Every account gets a gauge. Rows wrap, so a wider panel fits more per row.
-        LazyVGrid(columns: Self.gaugeColumns, spacing: 10) {
+        OverviewGaugeGrid(rowSpacing: 10) {
           ForEach(providers) { provider in
+            let remaining = MenuBarQuotaStyling.remainingPercent(for: provider)
+            let metric = MenuBarQuotaStyling.constrainingMetric(for: provider)
+            let caption = accountGaugeCaption(for: provider)
+            let reset = metric?.resetCountdown(at: now)
+
             Button {
               onSelect(provider.accountID)
             } label: {
               VStack(spacing: 5) {
-                if MenuBarQuotaStyling.remainingPercent(for: provider) == nil,
-                   let balance = provider.metrics.compactMap(\.usageLine).first {
+                if remaining == nil,
+                   let balance = provider.metrics.first(where: { !$0.isUnlimited && $0.usageLine != nil })?.usageLine {
                   Text(balance)
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .font(.system(size: Self.captionFontSize, weight: .semibold, design: .rounded))
                     .monospacedDigit()
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
                     .frame(height: 40)
                 } else {
                   GlossRing(
-                    remaining: MenuBarQuotaStyling.remainingPercent(for: provider),
+                    remaining: remaining,
                     unlimited: provider.metrics.allSatisfy(\.isUnlimited) && !provider.metrics.isEmpty,
                     tint: LimitKindColorScheme.accountAccent(
                       for: provider.metrics,
@@ -1235,16 +1435,33 @@ private struct OverviewCard: View {
                   )
                 }
                 Text(provider.title)
-                  .font(.system(size: 9, weight: .medium))
+                  .font(.system(size: Self.captionFontSize, weight: .medium))
                   .foregroundStyle(DashboardPalette.secondaryText)
-                  .lineLimit(1)
+                  .lineLimit(2, reservesSpace: true)
+                  .multilineTextAlignment(.center)
+                  .fixedSize(horizontal: false, vertical: true)
                   .frame(maxWidth: .infinity)
+
+                ViewThatFits(in: .horizontal) {
+                  if let reset {
+                    Text("\(caption) · \(reset == Self.resetDue ? "Reset due" : reset)")
+                      .lineLimit(1)
+                      .fixedSize(horizontal: true, vertical: true)
+                  }
+                  Text(caption)
+                    .lineLimit(2, reservesSpace: true)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                .font(.system(size: Self.captionFontSize))
+                .foregroundStyle(DashboardPalette.secondaryText)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
               }
               .frame(maxWidth: .infinity)
               .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Jump to \(provider.title)")
+            .help(accountGaugeAccessibilityLabel(for: provider))
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(accountGaugeAccessibilityLabel(for: provider))
           }
@@ -1268,16 +1485,32 @@ private struct OverviewCard: View {
           tint: tint
         )
         statDivider
-        StatCell(label: "ACCOUNTS", value: "\(accountCount)", tint: .white.opacity(0.92))
+        StatCell(label: accountCount == 1 ? "ACCOUNT" : "ACCOUNTS", value: "\(accountCount)", tint: DashboardPalette.primaryText)
         statDivider
         StatCell(
-          label: "ISSUES",
+          label: failureCount == 1 ? "ISSUE" : "ISSUES",
           value: "\(failureCount)",
-          tint: failureCount == 0 ? .green : .orange
+          tint: failureCount == 0 ? DashboardPalette.success : DashboardPalette.warning
         )
       }
+
+      if let bestAccount, case .percent(let remaining) = bestAccount.headroom {
+        Rectangle().fill(DashboardPalette.hairline).frame(height: 1)
+        HStack(spacing: 6) {
+          Image(systemName: "trophy.fill").accessibilityHidden(true)
+          Text("Best to burn")
+          Spacer(minLength: 4)
+          Text(bestAccount.usage.title).lineLimit(2)
+          Text("\(bestAccount.isEstimated ? "≈" : "")\(max(0, min(100, remaining)))%")
+            .monospacedDigit()
+        }
+        .font(.system(size: Self.captionFontSize, weight: .semibold))
+        .foregroundStyle(DashboardPalette.secondaryText)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Best account to use: \(bestAccount.usage.title), \(bestAccount.isEstimated ? "estimated " : "")\(remaining) percent remaining")
+      }
     }
-    .padding(13)
+    .padding(OverviewGaugeLayout.cardPadding)
     .dashboardCard()
   }
 
@@ -1291,17 +1524,84 @@ private struct OverviewCard: View {
     if provider.metrics.allSatisfy(\.isUnlimited), !provider.metrics.isEmpty {
       return "\(provider.title), unlimited. Jump to card."
     }
-    if let remaining = MenuBarQuotaStyling.remainingPercent(for: provider) {
+    if let metric = MenuBarQuotaStyling.constrainingMetric(for: provider),
+       let remaining = MenuBarQuotaStyling.remainingPercent(for: provider) {
       let qualifier = MenuBarQuotaStyling.isPercentageEstimated(for: provider) ? "estimated " : ""
-      return "\(provider.title), \(qualifier)\(remaining) percent remaining. Jump to card."
+      return "\(provider.title), limiting metric: \(metric.label), \(qualifier)\(remaining) percent remaining. "
+        + accountGaugeResetDescription(for: metric) + " Jump to card."
     }
-    let balances = provider.metrics.compactMap { metric in
+    let balances = provider.metrics.filter { !$0.isUnlimited }.compactMap { metric in
       metric.usageLine.map { "\(metric.label) \($0)" }
     }
     if !balances.isEmpty {
       return "\(provider.title), \(balances.joined(separator: ", ")). Jump to card."
     }
     return "\(provider.title), quota unavailable. Jump to card."
+  }
+
+  private func accountGaugeCaption(for provider: ProviderUsage) -> String {
+    if let metric = MenuBarQuotaStyling.constrainingMetric(for: provider) {
+      let label = metric.label.trimmingCharacters(in: .whitespacesAndNewlines)
+      let shortened = Self.metricLabelSuffixes.first(where: { label.lowercased().hasSuffix($0) })
+        .map { String(label.dropLast($0.count)) } ?? label
+      return (MenuBarQuotaStyling.isPercentageEstimated(for: provider) ? "≈ " : "")
+        + (shortened.isEmpty ? "Quota" : shortened)
+    }
+    if !provider.metrics.isEmpty, provider.metrics.allSatisfy(\.isUnlimited) { return "Unlimited" }
+    return provider.metrics.first(where: { !$0.isUnlimited && $0.usageLine != nil })?.label ?? "Unavailable"
+  }
+
+  private func accountGaugeResetDescription(for metric: UsageMetric) -> String {
+    guard let countdown = metric.resetCountdown(at: now) else { return "Reset unavailable." }
+    let description = countdown == Self.resetDue ? "Reset due" : "Resets in \(countdown)"
+    guard let resetAt = metric.resetAt else { return description + "." }
+    return "\(description) (\(resetAt.formatted(date: .abbreviated, time: .shortened)))."
+  }
+}
+
+/// Uses the geometry harness's balanced rows for native placement.
+private struct OverviewGaugeGrid: Layout {
+  let rowSpacing: CGFloat
+
+  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    let width = proposal.width ?? .infinity
+    let rows = OverviewGaugeLayout.rows(count: subviews.count, width: width)
+    let cellWidth = OverviewGaugeLayout.cellWidth(columns: rows.first ?? 0, width: width)
+    let heights = rowHeights(rows, subviews: subviews, cellWidth: cellWidth)
+    return CGSize(width: width.isFinite ? width : rowWidth(rows.first ?? 0, cellWidth: cellWidth),
+                  height: heights.reduce(0, +) + rowSpacing * CGFloat(max(0, rows.count - 1)))
+  }
+
+  func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    let rows = OverviewGaugeLayout.rows(count: subviews.count, width: bounds.width)
+    let cellWidth = OverviewGaugeLayout.cellWidth(columns: rows.first ?? 0, width: bounds.width)
+    let heights = rowHeights(rows, subviews: subviews, cellWidth: cellWidth)
+    var start = 0
+    var y = bounds.minY
+    for (row, length) in rows.enumerated() {
+      var x = bounds.midX - rowWidth(length, cellWidth: cellWidth) / 2
+      for view in subviews[start..<(start + length)] {
+        view.place(at: CGPoint(x: x, y: y), anchor: .topLeading,
+                   proposal: ProposedViewSize(width: cellWidth, height: heights[row]))
+        x += cellWidth + OverviewGaugeLayout.columnSpacing
+      }
+      start += length
+      y += heights[row] + rowSpacing
+    }
+  }
+
+  private func rowHeights(_ rows: [Int], subviews: Subviews, cellWidth: CGFloat) -> [CGFloat] {
+    var start = 0
+    return rows.map { length in
+      defer { start += length }
+      return subviews[start..<(start + length)].map {
+        $0.sizeThatFits(ProposedViewSize(width: cellWidth, height: nil)).height
+      }.max() ?? 0
+    }
+  }
+
+  private func rowWidth(_ length: Int, cellWidth: CGFloat) -> CGFloat {
+    CGFloat(length) * cellWidth + OverviewGaugeLayout.columnSpacing * CGFloat(max(0, length - 1))
   }
 }
 
@@ -1316,7 +1616,10 @@ private struct StatCell: View {
         .font(.system(size: 18, weight: .bold, design: .rounded))
         .monospacedDigit()
         .contentTransition(.numericText())
-        .foregroundStyle(tint)
+        .foregroundStyle(DashboardPalette.primaryText)
+      Circle().fill(tint)
+        .overlay(Circle().stroke(DashboardPalette.markBacking, lineWidth: 0.75))
+        .frame(width: 4, height: 4).accessibilityHidden(true)
       Text(label)
         .font(.system(size: 9, weight: .semibold))
         .tracking(0.7)
@@ -1342,6 +1645,8 @@ private struct ProviderQuotaCard: View {
 
   @State private var isHovered = false
 
+  private static let detailSeparator = " · "
+
   private var accent: Color {
     LimitKindColorScheme.accountAccent(for: usage.metrics, colors: kindColors, step: colorStep, primaryHexColor: primaryHexColor)
   }
@@ -1366,17 +1671,26 @@ private struct ProviderQuotaCard: View {
               Text("LAST KNOWN")
                 .font(.system(size: 8, weight: .bold))
                 .tracking(0.5)
-                .foregroundStyle(.orange)
+                .foregroundStyle(DashboardPalette.warning)
                 .padding(.horizontal, 5)
                 .padding(.vertical, 2)
-                .background(.orange.opacity(0.13), in: Capsule())
+                .background(DashboardPalette.warning.opacity(0.13), in: Capsule())
             }
           }
 
-          Text(accountDetail)
-            .font(.system(size: 10.5))
-            .foregroundStyle(DashboardPalette.secondaryText)
-            .lineLimit(1)
+          HStack(spacing: 0) {
+            if !detailParts.isEmpty {
+              Text(detailParts.joined(separator: Self.detailSeparator)).truncationMode(.middle)
+            }
+            Text(detailParts.isEmpty ? fetchedAge : Self.detailSeparator + fetchedAge)
+              .fixedSize()
+              .layoutPriority(1)
+          }
+          .font(.system(size: 10.5))
+          .foregroundStyle(DashboardPalette.secondaryText)
+          .lineLimit(1)
+          .help((detailParts + [fetchedAge]).joined(separator: Self.detailSeparator))
+          .accessibilityElement(children: .combine)
         }
 
         Spacer(minLength: 8)
@@ -1406,11 +1720,11 @@ private struct ProviderQuotaCard: View {
       }
 
       if let warning = usage.warning, !warning.isEmpty {
-        statusLine(warning, systemImage: "exclamationmark.triangle.fill", color: .orange)
+        statusLine(warning, systemImage: "exclamationmark.triangle.fill", color: DashboardPalette.warning)
       }
 
       if let failure {
-        statusLine(failure.message, systemImage: "arrow.triangle.2.circlepath", color: .orange)
+        statusLine(failure.message, systemImage: "arrow.triangle.2.circlepath", color: DashboardPalette.warning)
       }
     }
     .padding(13)
@@ -1441,13 +1755,12 @@ private struct ProviderQuotaCard: View {
     return points
   }
 
-  private var accountDetail: String {
-    var parts = [usage.provider.displayName]
-    if let subtitle = usage.subtitle, !subtitle.isEmpty, subtitle != accountName {
-      parts.append(subtitle)
-    }
-    parts.append("fetched \(usage.fetchedAt.formatted(.relative(presentation: .named)))")
-    return parts.joined(separator: " · ")
+  private var detailParts: [String] {
+    QuotaDisplayText.accountDetailParts(providerName: usage.provider.displayName, accountName: displayName, subtitle: usage.subtitle)
+  }
+
+  private var fetchedAge: String {
+    "fetched \(QuotaDisplayText.relativeAge(usage.fetchedAt, now: now))"
   }
 
   private func statusLine(_ text: String, systemImage: String, color: Color) -> some View {
@@ -1469,7 +1782,7 @@ private struct ProviderMark: View {
   var body: some View {
     Image(systemName: symbolName)
       .font(.system(size: 14, weight: .semibold))
-      .foregroundStyle(.white.opacity(0.95))
+      .foregroundStyle(DashboardPalette.primaryText)
       .frame(width: 30, height: 30)
       .background(
         LinearGradient(
@@ -1493,9 +1806,11 @@ private struct ProviderMark: View {
     case .openAI:
       return "sparkles"
     case .gitHubCopilot:
-      return "chevron.left.forwardslash.chevron.right"
-    case .zhipu, .zai:
+      return "brain.head.profile"
+    case .zhipu:
       return "bolt.fill"
+    case .zai:
+      return "bolt.horizontal.fill"
     case .kimi:
       return "moon.fill"
     case .googleAntigravity:
@@ -1505,7 +1820,7 @@ private struct ProviderMark: View {
     case .metaMuse:
       return "wand.and.stars"
     case .openCodeGo:
-      return "chevron.left.forwardslash.chevron.right"
+      return "curlybraces"
     case .venice:
       return "water.waves"
     case .cline:
@@ -1599,11 +1914,9 @@ private struct MetricQuotaRow: View {
   /// the value text shifts to the reserved status accents when a limit runs
   /// low. The number itself is the label that makes the color readable.
   private var valueColor: Color {
-    if metric.isUnlimited { return tint }
-    guard let remaining else { return .white.opacity(0.92) }
-    if remaining <= 10 { return Color(red: 1.0, green: 0.36, blue: 0.32) }
-    if remaining <= 25 { return .orange }
-    return .white.opacity(0.92)
+    if metric.isUnlimited { return DashboardPalette.primaryText }
+    guard let remaining else { return DashboardPalette.primaryText }
+    return MenuBarQuotaStyling.dangerTierColor(for: remaining, healthy: DashboardPalette.primaryText)
   }
 
   private var secondaryUsageLine: String? {
@@ -1632,57 +1945,52 @@ private struct ProviderFailureCard: View {
 
   var body: some View {
     HStack(alignment: .top, spacing: 10) {
-      ProviderMark(provider: failure.provider, tint: .orange)
+      ProviderMark(provider: failure.provider, tint: DashboardPalette.warning)
 
       VStack(alignment: .leading, spacing: 3) {
         Text(displayName)
           .font(.system(size: 13, weight: .semibold))
-        Text(failure.provider.displayName)
-          .font(.system(size: 10))
-          .foregroundStyle(DashboardPalette.tertiaryText)
+        if let providerName = QuotaDisplayText.accountDetailParts(providerName: failure.provider.displayName,
+                                                                  accountName: displayName, subtitle: nil).first {
+          Text(providerName)
+            .font(.system(size: 10))
+            .foregroundStyle(DashboardPalette.tertiaryText)
+        }
         Text(failure.message)
           .font(.caption)
-          .foregroundStyle(.orange)
+          .foregroundStyle(DashboardPalette.warning)
           .lineLimit(3)
       }
 
       Spacer(minLength: 0)
     }
     .padding(13)
-    .dashboardCard(accent: .orange)
+    .dashboardCard(accent: DashboardPalette.warning)
   }
 }
 
 private enum MenuBarQuotaStyling {
+  private static let criticalRemainingThreshold = 10
+  private static let warningRemainingThreshold = 25
+  static func constrainingMetric(for provider: ProviderUsage) -> UsageMetric? {
+    guard let metric = dashboardPrimaryMetric(for: provider), !metric.isUnlimited, metric.remainingPercent != nil else { return nil }
+    return metric
+  }
+
   static func isPercentageEstimated(for provider: ProviderUsage) -> Bool {
-    guard let remaining = remainingPercent(for: provider) else { return false }
+    guard let remaining = constrainingMetric(for: provider)?.remainingPercent else { return false }
     return provider.metrics.contains {
       !$0.isUnlimited && $0.remainingPercent == remaining && $0.isPercentageEstimated
     }
   }
 
   static func remainingPercent(for provider: ProviderUsage) -> Int? {
-    let boundedRemaining = provider.metrics
-      .filter { !$0.isUnlimited }
-      .compactMap(\.remainingPercent)
-
-    if let minimumRemaining = boundedRemaining.min() {
-      return clampPercent(minimumRemaining)
-    }
-
-    if provider.metrics.contains(where: \.isUnlimited) {
-      return 100
-    }
-
-    if let maxUsagePercent = provider.maxUsagePercent {
-      return clampPercent(100 - maxUsagePercent)
-    }
-
-    return nil
+    dashboardRemainingPercent(for: provider)
   }
 
-  private static func clampPercent(_ value: Int) -> Int {
-    max(0, min(100, value))
+  static func dangerTierColor(for remaining: Int, healthy: Color) -> Color {
+    if remaining <= criticalRemainingThreshold { return DashboardPalette.danger }
+    if remaining <= warningRemainingThreshold { return DashboardPalette.warning }
+    return healthy
   }
 }
-

@@ -218,19 +218,7 @@ public enum StatusRenderer {
   }
 
   public static func relativeAge(_ date: Date, now: Date) -> String {
-    let seconds = boundedSeconds(now.timeIntervalSince(date))
-    if seconds < 60 {
-      return "just now"
-    }
-    let minutes = seconds / 60
-    if minutes < 60 {
-      return "\(minutes) min ago"
-    }
-    let hours = minutes / 60
-    if hours < 48 {
-      return "\(hours) h ago"
-    }
-    return "\(hours / 24) d ago"
+    QuotaDisplayText.relativeAge(date, now: now)
   }
 
   static func accountStatuses(in snapshot: QuotaSnapshot, now: Date) -> [AccountStatus] {

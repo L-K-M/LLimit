@@ -11,6 +11,32 @@ enum MenuBarPanelCorner {
   case bottomTrailing
 }
 
+/// Balanced rows with equal-width cells; shorter rows remain centered.
+enum OverviewGaugeLayout {
+  // Space for the limiting-window caption at the dashboard's 11pt text size.
+  static let minimumCellWidth: CGFloat = 104
+  static let columnSpacing: CGFloat = 6
+  static let dashboardPadding: CGFloat = 12
+  static let cardPadding: CGFloat = 13
+
+  static func rows(count: Int, width: CGFloat) -> [Int] {
+    guard count > 0 else { return [] }
+
+    let fitting = ((width + columnSpacing) / (minimumCellWidth + columnSpacing)).rounded(.down)
+    let columnLimit = fitting.isNaN ? 1 : Int(max(1, min(fitting, CGFloat(count))))
+    let rowCount = (count + columnLimit - 1) / columnLimit
+    let shortRowLength = count / rowCount
+    let longRowCount = count % rowCount
+    return (0..<rowCount).map { $0 < longRowCount ? shortRowLength + 1 : shortRowLength }
+  }
+
+  static func cellWidth(columns: Int, width: CGFloat) -> CGFloat {
+    guard columns > 0 else { return 0 }
+    guard width.isFinite else { return minimumCellWidth }
+    return max(0, (width - columnSpacing * CGFloat(columns - 1)) / CGFloat(columns))
+  }
+}
+
 /// Size of the menu bar dropdown, which the user sets by dragging a corner grip.
 ///
 /// MenuBarExtra sizes its panel to the content's ideal frame when it opens, so
