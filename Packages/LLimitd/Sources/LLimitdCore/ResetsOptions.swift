@@ -50,7 +50,15 @@ public func parseResetsOptions(_ args: [String]) throws -> ResetsOptions {
     case "--days":
       guard index + 1 < args.count else { throw ResetsOptionError.missingDaysValue }
       let raw = args[index + 1]
-      guard let value = Int(raw) else { throw ResetsOptionError.invalidDaysValue(raw) }
+      guard let value = Int(raw) else {
+        // Digit strings that overflow Int are whole numbers out of range, not
+        // "not a number".
+        let digits = raw.hasPrefix("+") || raw.hasPrefix("-") ? raw.dropFirst() : raw[...]
+        if !digits.isEmpty, digits.allSatisfy({ $0 >= "0" && $0 <= "9" }) {
+          throw ResetsOptionError.daysOutOfRange(ResetsOptions.supportedDays.upperBound)
+        }
+        throw ResetsOptionError.invalidDaysValue(raw)
+      }
       guard ResetsOptions.supportedDays.contains(value) else {
         throw ResetsOptionError.daysOutOfRange(value)
       }

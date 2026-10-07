@@ -31,6 +31,18 @@ final class ResetsOptionsTests: XCTestCase {
     }
   }
 
+  func testOverflowingDaysValuesAreOutOfRangeNotInvalid() {
+    // Whole numbers too large for Int fail Int(raw), but they are range
+    // violations, not "not a number" ones.
+    for value in ["99999999999999999999", "-99999999999999999999", "+5000000000000000000"] {
+      XCTAssertThrowsError(try parseResetsOptions(["--days", value])) { error in
+        XCTAssertEqual(error as? ResetsOptionError,
+                       .daysOutOfRange(ResetsOptions.supportedDays.upperBound))
+        XCTAssertEqual((error as? ResetsOptionError)?.message, "--days must be between 1 and 90")
+      }
+    }
+  }
+
   func testRejectsNonNumericAndMissingDaysValues() {
     XCTAssertThrowsError(try parseResetsOptions(["--days", "abc"])) { error in
       XCTAssertEqual(error as? ResetsOptionError, .invalidDaysValue("abc"))

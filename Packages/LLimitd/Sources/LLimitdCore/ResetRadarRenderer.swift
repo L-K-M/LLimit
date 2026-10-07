@@ -25,7 +25,7 @@ public extension StatusRenderer {
     let stale = stalenessHint(snapshot: snapshot, now: now)
     // A failed refresh contributes no entries; say so instead of letting a
     // partial schedule read as the whole one.
-    let failureCount = snapshot.failures.count
+    let failureCount = failedAccountCount(in: snapshot)
     let failureLine = failureCount == 0 ? nil :
       "\(failureCount) account\(failureCount == 1 ? "" : "s") failed to refresh; their resets may be missing."
     guard !resets.isEmpty else {
@@ -68,7 +68,7 @@ public extension StatusRenderer {
       object["generatedAt"] = iso8601String(snapshot.generatedAt)
       // A failed refresh contributes no rows; the count keeps a partial
       // schedule from reading as the whole one.
-      object["failureCount"] = snapshot.failures.count
+      object["failureCount"] = failedAccountCount(in: snapshot)
       object["resets"] = snapshot
         .upcomingResets(now: now, within: windowInterval(windowDays))
         .map { entry -> [String: Any] in
@@ -98,6 +98,12 @@ public extension StatusRenderer {
       return #"{"error":"reset schedule serialization failed"}"#
     }
     return string
+  }
+
+  /// Failed refreshes, counted per account: the copy promises "N accounts", so
+  /// two failure records for one account must not inflate it.
+  private static func failedAccountCount(in snapshot: QuotaSnapshot) -> Int {
+    Set(snapshot.failures.map(\.accountID)).count
   }
 
   private static func dayCount(_ days: Int) -> String {

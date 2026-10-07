@@ -198,6 +198,26 @@ final class ResetRadarRendererTests: XCTestCase {
     )
   }
 
+  func testTwoFailureRecordsForOneAccountCountOnce() throws {
+    // The copy promises "N accounts"; two records for the same accountID must
+    // not inflate it, in either renderer.
+    let snap = failureSnapshot(
+      failures: [
+        ProviderFailure(accountID: "openai", provider: .openAI, kind: .auth, message: "expired"),
+        ProviderFailure(accountID: "openai", provider: .openAI, kind: .network, message: "timeout")
+      ]
+    )
+
+    XCTAssertTrue(
+      StatusRenderer.resetsHumanReadable(snapshot: snap, now: now, windowDays: 7)
+        .contains("1 account failed to refresh")
+    )
+
+    let json = StatusRenderer.resetsJSON(snapshot: snap, now: now, windowDays: 7)
+    let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+    XCTAssertEqual(object["failureCount"] as? Int, 1)
+  }
+
   func testASingleFailureIsSingularAndSurfacesOnAnEmptySchedule() {
     let snap = failureSnapshot(
       failures: [ProviderFailure(accountID: "openai", provider: .openAI, kind: .auth, message: "expired")]
