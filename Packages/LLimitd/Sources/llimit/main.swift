@@ -361,7 +361,7 @@ func runExport(_ args: [String]) {
     case "--format":
       i += 1
       guard i < args.count else { fail("--format needs csv or json") }
-      format = args[i]
+      format = args[i].lowercased()
     case "--days":
       i += 1
       guard i < args.count, let value = Int(args[i]), value > 0 else {
