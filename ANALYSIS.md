@@ -35,7 +35,9 @@ before coding overlapping work.
   idea and refuted claim in it is carried here, and the source ID index at the end
   maps each `R-*` ID to its entry.
 - **LEDGER**: this pass's PR ledger: open PRs #89, #90, #92-#96 and #101-#110, what
-  each implements, and the follow-ups each deferred.
+  each implements, and the follow-ups each deferred. Its final update (2026-10-07)
+  adds each PR's CI-green head after the last review round, what the review rounds
+  changed, the measured pairwise merge conflicts and an integration check.
 - **TRACKING**: this pass's local work-tracking notes (per-PR review rounds,
   applied and deferred findings, CI heads; not in the repository). Only LNX-01 and
   LNX-10 cite it, and the facts they use are written out in those entries.
@@ -199,11 +201,14 @@ and merge status were not checked, and a source document's "fixed", "landed" or
 - **MAIN method.** See "Sources consolidated" above. MAIN's evidence bullets follow
   as EVIDENCE-1 to EVIDENCE-7. All incoming references in MAIN, including the
   pass-C and pass-D references, are retained as reports.
-- **This pass's PRs.** LEDGER records scope and deferrals only. This document makes
-  no claim about their CI or review results. Some entries cite local worktree heads
-  ("Worktree check"): #89 `30e0299`, #90 `4cdbdab`, #92 `53350b7`, #93 `4f1aede`,
-  #104 `17f970d`, #110 `e72725c`, and the #105 and #108 worktrees. These may differ
-  from the PR heads.
+- **This pass's PRs.** LEDGER records scope and deferrals; its final update also
+  records each PR's CI-green head, the measured merge conflicts and an integration
+  check (ledger table 1). This document did not check CI or reviews itself. Some
+  entries cite local worktree heads ("Worktree check"): #89 `30e0299`, #90
+  `4cdbdab`, #92 `53350b7`, #93 `4f1aede`, #104 `17f970d`, #110 `e72725c`, and the
+  #105 and #108 worktrees. The first five are the final PR heads. #110's final head
+  is `0f0907c`, and the #105 and #108 worktree heads were not recorded, so those
+  checks may differ from the final PRs.
 
 ### Test and CI results
 
@@ -239,6 +244,11 @@ and merge status were not checked, and a source document's "fixed", "landed" or
   passed on Linux Swift 6.3.3 with the supplied SDK and `--jobs 2`. The temporary
   integration merge was not published. #69's additional checks are in ledger
   table 2.
+- **This pass's 17 heads together (LEDGER final update).** Branch
+  `opus/integration-check` (head `7ed4c7b`; draft PR #111, closed after CI) merges
+  all 17 final heads onto origin/main. CI was green (macOS Build & Test, Linux
+  SwiftPM, Linux static .deb, Linux tray), and **665 QuotaCore**, **134 LLimitd**
+  and **46 tray** tests passed locally. Details in ledger table 1.
 
 ### Toolchain notes
 
@@ -305,40 +315,73 @@ neither document checked.
 
 ### 1. This pass's open PRs (#89-#110)
 
-All open and unmerged, for the user to review. "Implements" uses TMP ids; LED ids
-point to the cluster list below. Partly implemented TMP ids keep their remaining
-work in the named topical cluster.
+All open and unmerged, for the user to review. All 17 reached the review stopping
+rule; "CI-green head" is each PR's final head, with CI green, from LEDGER's final
+update. "Implements" uses TMP ids; LED ids point to the cluster list below; from
+its second sentence on, an "Implements" cell lists what the review rounds added.
+Partly implemented TMP ids keep their remaining work in the named topical cluster.
 
-| PR | Branch | Implements | Deferred follow-ups (owner) |
-|---|---|---|---|
-| #89 | `opus/devin-exhausted-windows` | R-BUG-02 incl. hide flags, credits rule, `overageBalanceMicros` (LED-01) | Top-level `planInfo` copy not read (oh-my-pi treats it as authoritative); overage balance probed only in `planStatus` proto field 16 (PRV-27). |
-| #90 | `opus/zai-weekly-tokens` | R-BUG-01 (LED-02) | Whether `open.bigmodel.cn` (Zhipu) returns a weekly entry is unverified (PRV-27); unknown (unit, number) pairs not logged because QuotaCore has no logger (DEBT-01). |
-| #92 | `opus/release-unblock` | R-BLD-02 (LED-03); most of R-BLD-01 (BLD-01), R-SEC-01 (SEC-07), ubuntu-24.04 pin from R-SEC-03 (SEC-05); new "Linux (static .deb)" CI job; PTY secret-input test | Remainders in BLD-01, SEC-05, SEC-07: checksum/PGP verification of the Swift toolchain in all three installs via a shared composite action (rest of R-SEC-03); CI toolchain caching; run `scripts/test-panel-geometry.sh` in the Linux job; v1.0.1 release note about scrollback; restore terminal echo on signal; Musl branch in the `SettingsLock.swift`/`main.swift` import blocks (harmless today). Merge first (ORD-02). |
-| #93 | `opus/anthropic-windows` | R-BUG-05 (LED-04); R-BUG-06 (partial, PRV-14); amount-only `extra_usage` metric of R-FEAT-01 (partial, WID-16) | Non-USD extra-usage amounts (needs a capture); extra usage on ring tiles and the dashboard widget (WID-16); `maxUsagePercent` nil when no window parsed (R-BUG-34), covered for Anthropic by #84 (COR-10). |
-| #94 | `opus/publish-perf` | R-PERF-01 (LED-05): one decode + one encode per publish, App Group mirror whose corrupt widget copy self-repairs; `QuotaHistoryStore.remove` no-op skip | R-BUG-33: the 3,000-entry cap truncates the 30-day trend, needs a retention decision (PRF-03). A corrupt local archive still blocks local appends forever; needs quarantine, rebuild and surfacing (PRF-04; #78 likely covers). |
-| #95 | `opus/dropdown-layout` | R-VIS-01, R-VIS-08, R-VIS-11, R-UX-06 (LED-06 to LED-09); R-UX-03 (partial, WID-05); dashboard part of R-UX-24 (partial, MAC-21) | Visual check on a Mac: 360/420 pt, floating window, long subtitles, "≈100%" ring (DEBT-06); optional "oldest N min ago" header note (WID-05). Ages are English-only by design. |
-| #96 | `opus/status-item-health` | R-UX-05, R-VIS-07 (LED-10, LED-11) | R-UX-04, dashboard order vs bars (MAC-13). Share level/stale/failure-matching rules between `MenuBarGraph`, the dashboard's `MenuBarQuotaStyling` and the provider tile; re-apply the tooltip on display changes; manual Mac check of tooltip and light/dark bars (DEBT-06). Re-test the menu-icon hypothesis after merge (MAC-35). |
-| #101 | `opus/venice-key-commit` | R-BUG-09 (LED-12): drafts commit on submit, focus loss, selection change, close and quit; `PendingEdits` in QuotaCore | Drop `@discardableResult` on `updateAccount`; trim legacy stored credentials for display; SwiftUI commit-trigger wiring untested; manual Mac checks of close/quit with a draft (DEBT-06). |
-| #102 | `opus/refresh-during-signin` | R-BUG-11 (LED-13); R-UX-18 Refresh controls only (partial, MAC-15) | R-BUG-22: ticks dropped during single-account refreshes, scheduler (PRF-01). Disabled Connect/Remove reasons, rest of R-UX-18 (MAC-15). Tooltip on a disabled button unverified on macOS 14. |
-| #103 | `opus/quota-pace` | R-NOV-01 (partial): `windowSeconds`, `QuotaPace`, "N% over/under pace", ticks on bar and tile ring | `paceDelta` in Linux JSON; window lengths for Muse weekly and Devin windows; `GlossBar` spring ignores Reduce Motion (pre-existing, MAC-07). Converge with #87 and #109 (PRD-01, PRD-02). |
-| #104 | `opus/linux-account-integrity` | R-BUG-04 macOS guard + daemon guard (LED-14); R-LNX-03, R-LNX-05, R-LNX-06, R-LNX-09 | `remove` confirmation/`--yes`; 4-character minimum prefix; stored import source; carry Claude `expiresAt`; R-LNX-10 (an in-flight refresh can re-save an old Venice estimate). Its `makeDaemon` status warning becomes dead once #108 makes `status` snapshot-only (LNX-03). |
-| #105 | `opus/linux-honest-status` | R-LNX-02, R-LNX-07, R-BUG-08 (LED-15 to LED-17); R-LNX-01 (LNX-01); tray part of R-A11Y-04 | R-LNX-16 light-panel tray icons. Record `refreshIntervalMinutes` in the snapshot so the stale threshold follows the real interval; #105 uses a 6 h constant (2x the maximum interval; baseline was 2 h). #50 reports interval-aware staleness (LNX-01). |
-| #106 | `opus/global-hotkey` | R-NOV-04 (LED-18) | `@ObservedObject` for `AppModel.shared`; check the hot key id, not only the signature, in the Carbon handler; the remembered app can go stale if the user switches apps before dismissing (DEBT-06). |
-| #107 | `opus/managed-cli-path` | R-BUG-03 (partial, PRV-05); R-BUG-42, R-PERF-05 (LED-19, LED-20) | nvm discovery or a Settings override for the CLI path; the probe cache misses a byte-identical npm downgrade but recovers on launch failure (PRV-05). |
-| #108 | `opus/llimit-check-pick` | R-NOV-03 (LED-21); R-LNX-20: `check`, `pick`, `status --format/--account/--worst/--kind/--watch`, tmux/starship/agent-wrapper examples (partial, LNX-10); status part of R-BUG-04 (LED-14): `status` is snapshot-only | Presets (`short`, `tmux`, `i3blocks`) and `--worst N` (LNX-10). Snapshot merge and macOS still match failures by account id only (pre-existing). |
-| #109 | `opus/trend-widget` | R-BUG-12, R-BUG-13, R-A11Y-02, R-VIS-06, R-UX-21 (LED-22 to LED-26); R-UX-22; most of R-VIS-05 | "Store unavailable" empty state in `QuotaTimelineProvider` (WID-03). Rest of R-VIS-05: primary window only in the small widget, nudging overlapping flat lines apart, short-term limits off by default. |
-| #110 | `opus/linux-alerts` | R-LNX-21 (LED-27); Linux part of R-NOV-02: `QuotaEvents` detector in QuotaCore, `--notify`, `--on-event`, `LLIMIT_NOTIFY`, hook examples | `expiringUnused` flag in `status --json`; macOS "use it" chip and macOS notifications reusing `QuotaEvents` (PRD-04, WID-04); alerts from `llimit refresh` and the timer units; alerts path in `llimit paths` (DEBT-06). |
+| PR | Branch | CI-green head | Implements | Deferred follow-ups (owner) |
+|---|---|---|---|---|
+| #89 | `opus/devin-exhausted-windows` | `30e0299` | R-BUG-02 incl. hide flags, credits rule, `overageBalanceMicros` (LED-01). Credit-billed plans never infer an exhausted window from a reset alone; a sub-cent negative overage shows "$0.00"; the implicit-presence premise was verified against the oh-my-pi descriptor. | Top-level `planInfo` copy not read (oh-my-pi treats it as authoritative); overage balance probed only in `planStatus` proto field 16 (PRV-27). |
+| #90 | `opus/zai-weekly-tokens` | `4cdbdab` | R-BUG-01 (LED-02). A present but non-numeric `unit` becomes a neutral `tokens-uunknown-n<number>` entry; a malformed TOKENS_LIMIT entry fails the refresh (keeping the last good usage) instead of silently dropping a window. | Whether `open.bigmodel.cn` (Zhipu) returns a weekly entry is unverified (PRV-27); unknown (unit, number) pairs not logged because QuotaCore has no logger (DEBT-01). |
+| #92 | `opus/release-unblock` | `53350b7` | R-BLD-02 (LED-03); most of R-BLD-01 (BLD-01), R-SEC-01 (SEC-07), ubuntu-24.04 pin from R-SEC-03 (SEC-05); new "Linux (static .deb)" CI job; PTY secret-input test. The PTY test has a bounded exit wait (`EXIT_TIMEOUT_SECONDS`) and asserts that the packaged binary is statically linked. | Remainders in BLD-01, SEC-05, SEC-07: checksum/PGP verification of the Swift toolchain in all three installs via a shared composite action (rest of R-SEC-03) and CI toolchain caching, both declined in review and still open; run `scripts/test-panel-geometry.sh` in the Linux job; the three geometry tests, which the final head does not add (BLD-01); v1.0.1 release note about scrollback; restore terminal echo on signal; Musl branch in the `SettingsLock.swift`/`main.swift` import blocks (harmless today). Merge first (ORD-02). |
+| #93 | `opus/anthropic-windows` | `4f1aede` | R-BUG-05 (LED-04); R-BUG-06 (partial, PRV-14); amount-only `extra_usage` metric of R-FEAT-01 (partial, WID-16). The "empty" placeholder is dropped when an extra-usage amount exists. | Non-USD extra-usage amounts (needs a capture); extra usage on ring tiles and the dashboard widget (WID-16); `maxUsagePercent` nil when no window parsed (R-BUG-34), covered for Anthropic by #84 (COR-10). |
+| #94 | `opus/publish-perf` | `b57db7f` | R-PERF-01 (LED-05): one decode + one encode per publish; `QuotaHistoryStore.remove` no-op skip. The App Group history is a byte mirror of the local archive, and an unreadable widget copy is replaced on the next publish (`ifUnreadable: .replace`). | R-BUG-33: the 3,000-entry cap truncates the 30-day trend, needs a retention decision (PRF-03). A corrupt local archive still blocks local appends forever; needs quarantine, rebuild and surfacing (PRF-04; #78 likely covers). |
+| #95 | `opus/dropdown-layout` | `eacfbdb` | R-VIS-01, R-VIS-08, R-VIS-11, R-UX-06 (LED-06 to LED-09); R-UX-03 (partial, WID-05); dashboard part of R-UX-24 (partial, MAC-21). Dashboard padding constants are shared with the geometry harness. | Visual check on a Mac: 360/420 pt, floating window, long subtitles, "≈100%" ring (DEBT-06); optional "oldest N min ago" header note (WID-05). Ages are English-only by design. |
+| #96 | `opus/status-item-health` | `dad9a2f` | R-UX-05, R-VIS-07 (LED-10, LED-11). Reset staleness requires `resetAt` later than `fetchedAt` and counts only percentage windows; a 60 s timer re-evaluates staleness; the failure orange is a fixed sRGB value; the tooltip is retried at launch. | R-UX-04, dashboard order vs bars (MAC-13). Share level/stale/failure-matching rules between `MenuBarGraph`, the dashboard's `MenuBarQuotaStyling` and the provider tile; re-apply the tooltip on display changes; manual Mac check of tooltip and light/dark bars (DEBT-06). Re-test the menu-icon hypothesis after merge (MAC-35). |
+| #101 | `opus/venice-key-commit` | `92693f8` | R-BUG-09 (LED-12): drafts commit on submit, focus loss, selection change, close and quit; `PendingEdits` in QuotaCore. Commits return an outcome enum, and a rejected draft is kept with an inline reason (`PendingEdits<Key>`, 8 tests). | Drop `@discardableResult` on `updateAccount`; trim legacy stored credentials for display; SwiftUI commit-trigger wiring untested; manual Mac checks of close/quit with a draft (DEBT-06). A rejected draft for an account that became connected is never shown and is dropped at quit (COR-03). |
+| #102 | `opus/refresh-during-signin` | `daf9943` | R-BUG-11 (LED-13); R-UX-18 Refresh controls only (partial, MAC-15). Per-account Refresh Now is disabled during that account's own sign-in; the header keeps the data age next to the reason; an imported OpenAI account with only a refresh token or account id counts as refreshable. | R-BUG-22: ticks dropped during single-account refreshes, scheduler (PRF-01). Disabled Connect/Remove reasons, rest of R-UX-18 (MAC-15). Tooltip on a disabled button unverified on macOS 14. |
+| #103 | `opus/quota-pace` | `f0dc31d` | R-NOV-01 (partial): `windowSeconds`, `QuotaPace`, ticks on bar and tile ring. The text reads "N% over pace", "on pace" or "N% under pace", and the reset chip keeps its width. | `paceDelta` in Linux JSON; window lengths for Muse weekly and Devin windows; `GlossBar` spring ignores Reduce Motion (pre-existing, MAC-07). Converge with #87 and #109 (PRD-01, PRD-02). |
+| #104 | `opus/linux-account-integrity` | `17f970d` | R-BUG-04 macOS guard + daemon guard (LED-14); R-LNX-03, R-LNX-05, R-LNX-06, R-LNX-09. Settings mutations are reachable only through a `SettingsTransaction` handle passed to `editingSettings` (nesting traps); interactive import re-prompts; `--set key` without a value fails on a non-TTY; decode errors are built only from the error case, path and expected type; `reimport` scans before taking the lock. | `remove` confirmation/`--yes`; 4-character minimum prefix; stored import source; carry Claude `expiresAt`; R-LNX-10 (an in-flight refresh can re-save an old Venice estimate). Name every prompted key in the non-TTY error (SEC-06). Its `makeDaemon` status warning becomes dead once #108 makes `status` snapshot-only; dropping it is an integration fix (below; LNX-03). |
+| #105 | `opus/linux-honest-status` | `5e1dec2` | R-LNX-02, R-LNX-07, R-BUG-08 (LED-15 to LED-17); R-LNX-01 (LNX-01); tray part of R-A11Y-04. Error text neutralizes polybar `%{`, and the polybar script sanitizes its text; the regex scan is capped at 16,384 characters with precompiled patterns; trailing unclosed tag fragments are dropped after each cut; carried windows are cleared only when read before their reset; stale accounts cap the class at `warning`; tray hardening (naive `now`, failure note). | R-LNX-16 light-panel tray icons. Record `refreshIntervalMinutes` in the snapshot so the stale threshold follows the real interval; #105 uses a 6 h constant (2x the maximum interval; baseline was 2 h). #50 reports interval-aware staleness (LNX-01). Also strip a lone trailing `<` and repeat the fragment strip until stable; sample one `now` per tray menu build (DEBT-06). |
+| #106 | `opus/global-hotkey` | `e83920e` | R-NOV-04 (LED-18). `AppModel.shared` owns the model (no second AppModel on re-init); the key code is `DashboardHotkey.keyCode`, checked against Carbon's `kVK_ANSI_L` in tests; the picker is labeled; failures are logged with `os.Logger`. | `@ObservedObject` for `AppModel.shared`; check the hot key id, not only the signature, in the Carbon handler; the remembered app can go stale if the user switches apps before dismissing (DEBT-06). |
+| #107 | `opus/managed-cli-path` | `0807ded` | R-BUG-03 (partial, PRV-05); R-BUG-42, R-PERF-05 (LED-19, LED-20). Also nvm discovery (`$NVM_DIR` or `~/.nvm`, `alias/default` first, then `versions/node/*` by semantic version), fnm, Volta with `VOLTA_HOME`, a distinct excessive-output failure, tailored timeout advice, a process-group kill on probe timeout, and re-probing only when a start failure implicates the executable. | A Settings override for custom CLI paths (PRV-05). |
+| #108 | `opus/llimit-check-pick` | `e0a63d7` | R-NOV-03 (LED-21); R-LNX-20: `check`, `pick`, `status --format/--account/--worst/--kind/--watch`, tmux/starship/agent-wrapper examples (partial, LNX-10); status part of R-BUG-04 (LED-14): `status` is snapshot-only. Failures match on (provider, account id); `check` and `pick` exit 3 for a provider with no accounts; a blank `--format` is a usage error; `--watch` warns once per distinct message; the tmux example shows "(stale)"; the starship `when` hides the module without data. | Presets (`short`, `tmux`, `i3blocks`) and `--worst N`; share the `{class}` cutoffs with StatusRenderer after #95 and #105 land (LNX-10). Deterministic order for failure-only rows that share an account id (DEBT-06). Snapshot merge and macOS still match failures by account id only (pre-existing, DEBT-06). |
+| #109 | `opus/trend-widget` | `5cec752` | R-BUG-12, R-BUG-13, R-A11Y-02, R-VIS-06, R-UX-21 (LED-22 to LED-26); R-UX-22; most of R-VIS-05. Warnings also use a guarded recent pace (remaining at most 25%, span max(2 h, 3 refresh intervals), at least 4 raw samples); the refresh interval is floored at 15 min; day ticks are end-anchored; the DST fall-back hour is deduplicated; forecast keys are deduplicated; a fourth same-hue line gets dash-dot. Decided: an early large burn that projects depletion keeps warning (no idle gate). | "Store unavailable" empty state in `QuotaTimelineProvider` (WID-03). Rest of R-VIS-05: primary window only in the small widget, nudging overlapping flat lines apart, short-term limits off by default (WID-10). A stale doc comment on `recentPaceDepletion` (DEBT-06). |
+| #110 | `opus/linux-alerts` | `0f0907c` | R-LNX-21 (LED-27); Linux part of R-NOV-02: `QuotaEvents` detector in QuotaCore, `--notify`, `--on-event`, `LLIMIT_NOTIFY`, hook examples. Hooks that leave their process group are still killed (signals to pid and group; bounded reap); the state file is fsynced before rename; the failure latch tracks the latest kind; state for accounts absent from two snapshots is pruned. | `expiringUnused` flag in `status --json`; macOS "use it" chip and macOS notifications reusing `QuotaEvents` (PRD-04, WID-04); alerts from `llimit refresh` and the timer units; alerts path in `llimit paths` (DEBT-06). Its `AlertDelivery` Darwin branches are never compiled in CI (BLD-08). Info: a hook stuck in uninterruptible I/O after SIGKILL pins one background thread until it exits. |
 
-**Expected merge conflicts** (whichever merges second needs a rebase):
+**Measured merge conflicts and integration check** (LEDGER final update; this
+replaces the earlier expected-conflict list):
 
-- Within this pass: `LD/StatusRenderer.swift` (#95, #105; #93 adds a
-  `StatusRendererTests` case); `CLI/main.swift` (#92, #104, #108, #110, separate
-  regions); `APP/AppModel.swift` (#94, #101, #102, #104, #106, #107);
-  `APP/LLimitApp.swift` (#95, #96, #102, #103, #106); `APP/Views/SettingsView.swift`
-  (#101, #102, #106).
-- Against MAIN PRs: `APP/LLimitApp.swift` with #67; `QC/QuotaHistoryStore.swift`
-  (#94) with #52/#76; the `AnthropicClient` parser (#93) with #84;
-  `mergingStaleUsage` (#105) with #77; limit-color drawing code (#96, #109) with #53.
+- Pairwise `git merge-tree` of all 17 heads: only 8 pairs conflict. Code:
+  `LD/StatusRenderer.swift` (#95 x #105) and `APP/LLimitApp.swift` (#95 x #102).
+  Docs: `AGENTS.md` in all six pairs among #104, #105, #108 and #110, plus
+  `Packages/LLimitd/README.md` (#108 x #110). `CLI/main.swift` and
+  `APP/AppModel.swift` merge cleanly across all PRs.
+- Integration check: branch `opus/integration-check`, head `7ed4c7b` (draft PR
+  #111, closed after CI), merges all 17 heads onto origin/main with every conflict
+  resolved keeping both sides. CI green (macOS Build & Test, Linux SwiftPM, Linux
+  static .deb, Linux tray); locally 665 QuotaCore, 134 LLimitd and 46 tray tests
+  pass.
+- Integration-only fixes the second PR of each pair must carry:
+  - #95 + #108: #108's `StatusTemplate.swift` and `ScriptCommands.swift` call
+    `StatusRenderer.relativeAge`, which #95 removes; point them at
+    `QuotaDisplayText.relativeAge` (build break otherwise).
+  - #104 + #110: two `QuotaAlertsTests` calls to `QuotaDaemon.addAccount` need `try`
+    once #104 makes it throw (test build break otherwise).
+  - #104 + #108: #104's `makeDaemon` branch that warns for `status` becomes dead
+    once #108 makes `status` snapshot-only; drop it and the README sentence about
+    the stderr warning.
+- Conflict text: combine the layout entries in `AGENTS.md` and
+  `Packages/LLimitd/README.md`; merge #105's StatusRenderer rewrite with #95's
+  `relativeAge` move; combine the dropdown header subtitle (#102's reason and age
+  cases with #95's wording and formatter). The resolutions are on the integration
+  branch.
+- Suggested landing order: #92 first; then #104, #108, #105, #110; #95 after #105
+  and #108; #95 and #102 in either order; the other ten (#93, #89, #90, #94, #101,
+  #96, #103, #109, #107, #106) any time.
+- New follow-ups found by integration, open once both PRs land: #108's template
+  `{class}` does not apply #105's rule that failed or stale accounts raise the
+  class to `warning` at most (LNX-10); template `{stale}` and `check`/`pick` use
+  2 h (`HeadroomRanking.defaultMaxAge`) while #105's status output uses 6 h
+  (LNX-01); #108's `StatusTemplate` and `HeadroomRanking` name an account with no
+  usage by provider display name and ignore #105's `ProviderFailure.title`
+  (LNX-10).
+- Against MAIN PRs (expected, not measured): `APP/LLimitApp.swift` with #67;
+  `QC/QuotaHistoryStore.swift` (#94) with #52/#76; the `AnthropicClient` parser
+  (#93) with #84; `mergingStaleUsage` (#105) with #77; limit-color drawing code
+  (#96, #109) with #53.
 
 ### 2. MAIN-owned open slices (#66, #67, #69, #70, #72, #75)
 
@@ -510,7 +553,7 @@ name the open cluster that owns each deferred follow-up.
 | LED-06 | Overview gauges pack into the left columns since #48 | TMP R-VIS-01 | implemented: #95 | `columns = min(count, fit)`. Manual Mac check at 360/420 pt and in the floating window: DEBT-06. |
 | LED-07 | Card gauge stroke spills outside its frame | TMP R-VIS-08 | implemented: #95 | Stroke inset by `lineWidth/2`. |
 | LED-08 | Provider name repeated in subtitles and failure cards | TMP R-VIS-11 | implemented: #95 | `accountDetailParts` de-duplication; duplicate failure provider line hidden. |
-| LED-09 | Subtitle truncation hid the fetched age | TMP R-UX-06 | implemented: #95 | #95 also partly covers R-UX-03 (WID-05) and R-UX-24 (MAC-21). `APP/LLimitApp.swift` conflicts with #67, #96, #102, #103, #106. |
+| LED-09 | Subtitle truncation hid the fetched age | TMP R-UX-06 | implemented: #95 | #95 also partly covers R-UX-03 (WID-05) and R-UX-24 (MAC-21). `APP/LLimitApp.swift`: measured conflict with #102 only among this pass's PRs; #67 was not measured. |
 | LED-10 | Status-item graph shows failures and stale data | TMP R-UX-05 | implemented: #96 | R-UX-04: MAC-13. Shared rules, tooltip re-apply, manual check: DEBT-06. Re-test the menu-icon hypothesis (MAC-35) after merge. |
 | LED-11 | Menu-bar bars get a track and distinguishable low values | TMP R-VIS-07 | implemented: #96 | Also an exhausted-account danger cue. Same drawing code as #53 palettes. |
 | LED-12 | Venice key edits purged history on every keystroke | TMP R-BUG-09; MAIN F09, ledger #68 | implemented: #101; #68 (MAIN-reported, unverified) | OVERLAP: choose one mechanism; #68's key fingerprint could sit on top of #101. F09 acceptance: one purge per committed replacement, no old estimate on the new key, durable final edit, in-flight old-key results rejected. A committed change still rewrites the whole archive once (PRF-03). MAIN: a paste is one binding update. Interacts with #85. #101 deferrals: DEBT-06. |
@@ -523,7 +566,7 @@ name the open cluster that owns each deferred follow-up.
 | LED-19 | Claude child environment keeps proxy and CA variables | TMP R-BUG-42 | implemented: #107 | One allowlist shared with Codex; `ANTHROPIC_*` and `CLAUDE_*` stay excluded. |
 | LED-20 | Codex CLI probe accepts prereleases, caches results, no longer busy-waits | TMP R-PERF-05 | implemented: #107 | Cache misses a byte-identical npm downgrade, recovers on launch failure (PRV-05). |
 | LED-21 | `llimit check` and `llimit pick` | TMP R-NOV-03; MAIN ledger #97 | implemented: #108; #97 (MAIN-reported, unverified) | OVERLAP with incompatible contracts (see overlap 5); scripts will depend on one, so choose before either merges. `HeadroomRanking` reusable in PRD-06, IDEA-04, IDEA-09. #110's hooks overlap #97's pattern. |
-| LED-22 | Trend depletion warning gated on live, current-window data | TMP R-BUG-12; MAIN W06 | implemented: #109 | `QuotaForecast` in QuotaCore checks live, fresh data, uses window pace, requires depletion after now, orders warnings. Verify W06 acceptance: estimate from fresh current-reset-segment observations before display sampling; 10% before a reset, 100% at it and 20% now must warn about current depletion; stale, gapped or single-point data is not confident. Converge with #87 in PRD-01. |
+| LED-22 | Trend depletion warning gated on live, current-window data | TMP R-BUG-12; MAIN W06 | implemented: #109 | `QuotaForecast` in QuotaCore checks live, fresh data, uses window pace plus a guarded recent pace (table 1), requires depletion after now, orders warnings. Decided in review: an early large burn that projects depletion keeps warning (no idle gate). Verify W06 acceptance: estimate from fresh current-reset-segment observations before display sampling; 10% before a reset, 100% at it and 20% now must warn about current depletion; stale, gapped or single-point data is not confident. Converge with #87 in PRD-01. |
 | LED-23 | Trend series keyed by positional metric id | TMP R-BUG-13 | implemented: #109 | Trigger unverified. Root fix (duration-based OpenAI/Codex metric ids): PRV-29, DEBT-03. SUB-WIDGET-2 rejected (REF-17). |
 | LED-24 | Trend warning chip and axis labels legible on the default background | TMP R-A11Y-02 | implemented: #109 | Gutters, a scrim, a dark capsule with `#FFD60A`. Was rated high. |
 | LED-25 | Butt line caps keep dash gaps visible | TMP R-VIS-06 | implemented: #109 | Restores the secondary encoding for same-hue series. |
@@ -698,8 +741,10 @@ against them before coding and again in review. Code lines refer to baseline
     exactly when there is an error to show (R-LNX-07).
   - Open PRs: #66 (MAIN-owned, L01 and the Linux C03 guard) and #108 (status part
     of R-BUG-04) both make `status` snapshot-only with clean JSON stdout; keep one.
-    #104's `makeDaemon` status warning becomes dead code once #108 lands. #105
-    adds `"escape": true` and sanitizes text.
+    #104's `makeDaemon` status warning becomes dead code once #108 lands; the
+    second of the two to land drops it (integration fix, ledger table 1). #105
+    adds `"escape": true`, sanitizes text and neutralizes polybar `%{` in error
+    text (its polybar script also sanitizes its text).
 - **Proposal (rules):**
   1. Display consumers (`status` in every format, `check`, `pick`, `--watch`, the
      tray, bar examples, and future status line, MCP, brief, `--explain` and macOS
@@ -1244,9 +1289,11 @@ against them before coding and again in review. Code lines refer to baseline
   1. Distinguish unknown from zero. Missing is unknown unless the protocol proves
      otherwise: for Devin, a missing percent with a positive reset is 0%
      (exhausted), a missing percent with no reset is no window, and windows are
-     never invented from `billingStrategy` alone (R-BUG-02). Refuted CLIENT-7:
-     Antigravity's `remaining` is a oneof with explicit presence, so missing stays
-     unknown; change that only after capturing a fixture from an exhausted model.
+     never invented from `billingStrategy` alone (R-BUG-02); on credit-billed
+     plans #89 never infers an exhausted window from a reset alone. Refuted
+     CLIENT-7: Antigravity's `remaining` is a oneof with explicit presence, so
+     missing stays unknown; change that only after capturing a fixture from an
+     exhausted model.
   2. Require a recognizable success: a non-JSON 200 is `.decoding` with fixed text;
      a non-empty model list with no quota info is `.decoding`; a terminally failed
      Muse stream is not fresh success; present malformed or null windows are not
@@ -1339,8 +1386,9 @@ tree while merging; everything else is as the sources report it.
 - **Relations:** BKL-10 (backlog wording); COR-02 (cross-process owner);
   COR-04 (cancellation guards sit at the same commit points); COR-12 (Venice
   estimate state on disable); #104 (edits `removeAccount`); #68 and #101 (Venice
-  key edits); #75 (history semantics). The AppModel change collides with the
-  expected AppModel conflicts (#94, #101, #102, #104, #106, #107).
+  key edits); #75 (history semantics). The AppModel change must rebase onto #94,
+  #101, #102, #104, #106 and #107, which all edit `APP/AppModel.swift` but merge
+  cleanly with each other (measured, ledger table 1).
 
 ### COR-02 No cross-process refresh owner
 
@@ -1409,9 +1457,11 @@ tree while merging; everything else is as the sources report it.
 - **Status / severity / effort / platform:** partial. #104 implements the Linux
   account-mutation outcomes (TMP R-LNX-05: `normalizeAndSave` throws, mutations
   propagate, the CLI exits nonzero, `remove` saves before it purges history).
-  Remaining work is macOS-only. MAIN high; TMP medium. Effort M (TMP).
+  On macOS, #101's draft commits return an outcome, and a rejected draft is kept
+  with an inline reason. Remaining work is macOS-only. MAIN high; TMP medium.
+  Effort M (TMP).
 - **Sources:** MAIN C06; TMP R-UX-02 (APPMODEL-13, MENU-3 notice half,
-  SETTINGS-2), R-LNX-05 (LINUX-5, done in #104).
+  SETTINGS-2), R-LNX-05 (LINUX-5, done in #104); LEDGER #101 deferral.
 - **Problem and evidence (remaining, macOS):**
   - Edits stay in memory after a failed save (`APP/AppModel.swift:163-184`,
     `:550-578`, `:1603-1611`). Source check: `saveConfiguration` only sets
@@ -1424,7 +1474,9 @@ tree while merging; everything else is as the sources report it.
     nowhere (`APP/AppModel.swift:163-185`, `:203-207`, `:253-255`, `:424-427`,
     `:533-557`, `:1218-1229`, `:1588-1601`; `APP/LLimitApp.swift:797-843`, `:866`):
     - Auto-fill's "No Kimi login detected…" and "Filled…".
-    - Venice key rejections.
+    - Venice key rejections. #101 shows a rejected draft's reason inline, but
+      (deferred by #101) a rejected draft for an account that became connected is
+      never shown and is dropped at quit.
     - "Save failed" and "Save blocked because the existing settings file could not
       be read".
     - "No enabled provider accounts with complete credentials".
@@ -1438,7 +1490,8 @@ tree while merging; everything else is as the sources report it.
 - **Proposal:**
   - Return explicit durable outcomes from mutations. Save settings before
     destructive derived cleanup. Roll back failed mutations or keep retryable
-    unsaved drafts (#101's `PendingEdits` can hold them).
+    unsaved drafts (#101's `PendingEdits` already keeps a rejected draft with its
+    reason).
   - Publish `accountNotices: [String: AccountNotice]` (message, severity, date,
     context) plus one global `AppNotice` with an optional recovery action. Render
     account notices under the Credentials row, and the global notice as one line
@@ -1748,7 +1801,8 @@ tree while merging; everything else is as the sources report it.
     `defaultRingMetrics`.
   - #93 deferred making `maxUsagePercent` nil when nothing parsed. #84 (Anthropic)
     and #65 (Antigravity) report that behavior for their clients; check the other
-    clients that emit a placeholder.
+    clients that emit a placeholder. #93 drops Anthropic's "empty" placeholder
+    when an extra-usage amount exists.
 - **Tests / acceptance:** a placeholder-only usage gives a nil primary slot; a
   placeholder listed first does not shift a real `.other` metric's slot.
 - **Relations:** AGENTS.md color semantics (identity colors only for real
@@ -1911,19 +1965,20 @@ Provider APIs are undocumented and unstable: adopt new endpoint or field semanti
 
 ### PRV-05 Managed CLIs installed via nvm/fnm or at custom paths
 
-- **Status / severity / effort / platform:** partial. #107 (open) implements the rest of R-BUG-03 (executable directory first in the child PATH, wider candidates), R-BUG-42 (proxy and CA variables) and R-PERF-05 (prerelease versions, cached probe). Original severity: high for npm-installed Codex, medium for Claude (verifier correction). Remaining effort S to M; discovery is Linux-testable, a Settings override is macOS-only.
+- **Status / severity / effort / platform:** partial. #107 (open) implements the rest of R-BUG-03 (executable directory first in the child PATH, wider candidates, and nvm, fnm and Volta discovery), R-BUG-42 (proxy and CA variables) and R-PERF-05 (prerelease versions, cached probe). Remaining: a Settings override for custom CLI paths. Original severity: high for npm-installed Codex, medium for Claude (verifier correction). Remaining effort S; the Settings override is macOS-only.
 - **Sources:** TMP R-BUG-03 (AUTH-1); REF-20 (rejected AUTH-1 sub-claim); LEDGER #107 deferrals.
 - **Problem and evidence:**
   - Baseline: discovery checked `/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin`, then `$PATH`, and every child (probe, app-server, renewal, login PTY) inherited the parent PATH. An app started from Finder or as a login item gets `/usr/bin:/bin:/usr/sbin:/sbin`. The npm Codex shim (`#!/usr/bin/env node`, verified with `npm pack` of 0.160.1) then exits 127 on `codex --version`, every candidate is rejected, and the user is told "Install Codex CLI 0.144.4 or later" (`QC/CodexProfileStore.swift:130`). Locations: `QC/CodexCLIProbe.swift:15`, `:77-78`; `QC/CodexAccountService.swift:123`, `:138`, `:209-225`; `QC/ClaudeCodeProcess.swift:50-52`; `APP/Services/ClaudeProfileService.swift:22`, `:64-76`; `APP/AppModel.swift:968-978`, `:996-1000` ("Sign-in did not finish"), `:1114-1121`; `APP/Views/ClaudeTerminalSession.swift:54-60` (direct `execve`, no login shell).
-  - Remaining: nvm, fnm and other custom npm-prefix installs are still not found, which also gives Claude `cliMissing`. TMP's fix named `~/.volta/bin` and `~/.npm-global/bin` as extra candidates; check which ones #107 shipped.
+  - Done in #107's final head: nvm discovery (`$NVM_DIR` or `~/.nvm`, `alias/default` first, then `versions/node/*` by semantic version), fnm, and Volta with `VOLTA_HOME`; a distinct excessive-output failure, tailored timeout advice, a process-group kill on probe timeout, and re-probing only when a start failure implicates the executable.
+  - Remaining: a CLI at any other custom path is still not found, which also gives Claude `cliMissing`. TMP also named `~/.npm-global/bin` as a candidate; the ledger does not say whether #107 covers it.
   - Current `@anthropic-ai/claude-code` ships a native binary, so the `env: node` failure does not apply to Claude (REF-20); its gap is only the candidate directories.
   - #107's probe cache, keyed by resolved path, size and mtime, misses a byte-identical npm downgrade. It recovers on launch failure.
 - **Proposal:**
   - Add a non-secret "CLI path" override per CLI in Settings, validated with the same probe and its "not found", "failed to run (exit N)" and "too old" errors.
-  - Optionally enumerate nvm/fnm version directories (for example `~/.nvm/versions/node/*/bin`) as candidates and let the probe pick a supported one. The sources do not say which version to prefer; keep the override authoritative.
+  - Keep the override authoritative over #107's nvm, fnm and Volta candidates.
   - Leave the downgrade cache miss to launch-failure recovery unless it shows up in practice.
-- **Tests / acceptance:** a fake `codex` script with `#!/usr/bin/env fakenode` in a temporary nvm-style tree, parent PATH `/usr/bin:/bin`: discovery resolves it and a session starts. An override path wins over candidates; an invalid override reports "not found" with the path.
-- **Relations:** #107 (merge first; `AppModel.swift` conflicts listed in LEDGER), PRV-28 (#91's version detection depends on finding the CLI), PRV-06 (missing CLI maps to `.notConfigured`).
+- **Tests / acceptance:** a fake `codex` script with `#!/usr/bin/env fakenode` at a custom path outside every discovered candidate, parent PATH `/usr/bin:/bin`: with the override set, a session starts. An override path wins over candidates; an invalid override reports "not found" with the path.
+- **Relations:** #107 (merge first; it edits `AppModel.swift`, which merges cleanly with this pass's other PRs, measured in ledger table 1), PRV-28 (#91's version detection depends on finding the CLI), PRV-06 (missing CLI maps to `.notConfigured`).
 
 ### PRV-06 Managed Codex failures all become auth; cancellation reads as "sign-in canceled"
 
@@ -2391,7 +2446,7 @@ This section covers scheduling, networking and main-actor work. Source inspectio
 ### PRF-09 Repair App Group stores after transient failures
 - **Status / severity / effort / platform:** open; severity not rated; M (estimate); macOS-only.
 - **Sources:** MAIN F08; MAIN-reported #79; LEDGER #94.
-- **Problem and evidence:** the settings and snapshot syncs try twice and then give up (`APP/AppModel.swift:1907-1950`), as does the App Group history append (`:1999-2018`); store resolution is cached and invalidated on failure (`:1952-1995`). The app then shows "Settings saved locally. Widget sync unavailable." (`:163-185`) or "Widget sync partially unavailable" (`:274-297`), and nothing retries until the next save or publish. A missed App Group history append is never replayed. #79 makes the App Group `SnapshotStore` convenience initializer failable with an NSLog breadcrumb instead of a force unwrap; it avoids the crash but does not repair publication. #94's App Group mirror self-repairs a corrupt widget copy on publish, which may cover part of this; verify.
+- **Problem and evidence:** the settings and snapshot syncs try twice and then give up (`APP/AppModel.swift:1907-1950`), as does the App Group history append (`:1999-2018`); store resolution is cached and invalidated on failure (`:1952-1995`). The app then shows "Settings saved locally. Widget sync unavailable." (`:163-185`) or "Widget sync partially unavailable" (`:274-297`), and nothing retries until the next save or publish. A missed App Group history append is never replayed. #79 makes the App Group `SnapshotStore` convenience initializer failable with an NSLog breadcrumb instead of a force unwrap; it avoids the crash but does not repair publication. #94 makes the App Group history a byte mirror of the local archive and replaces an unreadable widget copy on the next publish (`ifUnreadable: .replace`), which may also cover a missed history append; verify.
 - **Proposal:** at bootstrap, reconcile the redacted settings and the latest local snapshot (and history, if #94's mirror does not) into the App Group. After a failure, retry a bounded number of times, then reload the affected timelines once repaired. Expose the load failure while the store is unavailable (WID-03).
 - **Tests / acceptance:** inject a transient failure; the widget copy recovers without another credential edit, and the widgets show a storage-unavailable state while it lasts.
 - **Relations:** WID-03 (MAIN W03 explicit load outcomes; #109 deferred the "Store unavailable" empty state). PRF-02 (the persistence service owns the sync), PRF-06 (reload kinds). #79, #94.
@@ -3427,7 +3482,7 @@ This section covers the WidgetKit tiles, the dashboard and trend widgets, and th
   - Derive row age and health from each account's source `fetchedAt` and its current failure, with the same rules as LNX-01 (last attempt, last success, current failure, stale age). Do not invent a second freshness model.
   - Add `QuotaSnapshot.oldestFetchedAt` over the displayed usages and use it for header copy such as "Updated 2 min ago · oldest 35 min ago", in the dropdown and the dashboard widget. Leave `generatedAt` unchanged; bootstrap and widgets depend on it.
   - Dashboard rows: a compact age marker on stale or failing rows. Tiles: the age in the footer when stale.
-  - Reuse the shared age formatter from #95's R-UX-03 work (verify that it lives in QuotaCore). Ages are English-only by design (#95).
+  - Reuse the shared age formatter from #95's R-UX-03 work, `QuotaDisplayText.relativeAge` (#95 moves it out of `StatusRenderer`; verify that it lives in QuotaCore). Ages are English-only by design (#95).
 - **Tests / acceptance:** `oldestFetchedAt` with carried usage. Fixtures for mixed fresh and stale accounts, a targeted sibling refresh, a cached failure, and hidden clock or percentages. No aggregate timestamp implies that every account succeeded.
 - **Relations:** COR-08, REF-06, LNX-01. #105 (Linux per-account `fetchedAt`/`ageSeconds`) and #50 (interval-aware stale threshold). #72 (dashboard truth, which excludes age). WID-02 (stale boundary entries).
 
@@ -3666,13 +3721,15 @@ else is as the sources report it.
 
 - **Status / severity / effort / platform:** partial. #105 (this pass) and #64
   (MAIN-reported) each implement most of the failure display; the remaining work
-  is reconciling them, interval-aware staleness, cross-account ordering and the
-  tray's provider warnings. TMP rates it high; verifiers split between high and
-  medium-high because the waybar hover tooltip does list ERROR lines. MAIN does
-  not rate it. Original effort M; remaining S to M. Linux-testable
+  is reconciling them, interval-aware staleness (one rule shared with #108's
+  commands), cross-account ordering and the tray's provider warnings. TMP rates it
+  high; verifiers split between high and medium-high because the waybar hover
+  tooltip does list ERROR lines. MAIN does not rate it. Original effort M;
+  remaining S to M. Linux-testable
   (StatusRendererTests, `TRAY/tests/test_menu_model.py`).
 - **Sources:** TMP R-LNX-01 (LINUX-2, PRODUCT-1, LINUX-8, LINUX-9; CORE-1 for the
-  class part); MAIN L02, L03, #64 and #50 reports; LEDGER #105. TMP backlog note (R-LNX-01): extends BACKLOG "Data correctness > Fresh, stale, failed, and unknown state", which has no Linux coverage.
+  class part); MAIN L02, L03, #64 and #50 reports; LEDGER #105 and its integration
+  check. TMP backlog note (R-LNX-01): extends BACKLOG "Data correctness > Fresh, stale, failed, and unknown state", which has no Linux coverage.
 - **Done elsewhere:** #105 adds per-account `failed`, `lastKnown`, `errorKind`,
   `error` (one sanitized line) and `fetchedAt`, failure-only accounts with
   `remainingPercent: null, metrics: []`, a top-level `failures` array (id,
@@ -3706,6 +3763,10 @@ else is as the sources report it.
     15-minute interval therefore goes 6 h before it is stale. #50 reports
     "configured-interval staleness instead of a hardcoded two hours"; how it gets
     the interval while `status` is snapshot-only (#66, #108) is unverified.
+  - Integration check (#105 + #108): once both land, staleness disagrees. #108's
+    template `{stale}` and `check`/`pick` use 2 h (`HeadroomRanking.defaultMaxAge`),
+    while #105's status output uses 6 h. Pick one rule, ideally from a recorded
+    refresh interval (proposal 2).
   - Freshness stamp: the tooltip's and tray's "Updated just now" comes from
     `generatedAt`, the time of the current cycle, not the age of the data.
     Worktree check: #105 keeps this stamp and adds per-line "(last known, age)"
@@ -3722,7 +3783,9 @@ else is as the sources report it.
     (CORE-1). Worktree check: #105 also excludes stale, non-failed accounts from
     the critical computation, so with a stopped daemon a 2% account reads
     `warning`. TRACKING records this "needsAttention filter" as a possible
-    important finding in #105's second review round; its resolution is unrecorded.
+    important finding in #105's second review round. LEDGER's final update
+    records the outcome: in #105's final head, stale accounts cap the class at
+    `warning`. #108's template `{class}` does not apply that cap yet (LNX-10).
   - Tray (MAIN L03, reproduced with in-memory probes): the baseline popup hides
     spending warnings and errors whenever any account has data
     (`TRAY/llimit_tray.py:145-162`; MAIN cites `:138-159,301-304`, TMP
@@ -3740,8 +3803,9 @@ else is as the sources report it.
      credential-free) and base `stale` on 2x that interval, falling back to the
      6 h constant for snapshots without it. Reconcile with #50's implementation
      instead of building a second one; `status` must not read settings to get it.
-  3. Decide the class cap for stale but non-failing accounts explicitly and
-     document it next to the class table in `EX/README.md`.
+     Use the same rule for #108's template `{stale}`, `check` and `pick`.
+  3. Check that `EX/README.md` documents #105's cap (stale accounts raise the class
+     to `warning` at most) next to the class table.
   4. Define one cross-account order (severity, then most recent failure using
      COR-06's timestamps) for ERROR lines, the human output and the tray. Keep the
      JSON `accounts` order stable unless the README documents order as part of
@@ -3758,14 +3822,16 @@ else is as the sources report it.
   marker; a failure-only account is present; two same-provider accounts are named
   apart; a snapshot with a 180-minute interval is not stale at 2.5 h and one with a
   15-minute interval is stale after 30 min; an old snapshot without the interval
-  uses the fallback; ordering follows severity then recency. `test_menu_model.py`:
-  a mixed payload shows the error row and the provider warning row; a
-  failure-only account gets a header. No test asserts both `failed` and `failing`.
+  uses the fallback; `status`, the template `{stale}` and `check`/`pick` agree on
+  staleness for the same snapshot; ordering follows severity then recency.
+  `test_menu_model.py`: a mixed payload shows the error row and the provider
+  warning row; a failure-only account gets a header. No test asserts both `failed` and `failing`.
 - **Relations:** overlaps #64 and #50 (MAIN). R-BUG-08's carried-window clearing
   (in #105 as `clearingElapsedWindows`) feeds this. LNX-16 and R-IDEA-17 depend on
   the chosen per-account keys. LNX-03 adds a settings-error state that should use
   the same `error` class path. #108's template `{class}` mirrors the baseline
-  cutoffs (LNX-10). #103 deferred `paceDelta` in this JSON.
+  cutoffs and ignores #105's cap, and #108's templates and `pick` ignore #105's
+  failure title (LNX-10). #103 deferred `paceDelta` in this JSON.
 
 ### LNX-02 In-place account update, remainder
 
@@ -3816,11 +3882,11 @@ else is as the sources report it.
 - **Status / severity / effort / platform:** partial. #104 reports the failure
   in the CLI and daemon. Worktree check: mutating and listing commands fail with
   "Settings file <path> is unreadable: <reason>. Fix it or move it aside; LLimit
-  will not overwrite it."; the reason comes from the `DecodingError` case and
-  coding path only (never the decoder's message, which can echo a value); the
-  daemon logs it once per distinct error and no longer logs "No enabled provider
-  accounts..."; `status` prints the warning on stderr from `makeDaemon`. TMP
-  rates it medium; remaining effort S. Linux-testable.
+  will not overwrite it."; the reason comes from the `DecodingError` case, coding
+  path and expected type only (never the decoder's message, which can echo a
+  value); the daemon logs it once per distinct error and no longer logs "No
+  enabled provider accounts..."; `status` prints the warning on stderr from
+  `makeDaemon`. TMP rates it medium; remaining effort S. Linux-testable.
 - **Sources:** TMP R-LNX-06 (LINUX-6); LEDGER #104 interplay note. TMP backlog
   note (R-LNX-06): new; BACKLOG "Settings recovery" targets only the macOS UI.
 - **Problem and evidence:**
@@ -3832,7 +3898,9 @@ else is as the sources report it.
     silently disabled the Linux product with every diagnostic pointing the wrong
     way.
   - Remaining: once `status` is snapshot-only (#108 or #66), it never loads
-    settings, so #104's stderr warning goes dead. Bars and the tray then show the
+    settings, so #104's stderr warning goes dead. The integration check drops that
+    `makeDaemon` branch and the README sentence about it; whichever of #104 and
+    #108 lands second must carry that fix. Bars and the tray then show the
     last-known snapshot (which the #104/#66 guard preserves) with no sign that
     refreshing has stopped, until it eventually turns stale.
 - **Proposal:**
@@ -3988,7 +4056,8 @@ else is as the sources report it.
 - **Proposal:** add `llimit config get [key]` and `llimit config set
   refresh-interval <minutes>` through `QuotaDaemon.setRefreshInterval(_:)`, which
   clamps to `refreshIntervalRange`, reports any clamping, and saves under the
-  settings lock with a fresh load (or #104's settings transaction). Whitelist
+  settings lock with a fresh load (or through #104's `SettingsTransaction` handle
+  from `editingSettings`, the only route to settings mutations there). Whitelist
   Linux-relevant keys only. Say that the change applies after the current sleep,
   or wake the daemon with SIGUSR1 once COR-02 adds it. When the timer unit is
   active, print the `systemctl --user edit llimit-refresh.timer` override instead.
@@ -4059,10 +4128,12 @@ else is as the sources report it.
 - **Status / severity / effort / platform:** partial. #108 adds `status --format
   <template> [--separator]`, repeatable `--account <id|provider>`, `--worst`,
   `--kind` and `--watch [<duration>]` (default 60 s), with tmux, starship and
-  agent-wrapper examples; the JSON contract is untouched. Remaining: presets and
-  `--worst N`. TMP rates the item medium, original effort M; remaining S.
-  Linux-testable.
-- **Sources:** TMP R-LNX-20 (LINUX-16, PRODUCT-10); LEDGER #108; MAIN #88, #99.
+  agent-wrapper examples; the JSON contract is untouched. Remaining: presets,
+  `--worst N`, and aligning the template's `{class}` and account names with
+  #105's StatusRenderer rules. TMP rates the item medium, original effort M;
+  remaining S. Linux-testable.
+- **Sources:** TMP R-LNX-20 (LINUX-16, PRODUCT-10); LEDGER #108 and its integration
+  check; MAIN #88, #99.
   TMP backlog note (R-LNX-20): extends Product backlog #10 (redacted
   status-line companion); mark it partly done for Linux.
 - **Problem and evidence:**
@@ -4074,16 +4145,25 @@ else is as the sources report it.
     `--worst` selects one account only.
   - Worktree check: #108's `StatusTemplate` copies the 15/40 class cutoffs as
     private constants "mirroring" `StatusRenderer`; TRACKING lists sharing them
-    as a follow-up. Once LNX-01's class rules (failed, stale, all-failed) land,
-    the template's `{class}` can disagree with the JSON `class`.
+    as a follow-up, and #108 deferred it until #95 and #105 land. Once LNX-01's
+    class rules (failed, stale, all-failed) land, the template's `{class}` can
+    disagree with the JSON `class`.
+  - Integration check (#105 + #108): with both merged, the template `{class}`
+    does not apply #105's rule that failed or stale accounts raise the class to
+    `warning` at most. #108's `StatusTemplate` and `HeadroomRanking` name an
+    account with no usage by its provider display name and ignore #105's
+    `ProviderFailure.title`. Staleness also disagrees (2 h versus 6 h; LNX-01).
 - **Proposal:** add presets `short`, `tmux` (segments wrapped in `#[fg=...]` by
   class) and `i3blocks`; add `--worst N`, ordered by R-NOV-03's
   `HeadroomRanking` in QuotaCore; decide whether `{short}` is still wanted. Derive
-  `{class}` from the same function as the JSON class (R-UX-09's `QuotaSeverity`).
+  `{class}` from the same function as the JSON class (R-UX-09's `QuotaSeverity`),
+  including #105's `warning` cap. Name accounts with no usage through the same
+  title fallback as `status` (#105's `ProviderFailure.title`).
 - **Tests / acceptance:** golden output per preset; `--worst 2` returns the two
   lowest in ranking order with ties broken the same way as `pick`; the template
-  `{class}` equals the JSON `class` for failed, stale and mixed fixtures; existing
-  checks (unknown placeholders left literal, empty snapshot, "≈" kept on
+  `{class}` equals the JSON `class` for failed, stale and mixed fixtures; a
+  failure-only account has the same name in the template, `pick` and `status`;
+  existing checks (unknown placeholders left literal, empty snapshot, "≈" kept on
   estimates) still pass.
 - **Relations:** OVERLAP: #99 (MAIN) adds `status --watch [seconds]` with ANSI
   clear/home repaint, and #88 (MAIN) adds `llimit compact`; keep one of each.
@@ -4284,7 +4364,7 @@ else is as the sources report it.
 This section covers CI, release, Debian packaging, the installer, and documentation accuracy. The macos-14 retirement on Nov 2, 2026 is the only dated deadline. Line numbers refer to baseline 2d6ac1e. Workflow, script and repository-root paths are written in full. TMP cites AGENTS.md lines (:207, :252) that do not match the baseline file, so the baseline lines are given instead.
 
 ### BLD-01 macOS CI on macos-14 is retired on Nov 2, 2026
-- **Status / severity / effort / platform:** partial. #92 (`opus/release-unblock`) moves `ci.yml` and `release.yml` to `macos-15`, pins `ubuntu-24.04` and adds the three geometry tests. Two items remain: run the geometry script in the Linux job, and merge #92 before Nov 2 (ORD-02). Severity: high (TMP). Effort: XS for the remainder. Platform: CI. The remaining step is Linux-testable, and the script already passes on Linux (16 checks).
+- **Status / severity / effort / platform:** partial. #92 (`opus/release-unblock`) moves `ci.yml` and `release.yml` to `macos-15` and pins `ubuntu-24.04`. Three items remain: run the geometry script in the Linux job, add the three geometry tests (#92's final head `53350b7` does not add them; see the assembly notes), and merge #92 before Nov 2 (ORD-02). Severity: high (TMP). Effort: XS for the remainder. Platform: CI. The remaining step is Linux-testable, and the script already passes on Linux (16 checks).
 - **Sources:** TMP R-BLD-01 (BUILD-1, plus the MENU-21 coverage gaps that survived refutation).
 - **Problem and evidence:**
   - At baseline, `.github/workflows/ci.yml:20` and `.github/workflows/release.yml:22` use `runs-on: macos-14`. actions/runner-images#13518 makes macOS 14 unsupported from Nov 2, 2026. Scheduled brownouts fail jobs on Oct 5, 12, 16, 19, 23, 26, 29 and 30, from 14:00 to 24:00 UTC. From Nov 2, no PR can pass its macOS job and no release can publish.
@@ -4294,10 +4374,11 @@ This section covers CI, release, Debian packaging, the installer, and documentat
 - **Proposal:**
   - Merge #92 before Nov 2, preferably before the next brownout on Oct 12. Its `macos-15` arm64 image ships Xcode 16.2 (16.4 is the default), so the existing 16.2 pin keeps working.
   - Add `scripts/test-panel-geometry.sh` to the `linux-test` job, which already installs Swift, and keep it in the macOS job.
+  - Add TMP's three geometry tests to `scripts/tests/MenuBarPanelGeometryTests.swift` (listed in ORD-02).
   - Optional (TMP): add a matrix of Xcode 16.2 and 26.x.
-  - TMP asked for `BACKLOG.md:16-17` ("Restore runnable CI") to become "Migrate off macos-14 before Nov 2, 2026". That edit is tracked with R-BKL-01. The ledger does not say whether #92 made it.
+  - TMP asked for `BACKLOG.md:16-17` ("Restore runnable CI") to become "Migrate off macos-14 before Nov 2, 2026". That edit is tracked with R-BKL-01. #92's final head (`53350b7`) leaves `BACKLOG.md` identical to baseline, so it is still open.
 - **Tests / acceptance:** a PR run on `macos-15` where all three harness steps pass (#92), and a Linux job log that shows the geometry checks passing.
-- **Relations:** BLD-03 (Linux publication depends on the macOS job). BLD-08 (#92 deferred CI toolchain caching). #92's other deferrals belong to the security cluster for R-SEC-01/R-SEC-03, not to this section: checksum or PGP verification of the toolchain through a shared composite action, restoring echo on signal, Musl branches in the `LD/SettingsLock.swift` and `CLI/main.swift` import blocks, and a v1.0.1 release note about scrollback. Expected merge conflict: `CLI/main.swift` with #104, #108 and #110.
+- **Relations:** BLD-03 (Linux publication depends on the macOS job). BLD-08 (#92 deferred CI toolchain caching). #92's other deferrals belong to the security cluster for R-SEC-01/R-SEC-03, not to this section: checksum or PGP verification of the toolchain through a shared composite action, restoring echo on signal, Musl branches in the `LD/SettingsLock.swift` and `CLI/main.swift` import blocks, and a v1.0.1 release note about scrollback. Measured: #92 merges cleanly with every other PR of this pass, including the `CLI/main.swift` edits in #104, #108 and #110 (ledger table 1).
 
 ### BLD-02 Signed, notarized distribution that supports widgets
 - **Status / severity / effort / platform:** open. Severity: high (MAIN). Effort: L (estimate; MAIN gives none). It needs more than one PR, plus an Apple Developer ID and repository secrets, which are owner decisions. Platform: macOS-only.
@@ -4369,7 +4450,7 @@ This section covers CI, release, Debian packaging, the installer, and documentat
   - Ship `copyright` and `changelog.Debian.gz`. Make the description generic (BLD-10), and fix the layout comment.
   - Parameterize the architecture: SDK triple, binary path, `Architecture:` and the file name. Add an aarch64 build leg. MAIN says "if scoped". It depends on R-BLD-02, which #92 fixes.
   - In `install.sh` and the docs, recommend `--static-swift-stdlib`.
-  - In CI, extend #92's "Linux (static .deb)" job with `lintian`, `dpkg-deb -I` and `file`. Add fixture-XDG smoke checks on the installed artifact: binary, dependencies, units, GTK-free tray output, and the installed CLI flags.
+  - In CI, extend #92's "Linux (static .deb)" job, which already asserts that the packaged binary is statically linked, with `lintian`, `dpkg-deb -I` and `file`. Add fixture-XDG smoke checks on the installed artifact: binary, dependencies, units, GTK-free tray output, and the installed CLI flags.
 - **Tests / acceptance:**
   - First-install and upgrade fixtures verify the running PID and version, and the optional tray behavior (L05).
   - A minimal install without recommendations reaches HTTP responses rather than a TLS trust failure. The control metadata and the shipped binary are inspected (L07).
@@ -4438,14 +4519,14 @@ This section covers CI, release, Debian packaging, the installer, and documentat
 
 ### BLD-08 CI coverage: LLimitd on macOS, XcodeGen drift, toolchains
 - **Status / severity / effort / platform:** open. Severity: the sources disagree. TMP rates R-BLD-10 and R-BLD-11 low, and MAIN rates "Focused CI" medium. Effort: S per TMP item; MAIN's wider scope is M. Platform: CI. The LLimitd-on-macOS step needs a macOS runner.
-- **Sources:** MAIN AM-BUILD-3; TMP R-BLD-10 (BUILD-13) and R-BLD-11 (BUILD-16). TMP backlog note (R-BLD-11): extends BACKLOG "Canonical project generation".
+- **Sources:** MAIN AM-BUILD-3; TMP R-BLD-10 (BUILD-13) and R-BLD-11 (BUILD-16); LEDGER #110 note. TMP backlog note (R-BLD-11): extends BACKLOG "Canonical project generation".
 - **Problem and evidence:**
-  - **LLimitd never builds on macOS.** AGENTS.md:51-52 and `:341` say LLimitd's tests run in macOS CI, but the macOS job (`.github/workflows/ci.yml:17-65`) never builds LLimitd. Its Darwin branches therefore never compile in CI: the termios path in `readField` (`CLI/main.swift`) and the `LD/SettingsLock.swift` import.
+  - **LLimitd never builds on macOS.** AGENTS.md:51-52 and `:341` say LLimitd's tests run in macOS CI, but the macOS job (`.github/workflows/ci.yml:17-65`) never builds LLimitd. Its Darwin branches therefore never compile in CI: the termios path in `readField` (`CLI/main.swift`), the `LD/SettingsLock.swift` import, and #110's `AlertDelivery` Darwin branches.
   - **Toolchain order and duplicate runs.** The macOS job runs QuotaCore `swift test` (`ci.yml:23-25`) before "Select Xcode" (`:27-30`), so that first run uses the runner's default toolchain. It runs the same tests again at `:56-57`.
   - **XcodeGen drift.** `project.yml:3` sets `minimumXcodeGenVersion: 2.38.0`, but `LLimit.xcodeproj/project.pbxproj:6` has `objectVersion = 77`, which needs XcodeGen 2.44.1 or later.
   - **Local signing in the generated project.** The project embeds local signing configuration: a concrete `DEVELOPMENT_TEAM` at `project.pbxproj:347`, `:492`, `:517` and `:543`, against `DEVELOPMENT_TEAM: ""` at `project.yml:36`. A regenerate-and-diff check must handle this.
   - **Unpinned engines.** The external `lkm-build` and `lkm-release` engines are resolved from `PATH` with no version (`scripts/build.sh:19-21`, `scripts/release.sh:27-31`).
-  - **Floating tooling.** Actions are tag-pinned (`actions/checkout@v7`, `maxim-lobanov/setup-xcode@v1`, `softprops/action-gh-release@v3`) and Homebrew tools float (`brew install xcbeautify create-dmg`). `zai-code-review.yml:26` also uses `ubuntu-latest`; R-SEC-03 cites only `ci.yml` and `release.yml`. Unverified: whether #92's pin covers this workflow.
+  - **Floating tooling.** Actions are tag-pinned (`actions/checkout@v7`, `maxim-lobanov/setup-xcode@v1`, `softprops/action-gh-release@v3`) and Homebrew tools float (`brew install xcbeautify create-dmg`). `zai-code-review.yml:26` also uses `ubuntu-latest`; R-SEC-03 cites only `ci.yml` and `release.yml`. #92's pin does not cover this workflow: its final head (`53350b7`) still uses `ubuntu-latest` there (ORD-02).
 - **Proposal:**
   - Add `swift test --package-path Packages/LLimitd` to the macOS job, folded into the cleanup of the duplicate QuotaCore run, and select Xcode before any test. Otherwise, correct AGENTS.md.
   - Raise `minimumXcodeGenVersion` to the version actually used. Add a regenerate-and-diff CI check that installs that exact XcodeGen release with a checksum, and decide whether the committed project or `project.yml` owns the team setting. Have `scripts/bootstrap.sh` print `xcodegen --version`.
@@ -4687,8 +4768,9 @@ ratings are given. Line numbers refer to baseline 2d6ac1e. Entries marked
   gating as scoped release follow-ups) overlap. #92 edits both workflows.
 
 ### SEC-05 Unverified Swift toolchain download for the shipped .deb
-- **Status / severity / effort / platform:** Partial. #92 pins `ubuntu-24.04`. Medium
-  (TMP). Effort S. CI-only.
+- **Status / severity / effort / platform:** Partial. #92 pins `ubuntu-24.04`; its
+  review declined adding the toolchain verification and CI caching, so both stay
+  here. Medium (TMP). Effort S. CI-only.
 - **Sources:** TMP R-SEC-03 (BUILD-6); LEDGER #92 deferrals.
 - **Problem and evidence (remaining):**
   - The toolchain tarball is downloaded with `curl` and extracted with `sudo tar` without
@@ -4718,7 +4800,7 @@ ratings are given. Line numbers refer to baseline 2d6ac1e. Entries marked
 - **Status / severity / effort / platform:** Partial. #104 adds in-place update without
   remove-and-add; #86 (MAIN-reported) adds `env:NAME` references. Medium (TMP). Effort S.
   Linux-testable.
-- **Sources:** TMP R-SEC-04 (LINUX-12); MAIN L09; LEDGER #104.
+- **Sources:** TMP R-SEC-04 (LINUX-12); MAIN L09; LEDGER #104 and its deferral.
 - **Problem and evidence (remaining):**
   - Non-interactive `accounts add` accepts secrets only as `--set key=value`
     (`CLI/main.swift:117-122`). Without a TTY, missing required fields must come from
@@ -4729,6 +4811,9 @@ ratings are given. Line numbers refer to baseline 2d6ac1e. Entries marked
     persist there too.
   - Unverified: whether the CLI accepts `--set key=env:NAME` under #86 as a scripted
     alternative.
+  - #104: `--set key` without a value fails on a non-TTY instead of prompting.
+    Deferred by #104: that error should name every key that would have been
+    prompted.
 - **Proposal:**
   1. Accept `--set key=-` (read the value from stdin) and `--set-file key=<path>`, plus
      file-descriptor input (MAIN). When stdin is a pipe and exactly one secret is missing,
@@ -4747,7 +4832,8 @@ ratings are given. Line numbers refer to baseline 2d6ac1e. Entries marked
      estimate after the update; the stored import source and Claude `expiresAt` are also
      deferred. Whether #104 tests update with an injected save failure is unverified.
 - **Tests / acceptance:** Inline, `-`, file, fd and missing-value cases. An inline secret
-  prints the warning. Secrets never appear in errors. An injected save failure leaves
+  prints the warning. On a non-TTY, the error names every key that would have been
+  prompted. Secrets never appear in errors. An injected save failure leaves
   settings unchanged and exits nonzero.
 - **Relations:** #104, #86, R-LNX-10, R-IDEA-02. SEC-07 can share the secret reader.
   `CLI/main.swift` is also edited by #92, #104, #108 and #110 (separate regions).
@@ -4783,7 +4869,8 @@ ratings are given. Line numbers refer to baseline 2d6ac1e. Entries marked
   and finds ECHO restored for each of the three signals. The release that first ships #92
   carries the note.
 - **Relations:** #92; R-BLD-02 (musl CI build); REF-07; DEBT-06; SEC-06 (shared secret
-  input). `CLI/main.swift` merge conflicts with #104, #108 and #110.
+  input). `CLI/main.swift` is also edited by #104, #108 and #110; it merges cleanly
+  with #92 (measured, ledger table 1).
 
 ## Tech debt
 
@@ -5012,8 +5099,8 @@ PR branch.
 ### DEBT-06 Small follow-ups deferred by this pass's PRs
 - **Status / severity / effort / platform:** open. Low. Each item is XS to S.
   Platform per item below.
-- **Sources:** LEDGER rows #92, #95, #96, #101, #102, #106, #108, #110. Larger
-  deferrals from these PRs are tracked in their own clusters.
+- **Sources:** LEDGER rows #92, #95, #96, #101, #102, #105, #106, #108, #109, #110.
+  Larger deferrals from these PRs are tracked in their own clusters.
 - **Problem, evidence and proposal per PR:**
 
 | PR (branch) | Follow-up | Platform |
@@ -5023,21 +5110,27 @@ PR branch.
 | #96 (`opus/status-item-health`) | Share the level, stale and failure-matching rules across `MenuBarGraph`, the dashboard's `MenuBarQuotaStyling` and the provider tile. Re-apply the status-item tooltip on display changes. Manual check of the tooltip and light/dark bars. | macOS |
 | #101 (`opus/venice-key-commit`) | Drop `@discardableResult` on `updateAccount` (`APP/AppModel.swift:1587` on the branch). Trim legacy stored credentials for display. The SwiftUI commit triggers (submit, focus loss, selection, close, quit) are untested; manual check of close and quit with an open draft. | macOS |
 | #102 (`opus/refresh-during-signin`) | Verify the tooltip on a disabled button on macOS 14. | macOS, manual |
+| #105 (`opus/linux-honest-status`) | Besides dropping trailing unclosed tag fragments after each cut, also strip a lone trailing `<`, and repeat the fragment strip until the text is stable. Sample one `now` per tray menu build. | Linux |
 | #106 (`opus/global-hotkey`) | Use `@ObservedObject` instead of `@StateObject` for `AppModel.shared` (`APP/LLimitApp.swift:28` on the branch). Check the hot key id, not only the signature, in the Carbon handler (`APP/Services/GlobalHotkeyService.swift:167` on the branch). The remembered previous app can go stale if the user switches apps before dismissing. | macOS |
-| #108 (`opus/llimit-check-pick`) | Pre-existing: the snapshot merge (`QC/SnapshotMerge.swift:17`) and macOS lookups (for example `APP/AppModel.swift:304`, `:324`, `:353`; `WX/ProviderQuotaWidget.swift:264`; `APP/Views/SettingsView.swift:1261`) match failures by account id only, while #108's `HeadroomRanking` keys them by provider plus account id. | Linux-testable (QuotaCore); macOS for app sites |
+| #108 (`opus/llimit-check-pick`) | Pre-existing: the snapshot merge (`QC/SnapshotMerge.swift:17`) and macOS lookups (for example `APP/AppModel.swift:304`, `:324`, `:353`; `WX/ProviderQuotaWidget.swift:264`; `APP/Views/SettingsView.swift:1261`) match failures by account id only, while #108's `HeadroomRanking` keys them by provider plus account id. Deferred by #108: a deterministic order for failure-only rows that share an account id. | Linux-testable (QuotaCore); macOS for app sites |
+| #109 (`opus/trend-widget`) | Update the one stale doc comment on `recentPaceDepletion`. | QuotaCore (comment only) |
 | #110 (`opus/linux-alerts`) | Alerts fire only from `llimit daemon` (`--notify`, `--on-event`, `LLIMIT_NOTIFY`); `llimit refresh` and the timer units (`Packages/LLimitd/systemd/llimit-refresh.service:8` runs `llimit refresh`) never evaluate them. `llimit paths` does not print the alerts state file (`$XDG_DATA_HOME/LLimit/alerts-state.json`). | Linux |
 
 - **Tests / acceptance:** Linux items get unit or CLI tests (`llimit paths` lists
   the alerts file; a timer-driven refresh emits a threshold event once; a failure
-  for another provider with the same account id does not attach). macOS items are
+  for another provider with the same account id does not attach; a text ending in
+  a lone `<` or a nested fragment strips to a stable result; failure-only rows
+  that share an account id keep one order across runs). macOS items are
   closed by a recorded manual check or a unit test where the logic moves into
   QuotaCore (shared level/stale rules).
-- **Relations:** expected merge conflicts between this pass's PRs: `AppModel.swift`
-  (#94, #101, #102, #104, #106, #107), `LLimitApp.swift` (#95, #96, #102, #103,
-  #106), `SettingsView.swift` (#101, #102, #106), `llimit/main.swift` (#92, #104,
-  #108, #110). Once #104 and #108 both merge, #104's `makeDaemon` status warning
-  becomes dead code and should be removed. #96's shared rules overlap R-UX-04
-  (dashboard order versus bars), which #96 deferred as a larger item.
+- **Relations:** measured merge conflicts between this pass's PRs are in ledger
+  table 1; in code only `LD/StatusRenderer.swift` (#95 x #105) and
+  `APP/LLimitApp.swift` (#95 x #102) conflict, and `AppModel.swift`,
+  `SettingsView.swift` and `llimit/main.swift` merge cleanly. Once #104 and #108
+  both merge, #104's `makeDaemon` status warning is dead code; whichever lands
+  second drops it and its README sentence (integration fix). #96's shared rules
+  overlap R-UX-04 (dashboard order versus bars), which #96 deferred as a larger
+  item.
 
 ## Product features, aesthetics and delight
 
@@ -5051,7 +5144,7 @@ CI and merge state were not checked here; verify them before building on them.
 - **Status / severity / effort / platform:** partial; medium (TMP); M; both platforms, estimator and Linux JSON Linux-testable, macOS row/widget display macOS-only.
 - **Sources:** TMP R-FEAT-02 (PRODUCT-8); MAIN AM-PROD-9 ("Runway/burn-rate chip").
 - **Problem and evidence:**
-  - Done elsewhere: #109 (R-BUG-12) moved the trend warning into a QuotaCore `QuotaForecast`, still consumed only by the trend widget. #87 (MAIN-reported) adds `PaceEstimator`/`UsageMetric.paceEstimate` with a macOS dropdown burn-rate/ETA; its reset and gap correctness is unproven, and its existence is not forecast validation. The two engines overlap.
+  - Done elsewhere: #109 (R-BUG-12) moved the trend warning into a QuotaCore `QuotaForecast`, still consumed only by the trend widget. Its final head also warns on a guarded recent pace (remaining at most 25%, a span of max(2 h, 3 refresh intervals), at least 4 raw samples), and its review decided that an early large burn that projects depletion keeps warning (no idle gate). #87 (MAIN-reported) adds `PaceEstimator`/`UsageMetric.paceEstimate` with a macOS dropdown burn-rate/ETA; its reset and gap correctness is unproven, and its existence is not forecast validation. The two engines overlap.
   - Baseline: the only forecast is the trend widget's `depletionWarnings` (`WX/LLimitQuotaWidget.swift:964`, `:975` 60% gate), shown as one line from `warnings.first` (`:99`), see also `:256`. The app loads only two days of history for sparklines (`APP/AppModel.swift:1759-1761`) and shows no forecast. Linux `metricObject` (`LD/StatusRenderer.swift:80-102`) emits none.
   - Unverified as new: this largely duplicates BACKLOG Product #3 and the "Trend chart" bullets (reset-segmented samples; more than one warning). The new parts were the QuotaCore placement (now #109) and the Linux JSON.
 - **Proposal:**
@@ -5068,7 +5161,7 @@ CI and merge state were not checked here; verify them before building on them.
 - **Status / severity / effort / platform:** partial; proposal (no severity); M (remaining S); Linux-testable for JSON and client lengths, marker default macOS-only.
 - **Sources:** TMP R-NOV-01 (PRODUCT-9; shortlist #14); MAIN AM-PROD-13 ("Pacing guide/ring").
 - **Problem and evidence:**
-  - Done in #103: optional `UsageMetric.windowSeconds`, `QuotaPace`, "N% over/under pace" text, and neutral ticks on GlossBar and the tile ring.
+  - Done in #103: optional `UsageMetric.windowSeconds`, `QuotaPace`, "N% over pace" / "on pace" / "N% under pace" text (the reset chip keeps its width), and neutral ticks on GlossBar and the tile ring.
   - Idea: "40% left" means very different things on day 2 and day 6 of a weekly window. Clients received the length but folded it into the label: OpenAI `limit_window_seconds` (`QC/Clients/OpenAIClient.swift:112`), Muse `window_duration_mins` (`QC/Clients/MetaMuseQuotaClient.swift:91`), Kimi `duration`/`timeUnit` (`QC/Clients/KimiQuotaClient.swift:163-174`), Codex `windowDurationMins` (`QC/CodexRateLimits.swift:39`). Anthropic `five_hour`/`seven_day` and Cline windows are fixed by id. Bar: `APP/LLimitApp.swift:369-401`.
   - Remaining gaps: Muse `weekly` carries only `used_percent` and `resets_at` (`MetaMuseQuotaClient.swift:98` onward); Devin `quota-daily`/`quota-weekly` (`QC/Clients/DevinQuotaClient.swift:113-114`) report only percent and reset epoch. Linux `metricObject` (`LD/StatusRenderer.swift:80-102`) has no pace key. #103 also left the GlossBar spring ignoring Reduce Motion (pre-existing).
   - Sources disagree on defaults: TMP wants the tick on every window with a known length and no setup; MAIN wants an opt-in, faint weekly/monthly comfortable-pace marker with an explicit target date (as BACKLOG Delight "Pacing rings" requires a user-chosen date). Check #103's default.
@@ -6152,9 +6245,9 @@ MAIN also rejected these review suggestions on its own PRs. Keep them rejected:
   `#!/usr/bin/env node` shim failure (exit 127, verified for Codex with `npm pack`
   of 0.160.1) does not apply to Claude. Severity is high for npm-installed Codex and
   medium for Claude.
-- **What remains real for Claude:** missing candidate directories only (nvm,
-  volta, fnm and custom npm prefixes lead to `cliMissing`) (PRV-05). #107
-  implements R-BUG-03 and deferred nvm discovery.
+- **What remains real for Claude:** missing candidate directories only. #107
+  implements R-BUG-03 and also finds nvm, fnm and Volta installs; a CLI at another
+  custom path still leads to `cliMissing` until PRV-05's Settings override lands.
 
 ### REF-21 Quitting during a Codex login strands the existing account
 - **Status / platform:** refuted / macOS.
@@ -6307,7 +6400,7 @@ A suggested sequence that combines MAIN's handoff order (AM-ORDER-1 to AM-ORDER-
 
 The shortlist's sixteen items are now this pass's PRs #89-#110: 1 #92; 2 #104 (guard, R-LNX-05, R-LNX-06) and #108 (snapshot-only status); 3 #105; 4 #93; 5 #89; 6 #104; 7 #101; 8 #107; 9 #102; 10 #90; 11 #95; 12 #109; 13 #94; 14 #103; 15 #110; 16 #108. Three next-tier items are also done: R-BUG-08 (#105), R-UX-05 with R-VIS-07 (#96) and R-NOV-04 (#106). The rest of the next tier is placed below: R-BUG-10, R-BUG-14 and R-BUG-15 (PRV-01 to PRV-03) in ORD-03; R-BUG-07, R-BUG-17, R-UX-01, R-A11Y-01 and R-SEC-05 in ORD-04; R-BLD-04 (BLD-03) in ORD-02.
 
-Every PR in both sets is open and unmerged. MAIN reached its requested review stop for its six slices (#66, #67, #69, #70, #72, #75); MAIN-reported PRs (#50-#100) were not checked by either document. Progress reported on a PR (green CI, completed review rounds, or "fixed", "landed" or "merged" in a source document) is not a merge instruction; the user decides merges. Native rendering, Instruments, VoiceOver, live authentication, installed widgets, systemd upgrades and packaged TLS were not exercised by either source, so every step that touches them keeps a manual verification item.
+Every PR in both sets is open and unmerged. MAIN reached its requested review stop for its six slices (#66, #67, #69, #70, #72, #75); this pass's 17 PRs reached the review stopping rule with CI green on their final heads (ledger table 1); MAIN-reported PRs (#50-#100) were not checked by either document. Progress reported on a PR (green CI, completed review rounds, or "fixed", "landed" or "merged" in a source document) is not a merge instruction; the user decides merges. Native rendering, Instruments, VoiceOver, live authentication, installed widgets, systemd upgrades and packaged TLS were not exercised by either source, so every step that touches them keeps a manual verification item.
 
 Order at a glance:
 
@@ -6322,7 +6415,7 @@ Order at a glance:
 
 ### ORD-01 Decide the overlapping implementations first
 - **Status / severity / effort / platform:** open. Priority: first (MAIN step 1). Effort: S per decision (compare and choose), M to rebase the survivors. Platform: both. The CLI, status and QuotaCore pairs are Linux-testable; #101/#68, #101/#85, #94/#78 and #54/#80/#72 are macOS app or widget paths.
-- **Sources:** MAIN AM-ORDER-1 and its ledger notes (#70 before #69; the overlap remarks under #50-#100); LEDGER expected-conflict list; TMP shortlist "Conflicts" bullets.
+- **Sources:** MAIN AM-ORDER-1 and its ledger notes (#70 before #69; the overlap remarks under #50-#100); LEDGER final update (measured conflicts, integration check, landing order); TMP shortlist "Conflicts" bullets.
 - **Problem and evidence:**
   - Cross-set pairs (detail in the ledger's overlap list):
     - #108 vs #66: snapshot-only `llimit status`. #104 vs #66: the Linux unreadable-settings guard. #104 also adds MAIN's open macOS C03 guard, which no MAIN PR covers.
@@ -6342,13 +6435,16 @@ Order at a glance:
     - #77 with COR-06 and PRF-05 (MAIN C01, F05): reuse `ProviderFailure.retryAt`; do not add a second retry field.
     - #87 with LED-22 (MAIN W06): correct the reset-segment semantics before converging estimators.
   - Integration order inside MAIN's set: #70 before #69 (Muse guard and parser overlap; #69 is stacked on #70).
-  - Expected textual conflicts (whichever merges second rebases): `LD/StatusRenderer.swift` (#95, #105; #93 adds a StatusRendererTests case); `CLI/main.swift` (#92, #104, #108, #110, separate regions); `APP/AppModel.swift` (#94, #101, #102, #104, #106, #107); `APP/LLimitApp.swift` (#95, #96, #102, #103, #106, and MAIN's #67); `APP/Views/SettingsView.swift` (#101, #102, #106). TMP adds `QC/CodexCLIProbe.swift` import lines (#92, #107) and asks to check any in-flight branch touching StatusRenderer (for example `feat/reset-radar`). Further contacts from the ledger: #105 and #77 both edit `mergingStaleUsage`; #94 and #52/#76 edit `QuotaHistoryStore`; #96/#109 and #53 share limit-color drawing; #91's version detection depends on #107's CLI discovery; #86's `env:` references must survive #104's in-place updates.
+  - Measured textual conflicts within this pass (pairwise `git merge-tree` of the 17 heads; replaces the expected list): only 8 pairs conflict. Code: `LD/StatusRenderer.swift` (#95 x #105) and `APP/LLimitApp.swift` (#95 x #102). Docs: `AGENTS.md` in all six pairs among #104, #105, #108 and #110, plus `Packages/LLimitd/README.md` (#108 x #110). `CLI/main.swift`, `APP/AppModel.swift` and TMP's expected `QC/CodexCLIProbe.swift` import lines (#92, #107) merge cleanly. MAIN's #67 against `APP/LLimitApp.swift` was not measured. TMP also asks to check any in-flight branch touching StatusRenderer (for example `feat/reset-radar`).
+  - Integration check: `opus/integration-check` (head `7ed4c7b`) merges all 17 heads onto origin/main with every conflict resolved keeping both sides; CI green (macOS Build & Test, Linux SwiftPM, Linux static .deb, Linux tray); locally 665 QuotaCore, 134 LLimitd and 46 tray tests pass. The resolutions (combined `AGENTS.md` and `Packages/LLimitd/README.md` layout entries, #105's StatusRenderer rewrite with #95's `relativeAge` move, and the dropdown header subtitle combining #102's reason and age cases with #95's wording and formatter) are on that branch.
+  - Integration-only fixes the second PR of each pair must carry: #95 + #108 (point #108's `StatusTemplate.swift` and `ScriptCommands.swift` from `StatusRenderer.relativeAge`, which #95 removes, to `QuotaDisplayText.relativeAge`; build break otherwise); #104 + #110 (add `try` to two `QuotaAlertsTests` calls to `QuotaDaemon.addAccount` once #104 makes it throw; test build break otherwise); #104 + #108 (drop #104's dead `makeDaemon` status warning and the README sentence about it).
+  - Further contacts from the ledger: #105 and #77 both edit `mergingStaleUsage`; #94 and #52/#76 edit `QuotaHistoryStore`; #96/#109 and #53 share limit-color drawing; #91's version detection depends on #107's CLI discovery; #86's `env:` references must survive #104's in-place updates.
 - **Proposal:**
   1. For each pair, choose one implementation, or one base plus the other's distinct parts, before writing new code in that area. Record the choice and the declined PR's reasons.
   2. Settle the external contracts first, because scripts and bars depend on them: `llimit check` flags and exit codes, the status JSON key names, and one alert threshold set.
-  3. Landing constraints from TMP's conflict notes, translated to PR numbers: #92 first (ORD-02). #104 before the other daemon and CLI PRs (#108, #110), since its guard is the data-loss fix. #108 owns `runStatus`; once it lands, #104's `makeDaemon` status warning is dead code (LNX-03). #103 after #105, #93 and #95 (TMP shortlist 14); LEDGER lists no StatusRenderer conflict for #103 because its `paceDelta` JSON key was deferred, but it still conflicts in `APP/LLimitApp.swift`. Then rebase the AppModel.swift chain one PR at a time.
+  3. Landing order for this pass's PRs (LEDGER final update, from the measured conflicts): #92 first (ORD-02); then #104, #108, #105, #110 (#104 leads because its guard is the data-loss fix); #95 after #105 and #108; #95 and #102 in either order; the other ten (#93, #89, #90, #94, #101, #96, #103, #109, #107, #106) any time. The second PR of each pair carries the integration-only fixes above. TMP's constraint that #103 land after #105, #93 and #95 no longer applies: #103 merges cleanly with every other head.
   4. Keep both sources' invariants when merging a pair: snapshot-only status with clean JSON stdout, additive keys only, no publication-time samples, safe failure text at every display boundary.
-- **Tests / acceptance:** every pair has one recorded decision. Before the first merge, a temporary integration branch of all chosen PRs passes QuotaCore and LLimitd `swift test`, the tray unit tests and the macOS build, as MAIN's coordinator did for its six heads (496 QuotaCore and 57 LLimitd tests on Linux Swift 6.3.3; that integration merge was not published).
+- **Tests / acceptance:** every pair has one recorded decision. Before the first merge, a temporary integration branch of all chosen PRs passes QuotaCore and LLimitd `swift test`, the tray unit tests and the macOS build, as MAIN's coordinator did for its six heads (496 QuotaCore and 57 LLimitd tests on Linux Swift 6.3.3; that integration merge was not published). This pass's 17 heads already pass together (`opus/integration-check`, head `7ed4c7b`); repeat the check once the cross-set choices are made.
 - **Relations:** LED-12, LED-14, LED-15, LED-21, LED-22, LED-27, LED-34, LED-36, LED-43, LED-48, LED-50, LED-54, LED-55, LED-57, LED-58, LED-60, LED-61. Downstream owners: LNX-01, LNX-03, LNX-10, PRD-01, PRD-02, PRD-04, PRD-06, COR-06, SEC-02, PRF-02, PRF-04, PRF-05, WID-03, WID-04.
 
 ### ORD-02 Release blockers before Nov 2
@@ -6357,20 +6453,20 @@ Order at a glance:
 - **Problem and evidence:**
   - At baseline the next tag breaks: `QC/CodexCLIProbe.swift:2-6`, `QC/CodexProfileStore.swift:2-6` and `QC/CodexRPCSession.swift:2-6` import `Glibc` unconditionally, and the release builds the `.deb` with `--swift-sdk x86_64-swift-linux-musl` (`.github/workflows/release.yml:124`), which has no Glibc module (`CodexCLIProbe.swift:5:8: error: no such module 'Glibc'`). The files arrived in b47497b (Sep 27), after v1.0.1 (Aug 21). The macOS job publishes first, so the tag would produce a Release without the `.deb` the README promises.
   - The shipped `.deb` echoes secrets at the `llimit accounts add` prompt (`CLI/main.swift:373-394`, guard at `:380`), and `ci.yml:20` and `release.yml:22` run on `macos-14`.
-  - #92 fixes all three: musl-safe imports, the Musl echo-off branch with a PTY secret-input test, a new "Linux (static .deb)" CI job, `macos-15` in both workflows and `ubuntu-24.04` pins. #92 is in no overlap pair; its only expected conflicts are `CLI/main.swift` regions shared with #104, #108 and #110.
+  - #92 fixes all three: musl-safe imports, the Musl echo-off branch with a PTY secret-input test, a new "Linux (static .deb)" CI job, `macos-15` in both workflows and `ubuntu-24.04` pins. #92 is in no overlap pair and, measured, conflicts with no other PR of this pass (ledger table 1).
   - Remaining before the next release:
-    - BLD-01: `scripts/test-panel-geometry.sh` runs only in the macOS job (`ci.yml:50-51`) although it passes on Linux (16 checks). TMP also asked for three geometry tests (the leading grip cannot widen at `visibleFrame.minX + screenMargin`; a frame 10 pt wider than the remembered size keeps that offset while shrinking; a 300x300 visible area returns the minimum size), an optional Xcode 16.2 and 26.x matrix, and an update to `BACKLOG.md:16-17`. The sources disagree on the tests: the build section says #92 adds them, LEDGER does not list them, and the local `opus/release-unblock` head 53350b7 leaves `scripts/tests/MenuBarPanelGeometryTests.swift` and `BACKLOG.md` identical to baseline. Verify on the PR.
+    - BLD-01: `scripts/test-panel-geometry.sh` runs only in the macOS job (`ci.yml:50-51`) although it passes on Linux (16 checks). TMP also asked for three geometry tests (the leading grip cannot widen at `visibleFrame.minX + screenMargin`; a frame 10 pt wider than the remembered size keeps that offset while shrinking; a 300x300 visible area returns the minimum size), an optional Xcode 16.2 and 26.x matrix, and an update to `BACKLOG.md:16-17`. #92 does not add the tests: LEDGER does not list them, and #92's final head is 53350b7, the `opus/release-unblock` head whose worktree check found `scripts/tests/MenuBarPanelGeometryTests.swift` and `BACKLOG.md` identical to baseline.
     - SEC-07: v1.0.1 has the same echo guard and the README quickstart prompts for the token, so typed secrets may sit in scrollback, tmux logs or screen shares. The first release that ships #92 needs a note telling v1.0.1 users to clear their scrollback. Restoring termios on SIGINT, SIGTERM and SIGHUP is hardening, not a blocker (only dash reproduced stuck echo).
     - BLD-04: `release.yml:44` stamps `CURRENT_PROJECT_VERSION` from `github.run_number`. LLimit-1.0.1.zip has CFBundleVersion 2 in the app and the extension while `project.yml` was at 20 at that tag (37 now). Installing a release over a dev build lowers the version that AGENTS.md requires to rise monotonically. The verifier notes limited practical impact while releases are ad-hoc signed without an App Group.
     - BLD-03: the macOS job creates a non-draft Latest release (`release.yml:74-89`) before `release-linux` (`:91`, `needs: release` at `:94`) builds the `.deb`. A macOS failure blocks the `.deb`; a Linux failure leaves a Latest release without it. No tests run before publishing, and `:11-12` grants `contents: write` to every job.
 - **Proposal:**
   1. Merge #92 before Nov 2, preferably before the Oct 12 brownout, without waiting for ORD-01.
-  2. A follow-up PR for the BLD-01 remainder: add the geometry script to the `linux-test` job (which already installs Swift) and keep it in the macOS job; add the three tests if #92 lacks them; reword `BACKLOG.md:16-17` from "Restore runnable CI" to "Migrate off macos-14 before Nov 2, 2026" (tracked with BKL-02).
+  2. A follow-up PR for the BLD-01 remainder: add the geometry script to the `linux-test` job (which already installs Swift) and keep it in the macOS job; add the three tests; reword `BACKLOG.md:16-17` from "Restore runnable CI" to "Migrate off macos-14 before Nov 2, 2026" (tracked with BKL-02).
   3. Put the SEC-07 scrollback note in the release notes of the first release containing #92.
   4. BLD-04: drop the override; add a release gate that fails when the tag differs from `MARKETING_VERSION` or when the app and appex CFBundleVersion differ (copy `scripts/build.sh:98-103`); set `RELEASE_POST_BUMP` in `scripts/release.sh` to bump `CURRENT_PROJECT_VERSION`.
   5. BLD-03: split into `build-macos` and `build-linux` jobs that only upload artifacts with `contents: read`, plus a `publish` job (`needs` both, `contents: write`) that creates the release, optionally as a draft published after every asset attaches. Run `swift test` and the harnesses before uploading.
 - **Tests / acceptance:** a PR run on `macos-15` where all three harness steps pass; a Linux job log showing the geometry checks; the musl build and `build-deb.sh 0.0.0~ci` run in CI; the openpty test asserts ECHO cleared during the read and restored after. A tagged build's app and appex both carry `project.yml`'s `CURRENT_PROJECT_VERSION`, and a mismatched tag fails before anything is published. In a fork test-tag run, a forced failure in either build job leaves no public release; a successful run publishes the `.dmg`, `.zip` and `.deb` at once.
-- **Relations:** LED-03; BLD-01, BLD-03, BLD-04, SEC-07. SEC-05 (#92's deferred checksum or PGP verification of the toolchain through a shared setup-swift composite action, plus CI caching) edits the same workflows, but neither source ranks it as a blocker. BLD-07 documents the new release layout after BLD-03 and BLD-04. BLD-08 (LLimitd never builds on macOS CI). In the local #92 head, `zai-code-review.yml:26` still uses `ubuntu-latest`.
+- **Relations:** LED-03; BLD-01, BLD-03, BLD-04, SEC-07. SEC-05 (#92's deferred checksum or PGP verification of the toolchain through a shared setup-swift composite action, plus CI caching, both declined in #92's review) edits the same workflows, but neither source ranks it as a blocker. BLD-07 documents the new release layout after BLD-03 and BLD-04. BLD-08 (LLimitd never builds on macOS CI). In the local #92 head, which is its final head `53350b7`, `zai-code-review.yml:26` still uses `ubuntu-latest`.
 
 ### ORD-03 Data-loss, credential and auth boundaries
 - **Status / severity / effort / platform:** open. Severity: high (MAIN rates C04 to C10 high and C11 medium; TMP rates PRV-01 to PRV-04 medium and PRV-09 low). Effort: L overall, S to M per cluster. Platform: both; QuotaCore and daemon slices are Linux-testable, AppModel wiring is macOS-only.
@@ -6406,7 +6502,7 @@ Order at a glance:
 - **Problem and evidence:**
   - WID-01 (TMP R-BUG-07): tiles and dashboard rows show the provider's fixed pair (`QC/ProviderMetricSelection.swift:29-51`: OpenCode Go rolling + monthly, Cline five_hour + weekly, Anthropic five_hour + seven_day) while sorting, "lowest X% left", the menu bar and Linux `status` use the minimum over all metrics. An OpenCode Go account whose weekly window is rate-limited sorts first and drives "lowest 0% left" but reads "55% / 70%" with no dashboard warning. #81's exhausted rendering does not change the pair.
   - WID-02 (TMP R-BUG-21, MAIN W09): after `resetAt` passes, the tile shows "now" and an orange "!" around the old ring (`WX/ProviderQuotaWidget.swift:189-195`, `:610-623`, `:778-781`) and the dashboard shows the stale percentage with no marker (`WX/LLimitQuotaWidget.swift:495-533`), for up to a full interval. A tile's last entry can precede the stale threshold, and a delayed reload freezes "Data is current" (W09; macOS delay frequency unmeasured).
-  - LNX-01 remainder (TMP R-LNX-01, MAIN L02, L03): #105 adds the failure keys, failure-only accounts, class elevation, account-named ERROR lines and tray error rows. Left: the stale threshold is a 6 h constant in #105 instead of following the configured interval (#105 deferred recording `refreshIntervalMinutes` in the snapshot; #50 reports an interval-aware threshold); the key set must be reconciled with #64 (ORD-01); MAIN L03's tray spending warnings and partial failures when cached accounts exist (`Packages/LLimitd/tray/llimit_tray.py:138-159,301-304`; unverified whether #105 covers spending warnings); cross-account severity and recency ordering and all-failed health (MAIN's #64 note).
+  - LNX-01 remainder (TMP R-LNX-01, MAIN L02, L03): #105 adds the failure keys, failure-only accounts, class elevation, account-named ERROR lines and tray error rows. Left: the stale threshold is a 6 h constant in #105 instead of following the configured interval (#105 deferred recording `refreshIntervalMinutes` in the snapshot; #50 reports an interval-aware threshold), and #108's template `{stale}` and `check`/`pick` use 2 h (integration check); the key set must be reconciled with #64 (ORD-01); MAIN L03's tray spending warnings and partial failures when cached accounts exist (`Packages/LLimitd/tray/llimit_tray.py:138-159,301-304`; unverified whether #105 covers spending warnings); cross-account severity and recency ordering and all-failed health (MAIN's #64 note).
   - WID-06 (TMP R-UX-01, MAIN W04): color identity is positional (`QC/ProviderMetricSelection.swift:168-209`, `accountColorStep` is `index % 3`). Adding a Claude account recolors later accounts' history; renaming swaps variants and automatic Tile 1 as you type (`APP/AppModel.swift:1170-1179`); a fourth account repeats the first, and per-account dash patterns do not separate them on the legend-less trend chart. TMP: rename stability is not an AGENTS.md promise, so this is a design improvement, but it conflicts with "two accounts must never share an exact color scheme" at 4+ accounts. MAIN: increasing the modulus fails because higher steps all become pale.
   - WID-07 (TMP R-A11Y-01): nothing reads `widgetRenderingMode` or uses `.widgetAccentable()` (`WX/ProviderQuotaWidget.swift:705-782`, `WX/LLimitQuotaWidget.swift:205-237`). In vibrant and Monochrome rendering, session #3ED8F0 (luminance 0.564) and weekly #FFC145 (0.598) differ by 1.06:1 and become the same gray.
   - SEC-03 (TMP R-SEC-05): "cleanup is pending" never happens. Nothing reads `RetainedProfiles/` or lists `CodexProfiles/` (`APP/Services/ClaudeProfileService.swift:139-197`, `QC/CodexAccountService.swift:110-113`), so removed accounts keep live refresh grants on disk and in Keychain.
@@ -6415,7 +6511,7 @@ Order at a glance:
 - **Proposal:**
   1. WID-01: keep the first preferred metric; substitute the most constrained other bounded metric for the second slot when its `remainingPercent` is lower; ties keep the preference; never substitute unlimited or percentage-less metrics. Update the pinned test (`ProviderMetricSelectionTests.swift:74-85`). Identity colors are unaffected because `limitSeriesSlots` runs over the full list.
   2. WID-02: `UsageMetric.isResetPending(at:)` and a `.resetPending` display state (dashed tile track and "reset" footer; neutral dashboard bar), a timeline entry at the earliest `resetAt` and explicit stale boundaries. Never assume a refill: LED-17 already turns expired carried metrics unknown. The display helper can land first; waking the app at the earliest `resetAt` plus 60 s (bounded by each provider's minimum poll interval) needs PRF-01's scheduler. Coordinate with the Reset Celebration glow (`4768e74`, probably #82).
-  3. LNX-01: carry the configured interval into the snapshot (or adopt #50's threshold) and base `stale` on 2x the interval; show remaining spending and partial failures in the tray regardless of cached accounts; additive keys only.
+  3. LNX-01: carry the configured interval into the snapshot (or adopt #50's threshold) and base `stale` on 2x the interval, in `status` and in #108's template, `check` and `pick`; show remaining spending and partial failures in the tray regardless of cached accounts; additive keys only.
   4. WID-06: persist identity (`colorVariant` on `ProviderStyleSettings`, or an append-only `stableAccountRanks`) seeded from today's order; give 4+ accounts a second channel (`markerIndex = index / 3`: circle, square, diamond, triangle) on chart endpoints and tiles, with no in-chart legend; keep the three validated variants (a fourth needs the palette validator). Update the AGENTS.md wording.
   5. WID-07: when the mode is not `.fullColor`, add a stroke style per window kind, draw the primary window accentable at full opacity and the secondary at 0.5, drop shadows and casing; hues stay unchanged.
   6. SEC-03: a sweeper at bootstrap and after each refresh that removes unreferenced Claude profiles and Codex namespaces with no session, renewal, refresh lock or `.pending` marker; list the rest under a "Leftover sign-ins" section with a warned delete. That section is a policy decision to record in AGENTS.md.
@@ -6442,7 +6538,7 @@ Order at a glance:
   6. Repair PRF-09: at bootstrap, reconcile the redacted settings and the latest local snapshot into the App Group, retry a bounded number of times, reload the affected timelines and expose the unavailable state (WID-03).
   7. Suggestion: PRF-07 (TMP R-PERF-03, a full credential scan per refresh) and PRF-08 (TMP R-PERF-04, interactive Keychain reads on the main actor) appear in neither order; they are main-actor work in the same AppModel code as PRF-02 and fit beside it.
 - **Tests / acceptance:** the same benchmarks before and after each change. Slow-storage tests show responsive typing and resize with a durable final edit; Instruments shows no main-thread encode or write. Concurrent append and purge keep unrelated data. 3,200 entries at 15 minutes plus 50 extras still give `loadRecent(days: 31)` at least 30 days with the reset jumps. An identical redacted payload writes and reloads nothing. Slow, oversized, 429 and 5xx fixtures respect the bounds. An injected transient App Group failure recovers without another credential edit.
-- **Relations:** LED-05, LED-12, LED-34, LED-48, LED-49, LED-55. LES-02 (#52/#75/#76 semantics survive any archive change). COR-02 (cross-process writers). The TMP usage ledger (ORD-07) sits outside the history cap. AppModel.swift and LLimitApp.swift conflicts as in ORD-01.
+- **Relations:** LED-05, LED-12, LED-34, LED-48, LED-49, LED-55. LES-02 (#52/#75/#76 semantics survive any archive change). COR-02 (cross-process writers). The TMP usage ledger (ORD-07) sits outside the history cap. AppModel.swift and LLimitApp.swift are edited by several of this pass's PRs; rebase onto them (merge conflicts in ORD-01).
 
 ### ORD-06 Freshness, notices, accessibility and Linux operations
 - **Status / severity / effort / platform:** open. Severity: medium to low. TMP rates R-UX-03, R-A11Y-03, R-A11Y-05, R-LNX-06, R-LNX-08, R-LNX-09 and R-SEC-04 medium, R-LNX-03 high (now mostly in #104) and the rest low; MAIN does not rate these. Effort: S to M per item. Platform: Linux account edits, packaging, docs and the notice evaluator are Linux-testable; accessibility, widget load states and deep links are macOS-only with manual VoiceOver and Accessibility Inspector checks.
@@ -6451,7 +6547,7 @@ Order at a glance:
   - Freshness, WID-05: #95 aligned the dropdown ages (R-UX-03) and deferred the optional "Updated 2 min ago · oldest 35 min ago" header (`QuotaSnapshot.oldestFetchedAt`). MAIN W14: widget rows still lack per-account source age; #80's 2x-interval badge is aggregate, and a fresh aggregate attempt can carry an old `ProviderUsage.fetchedAt`.
   - Notices, PRD-04: build on #97, #100 and #110 after ORD-01 picks one evaluator and one threshold set (WID-04). Missing: quiet hours, Focus awareness, macOS reset and reconnect notices, alerts from `llimit refresh` and timer units, the alerts path in `llimit paths`.
   - Accessibility: MAC-04 (MAIN M02, W07, TMP R-A11Y-06: countdowns spoken as "4d 6h 56m", rings that do not name the limit, raw `rateLimit`/`notConfigured`, a trend label of only "Quota trend chart"; #56 covers some Settings labels); MAC-05 (TMP R-A11Y-05: no announcements anywhere, and Codex sign-in success silently dismisses the sheet); MAC-06 (TMP R-A11Y-03, MAIN M05: tertiary text at 3.77:1, 3.61:1 on hover, section titles 4.46:1, `colorSchemeContrast` never read, `APP/LLimitApp.swift:241-253`; Crazy Banana white text about 2.03:1); MAC-07 (TMP R-A11Y-07, MAIN M06: the GlossBar spring at `APP/LLimitApp.swift:398`, which #103 also left, and the jump scroll at `:644-647` ignore Reduce Motion, and jumping does not move VoiceOver focus); MAC-08 (MAIN M11, TMP R-UX-19: color-only state dots; a disabled account shows a green "Disabled", a red "Account disabled" and a gray sidebar dot, and two rows are titled "Credentials").
-  - Linux account edits (remainders after #104): LNX-02 (TMP R-LNX-03: store a non-secret `importSource`; carry the Claude `expiresAt` into `anthropic.expires_at` and show "token expired: run llimit accounts update"; reconcile #104's `update`/`rename`/`reimport` with MAIN L09's `accounts set`). LNX-03 (TMP R-LNX-06: the local #104 head 17f970d has `settingsLoadError` but no credential-free `daemon-state.json`, so once #108 makes `status` snapshot-only, an unreadable settings file never reaches the bar; LEDGER notes #104's `makeDaemon` warning goes dead). LNX-04 (TMP R-LNX-08, MAIN L06: shell-exported `XDG_*` never reach the systemd user manager, `LD/LinuxPaths.swift:20-41`; the installer ignores custom XDG roots, emits unquoted paths and mishandles `&` in sed, `Packages/LLimitd/systemd/install.sh:44-49,59-61`). LNX-05 (TMP R-LNX-09: #104 deferred the TTY confirmation with `--yes` and the 4-character minimum prefix). SEC-06 (TMP R-SEC-04, MAIN L09: secrets only via `--set key=value` on argv, `CLI/main.swift:117-122`, `:140-146`).
+  - Linux account edits (remainders after #104): LNX-02 (TMP R-LNX-03: store a non-secret `importSource`; carry the Claude `expiresAt` into `anthropic.expires_at` and show "token expired: run llimit accounts update"; reconcile #104's `update`/`rename`/`reimport` with MAIN L09's `accounts set`). LNX-03 (TMP R-LNX-06: the local #104 head 17f970d, which is #104's final head, has `settingsLoadError` but no credential-free `daemon-state.json`, so once #108 makes `status` snapshot-only, an unreadable settings file never reaches the bar; #104's `makeDaemon` warning goes dead, and the integration check drops it). LNX-04 (TMP R-LNX-08, MAIN L06: shell-exported `XDG_*` never reach the systemd user manager, `LD/LinuxPaths.swift:20-41`; the installer ignores custom XDG roots, emits unquoted paths and mishandles `&` in sed, `Packages/LLimitd/systemd/install.sh:44-49,59-61`). LNX-05 (TMP R-LNX-09: #104 deferred the TTY confirmation with `--yes` and the 4-character minimum prefix). SEC-06 (TMP R-SEC-04, MAIN L09: secrets only via `--set key=value` on argv, `CLI/main.swift:117-122`, `:140-146`).
   - Packaging and install docs: BLD-05 (no maintainer scripts, so upgrades keep the old daemon running; `install.sh` `enable --now` does not restart active units, MAIN L05; `ca-certificates` only Recommended at `Packages/LLimitd/packaging/build-deb.sh:91`, MAIN L07; no `copyright` or changelog; amd64 only; no smoke test of the packaged binary, MAIN L10). BLD-06 (README builds debug at `README.md:214-215` while `install.sh:36` expects release; `install.sh -- --timer` at `Packages/LLimitd/README.md:89` exits 2, reproduced, MAIN L08; the contract table omits keys).
   - Widget load states, WID-03 (MAIN W03, TMP R-UX-22): tile and trend store failures collapse into no-account or empty states; #109 added the trend reasons but deferred "Store unavailable" in `WX/QuotaTimelineProvider.swift`; #79 only makes one initializer failable.
   - Deep links, WID-20 (MAIN W13): no `.widgetURL` anywhere, so tiles cannot open their account and dashboards cannot open a failing one.
@@ -6498,7 +6594,7 @@ Order at a glance:
 - **Problem and evidence:**
   - BACKLOG.md is historical input. BKL-01 to BKL-11 list entries that are done, outdated or only partly open (CI outage, global Claude-token replacement, automatic Settings scan, provider-unaware dashboard pairing, cloned dashboard timelines must not be resurrected). Merging this pass's PRs retires more entries, for example `BACKLOG.md:16-17` ("Restore runnable CI").
   - Contract and install docs: BLD-06 (README build command, `install.sh --timer`, the contract table that #105, #64, #50 and #108 extend); BLD-07 (CICD.md describes a different CI; RELEASING.md and `README.md:226` misstate `scripts/release.sh`, which pushes only with `--push`); BLD-10 (Settings names 4 import tools at `APP/Views/SettingsView.swift:281`, the README 7, the `.deb` description 7 of 12 providers, while `QC/CredentialDiscovery.swift:75-89` runs 10 scanners).
-  - AGENTS.md provider notes, checked against the local branch heads (verify on the PRs): #89 (`opus/devin-exhausted-windows` at 30e0299) adds the proto3 omitted-zero rule, the credits rule, `hideDailyQuota`/`hideWeeklyQuota` and `overageBalanceMicros` to the Devin note. #93 (`opus/anthropic-windows` at 4f1aede) adds `seven_day_sonnet`, the generic `five_hour_*`/`seven_day_*` windows, skipped null windows, `extra_usage` amounts as minor units of `currency` (cents for USD), and the amount-only `extra_usage` metric. #90 (`opus/zai-weekly-tokens` at 4cdbdab) does not touch AGENTS.md, and AGENTS.md has no Zhipu or Z.ai API note at all, so the (`unit`, `number`) mapping ((3, 5) 5-hour tokens, (6, 1) weekly tokens) is undocumented.
+  - AGENTS.md provider notes, checked against the local branch heads, which are the final PR heads: #89 (`opus/devin-exhausted-windows` at 30e0299) adds the proto3 omitted-zero rule, the credits rule, `hideDailyQuota`/`hideWeeklyQuota` and `overageBalanceMicros` to the Devin note. #93 (`opus/anthropic-windows` at 4f1aede) adds `seven_day_sonnet`, the generic `five_hour_*`/`seven_day_*` windows, skipped null windows, `extra_usage` amounts as minor units of `currency` (cents for USD), and the amount-only `extra_usage` metric. #90 (`opus/zai-weekly-tokens` at 4cdbdab) does not touch AGENTS.md, and AGENTS.md has no Zhipu or Z.ai API note at all, so the (`unit`, `number`) mapping ((3, 5) 5-hour tokens, (6, 1) weekly tokens) is undocumented.
   - Other AGENTS.md edits the sources call for: the color-identity wording (WID-06), the sweeper and "Leftover sign-ins" policy (SEC-03), the menu-bar description (IDEA-18), the provider lists in the adding-a-provider checklist (BLD-10), and the claim that LLimitd tests run in macOS CI (BLD-08).
 - **Proposal:**
   1. After the ledger PRs merge, update BACKLOG.md per BKL-01 to BKL-11, retiring resolved entries without deleting remaining evidence.
@@ -6516,10 +6612,11 @@ the source ID index.
 
 ### Open disagreements between sections
 
-1. **#92 and the three panel-geometry tests.** BLD-01 says #92 adds them. LEDGER
-   does not list them, and the local `opus/release-unblock` head `53350b7` leaves
+1. **#92 and the three panel-geometry tests (resolved).** BLD-01 said #92 adds
+   them. LEDGER does not list them, and the local `opus/release-unblock` head
+   `53350b7`, which LEDGER's final update gives as #92's final head, leaves
    `scripts/tests/MenuBarPanelGeometryTests.swift` and `BACKLOG.md` identical to
-   baseline (ORD-02). Check the PR before closing BLD-01.
+   baseline (ORD-02). BLD-01 now lists the tests as remaining.
 2. **#105's age key.** Ledger overlap 3 and LED-15 say #105 adds per-account
    `fetchedAt` and `ageSeconds`. The worktree check in LNX-01 found `fetchedAt` but
    no `ageSeconds`. Check the PR before reconciling key names with #50.
