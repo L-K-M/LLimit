@@ -141,9 +141,9 @@ unset when they do not apply:
 | `LLIMIT_SEVERITY` | `normal` or `critical` |
 | `LLIMIT_ACCOUNT_ID`, `LLIMIT_ACCOUNT_NAME`, `LLIMIT_PROVIDER` | the account |
 | `LLIMIT_METRIC`, `LLIMIT_METRIC_LABEL` | the limit's id and display label |
-| `LLIMIT_REMAINING` | remaining percent |
+| `LLIMIT_REMAINING` | remaining percent, a whole number (`4`) |
 | `LLIMIT_ESTIMATED` | `1` when that percentage is an estimate |
-| `LLIMIT_THRESHOLD` | the threshold crossed |
+| `LLIMIT_THRESHOLD` | the threshold crossed, a whole number (`5`) |
 | `LLIMIT_RESETS_AT` | when the current window resets, ISO 8601 |
 | `LLIMIT_FAILURE_KIND` | `auth` or `decoding` |
 | `LLIMIT_SUMMARY`, `LLIMIT_BODY` | a ready-made notification title and text |

@@ -237,9 +237,10 @@ struct QuotaEventStateStore {
     var errorDescription: String? { "\(operation) failed: \(String(cString: strerror(code)))" }
   }
 
-  /// Writes a temporary file that is mode 0600 from the moment it exists, then
-  /// renames it over the old one, so the state is never readable by others nor
-  /// half-written. A mode that cannot be set fails the save.
+  /// Writes a temporary file that is mode 0600 from the moment it exists,
+  /// syncs it, then renames it over the old one, so the state is never
+  /// readable by others nor half-written. A mode that cannot be set or data
+  /// that cannot be synced fails the save.
   func save(_ state: QuotaEventState) throws {
     let directory = fileURL.deletingLastPathComponent()
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -268,6 +269,11 @@ struct QuotaEventStateStore {
         throw WriteError(operation: "Setting mode 0600 on \(temporaryPath)", code: errno)
       }
       try FileHandle(fileDescriptor: descriptor, closeOnDealloc: false).write(contentsOf: data)
+      // On disk before the rename, so a crash cannot leave an empty state
+      // file that would repeat every alert on the next start.
+      guard fsync(descriptor) == 0 else {
+        throw WriteError(operation: "Syncing \(temporaryPath)", code: errno)
+      }
     }
 
     guard rename(temporaryPath, fileURL.path) == 0 else {

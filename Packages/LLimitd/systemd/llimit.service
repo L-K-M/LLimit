@@ -10,7 +10,7 @@ ExecStart=%h/.local/bin/llimit daemon
 # `systemctl --user edit llimit.service` and add:
 #   [Service]
 #   Environment=LLIMIT_NOTIFY=1
-# A hook (--on-event) goes in the same drop-in; see the README, "Alerts".
+# A hook (--on-event) needs an ExecStart= override there; see the README, "Alerts".
 Restart=on-failure
 RestartSec=30s
 

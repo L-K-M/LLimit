@@ -93,8 +93,10 @@ final class QuotaEventsTests: XCTestCase {
     XCTAssertEqual(events.map(\.kind), [.threshold])
     XCTAssertEqual(events.first?.threshold, 5)
     XCTAssertEqual(events.first?.severity, .critical)
-    // Both thresholds latched: recovering to 18 then dipping again stays quiet.
+    // 18 is within the 20% threshold's hysteresis, so that latch holds; it
+    // is past 5% + 5, so a second dip to the critical level alerts again.
     XCTAssertTrue(run.step(reading(18, at: t0 + 1_800), now: t0 + 1_800).isEmpty)
+    XCTAssertEqual(run.step(reading(3, at: t0 + 2_700), now: t0 + 2_700).map(\.threshold), [5])
   }
 
   func testRemainingExactlyAtThresholdCounts() {
@@ -147,11 +149,15 @@ final class QuotaEventsTests: XCTestCase {
   func testUnlimitedAndAmountOnlyMetricsNeverAlert() {
     var run = Run()
     let current = snapshot([usage([
-      metric("plan", label: "Plan", remaining: 0, unlimited: true),
-      metric("usd", label: "USD balance", remaining: nil, resetAt: t0 + hour)
+      // Would be a threshold and an expiringUnused alert if it were a quota.
+      metric("plan", label: "Weekly plan", remaining: 0, resetAt: t0 + 2 * hour, unlimited: true),
+      metric("plan-left", label: "Weekly plan", remaining: 90, resetAt: t0 + 2 * hour, unlimited: true),
+      metric("usd", label: "Monthly USD balance", remaining: nil, resetAt: t0 + hour),
+      // A live control, so the silence above is meaningful.
+      metric("control", label: "5-hour limit", remaining: 10, resetAt: t0 + hour)
     ], at: t0)], at: t0)
 
-    XCTAssertTrue(run.step(current, now: t0).isEmpty)
+    XCTAssertEqual(run.step(current, now: t0).map(\.metricID), ["control"])
   }
 
   func testEstimatedPercentagesAreMarked() {
@@ -223,6 +229,20 @@ final class QuotaEventsTests: XCTestCase {
     )
     XCTAssertTrue(run.step(failing, now: t0 + 2 * hour).isEmpty)
     XCTAssertEqual(run.state.thresholdLatches.count, 1)
+  }
+
+  func testCarriedUsageInAnOpenWindowIsNotANewCrossing() {
+    var run = Run()
+    let reset = t0 + 3 * hour
+    XCTAssertEqual(run.step(reading(18, resetAt: reset, at: t0), now: t0).count, 1)
+
+    // The window is still open, so only the failure keeps this quiet.
+    let failing = snapshot(
+      [usage([metric(remaining: 3, resetAt: reset)], at: t0)],
+      failures: [ProviderFailure(accountID: "acct-1", provider: .anthropic, kind: .network, message: "offline")],
+      at: t0 + hour
+    )
+    XCTAssertTrue(run.step(failing, now: t0 + hour).isEmpty)
   }
 
   func testMetricMissingForOneRefreshKeepsItsLatch() {
@@ -403,17 +423,43 @@ final class QuotaEventsTests: XCTestCase {
     XCTAssertEqual(run.step(reading(90, at: t0 + 2_700), now: t0 + 2_700).map(\.kind), [.recovered])
   }
 
-  func testRemovedAccountIsForgottenWithoutARecovery() {
+  func testAccountMissingForOneRefreshKeepsItsAlerts() {
     var run = Run()
     let failing = snapshot([], failures: [ProviderFailure(accountID: "acct-1", provider: .openAI, kind: .auth, message: "x")], at: t0)
     XCTAssertEqual(run.step(failing, now: t0).count, 1)
 
     let other = snapshot([usage(account: "acct-2", [metric(remaining: 90)], at: t0 + 900)], at: t0 + 900)
     XCTAssertTrue(run.step(other, now: t0 + 900).isEmpty)
+    XCTAssertTrue(run.step(failing, now: t0 + 1_800).isEmpty)
+  }
+
+  func testRemovedAccountIsForgottenWithoutARecovery() {
+    var run = Run()
+    let failing = snapshot([], failures: [ProviderFailure(accountID: "acct-1", provider: .openAI, kind: .auth, message: "x")], at: t0)
+    XCTAssertEqual(run.step(failing, now: t0).count, 1)
+
+    // Absent from two snapshots in a row (the daemon also drops disabled and
+    // removed accounts from the saved snapshot): forgotten, silently.
+    let other = snapshot([usage(account: "acct-2", [metric(remaining: 90)], at: t0 + 900)], at: t0 + 900)
+    XCTAssertTrue(run.step(other, now: t0 + 900).isEmpty)
+    XCTAssertTrue(run.step(other, now: t0 + 1_800).isEmpty)
     XCTAssertEqual(run.state, QuotaEventState())
 
     // Re-enabled while still broken: it alerts again.
-    XCTAssertEqual(run.step(failing, now: t0 + 1_800).map(\.kind), [.failure])
+    XCTAssertEqual(run.step(failing, now: t0 + 2_700).map(\.kind), [.failure])
+  }
+
+  func testFailureLatchFollowsTheLatestKind() {
+    var run = Run()
+    let auth = snapshot([], failures: [ProviderFailure(accountID: "acct-1", provider: .kimi, kind: .auth, message: "x")], at: t0)
+    let decoding = snapshot([], failures: [ProviderFailure(accountID: "acct-1", provider: .kimi, kind: .decoding, message: "x")], at: t0 + 900)
+
+    XCTAssertEqual(run.step(auth, now: t0).map(\.failureKind), [.auth])
+    XCTAssertTrue(run.step(decoding, now: t0 + 900).isEmpty)
+
+    let recovered = run.step(reading(90, at: t0 + 1_800), now: t0 + 1_800)
+    XCTAssertEqual(recovered.map(\.kind), [.recovered])
+    XCTAssertEqual(recovered.first?.failureKind, .decoding)
   }
 
   // MARK: - Use it or lose it
