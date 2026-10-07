@@ -408,7 +408,7 @@ public struct ProviderFailure: Codable, Hashable, Identifiable, Sendable {
   public var retryAt: Date?
 
   public init(accountID: String? = nil, provider: QuotaProvider, kind: QuotaErrorKind, message: String,
-              title: String? = nil, retryAt: Date? = nil) {
+              retryAt: Date? = nil, title: String? = nil) {
     self.accountID = accountID ?? provider.rawValue
     self.provider = provider
     self.kind = kind
