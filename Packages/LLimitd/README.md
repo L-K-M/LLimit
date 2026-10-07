@@ -154,9 +154,10 @@ unset when they do not apply:
 Provider error messages and credentials are never passed. Hooks run one at a
 time with stdin on `/dev/null`. One still running after 10 seconds is stopped
 (SIGTERM, then SIGKILL, along with anything it started), so a slow hook never
-delays a refresh. [`examples/hooks/notify-send.sh`](examples/hooks/notify-send.sh)
-customizes local desktop notifications. The event contract and hook originate
-in [#110](https://github.com/L-K-M/LLimit/pull/110).
+delays a refresh. Examples: [`examples/hooks/notify-send.sh`](examples/hooks/notify-send.sh)
+for custom desktop notifications and [`examples/hooks/ntfy.sh`](examples/hooks/ntfy.sh)
+to push alerts to a phone through [ntfy](https://ntfy.sh). The event contract and
+hooks originate in [#110](https://github.com/L-K-M/LLimit/pull/110).
 
 ### With systemd
 
@@ -178,7 +179,8 @@ for the .deb):
 ```ini
 [Service]
 ExecStart=
-ExecStart=%h/.local/bin/llimit daemon --on-event %h/.config/LLimit/hooks/notify-send.sh
+ExecStart=%h/.local/bin/llimit daemon --on-event %h/.config/LLimit/hooks/ntfy.sh
+Environment=NTFY_TOPIC=your-unguessable-topic
 ```
 
 Then run `systemctl --user restart llimit.service`. Desktop notifications use

@@ -46,7 +46,7 @@ Backward compatibility: keys are only ever **added**, never renamed or removed.
 - [`eww/`](eww/) — `defpoll` widget; eww parses the JSON output natively, including the
   `accounts` array.
 - [`hooks/`](hooks/): not bar modules but `llimit daemon --on-event` hooks for alerts
-  (notify-send). See the "Alerts" section of the package README.
+  (notify-send, ntfy). See the "Alerts" section of the package README.
 
 Each bar-module directory has a `screenshot.png` captured from the module actually running
 (headless sway for waybar, Xvfb for polybar/eww) against a snapshot whose lowest
