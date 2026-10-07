@@ -66,7 +66,8 @@ public struct QuotaCoordinator: Sendable {
                 accountID: configuration.accountID,
                 provider: configuration.provider,
                 kind: error.kind,
-                message: failureMessages.redacted(error.message)
+                message: failureMessages.redacted(error.message),
+                title: configuration.displayName
               )
             )
           } catch {
@@ -78,7 +79,8 @@ public struct QuotaCoordinator: Sendable {
                 accountID: configuration.accountID,
                 provider: configuration.provider,
                 kind: .unknown,
-                message: "Could not read usage. Try again later."
+                message: "Could not read usage. Try again later.",
+                title: configuration.displayName
               )
             )
           }

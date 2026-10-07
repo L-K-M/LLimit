@@ -388,12 +388,15 @@ public struct ProviderFailure: Codable, Hashable, Identifiable, Sendable {
   public var provider: QuotaProvider
   public var kind: QuotaErrorKind
   public var message: String
+  /// Names failed-only accounts without reading settings. Older snapshots omit it.
+  public var title: String?
 
-  public init(accountID: String? = nil, provider: QuotaProvider, kind: QuotaErrorKind, message: String) {
+  public init(accountID: String? = nil, provider: QuotaProvider, kind: QuotaErrorKind, message: String, title: String? = nil) {
     self.accountID = accountID ?? provider.rawValue
     self.provider = provider
     self.kind = kind
     self.message = message
+    self.title = title
   }
 
   private enum CodingKeys: String, CodingKey {
@@ -401,6 +404,7 @@ public struct ProviderFailure: Codable, Hashable, Identifiable, Sendable {
     case provider
     case kind
     case message
+    case title
   }
 
   public init(from decoder: Decoder) throws {
@@ -409,6 +413,7 @@ public struct ProviderFailure: Codable, Hashable, Identifiable, Sendable {
     accountID = (try? container.decodeIfPresent(String.self, forKey: .accountID)) ?? provider.rawValue
     kind = try container.decode(QuotaErrorKind.self, forKey: .kind)
     message = try container.decode(String.self, forKey: .message)
+    title = try container.decodeIfPresent(String.self, forKey: .title)
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -417,6 +422,7 @@ public struct ProviderFailure: Codable, Hashable, Identifiable, Sendable {
     try container.encode(provider, forKey: .provider)
     try container.encode(kind, forKey: .kind)
     try container.encode(message, forKey: .message)
+    try container.encodeIfPresent(title, forKey: .title)
   }
 }
 
@@ -425,17 +431,21 @@ public struct QuotaSnapshot: Codable, Hashable, Sendable {
   public var generatedAt: Date
   public var providers: [ProviderUsage]
   public var failures: [ProviderFailure]
+  /// Credential-free polling cadence for display consumers; nil in legacy snapshots.
+  public var refreshIntervalMinutes: Int?
 
   public init(
     version: Int = 1,
     generatedAt: Date,
     providers: [ProviderUsage],
-    failures: [ProviderFailure]
+    failures: [ProviderFailure],
+    refreshIntervalMinutes: Int? = nil
   ) {
     self.version = version
     self.generatedAt = generatedAt
     self.providers = providers
     self.failures = failures
+    self.refreshIntervalMinutes = refreshIntervalMinutes
   }
 
   public var isPartial: Bool { !failures.isEmpty }

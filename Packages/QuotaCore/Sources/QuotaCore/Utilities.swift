@@ -9,7 +9,7 @@ func percentRemaining(fromUsedPercent usedPercent: Double) -> Int? {
   roundedPercent(100.0 - usedPercent)
 }
 
-func formatShortDuration(seconds: Int) -> String {
+public func formatShortDuration(seconds: Int) -> String {
   let safeSeconds = max(0, seconds)
   let days = safeSeconds / 86_400
   let hours = (safeSeconds % 86_400) / 3_600
@@ -22,7 +22,7 @@ func formatShortDuration(seconds: Int) -> String {
   return parts.joined(separator: " ")
 }
 
-func formatResetCountdown(to date: Date, now: Date) -> String {
+public func formatResetCountdown(to date: Date, now: Date) -> String {
   let interval = date.timeIntervalSince(now)
   guard interval.isFinite, interval > 0 else { return "reset" }
 
