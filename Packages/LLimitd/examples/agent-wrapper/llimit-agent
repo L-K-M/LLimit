@@ -1,0 +1,27 @@
+#!/bin/sh
+# Starts the coding agent whose subscription has the most quota left: Claude
+# Code for an Anthropic account, Codex for an OpenAI one. Arguments pass
+# through to the agent:
+#
+#   llimit-agent "fix the failing test"
+#
+# `llimit pick` skips accounts whose refresh failed or whose data is older than
+# two hours, and exits non-zero when nothing qualifies (see `llimit help`), so
+# keep the daemon or the refresh timer running.
+#
+# With several accounts per tool, add {id} to the format and map each id to
+# the environment its login needs, for example CLAUDE_CONFIG_DIR or CODEX_HOME.
+set -eu
+
+# --min 5: never choose a subscription that is all but exhausted.
+choice=$(llimit pick --provider anthropic,openai --min 5 --format '{provider} {name} ({remaining} left)') || exit $?
+provider=${choice%% *}
+echo "llimit-agent: using ${choice#* }" >&2
+
+case "$provider" in
+  anthropic) exec claude "$@" ;;
+  openai)    exec codex "$@" ;;
+esac
+
+echo "llimit-agent: no agent configured for provider $provider" >&2
+exit 1

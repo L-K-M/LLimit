@@ -1,0 +1,13 @@
+# LLimit in the starship prompt: the account with the least quota left.
+# Copy the block into ~/.config/starship.toml. `llimit status` reads only the
+# snapshot, so it stays well inside starship's command_timeout.
+[custom.llimit]
+command = "llimit status --worst --format '{name} {remaining}'"
+when = true
+shell = ["sh"]
+format = "[$output]($style) "
+style = "bold yellow"
+
+# Show the module only while Claude has less than 25% left (or its data is
+# stale, failing, or missing, which `llimit check` also reports as non-zero):
+# when = "! llimit check anthropic --min 25 >/dev/null"

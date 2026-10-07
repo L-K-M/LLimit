@@ -32,9 +32,18 @@ func printUsage() {
       llimit accounts disable <account-id>
       llimit accounts remove <account-id>
       llimit refresh
-      llimit status [--json]
+      llimit status [--json | --format <template> [--separator <text>]] [--account <id|provider>]…
+                    [--worst] [--kind <kind>] [--watch [seconds]]
       llimit daemon
       llimit paths
+      llimit check <account-id|provider> [--min <pct>] [--max-age <duration>] [--kind <kind>]
+      llimit pick [--provider <id>[,<id>…]] [--kind <kind>] [--min <pct>] [--max-age <duration>]
+                  [--format <template>]
+
+    check and pick exit 0 ok, 1 below --min (default 1), 2 stale (older than --max-age,
+    default 2h) or failing, 3 no data, 64 usage error. Window kinds: session, daily,
+    weekly, monthly, other. Template placeholders: {id} {name} {provider} {remaining}
+    {metric} {kind} {reset} {class} {age} {stale}.
 
     Providers: \(QuotaProvider.allCases.map(\.rawValue).joined(separator: ", "))
     Account IDs may be shortened to any unique prefix.
@@ -329,12 +338,20 @@ func runRefresh() async {
   print(StatusRenderer.humanReadable(snapshot: daemon.snapshot))
 }
 
+/// Renders the snapshot only (see SnapshotCommands.swift); `--watch` repeats the
+/// render until interrupted.
 func runStatus(_ args: [String]) {
-  let daemon = makeDaemon()
-  if args.contains("--json") {
-    print(StatusRenderer.waybarJSON(snapshot: daemon.snapshot))
-  } else {
-    print(StatusRenderer.humanReadable(snapshot: daemon.snapshot))
+  let options: StatusOptions
+  do {
+    options = try StatusOptions.parse(args)
+  } catch {
+    fail(error.localizedDescription)
+  }
+
+  while true {
+    printStatus(options)
+    guard let interval = options.watchInterval else { return }
+    Thread.sleep(forTimeInterval: interval)
   }
 }
 
@@ -413,6 +430,10 @@ case "paths":
   print("settings: \(paths.settingsFileURL.path)")
   print("snapshot: \(paths.snapshotFileURL.path)")
   print("history:  \(paths.historyFileURL.path)")
+case "check":
+  runCheck(Array(arguments.dropFirst()))
+case "pick":
+  runPick(Array(arguments.dropFirst()))
 case "help", "--help", "-h":
   printUsage()
 default:

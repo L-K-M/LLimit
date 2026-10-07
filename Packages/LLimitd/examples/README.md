@@ -52,3 +52,16 @@ remaining quota is 5% — hence the `critical` color.
 
 All three assume the `llimit` binary is on `PATH` and the daemon
 (`systemctl --user enable --now llimit.service`) or the refresh timer is running.
+
+## Status lines and scripts
+
+These use `llimit status --format`, `llimit check` and `llimit pick` (see
+[`../README.md`](../README.md#status-lines-and-scripts) for placeholders and exit
+statuses). Like `--json`, they read only the snapshot and need no `jq`.
+
+- [`tmux/`](tmux/) — `status-right` showing the account with the least quota
+  left, colored by `{class}` with the bar palette.
+- [`starship/`](starship/) — a `custom` prompt module, optionally shown only
+  while a provider runs low.
+- [`agent-wrapper/`](agent-wrapper/) — `llimit-agent` starts Claude Code or
+  Codex, whichever account has the most quota left.

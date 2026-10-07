@@ -64,9 +64,13 @@ Google Antigravity, Devin, Meta Muse, OpenCode Go, Venice, Cline.
   - `Sources/LLimitdCore/StatusRenderer.swift` — `llimit status` output and the
     `status --json` bar contract (`text`/`tooltip`/`class`/`percentage` +
     `accounts`), built only from the snapshot.
+  - `Sources/LLimitdCore/StatusTemplate.swift`, `ScriptCommands.swift` —
+    `status --format` templates and the snapshot-only `status`/`check`/`pick`
+    options and exit statuses, ranked by QuotaCore's `HeadroomRanking`.
   - `Sources/llimit/main.swift` — the CLI (accounts add/list/import/enable/
-    disable/remove, refresh, status, daemon, paths).
-  - `examples/` — waybar/polybar/eww modules consuming the JSON contract.
+    disable/remove, refresh, status, check, pick, daemon, paths).
+  - `examples/` — waybar/polybar/eww modules consuming the JSON contract, plus
+    tmux/starship templates and a `pick`-based agent wrapper.
   - `systemd/` — user units (daemon service, or one-shot + timer).
   - `packaging/build-deb.sh` — assembles the `.deb` from a static musl build.
 
