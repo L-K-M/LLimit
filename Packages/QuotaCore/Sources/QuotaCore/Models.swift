@@ -274,6 +274,8 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
   public var windowSeconds: Int?
   public var isUnlimited: Bool
   public var detail: String?
+  /// Guarded history measurement, omitted when evidence is insufficient.
+  public var paceEstimate: PaceEstimate?
 
   public init(
     id: String,
@@ -288,7 +290,8 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
     resetIn: String? = nil,
     windowSeconds: Int? = nil,
     isUnlimited: Bool = false,
-    detail: String? = nil
+    detail: String? = nil,
+    paceEstimate: PaceEstimate? = nil
   ) {
     self.id = id
     self.label = label
@@ -303,6 +306,7 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
     self.windowSeconds = windowSeconds
     self.isUnlimited = isUnlimited
     self.detail = detail
+    self.paceEstimate = paceEstimate
   }
 
   public var usageLine: String? {

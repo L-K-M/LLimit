@@ -41,9 +41,9 @@ final class AppModel: ObservableObject {
   @Published var accountStatuses: [ProviderAccountStatus] = []
   @Published var snapshot: QuotaSnapshot?
   /// Recent slice of the local refresh history backing the dashboard sparklines.
-  /// Two days is enough for the 24h spark window while keeping the read cheap
-  /// against the 45-day history file.
+  /// Publish derives this from append's archive; only bootstrap and purges reload.
   @Published private(set) var recentHistory: [QuotaSnapshot] = []
+  private static let recentHistoryDays = 2
   @Published var statusMessage: String = ""
   @Published var isRefreshing = false
   @Published var launchAtLogin = false
@@ -349,16 +349,27 @@ final class AppModel: ObservableObject {
   }
 
   private func publishSnapshot(_ refreshed: QuotaSnapshot) {
+    let now = Date()
+    let archive: QuotaHistoryStore.Archive?
     let previous = snapshot
     do {
-      try historyStore.append(refreshed)
+      archive = try historyStore.append(refreshed)
     } catch {
       print("[LLimit] Local history append failed: \(error.localizedDescription)")
+      archive = nil
     }
-    reloadRecentHistory()
+    if let archive {
+      recentHistory = QuotaHistoryStore.recent(archive.snapshots, days: Self.recentHistoryDays, now: now)
+    }
+
+    // Reuse append's decoded evidence; derived pace never becomes an observation.
+    let refreshed = refreshed.applyingPaceEstimates(from: archive?.snapshots ?? [],
+      accounts: providerAccounts, now: now, refreshInterval: TimeInterval(refreshIntervalMinutes * 60))
+    do { try refreshService.save(refreshed) }
+    catch { print("[LLimit] Paced snapshot save failed: \(error.localizedDescription)") }
 
     let widgetSyncReady = syncSnapshotToWidgetStore(refreshed)
-    let historySyncReady = syncHistoryToWidgetStore(refreshed)
+    let historySyncReady = syncHistoryToWidgetStore(refreshed, archive: archive)
 
     if widgetSyncReady || historySyncReady {
       reloadWidgetTimelines()
@@ -1990,7 +2001,7 @@ final class AppModel: ObservableObject {
   }
 
   private func reloadRecentHistory(now: Date = Date()) {
-    recentHistory = (try? historyStore.loadRecent(days: 2, now: now)) ?? []
+    recentHistory = (try? historyStore.loadRecent(days: Self.recentHistoryDays, now: now)) ?? []
   }
 
   private func restartAutoRefreshLoop() {
@@ -2230,7 +2241,7 @@ final class AppModel: ObservableObject {
   }
 
   @discardableResult
-  private func syncHistoryToWidgetStore(_ snapshot: QuotaSnapshot) -> Bool {
+  private func syncHistoryToWidgetStore(_ snapshot: QuotaSnapshot, archive: QuotaHistoryStore.Archive?) -> Bool {
     for attempt in 1...2 {
       guard let appGroupStore = appGroupHistoryStore() else {
         print("[LLimit] History sync failed: no App Group history store available")
@@ -2239,7 +2250,11 @@ final class AppModel: ObservableObject {
       }
 
       do {
-        try appGroupStore.append(snapshot)
+        if let archive {
+          try appGroupStore.save(archive)
+        } else {
+          try appGroupStore.append(snapshot)
+        }
         return true
       } catch {
         print("[LLimit] History sync attempt \(attempt) failed: \(error.localizedDescription)")

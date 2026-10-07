@@ -189,6 +189,51 @@ final class SettingsConcurrencyTests: XCTestCase {
     XCTAssertEqual(try QuotaHistoryStore(fileURL: paths.historyFileURL).load(policy: .preserve).last?.failures, snapshot.failures)
   }
 
+  func testCredentialEditDuringAuthRecoveryCannotReviveHistory() async throws {
+    let replaced = ProviderAccount(id: "replaced", provider: .kimi,
+      credentials: [CredentialField.kimiAPIKey: "old-test-key"])
+    let failing = ProviderAccount(id: "failing", provider: .openAI, credentials: [
+      CredentialField.openAIAccessToken: try openAIToken(expiresAt: 4_070_908_800),
+      CredentialField.openAIAccountID: "account-under-test"
+    ])
+    try SettingsStore(fileURL: paths.settingsFileURL).save(AppSettings(accounts: [replaced, failing]))
+
+    let gate = FetchGate()
+    gate.release()
+    var discoveries = 0
+    let daemon = QuotaDaemon(paths: paths, coordinator: QuotaCoordinator(clients: [
+      CurrentKimiClient(), GatedClient(provider: .openAI, gate: gate, outcome: .failure)
+    ]), makeDiscovery: {
+      discoveries += 1
+      if discoveries == 2 {
+        // The first discovery is pre-fetch adoption. This edit lands during
+        // auth recovery, after the initial result validation has already run.
+        let cli = self.makeDaemon(coordinator: QuotaCoordinator(clients: []))
+        do {
+          _ = try cli.editingSettings { transaction in
+            try transaction.updateAccount(replaced.id,
+              credentials: .merging([CredentialField.kimiAPIKey: "replacement-test-key"]))
+          }
+        } catch {
+          XCTFail("Concurrent credential edit failed: \(error)")
+        }
+      }
+      return CredentialDiscovery(homeDirectories: [self.tempDirectory], environment: [:])
+    }, log: { _ in })
+    daemon.loadConfiguration()
+    await daemon.refreshNow()
+
+    XCTAssertEqual(discoveries, 2)
+    XCTAssertEqual(try onDiskSettings().accounts.first { $0.id == replaced.id }?
+      .credentials[CredentialField.kimiAPIKey], "replacement-test-key")
+    let snapshot = try XCTUnwrap(SnapshotStore(fileURL: paths.snapshotFileURL).load())
+    XCTAssertFalse(snapshot.providers.contains { $0.accountID == replaced.id })
+    XCTAssertEqual(snapshot.failures.map(\.accountID), [failing.id])
+    let history = try QuotaHistoryStore(fileURL: paths.historyFileURL).load()
+    XCTAssertFalse(history.contains { $0.providers.contains { $0.accountID == replaced.id } },
+      "History publication must use the same final credential validation as the snapshot")
+  }
+
   private enum ConcurrentEdit {
     case replaceCredentials
     case remove

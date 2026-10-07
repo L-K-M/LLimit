@@ -246,10 +246,106 @@ final class QuotaAlertsTests: XCTestCase {
     runner.waitUntilIdle()
 
     // The runner is serial: one child at a time, completions in queue order.
-    XCTAssertEqual(outcomes, [.exited(0), .exited(3), .failedToLaunch])
+    XCTAssertEqual(outcomes, [.exited(0), .exited(3), .failedToLaunch], loggedText)
     XCTAssertTrue(loggedText.contains("fails exited with status 3"))
     XCTAssertTrue(loggedText.contains("Could not start missing"))
   }
+
+  func testPreparedLaunchReportsSpawnReturnCode() throws {
+    let launch = try AlertProcessLaunch()
+    let missing = tempDirectory.appendingPathComponent("missing")
+    errno = EIO
+
+    XCTAssertThrowsError(try launch.spawn(executable: missing, arguments: [], environment: [:])) { error in
+      guard let failure = error as? ChildProcessRunner.SpawnError else {
+        return XCTFail("Expected a typed spawn failure")
+      }
+      XCTAssertEqual(failure.operation, .spawn)
+      XCTAssertEqual(failure.code, ENOENT)
+      XCTAssertEqual(failure.errorDescription, "posix_spawn returned \(ENOENT) (\(String(cString: strerror(ENOENT))))")
+    }
+  }
+
+  #if canImport(Darwin)
+  func testPreparedLaunchKeepsDescriptorsPrivateAcrossClosureAndChurn() throws {
+    guard let python = ExecutableLocator.find("python3", environment: ProcessInfo.processInfo.environment) else {
+      throw XCTSkip("needs python3 to inspect child descriptors")
+    }
+    let probe = """
+    import errno, os, sys
+    private_file = (int(sys.argv[3]), int(sys.argv[4]))
+    for argument in sys.argv[1:3]:
+        try:
+            metadata = os.fstat(int(argument))
+        except OSError as error:
+            if error.errno != errno.EBADF:
+                sys.exit(1)
+        else:
+            if (metadata.st_dev, metadata.st_ino) == private_file:
+                sys.exit(1)
+    for descriptor in (0, 1, 2):
+        os.fstat(descriptor)
+    sys.exit(0 if os.read(0, 1) == b"" else 1)
+    """
+    let attempts = 3
+    // Above stdio allocations, so reopening a low descriptor cannot hide the race.
+    let descriptorFloor: Int32 = 128
+    let privateFile = tempDirectory.appendingPathComponent("private-descriptor")
+    let held = open(privateFile.path, O_RDONLY | O_CREAT, 0o600)
+    XCTAssertGreaterThan(held, STDERR_FILENO)
+    guard held > STDERR_FILENO else { return }
+    defer { close(held) }
+    var metadata = stat()
+    XCTAssertEqual(fstat(held, &metadata), 0)
+
+    for _ in 0..<attempts {
+      var transient = fcntl(held, F_DUPFD, descriptorFloor)
+      XCTAssertGreaterThanOrEqual(transient, descriptorFloor)
+      guard transient >= descriptorFloor else { return }
+      defer { if transient >= 0 { close(transient) } }
+
+      let launch = try AlertProcessLaunch()
+      let closed = transient
+      XCTAssertEqual(close(transient), 0)
+      transient = -1
+      let late = fcntl(held, F_DUPFD, closed + 1)
+      XCTAssertGreaterThan(late, closed)
+      guard late > closed else { return }
+      defer { close(late) }
+
+      // Execute the runner's prepared actions, not a copied posix_spawn setup.
+      let arguments = ["-c", probe, String(held), String(late), String(metadata.st_dev), String(metadata.st_ino)]
+      let pid = try launch.spawn(executable: python, arguments: arguments, environment: [:])
+      assertChildExitsSuccessfully(pid)
+    }
+  }
+
+  private func assertChildExitsSuccessfully(_ pid: pid_t, file: StaticString = #filePath, line: UInt = #line) {
+    let exitTimeout: TimeInterval = 5
+    let pollInterval: useconds_t = 20_000
+    let deadline = Date().addingTimeInterval(exitTimeout)
+    var status: Int32 = 0
+    while Date() < deadline {
+      let result = waitpid(pid, &status, WNOHANG)
+      if result == pid {
+        XCTAssertEqual(status, EXIT_SUCCESS, file: file, line: line)
+        return
+      }
+      if result == -1, errno != EINTR {
+        return XCTFail("waitpid returned errno \(errno)", file: file, line: line)
+      }
+      usleep(pollInterval)
+    }
+
+    // The child remains unreaped, so its PID cannot have been reused.
+    kill(pid, SIGKILL)
+    DispatchQueue.global().async {
+      var status: Int32 = 0
+      while waitpid(pid, &status, 0) == -1, errno == EINTR {}
+    }
+    XCTFail("Child did not exit within \(exitTimeout)s", file: file, line: line)
+  }
+  #endif
 
   func testHungHookDoesNotBlockAndIsKilledAndReaped() throws {
     let pidFile = tempDirectory.appendingPathComponent("pid")
@@ -388,18 +484,18 @@ final class QuotaAlertsTests: XCTestCase {
     await daemon.refreshNow()
     await daemon.refreshNow()
     runner.waitUntilIdle()
-    XCTAssertEqual(deliveredEvents(), ["LLIMIT_EVENT=failure"])
+    XCTAssertEqual(deliveredEvents(), ["LLIMIT_EVENT=failure"], loggedText)
 
     // The restarted daemon remembers the delivered alert.
     runner = attachMonitor()
     await daemon.refreshNow()
     runner.waitUntilIdle()
-    XCTAssertEqual(deliveredEvents(), ["LLIMIT_EVENT=failure"])
+    XCTAssertEqual(deliveredEvents(), ["LLIMIT_EVENT=failure"], loggedText)
 
     client.error = nil
     await daemon.refreshNow()
     runner.waitUntilIdle()
-    XCTAssertEqual(deliveredEvents(), ["LLIMIT_EVENT=failure", "LLIMIT_EVENT=recovered"])
+    XCTAssertEqual(deliveredEvents(), ["LLIMIT_EVENT=failure", "LLIMIT_EVENT=recovered"], loggedText)
 
     let hookOutput = try String(contentsOf: output, encoding: .utf8)
     let failureBlock = try XCTUnwrap(hookOutput.components(separatedBy: "---").first)
