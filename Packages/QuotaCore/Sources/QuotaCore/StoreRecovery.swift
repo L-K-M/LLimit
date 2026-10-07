@@ -46,10 +46,12 @@ func quarantineCorruptFile(at fileURL: URL) -> Bool {
       .sorted { lhs, rhs in
         lhs.date == rhs.date ? lhs.url.lastPathComponent > rhs.url.lastPathComponent : lhs.date > rhs.date
       }
-    // Keep the current document even if the clock moved backward, within the cap.
-    let retained = Set(ranked.filter { $0.url != quarantined }
-      .prefix(maximumStoreQuarantines - 1).map(\.url)).union([quarantined])
-    for entry in ranked where !retained.contains(entry.url) {
+    // Enumeration can return different URL representations on Darwin. These
+    // siblings share a directory, so filenames identify the current artifact.
+    let currentName = quarantined.lastPathComponent
+    let retained = Set(ranked.filter { $0.url.lastPathComponent != currentName }
+      .prefix(maximumStoreQuarantines - 1).map { $0.url.lastPathComponent }).union([currentName])
+    for entry in ranked where !retained.contains(entry.url.lastPathComponent) {
       try FileManager.default.removeItem(at: entry.url)
     }
   } catch {
