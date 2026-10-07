@@ -4,6 +4,8 @@ import QuotaCore
 /// Serializes the recorded quota history for scripts and spreadsheets. Reads
 /// only the history archive, which is credential-free by contract.
 public enum HistoryExporter {
+  private static let formulaPrefixCharacters = CharacterSet(charactersIn: "=+-@\t\r\n")
+
   /// One CSV row per metric sample:
   /// `generatedAt,account_id,provider,account,metric,label,remaining_percent,remaining_amount,reset_at`.
   public static func csv(history: [QuotaSnapshot]) -> String {
@@ -43,9 +45,11 @@ public enum HistoryExporter {
   private static func escape(_ field: String) -> String {
     // Spreadsheet-safety: a leading =, +, - or @ is interpreted as a formula by
     // Excel/Numbers even inside quotes — neutralize with a leading apostrophe.
-    // Leading tabs/CRs get the same treatment: some importers trim them,
-    // re-exposing a formula prefix.
-    let guarded = field.first.map({ "=+-@\t\r".contains($0) }) == true ? "'" + field : field
+    // Leading tab/CR/newline get the same treatment: some importers trim
+    // them, re-exposing a formula prefix. CharacterSet works at scalar level —
+    // a Character literal "\r\n" would be one grapheme and never match.
+    let guarded = field.unicodeScalars.first.map(Self.formulaPrefixCharacters.contains) == true
+      ? "'" + field : field
     guard guarded.contains(",") || guarded.contains("\"") || guarded.contains("\n") || guarded.contains("\r") else {
       return guarded
     }

@@ -63,6 +63,9 @@ final class HistoryExporterTests: XCTestCase {
     snapshot.providers[0].title = "\r@SUM(1)"
     csv = HistoryExporter.csv(history: [snapshot])
     XCTAssertTrue(csv.contains("\"'\r@SUM(1)\""))
+    snapshot.providers[0].title = "\n=1+1"
+    csv = HistoryExporter.csv(history: [snapshot])
+    XCTAssertTrue(csv.contains("\"'\n=1+1\""))
   }
 
   func testJSONRoundTrips() throws {
