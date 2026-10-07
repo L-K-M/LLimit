@@ -87,7 +87,7 @@ public final class QuotaDaemon {
     }
 
     do {
-      snapshot = try snapshotStore.load()
+      snapshot = try snapshotStore.load(policy: .recover)
       reconcileSnapshotWithCurrentAccounts()
     } catch {
       statusMessage = "Could not load snapshot: \(error.localizedDescription)"
@@ -280,7 +280,7 @@ public final class QuotaDaemon {
 
     // Read the previous snapshot before overwriting it so accounts that fail this
     // cycle keep showing their last-known usage instead of vanishing.
-    let previous = (try? snapshotStore.load()) ?? snapshot
+    let previous = (try? snapshotStore.load(policy: .recover)) ?? snapshot
     var refreshed = await coordinator.refresh(configurations: enabledConfigs, previousSnapshot: previous)
       .mergingStaleUsage(from: previous)
 

@@ -28,7 +28,7 @@ public final class SnapshotStore: @unchecked Sendable {
   }
   #endif
 
-  public func load() throws -> QuotaSnapshot? {
+  public func load(policy: StoreReadPolicy = .preserve) throws -> QuotaSnapshot? {
     guard FileManager.default.fileExists(atPath: fileURL.path) else {
       return nil
     }
@@ -36,6 +36,7 @@ public final class SnapshotStore: @unchecked Sendable {
     do {
       return try decoder.decode(QuotaSnapshot.self, from: data)
     } catch {
+      guard case .recover = policy else { throw error }
       guard quarantineCorruptFile(at: fileURL) else { throw error }
       reportPersistenceIssue("Quarantined undecodable \(fileURL.lastPathComponent).")
       return nil

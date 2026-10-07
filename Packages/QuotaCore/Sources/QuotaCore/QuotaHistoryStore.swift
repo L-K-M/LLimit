@@ -28,7 +28,7 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     encoder.outputFormatting = []
   }
 
-  public func load() throws -> [QuotaSnapshot] {
+  public func load(policy: StoreReadPolicy = .preserve) throws -> [QuotaSnapshot] {
     guard FileManager.default.fileExists(atPath: fileURL.path) else {
       return []
     }
@@ -37,6 +37,7 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     do {
       return try decoder.decode([QuotaSnapshot].self, from: data)
     } catch {
+      guard case .recover = policy else { throw error }
       guard quarantineCorruptFile(at: fileURL) else { throw error }
       reportPersistenceIssue("Quarantined undecodable \(fileURL.lastPathComponent).")
       return []
@@ -80,7 +81,7 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     keepDays: Int = 45,
     maxEntries: Int = 3_000
   ) throws -> Archive {
-    let original = try load()
+    let original = try load(policy: .recover)
     var history = original
 
     let cutoffDays = max(1, keepDays)
@@ -143,7 +144,7 @@ public final class QuotaHistoryStore: @unchecked Sendable {
   public func remove(accountIDs: Set<String>) throws {
     guard !accountIDs.isEmpty else { return }
 
-    let history = try load()
+    let history = try load(policy: .recover)
     let filtered = history.map { snapshot in
       QuotaSnapshot(
         version: snapshot.version,
