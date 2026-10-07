@@ -103,6 +103,13 @@ public enum ClaudeCodeVersion {
       Thread.sleep(forTimeInterval: 0.2)
       if process.isRunning { kill(process.processIdentifier, SIGKILL) }
     }
+    // A child stuck in an uninterruptible syscall can survive even SIGKILL;
+    // bound the reap so the probe thread can't hang forever. On the normal
+    // path the child already exited and waitUntilExit returns immediately.
+    if process.isRunning, exited.wait(timeout: .now() + 2) == .timedOut {
+      pipe.fileHandleForReading.readabilityHandler = nil
+      return nil
+    }
     process.waitUntilExit()
     pipe.fileHandleForReading.readabilityHandler = nil
     try? pipe.fileHandleForReading.close()
