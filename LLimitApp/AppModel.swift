@@ -349,9 +349,9 @@ final class AppModel: ObservableObject {
   }
 
   private func publishSnapshot(_ refreshed: QuotaSnapshot) {
-    let previous = snapshot
     let now = Date()
     let archive: QuotaHistoryStore.Archive?
+    let previous = snapshot
     do {
       archive = try historyStore.append(refreshed)
     } catch {
