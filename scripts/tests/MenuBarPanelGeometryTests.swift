@@ -147,10 +147,9 @@ private struct MenuBarPanelGeometryTests {
     )
   }
 
-  // The Overview card sits inside the dashboard's 12pt padding and has 13pt of
-  // its own on each side.
+  // The same paddings the dashboard and the Overview card apply.
   private static func overviewContentWidth(panelWidth: CGFloat) -> CGFloat {
-    panelWidth - 2 * (12 + 13)
+    panelWidth - 2 * (OverviewGaugeLayout.dashboardPadding + OverviewGaugeLayout.cardPadding)
   }
 
   private static func drag(corner: MenuBarPanelCorner, pointerDelta: CGSize) -> MenuBarPanelSize.Resize {

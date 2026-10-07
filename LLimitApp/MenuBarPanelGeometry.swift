@@ -103,6 +103,9 @@ enum MenuBarPanelSize {
 enum OverviewGaugeLayout {
   static let minimumCellWidth: CGFloat = 54
   static let columnSpacing: CGFloat = 6
+  // The gauges span the panel width less both paddings on each side.
+  static let dashboardPadding: CGFloat = 12
+  static let cardPadding: CGFloat = 13
 
   /// Number of gauges in each row, longest first, for `count` gauges across
   /// `width` points. An unbounded width, as in an ideal-size query, fits every

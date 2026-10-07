@@ -681,7 +681,7 @@ private struct MenuBarContent: View {
                 )
               }
             }
-            .padding(12)
+            .padding(OverviewGaugeLayout.dashboardPadding)
           }
           .scrollIndicators(.automatic)
         }
@@ -1279,7 +1279,7 @@ private struct OverviewCard: View {
         )
       }
     }
-    .padding(13)
+    .padding(OverviewGaugeLayout.cardPadding)
     .dashboardCard()
   }
 
