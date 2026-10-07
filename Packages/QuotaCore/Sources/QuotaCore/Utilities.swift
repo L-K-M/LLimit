@@ -179,6 +179,58 @@ func roundedPercent(_ value: Double) -> Int? {
   return Int(min(100, max(0, value)).rounded())
 }
 
+/// Non-cryptographic fingerprint used to detect *changes* in a credential
+/// without persisting the credential itself — snapshots are credential-free.
+/// This FNV-1a stamp is change provenance, not an authentication hash.
+func credentialFingerprint(_ value: String) -> String {
+  let offsetBasis: UInt64 = 0xcbf2_9ce4_8422_2325
+  let prime: UInt64 = 0x0000_0100_0000_01b3
+  var hash = offsetBasis
+  for byte in value.utf8 {
+    hash ^= UInt64(byte)
+    hash &*= prime
+  }
+  return String(hash, radix: 16)
+}
+
+private enum CredentialEnvironmentReference {
+  static let prefix = "env:"
+}
+
+public extension String {
+  /// True when the value is an `env:NAME` indirection — a shell-style variable
+  /// name that resolves from the process environment at runtime. Anything else
+  /// (including `env:` followed by an invalid identifier) is a literal value.
+  var isEnvironmentReference: Bool {
+    guard hasPrefix(CredentialEnvironmentReference.prefix) else { return false }
+    let name = String(dropFirst(CredentialEnvironmentReference.prefix.count))
+    return name.range(of: #"^[A-Za-z_][A-Za-z0-9_]*$"#, options: .regularExpression) == name.startIndex..<name.endIndex
+  }
+}
+
+public extension Dictionary where Key == String, Value == String {
+  /// Resolves values of the form `env:NAME` from the process environment, so a
+  /// credential can live outside the settings file entirely (e.g. a systemd
+  /// `EnvironmentFile` for the Linux daemon). A NAME that is unset resolves to
+  /// empty, which readiness checks and the provider client then report as a
+  /// missing credential. Paths that write credentials back into settings must
+  /// leave `isEnvironmentReference` values untouched so the pointer is never
+  /// replaced by the secret it resolved to.
+  func resolvingEnvironmentReferences(
+    _ environment: [String: String] = ProcessInfo.processInfo.environment
+  ) -> [String: String] {
+    mapValues { value in
+      guard value.isEnvironmentReference else { return value }
+      return environment[String(value.dropFirst(CredentialEnvironmentReference.prefix.count))] ?? ""
+    }
+  }
+
+  /// Automatic writes retain pointers even when their runtime copy contains secrets.
+  func preservingEnvironmentReferences(from stored: [String: String]) -> [String: String] {
+    merging(stored.filter { $0.value.isEnvironmentReference }) { _, reference in reference }
+  }
+}
+
 func parseJSONObject(from data: Data) throws -> [String: Any] {
   let object = try JSONSerialization.jsonObject(with: data)
   guard let dictionary = object as? [String: Any] else {

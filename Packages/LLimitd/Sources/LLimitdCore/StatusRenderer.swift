@@ -59,7 +59,7 @@ public enum StatusRenderer {
 
     for status in accountStatuses(in: snapshot, now: now) {
       if let usage = status.usage {
-        let metrics = usage.metrics.compactMap { metricLine($0, now: now) }
+        let metrics = usage.metrics.compactMap { metricLine($0, now: now, status: status) }
         let suffix = metrics.isEmpty ? "" : ": " + metrics.joined(separator: " · ")
         let age = relativeAge(usage.fetchedAt, now: now)
         let note = status.isFailed ? " (last known, \(age))" : status.isStale ? " (stale, \(age))" : ""
@@ -117,6 +117,15 @@ public enum StatusRenderer {
     if let detail = metric.detail {
       object["detail"] = detail
     }
+    if let pace = metric.paceEstimate, pace.isValid(at: now) {
+      object["pace"] = pace.displayText(at: now)
+      object["paceTrend"] = pace.trend.rawValue
+      object["burnRatePerHour"] = pace.burnRatePerHour
+      object["projectedPercentAtReset"] = pace.projectedPercentAtReset
+      if let exhaustionAt = pace.exhaustionAt {
+        object["exhaustionAt"] = ISO8601DateFormatter().string(from: exhaustionAt)
+      }
+    }
     return object
   }
 
@@ -137,6 +146,11 @@ public enum StatusRenderer {
     var remainingPercents: [Int] = []
 
     for status in statuses {
+      let displayMetrics = (status.usage?.metrics ?? []).map { metric -> UsageMetric in
+        var copy = metric
+        if status.isFailed { copy.paceEstimate = nil }
+        return copy
+      }
       // An account's headline number is its most-consumed metric, expressed as
       // remaining percent so "100" always means "full quota".
       let remaining = status.headline
@@ -154,7 +168,7 @@ public enum StatusRenderer {
         // Per-limit breakdown. The headline `remainingPercent` above is only the
         // worst metric; a popup (the tray) needs every limit as its own row.
         // Additive: bars that read only the older keys are unaffected.
-        "metrics": (status.usage?.metrics ?? []).map { metricObject($0, now: now) }
+        "metrics": displayMetrics.map { metricObject($0, now: now) }
       ]
       if let usage = status.usage {
         account["fetchedAt"] = iso8601String(usage.fetchedAt)
@@ -304,7 +318,7 @@ public enum StatusRenderer {
     return String(amount)
   }
 
-  private static func metricLine(_ metric: UsageMetric, now: Date) -> String? {
+  private static func metricLine(_ metric: UsageMetric, now: Date, status: AccountStatus) -> String? {
     let label = singleLine(metric.label)
     if metric.isUnlimited { return "\(label) unlimited" }
     var text: String
@@ -316,6 +330,9 @@ public enum StatusRenderer {
     else { return nil }
     if let reset = metric.resetCountdown(at: now) {
       text += reset == "reset" ? " (reset due)" : " (resets in \(reset))"
+    }
+    if !status.isFailed, let pace = metric.paceEstimate, pace.trend == .runsOut, pace.isValid(at: now) {
+      text += " · \(pace.displayText(at: now))"
     }
     return text
   }

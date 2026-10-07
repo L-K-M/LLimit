@@ -24,12 +24,14 @@ public enum OpenAICredentialSync {
   public static func adoption(
     for stored: [String: String],
     among live: [[String: String]],
+    environment: [String: String] = ProcessInfo.processInfo.environment,
     expiry: (String) -> Date?
   ) -> [String: String]? {
     // Managed accounts belong exclusively to their isolated app-server. Even a
     // malformed marker must not make an account eligible for global imports.
     guard !CodexAccountProfile.isManaged(stored) else { return nil }
-    let storedAccountID = (stored[CredentialField.openAIAccountID] ?? "")
+    let resolved = stored.resolvingEnvironmentReferences(environment)
+    let storedAccountID = (resolved[CredentialField.openAIAccountID] ?? "")
       .trimmingCharacters(in: .whitespacesAndNewlines)
     guard !storedAccountID.isEmpty else { return nil }
 
@@ -49,7 +51,7 @@ public enum OpenAICredentialSync {
     }) else { return nil }
 
     // Only adopt when strictly fresher than what we already hold.
-    let storedAccess = stored[CredentialField.openAIAccessToken] ?? ""
+    let storedAccess = resolved[CredentialField.openAIAccessToken] ?? ""
     if let storedExp = storedAccess.isEmpty ? nil : expiry(storedAccess) {
       guard let freshExp = expiry(freshest[CredentialField.openAIAccessToken] ?? ""), freshExp > storedExp else {
         return nil
@@ -73,13 +75,18 @@ public enum OpenAICredentialSync {
     var updated = stored
     var changed = false
 
-    if updated[CredentialField.openAIAccessToken] != liveAccess {
+    // An env: reference stores a pointer, not a value — a live file sync must
+    // never replace it with the secret it resolves to.
+    if updated[CredentialField.openAIAccessToken] != liveAccess,
+      updated[CredentialField.openAIAccessToken]?.isEnvironmentReference != true
+    {
       updated[CredentialField.openAIAccessToken] = liveAccess
       changed = true
     }
 
     if let liveRefresh = live[CredentialField.openAIRefreshToken], !liveRefresh.isEmpty,
-      updated[CredentialField.openAIRefreshToken] != liveRefresh
+      updated[CredentialField.openAIRefreshToken] != liveRefresh,
+      updated[CredentialField.openAIRefreshToken]?.isEnvironmentReference != true
     {
       updated[CredentialField.openAIRefreshToken] = liveRefresh
       changed = true

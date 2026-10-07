@@ -99,7 +99,7 @@ struct ClaudeTerminalTests {
     ) -> ClaudeTerminalSession {
         ClaudeTerminalSession(
             executable: executable, arguments: ["auth", "login", "--claudeai"],
-            environment: ClaudeCodeProcess.environment(parent: parent, profileDirectory: directory),
+            environment: ClaudeCodeProcess.environment(parent: parent, profileDirectory: directory, executable: executable),
             workingDirectory: directory.appendingPathComponent("work"))
     }
 

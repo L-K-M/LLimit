@@ -12,9 +12,28 @@ struct SettingsView: View {
     case account(String)
   }
 
+  /// One account text field. Drafts are keyed by account, so a draft always commits
+  /// to the account it was typed for, whichever account is selected by then.
+  private struct AccountFieldKey: Hashable {
+    let accountID: String
+    let field: EditableAccountField
+  }
+
+  /// Holds the hosting window by reference, so recording it never invalidates the view.
+  private final class HostWindowReference {
+    weak var window: NSWindow?
+  }
+
   @ObservedObject var model: AppModel
   @State private var selection: SettingsItem? = .overview
   @State private var providerToAdd: QuotaProvider = .openAI
+  /// Uncommitted text of account name and credential fields. Saving a credential can
+  /// clear a Venice account's history, so keystrokes stay here until the field commits:
+  /// on Return, focus loss, leaving the field or account, window close, or quit.
+  /// A rejected draft stays visible with its reason and is retried by the next commit.
+  @State private var accountDrafts = PendingEdits<AccountFieldKey>()
+  @FocusState private var focusedAccountField: AccountFieldKey?
+  @State private var hostWindow = HostWindowReference()
 
   private let refreshIntervalOptions = [15, 30, 45, 60, 90, 120, 180]
   private let settingsLabelWidth: CGFloat = 180
@@ -41,6 +60,7 @@ struct SettingsView: View {
       window.styleMask.insert(.resizable)
       window.minSize = NSSize(width: 720, height: 480)
       window.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+      hostWindow.window = window
     })
     .navigationTitle("LLimit")
     .sheet(item: $model.claudeTerminalSession) { session in
@@ -56,6 +76,27 @@ struct SettingsView: View {
       if case .account(let accountID) = selection, !accountIDs.contains(accountID) {
         selection = .overview
       }
+    }
+    .onChange(of: selection) { _, _ in
+      commitAccountDrafts()
+    }
+    .onChange(of: focusedAccountField) { previousField, _ in
+      if let previousField { commitAccountDraft(previousField) }
+    }
+    // The window is reused after closing (`isReleasedWhenClosed` is false), so closing
+    // it does not reliably make this view disappear. Commit when it closes instead.
+    // Rejected drafts survive the close and show again, with their reason, on reopen.
+    .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { notification in
+      guard let window = notification.object as? NSWindow, window === hostWindow.window else { return }
+      commitAccountDrafts()
+    }
+    // One last attempt on quit. A draft that is still rejected cannot be saved and
+    // is lost with the process; it is not retried.
+    .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+      commitAccountDrafts()
+    }
+    .onDisappear {
+      commitAccountDrafts()
     }
   }
 
@@ -214,7 +255,8 @@ struct SettingsView: View {
             }
           }
           .buttonStyle(.borderedProminent)
-          .disabled(model.isRefreshing || model.providerAccounts.contains { model.codexAccountIsBusy($0.id) })
+          .disabled(!model.refreshAvailability.allowsRefresh)
+          .help(model.refreshAvailability.help)
         }
 
         if model.providerAccounts.isEmpty {
@@ -916,6 +958,7 @@ struct SettingsView: View {
     VStack(alignment: .leading, spacing: 10) {
       let managed = model.codexAccountIsManaged(account.id)
       Button(model.codexLoginIsOpen(account.id) ? "Continue Sign-In" : managed ? "Reconnect OpenAI" : "Connect OpenAI") {
+        commitAccountDrafts()
         model.connectCodexAccount(account.id)
       }
       .buttonStyle(.borderedProminent)
@@ -952,6 +995,7 @@ struct SettingsView: View {
     VStack(alignment: .leading, spacing: 10) {
       let managed = ClaudeCodeProfile.profile(from: account.credentials) != nil
       Button(model.claudeLoginIsOpen(account.id) ? "Open Login Terminal" : managed ? "Reconnect Claude" : "Connect Claude") {
+        commitAccountDrafts()
         model.connectClaudeAccount(account.id)
       }
       .buttonStyle(.borderedProminent)
@@ -988,7 +1032,11 @@ struct SettingsView: View {
     VStack(alignment: .leading, spacing: 12) {
       HStack(spacing: 10) {
         Button {
-          model.autofillCredentials(forAccountID: account.id)
+          // Auto-fill replaces every credential field at once; a draft committed
+          // later would overwrite it. A failed auto-fill keeps the drafts.
+          if model.autofillCredentials(forAccountID: account.id) {
+            discardCredentialDrafts(for: account.id)
+          }
         } label: {
           Label("Auto-fill from this Mac", systemImage: "sparkles")
         }
@@ -1013,10 +1061,14 @@ struct SettingsView: View {
       ScrollView {
         VStack(alignment: .leading, spacing: 0) {
           settingsRow(title: "Display name") {
-            TextField("Account name", text: model.accountDisplayNameBinding(for: accountID))
-              .textFieldStyle(.roundedBorder)
-              .frame(maxWidth: 340)
-              .accessibilityLabel("Display name")
+            let nameKey = AccountFieldKey(accountID: accountID, field: .displayName)
+            committingDraft(
+              TextField("Account name", text: draftBinding(for: nameKey))
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 340)
+                .accessibilityLabel("Display name"),
+              key: nameKey
+            )
           }
 
           Divider()
@@ -1144,6 +1196,7 @@ struct SettingsView: View {
           settingsRow(title: "Actions") {
             HStack(spacing: 10) {
               Button {
+                commitAccountDrafts()
                 Task { await model.refreshNow() }
               } label: {
                 if model.isRefreshing {
@@ -1155,7 +1208,10 @@ struct SettingsView: View {
                 }
               }
               .buttonStyle(.borderedProminent)
-              .disabled(model.isRefreshing || model.codexAccountIsBusy(accountID))
+              // A refresh would skip this account until its own sign-in ends.
+              .disabled(!model.refreshAvailability.allowsRefresh || model.codexAccountIsBusy(accountID))
+              .help(model.codexAccountIsBusy(accountID)
+                ? "Waiting for this account’s OpenAI sign-in" : model.refreshAvailability.help)
 
               Button("Remove Account", role: .destructive) {
                 model.removeProviderAccount(accountID: accountID)
@@ -1182,7 +1238,8 @@ struct SettingsView: View {
   }
 
   private func credentialField(_ field: CredentialFieldDescriptor, accountID: String) -> some View {
-    VStack(alignment: .leading, spacing: 5) {
+    let key = AccountFieldKey(accountID: accountID, field: .credential(field.key))
+    return VStack(alignment: .leading, spacing: 5) {
       HStack {
         Text(field.label)
           .font(.caption.weight(.semibold))
@@ -1194,13 +1251,19 @@ struct SettingsView: View {
       }
 
       if field.isSecret {
-        SecureField(field.label, text: model.credentialBinding(for: accountID, fieldKey: field.key))
-          .textFieldStyle(.roundedBorder)
-          .frame(maxWidth: 520)
+        committingDraft(
+          SecureField(field.label, text: draftBinding(for: key))
+            .textFieldStyle(.roundedBorder)
+            .frame(maxWidth: 520),
+          key: key
+        )
       } else {
-        TextField(field.label, text: model.credentialBinding(for: accountID, fieldKey: field.key))
-          .textFieldStyle(.roundedBorder)
-          .frame(maxWidth: 520)
+        committingDraft(
+          TextField(field.label, text: draftBinding(for: key))
+            .textFieldStyle(.roundedBorder)
+            .frame(maxWidth: 520),
+          key: key
+        )
       }
 
       if let help = field.help, !help.isEmpty {
@@ -1208,6 +1271,54 @@ struct SettingsView: View {
           .font(.caption)
           .foregroundStyle(.secondary)
       }
+    }
+  }
+
+  // MARK: - Account drafts
+
+  private func draftBinding(for key: AccountFieldKey) -> Binding<String> {
+    Binding(
+      get: { accountDrafts.text(for: key) ?? model.account(withID: key.accountID)?.savedText(for: key.field) ?? "" },
+      set: { accountDrafts.edit(key, text: $0) }
+    )
+  }
+
+  /// Commits on Return and when the field leaves the screen, such as a collapsed
+  /// disclosure group. Focus moving elsewhere commits through `focusedAccountField`.
+  /// Shows why the last commit was rejected while the draft waits for another try.
+  private func committingDraft(_ field: some View, key: AccountFieldKey) -> some View {
+    VStack(alignment: .leading, spacing: 4) {
+      field
+        .focused($focusedAccountField, equals: key)
+        .onSubmit { commitAccountDraft(key) }
+        .onDisappear { commitAccountDraft(key) }
+
+      if let rejection = accountDrafts.rejection(for: key) {
+        Text(rejection.message)
+          .font(.caption)
+          .foregroundStyle(.orange)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+    }
+  }
+
+  private func commitAccountDraft(_ key: AccountFieldKey) {
+    accountDrafts.commit(key, using: saveAccountDraft)
+  }
+
+  /// Also runs before connecting or refreshing an account: clicking a button keeps
+  /// text focus, and those actions should use what you typed.
+  private func commitAccountDrafts() {
+    accountDrafts.commitAll(using: saveAccountDraft)
+  }
+
+  private func saveAccountDraft(_ key: AccountFieldKey, _ text: String) -> AccountEditOutcome {
+    model.commitAccountEdit(text, to: key.field, accountID: key.accountID)
+  }
+
+  private func discardCredentialDrafts(for accountID: String) {
+    accountDrafts.discard { key in
+      key.accountID == accountID && key.field != .displayName
     }
   }
 

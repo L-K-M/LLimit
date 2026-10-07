@@ -41,9 +41,9 @@ final class AppModel: ObservableObject {
   @Published var accountStatuses: [ProviderAccountStatus] = []
   @Published var snapshot: QuotaSnapshot?
   /// Recent slice of the local refresh history backing the dashboard sparklines.
-  /// Two days is enough for the 24h spark window while keeping the read cheap
-  /// against the 45-day history file.
+  /// Publish derives this from append's archive; only bootstrap and purges reload.
   @Published private(set) var recentHistory: [QuotaSnapshot] = []
+  private static let recentHistoryDays = 2
   @Published var statusMessage: String = ""
   @Published var isRefreshing = false
   @Published var launchAtLogin = false
@@ -67,6 +67,8 @@ final class AppModel: ObservableObject {
   @Published var codexLogin: CodexLoginPresentation?
   @Published private(set) var codexAccountMessages: [String: String] = [:]
   @Published private var codexBusyAccounts: Set<String> = []
+  private var signInSkippedAccountIDs: Set<String> = []
+  private var credentialEditRevisions: [String: UUID] = [:]
   private var codexLoginHandles: [UUID: CodexLoginHandle] = [:]
   private var codexLoginIDs: [String: UUID] = [:]
   private var codexUsageReceipts: [String: (profile: UUID, fetchedAt: Date)] = [:]
@@ -109,8 +111,33 @@ final class AppModel: ObservableObject {
     )
     self.launchAtLogin = SMAppService.mainApp.status == .enabled
 
+    // A coalesced settings write may still be pending when the app quits.
+    // queue: nil runs the flush synchronously on the posting (main) thread —
+    // willTerminate is posted inside terminate(), and an async hop to
+    // OperationQueue.main is not guaranteed to drain before the process exits.
+    terminationObserver = NotificationCenter.default.addObserver(
+      forName: NSApplication.willTerminateNotification, object: nil, queue: nil
+    ) { [weak self] _ in
+      MainActor.assumeIsolated { self?.flushPendingConfigurationSave() }
+    }
+    // Flush on focus loss. Crashes and SIGKILL may skip both notifications.
+    resignActiveObserver = NotificationCenter.default.addObserver(
+      forName: NSApplication.willResignActiveNotification, object: nil, queue: nil
+    ) { [weak self] _ in
+      MainActor.assumeIsolated { self?.flushPendingConfigurationSave() }
+    }
+
     Task { @MainActor [weak self] in
       await self?.bootstrap()
+    }
+  }
+
+  deinit {
+    if let terminationObserver {
+      NotificationCenter.default.removeObserver(terminationObserver)
+    }
+    if let resignActiveObserver {
+      NotificationCenter.default.removeObserver(resignActiveObserver)
     }
   }
 
@@ -163,7 +190,38 @@ final class AppModel: ObservableObject {
     reloadAccountStatuses()
   }
 
+  /// Pending coalesced save for high-frequency style mutations (color-picker
+  /// drags, background wells). An explicit save supersedes it — the file always
+  /// reflects current in-memory state. Account edits commit once via
+  /// `commitAccountEdit` and save synchronously; they never coalesce.
+  private var settingsSaveTask: Task<Void, Never>?
+  private var terminationObserver: NSObjectProtocol?
+  private var resignActiveObserver: NSObjectProtocol?
+  private static let configurationSaveDelay: Duration = .milliseconds(400)
+
+  private enum ConfigurationSaveTiming { case immediate, coalesced }
+
+  /// Coalesced settings save for bindings that fire per drag event.
+  /// Explicit actions keep calling saveConfiguration() directly.
+  private func scheduleConfigurationSave() {
+    settingsSaveTask?.cancel()
+    settingsSaveTask = Task { @MainActor [weak self] in
+      try? await Task.sleep(for: Self.configurationSaveDelay)
+      guard !Task.isCancelled else { return }
+      self?.saveConfiguration()
+    }
+  }
+
+  private func flushPendingConfigurationSave() {
+    guard settingsSaveTask != nil else { return }
+    settingsSaveTask?.cancel()
+    settingsSaveTask = nil
+    saveConfiguration()
+  }
+
   func saveConfiguration(showSuccessMessage: Bool = false) {
+    settingsSaveTask?.cancel()
+    settingsSaveTask = nil
     guard !configurationLoadFailed else {
       statusMessage = "Save blocked because the existing settings file could not be read. Fix or back up the file, then relaunch LLimit."
       return
@@ -187,8 +245,12 @@ final class AppModel: ObservableObject {
     }
   }
 
+  var refreshAvailability: RefreshAvailability {
+    RefreshAvailability(isRefreshing: isRefreshing, accounts: providerAccounts, signingInAccountIDs: codexBusyAccounts)
+  }
+
   func refreshNow() async {
-    guard !isRefreshing, codexBusyAccounts.isEmpty else {
+    guard !isRefreshing else {
       return
     }
 
@@ -196,25 +258,33 @@ final class AppModel: ObservableObject {
     defer { isRefreshing = false }
 
     await refreshExpiringChatGPTTokens()
-    let claudeFailures = await prepareClaudeAccounts()
+    let preparation = await prepareClaudeAccounts()
+    let claudeFailures = preparation.failures
     reloadAccountStatuses()
 
-    let enabledConfigs = runtimeConfigurations().filter { configuration in
-      configuration.isEnabled && configuration.provider.hasRequiredCredentials(configuration.credentials)
-        && !claudeFailures.contains(where: { $0.accountID == configuration.accountID })
-    }
+    // A sign-in owns only its account; siblings refresh and retain their own timestamps.
+    let selection = RefreshSelection(
+      configurations: runtimeConfigurations(), failedPreparation: Set(claudeFailures.map(\.accountID)),
+      signingInAccountIDs: codexBusyAccounts)
+    signInSkippedAccountIDs.formUnion(selection.skippedAccountIDs)
+    let enabledConfigs = selection.fetched
+    var provenance = RefreshProvenance(configurations: enabledConfigs, carriedConfigurations: selection.skipped,
+                                       credentialRevisions: credentialEditRevisions)
+    provenance.recordQueries(preparation.configurations, credentialRevisions: preparation.credentialRevisions)
 
     guard !enabledConfigs.isEmpty || !claudeFailures.isEmpty else {
-      statusMessage = "No enabled provider accounts with complete credentials configured."
+      if selection.skippedAccountIDs.isEmpty {
+        statusMessage = "No enabled provider accounts with complete credentials configured."
+      }
       return
     }
 
     do {
-      var refreshed = await refreshService.refresh(configurations: enabledConfigs, credentialFailures: claudeFailures)
-      // A cancelled launch-time refresh has nothing to publish. Completed
-      // usage and genuine failures still survive a late cancellation.
+      var refreshed = await refreshService.refresh(
+        configurations: enabledConfigs, credentialFailures: claudeFailures, skippedAccountIDs: selection.skippedAccountIDs)
+      // Preserve completed usage and real failures when cancellation arrives late.
       if Task.isCancelled, refreshed.providers.isEmpty, refreshed.failures.isEmpty { return }
-      refreshed = removingChangedVeniceResults(from: refreshed, configurations: enabledConfigs)
+      refreshed = validatedRefreshResults(refreshed, provenance: provenance)
       try refreshService.save(refreshed)
       let initiallySaved = refreshed
       recordClaudeUsage(in: refreshed, configurations: enabledConfigs)
@@ -224,36 +294,49 @@ final class AppModel: ObservableObject {
       // revoked before its JWT exp, or a Codex rotation that landed mid-cycle), refresh
       // its token and retry — only the accounts we actually recovered, so healthy accounts
       // and the other providers aren't re-polled (Anthropic hard-rate-limits repeat pollers).
-      var recoveredIDs = await recoverFailedOpenAITokens(in: refreshed)
+      let recovered = await recoverFailedOpenAITokens(in: refreshed, skipping: selection.skippedAccountIDs,
+                                                     provenance: provenance)
+      var retryConfigurations = recovered.configurations
+      var retryRevisions = recovered.credentialRevisions
       let blockedClaudeIDs = Set(claudeFailures.map(\.accountID))
       for failure in refreshed.failures where failure.provider == .anthropic && failure.kind == .auth
         && !blockedClaudeIDs.contains(failure.accountID) {
+        guard let current = account(withID: failure.accountID),
+              provenance.matchesQuery(current, credentialRevisions: credentialEditRevisions) else { continue }
+        let revision = credentialEditRevisions[current.id]
+        let profile = ClaudeCodeProfile.profile(from: current.credentials)
         if await prepareClaudeAccount(id: failure.accountID, force: true) == nil,
            let account = account(withID: failure.accountID),
-           ClaudeCodeProfile.profile(from: account.credentials) != nil {
-          recoveredIDs.insert(failure.accountID)
+           account.provider == .anthropic, credentialEditRevisions[account.id] == revision,
+           account.credentials[CredentialField.anthropicAccessToken]?.isEnvironmentReference != true,
+           let preparedProfile = ClaudeCodeProfile.profile(from: account.credentials), preparedProfile == profile {
+          retryConfigurations.append(account.runtimeConfiguration())
+          retryRevisions[account.id] = revision
         }
       }
-      if !recoveredIDs.isEmpty {
-        let retryConfigs = runtimeConfigurations().filter { configuration in
-          recoveredIDs.contains(configuration.accountID)
-            && configuration.isEnabled
+      if !retryConfigurations.isEmpty {
+        let retryConfigs = retryConfigurations.filter { configuration in
+          guard let current = account(withID: configuration.accountID), !codexAccountIsBusy(current.id) else { return false }
+          return configuration.matchesCurrentAccount(current, expectedCredentialRevision: retryRevisions[current.id],
+                                                      currentCredentialRevision: credentialEditRevisions[current.id])
             && configuration.provider.hasRequiredCredentials(configuration.credentials)
         }
         if !retryConfigs.isEmpty {
           let retriedIDs = Set(retryConfigs.map(\.accountID))
+          provenance.recordQueries(retryConfigs, credentialRevisions: retryRevisions)
           // Merge stale-on-failure against the current snapshot so a still-failing retry
           // keeps the last-known usage, then splice only these accounts' results back in.
-          let retrySnapshot = await refreshService.fetch(configurations: retryConfigs)
-            .mergingStaleUsage(from: refreshed)
+          let retrySnapshot = validatedRefreshResults(
+            await refreshService.fetch(configurations: retryConfigs).mergingStaleUsage(from: refreshed), provenance: provenance)
           recordClaudeUsage(in: retrySnapshot, configurations: retryConfigs)
+          recordCodexUsage(in: retrySnapshot, configurations: retryConfigs)
           refreshed = refreshed.replacingResults(forAccountIDs: retriedIDs, from: retrySnapshot)
         }
       }
 
-      // Other providers' recovery can suspend this cycle while a Venice key is
-      // edited. Validate again before its result reaches history and widgets.
-      refreshed = removingChangedVeniceResults(from: refreshed, configurations: enabledConfigs)
+      // Recovery suspends the cycle. Recheck every result and skipped carry
+      // against its original ownership before snapshot, history and widgets.
+      refreshed = validatedRefreshResults(refreshed, provenance: provenance)
       if refreshed != initiallySaved { try refreshService.save(refreshed) }
       publishSnapshot(refreshed)
     } catch {
@@ -261,33 +344,32 @@ final class AppModel: ObservableObject {
     }
   }
 
-  private func removingChangedVeniceResults(
-    from result: QuotaSnapshot,
-    configurations: [ProviderRuntimeConfiguration]
-  ) -> QuotaSnapshot {
-    let changedIDs = Set(configurations.compactMap { configuration -> String? in
-      guard configuration.provider == .venice else { return nil }
-      guard let current = account(withID: configuration.accountID), current.isEnabled,
-            current.credentials[CredentialField.veniceAPIKey] == configuration.credentials[CredentialField.veniceAPIKey] else {
-        return configuration.accountID
-      }
-      return nil
-    })
-    let empty = QuotaSnapshot(generatedAt: result.generatedAt, providers: [], failures: [])
-    return result.replacingResults(forAccountIDs: changedIDs, from: empty)
+  private func validatedRefreshResults(_ result: QuotaSnapshot, provenance: RefreshProvenance) -> QuotaSnapshot {
+    provenance.validated(result, accounts: providerAccounts, credentialRevisions: credentialEditRevisions)
   }
 
   private func publishSnapshot(_ refreshed: QuotaSnapshot) {
+    let now = Date()
+    let archive: QuotaHistoryStore.Archive?
     let previous = snapshot
     do {
-      try historyStore.append(refreshed)
+      archive = try historyStore.append(refreshed)
     } catch {
       print("[LLimit] Local history append failed: \(error.localizedDescription)")
+      archive = nil
     }
-    reloadRecentHistory()
+    if let archive {
+      recentHistory = QuotaHistoryStore.recent(archive.snapshots, days: Self.recentHistoryDays, now: now)
+    }
+
+    // Reuse append's decoded evidence; derived pace never becomes an observation.
+    let refreshed = refreshed.applyingPaceEstimates(from: archive?.snapshots ?? [],
+      accounts: providerAccounts, now: now, refreshInterval: TimeInterval(refreshIntervalMinutes * 60))
+    do { try refreshService.save(refreshed) }
+    catch { print("[LLimit] Paced snapshot save failed: \(error.localizedDescription)") }
 
     let widgetSyncReady = syncSnapshotToWidgetStore(refreshed)
-    let historySyncReady = syncHistoryToWidgetStore(refreshed)
+    let historySyncReady = syncHistoryToWidgetStore(refreshed, archive: archive)
 
     if widgetSyncReady || historySyncReady {
       reloadWidgetTimelines()
@@ -332,7 +414,7 @@ final class AppModel: ObservableObject {
       catch { return }
     }
     guard !Task.isCancelled else { return }
-    guard let account = account(withID: id), account.isEnabled,
+    guard let account = account(withID: id), account.provider == .anthropic, account.isEnabled,
           let profile = ClaudeCodeProfile.profile(from: account.credentials) else { return }
     if snapshot?.failures.contains(where: { $0.accountID == id }) == false,
        claudeUsageReceipts[id]?.satisfies(profileID: profile.id, since: requestedAt) == true {
@@ -340,16 +422,27 @@ final class AppModel: ObservableObject {
     }
     isRefreshing = true
     defer { isRefreshing = false }
+    let preparationRevision = credentialEditRevisions[id]
     let failure = await prepareClaudeAccount(id: id)
     var partial: QuotaSnapshot
+    let configurations: [ProviderRuntimeConfiguration]
+    let provenance: RefreshProvenance
     if let failure {
+      configurations = [configurationAfterClaudePreparation(account, credentialRevision: preparationRevision)]
+      var revisions: [String: UUID] = [:]
+      revisions[id] = preparationRevision
+      provenance = RefreshProvenance(configurations: configurations, credentialRevisions: revisions)
       partial = QuotaSnapshot(generatedAt: Date(), providers: [], failures: [failure])
     } else {
-      let configurations = runtimeConfigurations().filter { $0.accountID == id && $0.isEnabled }
+      guard let current = self.account(withID: id), current.isEnabled, current.provider == .anthropic,
+            ClaudeCodeProfile.profile(from: current.credentials)?.id == profile.id,
+            credentialEditRevisions[id] == preparationRevision else { return }
+      configurations = [current.runtimeConfiguration()]
+      provenance = RefreshProvenance(configurations: configurations, credentialRevisions: credentialEditRevisions)
       partial = await refreshService.fetch(configurations: configurations)
-      recordClaudeUsage(in: partial, configurations: configurations)
     }
-    partial = partial.mergingStaleUsage(from: snapshot)
+    partial = validatedRefreshResults(partial.mergingStaleUsage(from: snapshot), provenance: provenance)
+    recordClaudeUsage(in: partial, configurations: configurations)
     var refreshed = snapshot?.replacingResults(forAccountIDs: [id], from: partial) ?? partial
     refreshed.generatedAt = partial.generatedAt
     var saveFailed = false
@@ -367,6 +460,7 @@ final class AppModel: ObservableObject {
       let failed = claudeCredentialFailures.contains(account.id) || codexFailure != nil
       let pending = account.credentials[CredentialField.anthropicRenewalPending] != nil
       let needsRenewal = ClaudeCodeProfile.profile(from: account.credentials) != nil
+        && account.credentials[CredentialField.anthropicAccessToken]?.isEnvironmentReference != true
         && ClaudeCodeProfile.readiness(for: ClaudeCodeProfile.credentials(from: account.credentials)) != .ready
       let detail: String
       if codexBusyAccounts.contains(account.id) {
@@ -451,6 +545,7 @@ final class AppModel: ObservableObject {
     }
     codexAccountMessages[accountID] = nil
     codexUsageReceipts[accountID] = nil
+    credentialEditRevisions[accountID] = nil
     claudeSessions[accountID] = nil
     claudeAccountMessages[accountID] = nil
     claudeCredentialFailures.remove(accountID)
@@ -542,6 +637,8 @@ final class AppModel: ObservableObject {
   /// Fills an existing account's credentials from a login detected on this Mac (the
   /// per-account "Auto-fill" action). Running this on demand also triggers the macOS
   /// Keychain prompt for Claude, which a background scan can't surface clearly.
+  /// Returns true only when the detected login replaced the account's whole credential
+  /// set (every field, never a merge); false leaves the credentials unchanged.
   @discardableResult
   func autofillCredentials(forAccountID accountID: String) -> Bool {
     guard let index = providerAccounts.firstIndex(where: { $0.id == accountID }) else { return false }
@@ -557,14 +654,10 @@ final class AppModel: ObservableObject {
 
     claudeAccountMessages[accountID] = nil
     claudeCredentialFailures.remove(accountID)
-    if provider == .venice {
-      updateAccount(accountID: accountID) { $0.credentials = match.credentials }
-      guard account(withID: accountID)?.credentials == match.credentials else { return false }
-    } else {
-      providerAccounts[index].credentials = match.credentials
-      reloadAccountStatuses()
-      saveConfiguration()
-    }
+    let outcome = updateAccount(accountID: accountID) { $0.credentials = match.credentials }
+    // Auto-fill uses the same committed replacement and revision boundary as typing.
+    if case .rejected(let rejection) = outcome { statusMessage = rejection.message }
+    guard account(withID: accountID)?.credentials == match.credentials else { return false }
     statusMessage = "Filled “\(providerAccounts[index].resolvedDisplayName)” from \(match.sourceLabel)."
     return true
   }
@@ -653,7 +746,10 @@ final class AppModel: ObservableObject {
   private func refreshExpiringChatGPTTokens() async {
     // Only enabled accounts: refreshing a disabled account would keep rotating the shared
     // Codex refresh token and log the user's Codex CLI out of an account they turned off.
-    let openAIAccountIDs = providerAccounts.filter { $0.provider == .openAI && $0.isEnabled && !CodexAccountProfile.isManaged($0.credentials) }.map(\.id)
+    let openAIAccountIDs = providerAccounts.filter {
+      $0.provider == .openAI && $0.isEnabled && !CodexAccountProfile.isManaged($0.credentials)
+        && !codexBusyAccounts.contains($0.id)
+    }.map(\.id)
     guard !openAIAccountIDs.isEmpty else { return }
 
     var didChange = false
@@ -670,7 +766,11 @@ final class AppModel: ObservableObject {
       let credentials = providerAccounts[index].credentials
       guard let refreshToken = credentials[CredentialField.openAIRefreshToken], !refreshToken.isEmpty else { continue }
 
-      let access = credentials[CredentialField.openAIAccessToken] ?? ""
+      // Externally managed grants cannot be rotated back into their variables.
+      if refreshToken.isEnvironmentReference
+        || credentials[CredentialField.openAIAccessToken]?.isEnvironmentReference == true { continue }
+
+      let access = credentials.resolvingEnvironmentReferences()[CredentialField.openAIAccessToken] ?? ""
       if !access.isEmpty, !ChatGPTOAuth.isAccessTokenExpired(access) { continue }
 
       if await refreshOpenAIAccount(id: accountID, refreshToken: refreshToken) {
@@ -712,23 +812,31 @@ final class AppModel: ObservableObject {
   @discardableResult
   private func refreshOpenAIAccount(id accountID: String, refreshToken: String) async -> Bool {
     guard let previous = account(withID: accountID)?.credentials,
-          !CodexAccountProfile.isManaged(previous) else { return false }
+          !CodexAccountProfile.isManaged(previous), !codexAccountIsBusy(accountID),
+          !refreshToken.isEnvironmentReference,
+          previous[CredentialField.openAIAccessToken]?.isEnvironmentReference != true else { return false }
+    let revision = credentialEditRevisions[accountID]
     do {
       let result = try await ChatGPTOAuth.refresh(refreshToken: refreshToken)
       // A reconnect or credential edit must not be replaced by an older refresh.
       guard let index = providerAccounts.firstIndex(where: { $0.id == accountID }),
-            providerAccounts[index].credentials == previous else { return false }
+            providerAccounts[index].credentials == previous,
+            credentialEditRevisions[accountID] == revision else { return false }
       providerAccounts[index].credentials[CredentialField.openAIAccessToken] = result.accessToken
-      if let newRefresh = result.refreshToken {
+      if let newRefresh = result.refreshToken,
+         previous[CredentialField.openAIRefreshToken]?.isEnvironmentReference != true {
         providerAccounts[index].credentials[CredentialField.openAIRefreshToken] = newRefresh
       }
-      if let newAccountID = result.accountID {
+      if let newAccountID = result.accountID,
+         previous[CredentialField.openAIAccountID]?.isEnvironmentReference != true {
         providerAccounts[index].credentials[CredentialField.openAIAccountID] = newAccountID
       }
       return true
     } catch {
       print("[LLimit] ChatGPT token refresh failed: \(error.localizedDescription)")
       // Codex may have rotated the grant; re-read the live file and adopt if it changed.
+      guard account(withID: accountID)?.credentials == previous,
+            credentialEditRevisions[accountID] == revision else { return false }
       return adoptLiveOpenAITokens(forAccountIDs: [accountID])
     }
   }
@@ -738,41 +846,52 @@ final class AppModel: ObservableObject {
   /// pass skips a not-yet-expired token, so such an account 401s every cycle. For each
   /// enabled OpenAI account that failed auth this cycle, first adopt a fresher live token;
   /// only if nothing fresher is on disk do we force a refresh (which rotates the grant).
-  /// Returns the set of account ids whose credentials changed, so the caller can retry
-  /// exactly those accounts.
-  private func recoverFailedOpenAITokens(in snapshot: QuotaSnapshot) async -> Set<String> {
+  /// Capture each recovered login immediately: another recovery can suspend while
+  /// the user changes it. Skipped failures belong to an earlier fetch.
+  private func recoverFailedOpenAITokens(in snapshot: QuotaSnapshot, skipping skippedIDs: Set<String>,
+                                        provenance: RefreshProvenance) async -> (configurations: [ProviderRuntimeConfiguration],
+                                                                                credentialRevisions: [String: UUID]) {
     let failedIDs = snapshot.failures
-      .filter { $0.provider == .openAI && $0.kind == .auth }
+      .filter { $0.provider == .openAI && $0.kind == .auth && !skippedIDs.contains($0.accountID) }
       .map(\.accountID)
-    guard !failedIDs.isEmpty else { return [] }
+    guard !failedIDs.isEmpty else { return ([], [:]) }
 
-    var recovered: Set<String> = []
+    var recovered: [ProviderRuntimeConfiguration] = []
+    var revisions: [String: UUID] = [:]
     for accountID in failedIDs {
       guard
         let index = providerAccounts.firstIndex(where: { $0.id == accountID }),
         providerAccounts[index].provider == .openAI,
         providerAccounts[index].isEnabled,
+        provenance.matchesQuery(providerAccounts[index], credentialRevisions: credentialEditRevisions),
+        !codexAccountIsBusy(accountID),
         !CodexAccountProfile.isManaged(providerAccounts[index].credentials)
       else { continue }
 
       // Prefer adopting Codex's own fresher token — that recovers the account without
       // rotating the shared grant (which would log the Codex CLI out).
       if adoptLiveOpenAITokens(forAccountIDs: [accountID]) {
-        recovered.insert(accountID)
+        recovered.append(providerAccounts[index].runtimeConfiguration())
+        revisions[accountID] = credentialEditRevisions[accountID]
         continue
       }
 
       // Nothing fresher on disk: the stored token is genuinely bad, so force a refresh.
       let refreshToken = providerAccounts[index].credentials[CredentialField.openAIRefreshToken] ?? ""
-      if !refreshToken.isEmpty, await refreshOpenAIAccount(id: accountID, refreshToken: refreshToken) {
-        recovered.insert(accountID)
+      if !refreshToken.isEmpty, !refreshToken.isEnvironmentReference,
+         providerAccounts[index].credentials[CredentialField.openAIAccessToken]?.isEnvironmentReference != true,
+         await refreshOpenAIAccount(id: accountID, refreshToken: refreshToken) {
+        if let current = account(withID: accountID) {
+          recovered.append(current.runtimeConfiguration())
+          revisions[accountID] = credentialEditRevisions[accountID]
+        }
       }
     }
 
     if !recovered.isEmpty {
       saveConfiguration()
     }
-    return recovered
+    return (recovered, revisions)
   }
 
   // MARK: - Independent Codex accounts
@@ -834,6 +953,7 @@ final class AppModel: ObservableObject {
         codexLoginIDs[accountID] = nil
         codexLoginHandles[profile.id] = nil
         codexBusyAccounts.remove(accountID)
+        signInSkippedAccountIDs.remove(accountID)
         if codexLogin?.id == profile.id { codexLogin = nil }
         reloadAccountStatuses()
         await refreshCodexAccountAfterCurrentCycle(accountID, profileID: profile.id, requestedAt: Date())
@@ -851,6 +971,7 @@ final class AppModel: ObservableObject {
           codexLogin?.isBusy = false
         }
         reloadAccountStatuses()
+        catchUpAfterSignIn(accountID)
       }
     }
   }
@@ -883,6 +1004,26 @@ final class AppModel: ObservableObject {
         : "Sign-in canceled. Your previous connection is unchanged. Local login cleanup is pending."
       if codexLogin?.id == login.id { codexLogin = nil }
       reloadAccountStatuses()
+      catchUpAfterSignIn(login.accountID)
+    }
+  }
+
+  private func catchUpAfterSignIn(_ accountID: String) {
+    guard signInSkippedAccountIDs.remove(accountID) != nil else { return }
+    let endedAt = Date()
+    Task {
+      if let profile = account(withID: accountID).flatMap({ CodexAccountProfile.profile(from: $0.credentials) }) {
+        await refreshCodexAccountAfterCurrentCycle(accountID, profileID: profile.id, requestedAt: endedAt)
+        return
+      }
+      // Imported accounts still need the cycle's identity-matched adoption and recovery.
+      while isRefreshing {
+        do { try await Task.sleep(for: .seconds(1)) } catch { return }
+      }
+      guard let current = account(withID: accountID), current.isEnabled, current.hasRequiredCredentials else { return }
+      if let fetchedAt = snapshot?.providers.first(where: { $0.accountID == accountID })?.fetchedAt,
+         fetchedAt >= endedAt { return }
+      await refreshNow()
     }
   }
 
@@ -891,9 +1032,14 @@ final class AppModel: ObservableObject {
       throw CodexConnectionError.storage
     }
     let previous = providerAccounts[index].credentials
+    if previous != credentials {
+      do { try invalidateAccountSnapshot(for: accountID) }
+      catch { throw CodexConnectionError.storage }
+    }
     providerAccounts[index].credentials = credentials
     do { try settingsStore.save(currentSettings()) }
     catch { providerAccounts[index].credentials = previous; throw CodexConnectionError.storage }
+    if previous != credentials { credentialEditRevisions[accountID] = UUID() }
     codexUsageReceipts[accountID] = nil
     if syncSettingsToWidgetStore(currentSettings().redactedCredentials()) { reloadWidgetTimelines() }
   }
@@ -918,19 +1064,20 @@ final class AppModel: ObservableObject {
   }
 
   private func refreshCodexAccountAfterCurrentCycle(_ id: String, profileID: UUID, requestedAt: Date) async {
-    while isRefreshing || !codexBusyAccounts.isEmpty {
+    while isRefreshing || codexAccountIsBusy(id) {
       do { try await Task.sleep(for: .seconds(1)) } catch { return }
     }
-    guard let account = account(withID: id), account.isEnabled,
+    guard let account = account(withID: id), account.provider == .openAI, account.isEnabled,
           CodexAccountProfile.profile(from: account.credentials)?.id == profileID else { return }
     if let receipt = codexUsageReceipts[id], receipt.profile == profileID, receipt.fetchedAt >= requestedAt,
        snapshot?.failures.contains(where: { $0.accountID == id }) == false { return }
     isRefreshing = true
     defer { isRefreshing = false }
     let configurations = runtimeConfigurations().filter { $0.accountID == id && $0.isEnabled }
+    let provenance = RefreshProvenance(configurations: configurations, credentialRevisions: credentialEditRevisions)
     var partial = await refreshService.fetch(configurations: configurations)
+    partial = validatedRefreshResults(partial.mergingStaleUsage(from: snapshot), provenance: provenance)
     recordCodexUsage(in: partial, configurations: configurations)
-    partial = partial.mergingStaleUsage(from: snapshot)
     var refreshed = snapshot?.replacingResults(forAccountIDs: [id], from: partial) ?? partial
     refreshed.generatedAt = partial.generatedAt
     var saveFailed = false
@@ -987,7 +1134,7 @@ final class AppModel: ObservableObject {
       let session = ClaudeTerminalSession(
         executable: executable, arguments: ["auth", "login", "--claudeai"],
         environment: ClaudeCodeProcess.environment(parent: ProcessInfo.processInfo.environment,
-                                                    profileDirectory: directory),
+                                                    profileDirectory: directory, executable: executable),
         workingDirectory: directory.appendingPathComponent("work", isDirectory: true))
       session.onExit = { [weak self] status in
         self?.completeClaudeLogin(accountID: accountID, profile: profile, status: status)
@@ -1056,29 +1203,57 @@ final class AppModel: ObservableObject {
       throw ClaudeProfileService.Failure.settingsUnavailable
     }
     let previous = providerAccounts[index].credentials
+    if expectedProfile == nil, previous != credentials {
+      do { try invalidateAccountSnapshot(for: accountID) }
+      catch { throw ClaudeProfileService.Failure.settingsUnavailable }
+    }
     providerAccounts[index].credentials = credentials
     do { try settingsStore.save(currentSettings()) }
     catch {
       providerAccounts[index].credentials = previous
       throw ClaudeProfileService.Failure.settingsUnavailable
     }
+    if expectedProfile == nil, previous != credentials { credentialEditRevisions[accountID] = UUID() }
     if syncSettingsToWidgetStore(currentSettings().redactedCredentials()) { reloadWidgetTimelines() }
     reloadAccountStatuses()
   }
 
-  private func prepareClaudeAccounts() async -> [ProviderFailure] {
+  private func prepareClaudeAccounts() async -> (failures: [ProviderFailure], configurations: [ProviderRuntimeConfiguration],
+                                               credentialRevisions: [String: UUID]) {
     let ids = providerAccounts.filter {
       $0.provider == .anthropic && $0.isEnabled && ClaudeCodeProfile.profile(from: $0.credentials) != nil
     }.map(\.id)
     var failures: [ProviderFailure] = []
+    var configurations: [ProviderRuntimeConfiguration] = []
+    var revisions: [String: UUID] = [:]
     for id in ids {
-      if let failure = await prepareClaudeAccount(id: id) { failures.append(failure) }
+      guard let before = account(withID: id) else { continue }
+      let revision = credentialEditRevisions[id]
+      if let failure = await prepareClaudeAccount(id: id) {
+        failures.append(failure)
+        configurations.append(configurationAfterClaudePreparation(before, credentialRevision: revision))
+        revisions[id] = revision
+      }
     }
-    return failures
+    return (failures, configurations, revisions)
+  }
+
+  /// Pending markers and token caches may change during preparation. Only the
+  /// same verified profile and edit revision may own its resulting failure.
+  private func configurationAfterClaudePreparation(_ before: ProviderAccount, credentialRevision: UUID?) -> ProviderRuntimeConfiguration {
+    guard let current = account(withID: before.id), current.provider == before.provider,
+          credentialEditRevisions[before.id] == credentialRevision,
+          ClaudeCodeProfile.profile(from: current.credentials) == ClaudeCodeProfile.profile(from: before.credentials),
+          ClaudeCodeProfile.identity(from: current.credentials)?.accountID == ClaudeCodeProfile.identity(from: before.credentials)?.accountID,
+          ClaudeCodeProfile.identity(from: current.credentials)?.organizationID == ClaudeCodeProfile.identity(from: before.credentials)?.organizationID else {
+      return before.runtimeConfiguration()
+    }
+    return current.runtimeConfiguration()
   }
 
   private func prepareClaudeAccount(id: String, force: Bool = false) async -> ProviderFailure? {
     guard let account = account(withID: id), account.isEnabled,
+          account.credentials[CredentialField.anthropicAccessToken]?.isEnvironmentReference != true,
           let profile = ClaudeCodeProfile.profile(from: account.credentials) else { return nil }
     do {
       if let operation = claudeRenewals[id] {
@@ -1131,7 +1306,8 @@ final class AppModel: ObservableObject {
     let result = try await claudeProcess.run(
       executable: executable, arguments: ["auth", "login", "--claudeai"],
       environment: ClaudeCodeProcess.environment(parent: ProcessInfo.processInfo.environment,
-                                                  profileDirectory: directory, renewal: material),
+                                                  profileDirectory: directory, executable: executable,
+                                                  renewal: material),
       workingDirectory: directory.appendingPathComponent("work", isDirectory: true), timeout: 45)
     switch result {
     case .completed(let status):
@@ -1180,15 +1356,36 @@ final class AppModel: ObservableObject {
     status(for: accountID)?.available ?? false
   }
 
-  func accountDisplayNameBinding(for accountID: String) -> Binding<String> {
-    Binding(
-      get: { self.account(withID: accountID)?.displayName ?? "" },
-      set: { newValue in
-        self.updateAccount(accountID: accountID) { account in
-          account.displayName = newValue
-        }
+  /// Saves one committed Settings text field. Settings keeps keystrokes in a draft and
+  /// commits once (Return, focus loss, navigation, window close or quit), so a key
+  /// replacement and its Venice history purge run only when the value really changed.
+  /// A rejection leaves the account unchanged; Settings keeps the draft and its reason.
+  func commitAccountEdit(_ draft: String, to field: EditableAccountField, accountID: String) -> AccountEditOutcome {
+    guard let savedAccount = account(withID: accountID) else { return .accountMissing }
+    guard let value = savedAccount.committedText(draft, for: field) else { return .unchanged }
+
+    switch field {
+    case .displayName:
+      return updateAccount(accountID: accountID) { account in
+        account.displayName = value
       }
-    )
+    case .credential(let fieldKey):
+      if codexAccountIsBusy(accountID) { return .rejected(.signInInProgress) }
+      // A connection owns every credential of its account, and Settings hides all
+      // manual fields while connected. A draft committed now was typed before the
+      // connection finished and must not undo it. Anthropic has only the token field.
+      if codexAccountIsManaged(accountID) || ClaudeCodeProfile.profile(from: savedAccount.credentials) != nil {
+        return .rejected(.managedConnection)
+      }
+      claudeAccountMessages[accountID] = nil
+      claudeCredentialFailures.remove(accountID)
+      return updateAccount(accountID: accountID) { account in
+        if account.provider == .anthropic && fieldKey == CredentialField.anthropicAccessToken {
+          account.credentials = ClaudeCodeProfile.clearManagedMetadata(from: account.credentials)
+        }
+        account.credentials[fieldKey] = value
+      }
+    }
   }
 
   func accountEnabledBinding(for accountID: String) -> Binding<Bool> {
@@ -1197,23 +1394,6 @@ final class AppModel: ObservableObject {
       set: { newValue in
         self.updateAccount(accountID: accountID) { account in
           account.isEnabled = newValue
-        }
-      }
-    )
-  }
-
-  func credentialBinding(for accountID: String, fieldKey: String) -> Binding<String> {
-    Binding(
-      get: { self.account(withID: accountID)?.credentials[fieldKey] ?? "" },
-      set: { newValue in
-        guard !self.codexAccountIsManaged(accountID), !self.codexAccountIsBusy(accountID) else { return }
-        self.claudeAccountMessages[accountID] = nil
-        self.claudeCredentialFailures.remove(accountID)
-        self.updateAccount(accountID: accountID) { account in
-          if account.provider == .anthropic && fieldKey == CredentialField.anthropicAccessToken {
-            account.credentials = ClaudeCodeProfile.clearManagedMetadata(from: account.credentials)
-          }
-          account.credentials[fieldKey] = newValue
         }
       }
     )
@@ -1398,7 +1578,7 @@ final class AppModel: ObservableObject {
       set: { newValue in
         self.widgetStyle.backgroundHexColor = Self.hexColor(from: newValue, allowTransparency: true)
         self.widgetStyle.useTransparentBackground = false
-        self.saveConfiguration()
+        self.scheduleConfigurationSave()
       }
     )
   }
@@ -1446,7 +1626,7 @@ final class AppModel: ObservableObject {
         return Self.color(fromHex: resolvedHex)
       },
       set: { newValue in
-        self.updateWidgetBackgroundOverride(for: target) { override in
+        self.updateWidgetBackgroundOverride(for: target, saveTiming: .coalesced) { override in
           override.useCustomBackground = true
           override.backgroundHexColor = Self.hexColor(from: newValue, allowTransparency: true)
           override.useTransparentBackground = false
@@ -1478,7 +1658,7 @@ final class AppModel: ObservableObject {
         }
 
         self.widgetStyle.limitKindColors.setHexColor(hex, for: kind, otherSlot: otherSlot)
-        self.saveConfiguration()
+        self.scheduleConfigurationSave()
       }
     )
   }
@@ -1494,7 +1674,7 @@ final class AppModel: ObservableObject {
         }
 
         self.widgetStyle.limitKindColors.unlimitedHexColor = hex
-        self.saveConfiguration()
+        self.scheduleConfigurationSave()
       }
     )
   }
@@ -1545,7 +1725,7 @@ final class AppModel: ObservableObject {
       },
       set: { newValue in
         guard let hex = Self.hexColor(from: newValue, allowTransparency: false) else { return }
-        self.updateProviderStyle(for: accountID) { $0.primaryHexColor = hex }
+        self.updateProviderStyle(for: accountID, saveTiming: .coalesced) { $0.primaryHexColor = hex }
       }
     )
   }
@@ -1611,7 +1791,7 @@ final class AppModel: ObservableObject {
         return Self.color(fromHex: resolvedHex)
       },
       set: { newValue in
-        self.updateProviderStyle(for: accountID) { style in
+        self.updateProviderStyle(for: accountID, saveTiming: .coalesced) { style in
           style.style.backgroundHexColor = Self.hexColor(from: newValue, allowTransparency: true)
           style.style.useTransparentBackground = false
         }
@@ -1630,34 +1810,43 @@ final class AppModel: ObservableObject {
     )
   }
 
+  /// Returns `.applied` once the mutation is accepted, whether or not it changed
+  /// anything, or why it was refused. Callers report a rejection on their own
+  /// surface: Settings fields show it inline, Auto-fill uses the status message.
+  @discardableResult
   private func updateAccount(
     accountID: String,
     mutate: (inout ProviderAccount) -> Void
-  ) {
+  ) -> AccountEditOutcome {
     guard let index = providerAccounts.firstIndex(where: { $0.id == accountID }) else {
-      return
+      return .accountMissing
     }
 
     let previousAccount = providerAccounts[index]
     var updatedAccount = previousAccount
     mutate(&updatedAccount)
 
-    if previousAccount.provider == .venice,
-       previousAccount.credentials[CredentialField.veniceAPIKey] != updatedAccount.credentials[CredentialField.veniceAPIKey] {
+    if previousAccount.credentials != updatedAccount.credentials {
       guard !configurationLoadFailed else {
-        statusMessage = "Could not change this key because the settings file could not be read."
-        return
+        return .rejected(.settingsUnreadable)
       }
       do {
-        // The observed DIEM denominator belongs to this key. Clear it durably
-        // before accepting a replacement key, including Auto-fill replacements.
-        try invalidateVeniceUsage(for: previousAccount)
+        // Old cache entries must not become stale-on-failure carries for the replacement login.
+        if previousAccount.provider == .venice,
+           previousAccount.credentials[CredentialField.veniceAPIKey] != updatedAccount.credentials[CredentialField.veniceAPIKey] {
+          try invalidateVeniceUsage(for: previousAccount)
+        } else {
+          try invalidateAccountSnapshot(for: accountID)
+        }
       } catch {
-        statusMessage = "Could not clear this account's previous usage. Check LLimit's storage permissions and try again."
-        return
+        return .rejected(.previousUsageNotCleared)
       }
     }
     providerAccounts[index] = updatedAccount
+
+    if previousAccount.credentials != updatedAccount.credentials {
+      credentialEditRevisions[accountID] = UUID()
+    }
 
     let wasActive = previousAccount.isEnabled && previousAccount.hasRequiredCredentials
     let isActive = updatedAccount.isEnabled && updatedAccount.hasRequiredCredentials
@@ -1666,34 +1855,41 @@ final class AppModel: ObservableObject {
     }
     reloadAccountStatuses()
     saveConfiguration()
+    return .applied
   }
 
   private func invalidateVeniceUsage(for account: ProviderAccount) throws {
+    try invalidateAccountSnapshot(for: account.id)
+    try historyStore.remove(accountIDs: [account.id])
+    reloadRecentHistory()
+    purgeWidgetHistory(accountIDs: [account.id])
+  }
+
+  private func invalidateAccountSnapshot(for accountID: String) throws {
     let current = try snapshotStore.load(policy: .recover) ?? snapshot
       ?? QuotaSnapshot(generatedAt: Date(), providers: [], failures: [])
     let empty = QuotaSnapshot(generatedAt: current.generatedAt, providers: [], failures: [])
-    let cleared = current.replacingResults(forAccountIDs: [account.id], from: empty)
+    let cleared = current.replacingResults(forAccountIDs: [accountID], from: empty)
     try snapshotStore.save(cleared)
-    try historyStore.remove(accountIDs: [account.id])
     snapshot = cleared
-    reloadRecentHistory()
     if syncSnapshotToWidgetStore(cleared) { reloadWidgetTimelines() }
-    purgeHistory(for: account)
   }
 
   private func updateProviderStyle(
     for accountID: String,
+    saveTiming: ConfigurationSaveTiming = .immediate,
     mutate: (inout ProviderStyleSettings) -> Void
   ) {
     var style = providerStyle(for: accountID)
     style.provider = account(withID: accountID)?.provider
     mutate(&style)
     providerStyleSettings[accountID] = style
-    saveConfiguration()
+    saveStyleConfiguration(timing: saveTiming)
   }
 
   private func updateWidgetBackgroundOverride(
     for target: WidgetBackgroundTarget,
+    saveTiming: ConfigurationSaveTiming = .immediate,
     mutate: (inout WidgetBackgroundOverride) -> Void
   ) {
     switch target {
@@ -1707,7 +1903,14 @@ final class AppModel: ObservableObject {
       widgetBackgroundSettings.trend = override
     }
 
-    saveConfiguration()
+    saveStyleConfiguration(timing: saveTiming)
+  }
+
+  private func saveStyleConfiguration(timing: ConfigurationSaveTiming) {
+    switch timing {
+    case .immediate: saveConfiguration()
+    case .coalesced: scheduleConfigurationSave()
+    }
   }
 
   private func nextDisplayName(for provider: QuotaProvider) -> String {
@@ -1733,15 +1936,7 @@ final class AppModel: ObservableObject {
   }
 
   private func runtimeConfigurations() -> [ProviderRuntimeConfiguration] {
-    providerAccounts.map { account in
-      ProviderRuntimeConfiguration(
-        accountID: account.id,
-        provider: account.provider,
-        displayName: account.resolvedDisplayName,
-        isEnabled: account.isEnabled,
-        credentials: account.credentials
-      )
-    }
+    providerAccounts.map { $0.runtimeConfiguration() }
   }
 
   private func loadSettingsFromPreferredStore() throws -> AppSettings {
@@ -1800,7 +1995,10 @@ final class AppModel: ObservableObject {
       print("[LLimit] Local history purge failed: \(error.localizedDescription)")
     }
     reloadRecentHistory()
+    purgeWidgetHistory(accountIDs: accountIDs)
+  }
 
+  private func purgeWidgetHistory(accountIDs: Set<String>) {
     do {
       guard let widgetHistoryStore = appGroupHistoryStore() else {
         print("[LLimit] Widget history purge failed: no App Group history store available")
@@ -1815,7 +2013,7 @@ final class AppModel: ObservableObject {
   }
 
   private func reloadRecentHistory(now: Date = Date()) {
-    recentHistory = (try? historyStore.loadRecent(days: 2, now: now)) ?? []
+    recentHistory = (try? historyStore.loadRecent(days: Self.recentHistoryDays, now: now)) ?? []
   }
 
   private func restartAutoRefreshLoop() {
@@ -2055,7 +2253,7 @@ final class AppModel: ObservableObject {
   }
 
   @discardableResult
-  private func syncHistoryToWidgetStore(_ snapshot: QuotaSnapshot) -> Bool {
+  private func syncHistoryToWidgetStore(_ snapshot: QuotaSnapshot, archive: QuotaHistoryStore.Archive?) -> Bool {
     for attempt in 1...2 {
       guard let appGroupStore = appGroupHistoryStore() else {
         print("[LLimit] History sync failed: no App Group history store available")
@@ -2064,7 +2262,11 @@ final class AppModel: ObservableObject {
       }
 
       do {
-        try appGroupStore.append(snapshot)
+        if let archive {
+          try appGroupStore.save(archive)
+        } else {
+          try appGroupStore.append(snapshot)
+        }
         return true
       } catch {
         print("[LLimit] History sync attempt \(attempt) failed: \(error.localizedDescription)")
@@ -2075,11 +2277,7 @@ final class AppModel: ObservableObject {
     return false
   }
 
-  /// Coalesces widget reloads. `saveConfiguration()` runs on every keystroke in Settings
-  /// (each edit to a name/credential field), and WidgetKit budgets `reloadAllTimelines()`
-  /// aggressively — hammering it during typing gets later, meaningful reloads dropped and
-  /// leaves the widgets stuck on stale data. Debouncing means a burst of edits triggers a
-  /// single reload once the user pauses.
+  /// Coalesce configuration and quota reloads to avoid exhausting WidgetKit's budget.
   private func reloadWidgetTimelines() {
     widgetReloadTask?.cancel()
     widgetReloadTask = Task { [weak self] in

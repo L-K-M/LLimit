@@ -614,40 +614,29 @@ private struct SparkPoint {
   let remaining: Double
 }
 
-/// Builds per-metric history series for the sparklines from the app's recent
-/// local history. Matching mirrors the trend widget: by accountID, with the
-/// pre-multi-account fallback (accountID == provider raw value) honored only
-/// while that provider still has exactly one enabled account.
+/// Projects source observations into per-metric sparklines.
 private struct SparkSeriesBuilder {
-  let history: [QuotaSnapshot]
-  let soleAccountProviders: Set<QuotaProvider>
+  let observations: [ProviderUsage]
 
   func points(
     accountID: String,
     provider: QuotaProvider,
     metricID: String,
-    metricLabel: String,
-    window: ClosedRange<Date>
+    metricLabel: String
   ) -> [SparkPoint] {
     let resolvedID = Self.resolvedMetricID(id: metricID, label: metricLabel)
     var result: [SparkPoint] = []
 
-    for snapshot in history {
-      guard window.contains(snapshot.generatedAt) else { continue }
-      guard let usage = snapshot.providers.first(where: { usage in
-        usage.accountID == accountID
-          || (usage.provider == provider
-            && usage.accountID == usage.provider.rawValue
-            && soleAccountProviders.contains(provider))
-      }) else { continue }
+    for usage in observations {
+      guard usage.accountID == accountID, usage.provider == provider else { continue }
       guard let metric = usage.metrics.first(where: { metric in
         Self.resolvedMetricID(id: metric.id, label: metric.label) == resolvedID
       }) else { continue }
 
       if metric.isUnlimited {
-        result.append(SparkPoint(date: snapshot.generatedAt, remaining: 100))
+        result.append(SparkPoint(date: usage.fetchedAt, remaining: 100))
       } else if let remaining = metric.remainingPercent {
-        result.append(SparkPoint(date: snapshot.generatedAt, remaining: Double(max(0, min(100, remaining)))))
+        result.append(SparkPoint(date: usage.fetchedAt, remaining: Double(max(0, min(100, remaining)))))
       }
     }
 
@@ -826,10 +815,9 @@ private struct MenuBarContent: View {
       if providers.isEmpty && standaloneFailures.isEmpty {
         emptyState
       } else {
-        let enabledByProvider = Dictionary(grouping: model.providerAccounts.filter(\.isEnabled), by: \.provider)
         let sparkBuilder = SparkSeriesBuilder(
-          history: model.recentHistory,
-          soleAccountProviders: Set(enabledByProvider.filter { $0.value.count == 1 }.map(\.key))
+          observations: QuotaObservations.extract(from: model.recentHistory + [snapshot],
+            accounts: model.providerAccounts, window: now.addingTimeInterval(-24 * 3_600)...now)
         )
 
         ScrollViewReader { proxy in
@@ -927,8 +915,12 @@ private struct MenuBarContent: View {
         Group {
           if model.isRefreshing {
             Text("Refreshing…")
+          } else if let snapshot = model.snapshot, let reason = model.refreshAvailability.reason {
+            Text("\(reason) · Updated \(QuotaDisplayText.relativeAge(snapshot.generatedAt, now: now))")
           } else if let snapshot = model.snapshot {
             Text("Updated \(QuotaDisplayText.relativeAge(snapshot.generatedAt, now: now))")
+          } else if let reason = model.refreshAvailability.reason {
+            Text(reason)
           } else {
             Text("Waiting for quota data")
           }
@@ -1037,7 +1029,8 @@ private struct MenuBarContent: View {
           .foregroundStyle(.white)
       }
       .buttonStyle(.plain)
-      .disabled(model.isRefreshing)
+      .disabled(!model.refreshAvailability.allowsRefresh)
+      .help(model.refreshAvailability.help)
       .padding(.top, 4)
     }
     .frame(maxWidth: .infinity, minHeight: 220)
@@ -1049,13 +1042,14 @@ private struct MenuBarContent: View {
       ActionBarButton(
         title: model.isRefreshing ? "Refreshing" : "Refresh",
         systemImage: "arrow.clockwise",
-        isDisabled: model.isRefreshing,
+        isDisabled: !model.refreshAvailability.allowsRefresh,
         shortcut: KeyboardShortcut("r", modifiers: .command)
       ) {
         Task {
           await model.refreshNow()
         }
       }
+      .help(model.refreshAvailability.help)
 
       Spacer()
 
@@ -1763,18 +1757,12 @@ private struct ProviderQuotaCard: View {
   private func sparkPoints(for metric: UsageMetric) -> [SparkPoint] {
     guard !metric.isUnlimited else { return [] }
 
-    var points = sparkBuilder.points(
+    return sparkBuilder.points(
       accountID: usage.accountID,
       provider: usage.provider,
       metricID: metric.id,
-      metricLabel: metric.label,
-      window: now.addingTimeInterval(-24 * 3_600)...now
+      metricLabel: metric.label
     )
-    // Extend the line to "now" at the live value so the spark never ends mid-window.
-    if let remaining = metric.remainingPercent {
-      points.append(SparkPoint(date: now, remaining: Double(max(0, min(100, remaining)))))
-    }
-    return points
   }
 
   private var detailParts: [String] {
@@ -1908,6 +1896,12 @@ private struct MetricQuotaRow: View {
               .fixedSize()
           }
         }
+      }
+
+      if let pace = metric.paceEstimate, pace.trend == .runsOut, pace.isValid(at: now) {
+        Text(pace.displayText(at: now))
+          .font(.system(size: 10, weight: .semibold))
+          .foregroundStyle(.orange)
       }
 
       if let detail = metric.detail, !detail.isEmpty {

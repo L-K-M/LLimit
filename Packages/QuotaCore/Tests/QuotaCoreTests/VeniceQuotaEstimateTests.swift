@@ -7,9 +7,11 @@ final class VeniceQuotaEstimateTests: XCTestCase {
 
   private func fetch(_ amount: Double, previous: QuotaSnapshot? = nil, seconds: TimeInterval = 0,
                      reset: Date? = nil, percent: Int? = nil, warning: String? = nil,
+                     keyHash: String? = nil,
                      accountID: String = "venice-account", provider: QuotaProvider = .venice) async -> QuotaSnapshot {
     let metric = UsageMetric(
       id: "daily-diem", label: "Daily DIEM remaining", remainingPercent: percent, remainingAmount: amount,
+      estimateKeyHash: keyHash,
       usedDisplay: "\(amount) DIEM", resetAt: reset ?? now.addingTimeInterval(3_600), detail: "API key balance.")
     let coordinator = QuotaCoordinator(clients: [EstimateClient(provider: provider, metric: metric, warning: warning)])
     return await coordinator.refresh(
@@ -153,6 +155,28 @@ final class VeniceQuotaEstimateTests: XCTestCase {
     XCTAssertEqual(failed.failures.count, 1)
     let recovered = await fetch(25, previous: failed, seconds: 3)
     XCTAssertEqual(recovered.providers.first?.metrics.first?.remainingPercent, 25)
+  }
+
+  func testReplacedKeyDoesNotInheritPreviousKeysEstimate() async {
+    let first = await fetch(100, keyHash: credentialFingerprint("key-A"))
+    let spent = await fetch(50, previous: first, seconds: 1, keyHash: credentialFingerprint("key-A"))
+    XCTAssertEqual(spent.providers.first?.metrics.first?.remainingPercent, 50)
+    // A replacement key's first reading starts a fresh observation instead of
+    // measuring its balance against the old key's denominator.
+    let replaced = await fetch(30, previous: spent, seconds: 2, keyHash: credentialFingerprint("key-B"))
+    XCTAssertEqual(replaced.providers.first?.metrics.first?.remainingPercent, 100)
+    XCTAssertEqual(replaced.providers.first?.metrics.first?.estimatedTotal, 30)
+    let spentNewKey = await fetch(15, previous: replaced, seconds: 3, keyHash: credentialFingerprint("key-B"))
+    XCTAssertEqual(spentNewKey.providers.first?.metrics.first?.remainingPercent, 50)
+  }
+
+  func testUnstampedPriorSnapshotDoesNotCarryOntoStampedKey() async {
+    // Snapshots written before the fingerprint existed have no stamp; the
+    // first stamped refresh must not inherit their estimate.
+    let legacy = await fetch(100)
+    let stamped = await fetch(40, previous: legacy, seconds: 1, keyHash: credentialFingerprint("key-A"))
+    XCTAssertEqual(stamped.providers.first?.metrics.first?.remainingPercent, 100)
+    XCTAssertEqual(stamped.providers.first?.metrics.first?.estimatedTotal, 40)
   }
 
   func testLegacyMetricsStillDecodeAndDoNotParseFormattedBalances() async throws {

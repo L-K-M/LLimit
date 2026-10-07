@@ -43,6 +43,23 @@ XDG defaults (`~/.config`, `~/.local/share`) apply when the variables are unset;
 relative XDG values are ignored per the spec. Run `llimit paths` to see the
 resolved locations.
 
+### Credentials from the environment
+
+Store `env:NAME` in any credential field instead of a secret, for example
+`llimit accounts add venice --set venice.api_key=env:VENICE_API_KEY`.
+Requests resolve the value from the daemon's process environment, such as a
+systemd `EnvironmentFile`. Settings retain the reference. An unset variable
+counts as a missing credential; an invalid variable name remains a literal.
+
+Automatic OpenAI token rotation skips accounts with an environment-referenced
+access or refresh token because it cannot save the rotated grant back into a
+variable. Keep those tokens fresh externally. Automatic adoption and settings
+merges preserve references. Managed CLI profiles retain their own credentials.
+
+On macOS, LLimit uses its launch environment, not `.zshrc`. `launchctl setenv`
+does not survive a reboot; a LaunchAgent `EnvironmentVariables` dictionary does.
+The environment-file setup above is supported on Linux.
+
 ## Usage
 
 ```
