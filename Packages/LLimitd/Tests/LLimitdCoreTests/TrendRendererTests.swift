@@ -41,4 +41,16 @@ final class TrendRendererTests: XCTestCase {
     XCTAssertTrue(TrendRenderer.render(history: history, now: now, accountPrefix: "Work").contains("Not enough history"))
     XCTAssertTrue(TrendRenderer.render(history: history, now: now, accountPrefix: "Pers").contains("Personal:"))
   }
+
+  func testAmountNormalizationUsesRawObservedRangeBeforeBucketing() {
+    let samples = [(at: now.addingTimeInterval(-60), value: 10.0), (at: now, value: 0.0)]
+    let line = TrendRenderer.sparkline(samples, window: now.addingTimeInterval(-7 * 86_400)...now, width: 24)
+    XCTAssertTrue(line.hasSuffix("▁"))
+  }
+
+  func testFiniteExtremeAmountsKeepTheirRelativeScale() {
+    let samples = [(at: now.addingTimeInterval(-60), value: -Double.greatestFiniteMagnitude),
+      (at: now, value: Double.greatestFiniteMagnitude)]
+    XCTAssertEqual(TrendRenderer.sparkline(samples, window: now.addingTimeInterval(-60)...now, width: 2), "▁█")
+  }
 }

@@ -19,14 +19,15 @@ public enum TrendRenderer {
   ) -> String {
     guard width > 0, !samples.isEmpty else { return "" }
     let span = max(1, window.upperBound.timeIntervalSince(window.lowerBound))
+    let observed = samples.filter { window.contains($0.at) && $0.value.isFinite }
     var buckets = [Double?](repeating: nil, count: width)
-    for sample in samples.sorted(by: { $0.at < $1.at }) where window.contains(sample.at) && sample.value.isFinite {
+    for sample in observed.sorted(by: { $0.at < $1.at }) {
       let offset = sample.at.timeIntervalSince(window.lowerBound) / span
       let index = min(width - 1, max(0, Int((offset * Double(width)).rounded(.down))))
       buckets[index] = sample.value
     }
-    let observed = buckets.compactMap { $0 }
-    guard let minimum = observed.min(), let maximum = observed.max() else { return "" }
+    let values = observed.map(\.value)
+    guard let minimum = values.min(), let maximum = values.max() else { return "" }
     let low = scale?.lowerBound ?? minimum
     let high = scale?.upperBound ?? maximum
     var output = ""
@@ -34,7 +35,11 @@ public enum TrendRenderer {
     for bucket in buckets {
       if let bucket { carried = bucket }
       guard let value = carried else { output.append(" "); continue }
-      let fraction = high == low ? 0.5 : min(1, max(0, (value - low) / (high - low)))
+      // Halving first avoids overflow between finite signed amounts.
+      let relative = high == low ? 0.5 : (high - low).isFinite
+        ? (value - low) / (high - low)
+        : (value / 2 - low / 2) / (high / 2 - low / 2)
+      let fraction = min(1, max(0, relative))
       output.append(blocks[Int(fraction * Double(blocks.count - 1))])
     }
     return output
