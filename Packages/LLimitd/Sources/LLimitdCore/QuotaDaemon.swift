@@ -431,14 +431,21 @@ public final class QuotaDaemon {
         let latest = try loadLatestSettings()
         refreshed = validatedResults(refreshed, configurations: fetchedConfigurations, settings: latest)
         refreshed.refreshIntervalMinutes = latest.refreshIntervalMinutes
+
+        // Archive only finally validated observations, then reuse that evidence
+        // for pace. An earlier append could revive a login replaced during recovery.
+        let archive: QuotaHistoryStore.Archive?
+        do {
+          archive = try historyStore.append(refreshed)
+        } catch {
+          log("[llimitd] History append failed: \(error.localizedDescription)")
+          archive = nil
+        }
+        refreshed = refreshed.applyingPaceEstimates(from: archive?.snapshots ?? [],
+          accounts: latest.accounts, now: Date(), refreshInterval: TimeInterval(latest.refreshIntervalMinutes * 60))
         try snapshotStore.save(refreshed)
         settings = latest
         settingsBase = latest
-        do {
-          try historyStore.append(refreshed)
-        } catch {
-          log("[llimitd] History append failed: \(error.localizedDescription)")
-        }
       }
     } catch {
       statusMessage = "Snapshot save failed: \(error.localizedDescription)"

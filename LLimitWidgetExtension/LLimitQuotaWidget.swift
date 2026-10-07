@@ -73,8 +73,8 @@ private struct TrendLineChartWidgetView: View {
     let chartData = trendChartData(for: entry, days: days)
 
     VStack(alignment: .leading, spacing: 4) {
-      if chartData.series.isEmpty {
-        let message = emptyMessage(for: chartData)
+      if let reason = chartData.emptyReason {
+        let message = emptyMessage(for: reason)
         Spacer(minLength: 0)
         Text(message.title)
           .font(.caption.weight(.semibold))
@@ -92,72 +92,94 @@ private struct TrendLineChartWidgetView: View {
           series: chartData.series.sorted { $0.drawPriority < $1.drawPriority },
           startDate: chartData.startDate,
           endDate: chartData.endDate,
-          showAxisLabels: family != .systemSmall
+          axisStyle: family == .systemSmall ? .endpoints : .full
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
 
         if let warning = chartData.warnings.first {
-          Label {
+          HStack(spacing: 3) {
+            Image(systemName: "exclamationmark.triangle.fill")
             Text(warning.message)
               .lineLimit(1)
-          } icon: {
-            Image(systemName: "exclamationmark.triangle.fill")
+              .minimumScaleFactor(0.8)
+            if chartData.warnings.count > 1 {
+              Text("+\(chartData.warnings.count - 1)").fixedSize()
+            }
           }
-          .font(.system(size: 8.5, weight: .semibold))
+          .font(.system(size: 9, weight: .semibold))
           .foregroundStyle(.orange)
           .padding(.horizontal, 6)
           .padding(.vertical, 2.5)
-          .background(.orange.opacity(0.16), in: Capsule())
+          // Preserve warning contrast against the default blue surface.
+          .background(Color.black.opacity(0.6), in: Capsule())
         }
       }
     }
     .padding(family == .systemSmall ? 7 : 9)
-    .accessibilityLabel(trendAccessibilityLabel(days: days))
+    .accessibilityLabel(trendAccessibilityLabel(days: days, chartData: chartData))
   }
 
-  /// Most specific cause first: hiding every account is the user's choice and
-  /// fixable in Settings, so it outranks the data-driven reasons.
-  private func emptyMessage(for chartData: TrendChartData) -> (title: String, detail: String) {
-    if chartData.hidesEveryAccount {
+  private func emptyMessage(for reason: TrendEmptyReason) -> (title: String, detail: String) {
+    switch reason {
+    case .noAccounts:
+      return ("No accounts", "Add an account in LLimit to chart its quota")
+    case .allHidden:
       return ("No accounts selected", "Choose accounts under Trend Widget in LLimit Settings")
-    }
-    if chartData.hasOnlyUnlimitedData {
+    case .onlyUnlimited:
       return ("Unlimited plans only", "Every tracked limit reports unlimited — nothing to chart")
+    case .onlyAmounts:
+      return ("No limits to chart", "Balances have no remaining percentage to chart")
+    case .refreshFailing:
+      return ("No data to chart", "Open LLimit to check failed refreshes")
+    case .noHistory:
+      return ("No history yet", "The chart fills in as LLimit refreshes")
     }
-    return ("No history yet", "Waiting for automatic refresh")
   }
 
-  private func trendAccessibilityLabel(days: Int) -> String {
+  private func trendAccessibilityLabel(days: Int, chartData: TrendChartData) -> String {
     let start = entry.date.addingTimeInterval(-Double(days) * 86_400)
     let snapshots = entry.history + [entry.snapshot].compactMap { $0 }
     // Only charted accounts count: a hidden account's estimate is not on screen.
     let accountFilter = TrendChartAccountFilter(settings: entry.settings)
-    let includesEstimates = snapshots.contains { snapshot in
-      snapshot.generatedAt >= start && snapshot.generatedAt <= entry.date
-        && snapshot.providers.contains { usage in
-          accountFilter.includes(usage) && usage.metrics.contains(where: \.isPercentageEstimated)
-        }
+    let includesEstimates = QuotaObservations.extract(from: snapshots,
+      accounts: entry.settings.accounts, window: start...entry.date).contains { usage in
+      accountFilter.includes(usage) && usage.metrics.contains(where: \.isPercentageEstimated)
     }
-    return includesEstimates
+    let chart = includesEstimates
       ? "Quota trend chart. Includes estimated remaining percentages."
       : "Quota trend chart."
+    let stale = chartData.series.contains { $0.state == .stale } ? " Includes stale readings." : ""
+    let warnings = chartData.warnings.map { " Warning: \($0.message.replacingOccurrences(of: "~", with: "about "))." }.joined()
+    return chart + stale + warnings
   }
+}
+
+private enum TrendAxisStyle {
+  case full, endpoints
 }
 
 private struct TrendChartPlotView: View {
   let series: [TrendSeries]
   let startDate: Date
   let endDate: Date
-  let showAxisLabels: Bool
+  let axisStyle: TrendAxisStyle
+  private static let percentGutterWidth: CGFloat = 17
+  private static let timeGutterHeight: CGFloat = 11
+  private static let plotInset: CGFloat = 3
+  private static let timeLabelSpacing: CGFloat = 34
+  private static let axisFontSize: CGFloat = 8
+  private static let axisGlyphWidthEms: CGFloat = 0.58
 
   var body: some View {
     GeometryReader { proxy in
-      let width = max(1, proxy.size.width)
-      let height = max(1, proxy.size.height)
-      let boundaries = dayBoundaries()
-      let labelStride = max(1, Int((Double(boundaries.count) / 6.0).rounded(.up)))
+      let showsPercentLabels = axisStyle == .full
+      let width = max(1, proxy.size.width - (showsPercentLabels ? Self.percentGutterWidth : 0))
+      let height = max(1, proxy.size.height - Self.timeGutterHeight)
+      let ticks = timeTicks(width: width)
 
       ZStack {
+        // Axis labels retain contrast on the blue widget background.
+        RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.black.opacity(0.3))
         // Horizontal grid lines at 0%, 25%, 50%, 75%, 100%
         ForEach([0, 25, 50, 75, 100], id: \.self) { level in
           Path { path in
@@ -168,63 +190,64 @@ private struct TrendChartPlotView: View {
           .stroke(Color.white.opacity(level % 50 == 0 ? 0.13 : 0.07), lineWidth: 0.8)
         }
 
-        // Vertical day-separator lines at each midnight boundary
-        ForEach(boundaries, id: \.timeIntervalSince1970) { date in
-          Path { path in
-            let x = xPosition(for: date, width: width)
-            path.move(to: CGPoint(x: x, y: 0))
-            path.addLine(to: CGPoint(x: x, y: height))
+        if axisStyle == .full {
+          ForEach(ticks, id: \.date) { tick in
+            Path { path in
+              let x = xPosition(for: tick.date, width: width)
+              path.move(to: CGPoint(x: x, y: 0))
+              path.addLine(to: CGPoint(x: x, y: height))
+            }
+            .stroke(Color.white.opacity(0.12), style: StrokeStyle(lineWidth: 0.8, dash: [3, 3]))
           }
-          .stroke(Color.white.opacity(0.12), style: StrokeStyle(lineWidth: 0.8, dash: [3, 3]))
         }
 
-        if showAxisLabels {
-          let weekdaySymbols = Calendar.current.veryShortWeekdaySymbols
-
+        if showsPercentLabels {
           ForEach([100, 50, 0], id: \.self) { level in
             Text("\(level)")
-              .font(.system(size: 6.5, weight: .medium))
+              .font(.system(size: Self.axisFontSize, weight: .medium))
               .monospacedDigit()
-              .foregroundStyle(.white.opacity(0.42))
+              .foregroundStyle(.white.opacity(0.9))
               .position(
-                x: width - 7,
-                y: min(max(yPosition(for: Double(level), height: height) + (level == 100 ? 5 : -5), 4), height - 4)
+                x: width + Self.percentGutterWidth / 2,
+                y: max(yPosition(for: Double(level), height: height), Self.axisFontSize / 2 + 1)
               )
           }
 
-          ForEach(Array(boundaries.enumerated()), id: \.element.timeIntervalSince1970) { index, date in
-            if index % labelStride == 0 {
-              Text(weekdayLetter(for: date, symbols: weekdaySymbols))
-                .font(.system(size: 6.5, weight: .medium))
-                .foregroundStyle(.white.opacity(0.42))
-                .position(x: xPosition(for: date, width: width) + 6, y: height - 5)
-            }
-          }
+        }
+
+        ForEach(ticks, id: \.date) { tick in
+          Text(tick.label)
+            .font(.system(size: Self.axisFontSize, weight: .medium))
+            .lineLimit(1)
+            .foregroundStyle(.white.opacity(0.9))
+            .position(x: timeLabelCenter(for: tick, width: width), y: height + Self.timeGutterHeight / 2)
         }
 
         // Data lines (pre-sorted by draw priority). A dark casing keeps every
         // line separable from whatever background the widget sits on.
         ForEach(series) { line in
           if line.points.count >= 2 {
-            let path = linePath(for: line, width: width, height: height)
+            let segments = TrendPathBuilder.segments(for: line.points)
+            let path = linePath(for: segments, kind: .consumption, width: width, height: height)
             let casing = StrokeStyle(
               lineWidth: line.lineWidth + 1.5,
               lineCap: .round,
-              lineJoin: .round,
-              dash: line.dashPattern
+              lineJoin: .round
             )
             let stroke = StrokeStyle(
               lineWidth: line.lineWidth,
-              lineCap: .round,
+              lineCap: line.dashPattern.isEmpty ? .round : .butt,
               lineJoin: .round,
               dash: line.dashPattern
             )
 
+            linePath(for: segments, kind: .reset, width: width, height: height)
+              .stroke(line.color.opacity(0.3), lineWidth: 0.6)
             path.stroke(Color.black.opacity(0.28), style: casing)
             path.stroke(line.color.opacity(line.lineOpacity), style: stroke)
           }
 
-          if let latest = line.points.last {
+          if line.state == .current, let latest = line.points.last {
             Circle()
               .fill(line.color)
               .overlay(Circle().stroke(Color.black.opacity(0.35), lineWidth: 0.8))
@@ -239,86 +262,56 @@ private struct TrendChartPlotView: View {
     }
   }
 
-  /// Quota traces drain downward and refill in an instant. When a sample pair
-  /// jumps upward a reset happened in between, so draw hold-then-snap instead
-  /// of a misleading diagonal across the gap.
-  private func linePath(for line: TrendSeries, width: CGFloat, height: CGFloat) -> Path {
+  private func linePath(for segments: [TrendPathSegment], kind: TrendPathSegment.Kind, width: CGFloat, height: CGFloat) -> Path {
     Path { path in
-      var previous: TrendPoint?
-
-      for point in line.points {
-        let coordinate = CGPoint(
-          x: xPosition(for: point.date, width: width),
-          y: yPosition(for: point.remainingPercent, height: height)
-        )
-
-        if let previous {
-          if point.remainingPercent > previous.remainingPercent + 4 {
-            path.addLine(to: CGPoint(x: coordinate.x, y: yPosition(for: previous.remainingPercent, height: height)))
-          }
-          path.addLine(to: coordinate)
-        } else {
-          path.move(to: coordinate)
+      for segment in segments where segment.kind == kind {
+        for (index, point) in segment.samples.enumerated() {
+          let coordinate = CGPoint(x: xPosition(for: point.date, width: width),
+            y: yPosition(for: point.remainingPercent, height: height))
+          if index == 0 { path.move(to: coordinate) } else { path.addLine(to: coordinate) }
         }
-
-        previous = point
       }
     }
   }
 
-  private func weekdayLetter(for date: Date, symbols: [String]) -> String {
-    let weekday = Calendar.current.component(.weekday, from: date)
-    guard weekday >= 1, weekday <= symbols.count else {
-      return ""
+  private func timeTicks(width: CGFloat) -> [TrendAxisTick] {
+    switch axisStyle {
+    case .full:
+      return TrendAxisTicks.make(start: startDate, end: endDate, calendar: .current, locale: .current,
+        maxLabels: max(1, Int(width / Self.timeLabelSpacing)))
+    case .endpoints:
+      return TrendAxisTicks.endpoints(start: startDate, end: endDate, calendar: .current, locale: .current)
     }
-    return symbols[weekday - 1]
   }
 
-  private func dayBoundaries() -> [Date] {
-    let calendar = Calendar.current
-    var boundaries: [Date] = []
-    // Start from the midnight after startDate, walk forward by day
-    var current = calendar.startOfDay(for: startDate)
-    if current <= startDate {
-      current = calendar.date(byAdding: .day, value: 1, to: current) ?? current
-    }
-    while current < endDate {
-      boundaries.append(current)
-      current = calendar.date(byAdding: .day, value: 1, to: current) ?? endDate
-    }
-    return boundaries
+  private func timeLabelCenter(for tick: TrendAxisTick, width: CGFloat) -> CGFloat {
+    let halfWidth = min(width / 2, CGFloat(tick.label.count) * Self.axisFontSize * Self.axisGlyphWidthEms / 2 + 1)
+    return min(max(xPosition(for: tick.date, width: width), halfWidth), width - halfWidth)
   }
 
   private func xPosition(for date: Date, width: CGFloat) -> CGFloat {
     let duration = max(1, endDate.timeIntervalSince(startDate))
     let elapsed = min(max(date.timeIntervalSince(startDate), 0), duration)
-    return CGFloat(elapsed / duration) * width
+    return Self.plotInset + CGFloat(elapsed / duration) * max(0, width - 2 * Self.plotInset)
   }
 
   private func yPosition(for remainingPercent: Double, height: CGFloat) -> CGFloat {
     let clamped = min(max(remainingPercent, 0), 100)
-    return (1 - CGFloat(clamped / 100)) * height
+    return Self.plotInset + (1 - CGFloat(clamped / 100)) * max(0, height - 2 * Self.plotInset)
   }
 }
 
-private struct TrendPoint {
-  let date: Date
-  let remainingPercent: Double
-}
+private typealias TrendPoint = TrendSample
 
 private struct TrendSeries: Identifiable {
   let id: String
-  let provider: QuotaProvider
-  let metricID: String
-  let metricLabel: String
-  let displayLabel: String
   let points: [TrendPoint]
   let color: Color
-  let resetAt: Date?
   let lineWidth: CGFloat
   let lineOpacity: Double
   let dashPattern: [CGFloat]
   let drawPriority: Int
+  let state: TrendSeriesState
 }
 
 private struct TrendWarning: Identifiable {
@@ -331,11 +324,7 @@ private struct TrendChartData {
   let startDate: Date
   let endDate: Date
   let warnings: [TrendWarning]
-  // True when history exists but every tracked metric reports unlimited —
-  // there is genuinely nothing to chart, which is different from "no data".
-  var hasOnlyUnlimitedData = false
-  // True when the user hid every enabled account from the chart.
-  var hidesEveryAccount = false
+  var emptyReason: TrendEmptyReason?
 }
 
 private struct OverviewSmallQuotaView: View {
@@ -708,102 +697,24 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
   let now = entry.date
   let startWindow = now.addingTimeInterval(-Double(clampedDays) * 86_400)
 
-  let accountFilter = TrendChartAccountFilter(settings: entry.settings)
-  guard !accountFilter.hidesEveryAccount else {
-    return TrendChartData(series: [], startDate: startWindow, endDate: now, warnings: [], hidesEveryAccount: true)
-  }
-
-  var snapshots = entry.history.filter { snapshot in
-    snapshot.generatedAt >= startWindow && snapshot.generatedAt <= now
-  }
-
-  if let current = entry.snapshot {
-    let alreadyIncluded = snapshots.contains {
-      abs($0.generatedAt.timeIntervalSince(current.generatedAt)) < 1
-    }
-    if !alreadyIncluded {
-      snapshots.append(current)
-    }
-  }
-
-  snapshots.sort { $0.generatedAt < $1.generatedAt }
-
-  guard !snapshots.isEmpty else {
-    return TrendChartData(series: [], startDate: startWindow, endDate: now, warnings: [])
-  }
-
-  struct SeriesKey: Hashable {
-    let accountID: String
-    let metricID: String
-  }
-
-  var pointsByKey: [SeriesKey: [TrendPoint]] = [:]
-  var labelsByKey: [SeriesKey: String] = [:]
-  var resetByKey: [SeriesKey: Date] = [:]
-  var orderByAccount: [String: [String]] = [:]
-  var usageByAccount: [String: ProviderUsage] = [:]
-  var sawUnlimitedMetric = false
-
-  for snapshot in snapshots {
-    for usage in snapshot.providers {
-      guard accountFilter.includes(usage) else { continue }
-
-      var metricOrder = orderByAccount[usage.accountID] ?? []
-      usageByAccount[usage.accountID] = usage
-
-      for metric in usage.metrics {
-        // Unlimited metrics have no trend to chart — plotting them pins a
-        // flat line at 100% and only adds noise.
-        if metric.isUnlimited {
-          sawUnlimitedMetric = true
-          continue
-        }
-        guard metric.remainingPercent != nil else {
-          continue
-        }
-
-        let resolvedID = metric.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-          ? metric.label
-          : metric.id
-
-        if !metricOrder.contains(resolvedID) {
-          metricOrder.append(resolvedID)
-        }
-
-        let key = SeriesKey(accountID: usage.accountID, metricID: resolvedID)
-        let remaining = Double(metric.remainingPercent ?? 0)
-        pointsByKey[key, default: []].append(TrendPoint(date: snapshot.generatedAt, remainingPercent: remaining))
-        labelsByKey[key] = metric.label
-
-        if let resetAt = metric.resetAt {
-          resetByKey[key] = resetAt
-        }
-      }
-
-      orderByAccount[usage.accountID] = metricOrder
-    }
+  let snapshots = entry.history + [entry.snapshot].compactMap { $0 }
+  let content = TrendSeriesBuilder.build(snapshots: snapshots, latest: entry.snapshot,
+    settings: entry.settings, window: startWindow...now, now: now,
+    refreshInterval: TimeInterval(entry.refreshIntervalMinutes * 60))
+  if let reason = content.emptyReason {
+    return TrendChartData(series: [], startDate: startWindow, endDate: now, warnings: [], emptyReason: reason)
   }
 
   var series: [TrendSeries] = []
+  var forecastKeys: [QuotaForecast.SeriesKey] = []
+  var warningLabels: [QuotaForecast.SeriesKey: String] = [:]
   let kindColors = entry.settings.widgetStyle.limitKindColors
-  let showShortTermLimits = entry.settings.widgetVisibility.showShortTermLimitsInTrend
 
-  let accountOrder = usageByAccount.values.sorted { lhs, rhs in
-    if lhs.provider.rawValue != rhs.provider.rawValue {
-      return lhs.provider.rawValue < rhs.provider.rawValue
-    }
-    return lhs.title < rhs.title
-  }
-
-  for usage in accountOrder {
-    let metricIDs = orderByAccount[usage.accountID] ?? []
-    guard !metricIDs.isEmpty else {
-      continue
-    }
+  for account in content.accounts {
+    let usage = account.usage
 
     // Resolve color slots against the account's full metric list so the chart
     // agrees with the rings and the dashboard about which color a metric owns.
-    let accountSlots = limitSeriesSlots(for: usage.metrics)
     let primarySlot = primaryLimitSlot(for: usage.metrics)
     let primaryHexColor = entry.settings.primaryHexColor(for: usage.accountID)
     // Lines wear the account's color-scheme variant — the same colors as the
@@ -813,40 +724,12 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
     // two weeklies, a third per-model quota re-using an aux color). The tile
     // can't show those either, so the chart adds a dash for repeats.
     var duplicateOrdinalByHex: [String: Int] = [:]
-
-    // Slots resolve before any line is built so the long-term filter can weigh
-    // each metric's window against every window this account reports.
-    let resolvedSlots = metricIDs.map { metricID -> (metricID: String, slot: LimitSeriesSlot) in
-      if let index = usage.metrics.firstIndex(where: { $0.id == metricID || $0.label == metricID }) {
-        return (metricID: metricID, slot: accountSlots[index])
-      }
-      let key = SeriesKey(accountID: usage.accountID, metricID: metricID)
-      let metricLabel = labelsByKey[key] ?? metricID
-      return (metricID: metricID, slot: LimitSeriesSlot(kind: QuotaWindowKind.classify(metricID: metricID, label: metricLabel)))
-    }
-
-    // With short-term limits hidden, the fast windows — which saw-tooth all day
-    // and cross over the slow lines — drop out and only the long-term traces
-    // (usually the weekly ones) remain.
-    let accountKinds = resolvedSlots.map { $0.slot.kind }
-    let chartedSlots = showShortTermLimits
-      ? resolvedSlots
-      : resolvedSlots.filter { chartsAsLongTermLimit($0.slot.kind, accountKinds: accountKinds) }
-
-    for (metricID, slot) in chartedSlots {
-      let key = SeriesKey(accountID: usage.accountID, metricID: metricID)
-      let points = downsampleTrendPoints(pointsByKey[key] ?? [], maxCount: 240)
-      guard !points.isEmpty else {
-        continue
-      }
-
-      let metricLabel = labelsByKey[key] ?? metricID
-      let displayLabel: String
-      if chartedSlots.count > 1 {
-        displayLabel = "\(compactProviderName(for: usage)) \(compactMetricLabel(metricLabel))"
-      } else {
-        displayLabel = compactProviderName(for: usage)
-      }
+    // Live identities keep the solid stroke when retired lines share a hue.
+    let liveFirst = account.series.filter { !$0.isRetired } + account.series.filter(\.isRetired)
+    for line in liveFirst {
+      let slot = line.slot
+      let key = QuotaForecast.SeriesKey(accountID: line.accountID, metricID: line.metricID)
+      let displayLabel = "\(compactProviderName(for: usage)) \(compactMetricLabel(line.label))"
 
       let baseHex = (slot == primarySlot ? primaryHexColor : nil) ?? kindColors.hexColor(for: slot)
       let duplicateOrdinal = duplicateOrdinalByHex[baseHex, default: 0]
@@ -862,27 +745,29 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
       case 0:
         dashPattern = []
       case 1:
-        dashPattern = [4, 2.5]
+        dashPattern = [5, 3]
+      case 2:
+        dashPattern = [1.5, 2.5]
       default:
-        dashPattern = [1.6, 2.4]
+        dashPattern = [5, 2.5, 1.5, 2.5]
       }
 
       series.append(
         TrendSeries(
-          id: "\(usage.accountID):\(metricID)",
-          provider: usage.provider,
-          metricID: metricID,
-          metricLabel: metricLabel,
-          displayLabel: displayLabel,
-          points: points,
+          id: line.id,
+          points: TrendPathBuilder.downsample(line.samples, maxCount: 240),
           color: lineColor,
-          resetAt: resetByKey[key],
           lineWidth: style.lineWidth,
           lineOpacity: style.opacity,
           dashPattern: dashPattern,
-          drawPriority: style.drawPriority
+          drawPriority: style.drawPriority,
+          state: line.state
         )
       )
+      if line.state == .current, !forecastKeys.contains(key) {
+        forecastKeys.append(key)
+        warningLabels[key] = displayLabel
+      }
     }
   }
 
@@ -890,7 +775,7 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
   // window: two days of history in a seven-day window otherwise huddles in
   // the right half of an empty chart.
   var chartStart = startWindow
-  if let earliest = snapshots.first?.generatedAt {
+  if let earliest = series.flatMap(\.points).map(\.date).min() {
     chartStart = max(startWindow, earliest)
   }
   let minimumSpan: TimeInterval = 6 * 3_600
@@ -899,13 +784,20 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
   }
   chartStart = chartStart.addingTimeInterval(-now.timeIntervalSince(chartStart) * 0.02)
 
-  let warnings = depletionWarnings(for: series, now: now)
+  // Forecast raw observations, never downsampled paths or decorative holds.
+  let forecasts = QuotaForecast.depletionWarnings(for: forecastKeys, history: entry.history,
+    latest: entry.snapshot, accounts: entry.settings.accounts, now: now,
+    refreshInterval: TimeInterval(entry.refreshIntervalMinutes * 60))
+  let warnings = forecasts.map { forecast in
+    let key = QuotaForecast.SeriesKey(accountID: forecast.accountID, metricID: forecast.metricID)
+    return TrendWarning(id: "\(forecast.accountID):\(forecast.metricID)",
+      message: "\(warningLabels[key] ?? forecast.metricLabel): \(forecast.timing(at: now))")
+  }
   return TrendChartData(
     series: series,
     startDate: chartStart,
     endDate: now,
-    warnings: warnings,
-    hasOnlyUnlimitedData: series.isEmpty && sawUnlimitedMetric
+    warnings: warnings
   )
 }
 
@@ -927,24 +819,6 @@ private func seriesStyle(for kind: QuotaWindowKind) -> (lineWidth: CGFloat, opac
   }
 }
 
-private func downsampleTrendPoints(_ points: [TrendPoint], maxCount: Int) -> [TrendPoint] {
-  let sorted = points.sorted { $0.date < $1.date }
-  guard sorted.count > maxCount, maxCount > 1 else {
-    return sorted
-  }
-
-  let scale = Double(sorted.count - 1) / Double(maxCount - 1)
-  var sampled: [TrendPoint] = []
-  sampled.reserveCapacity(maxCount)
-
-  for index in 0..<maxCount {
-    let sourceIndex = min(sorted.count - 1, Int((Double(index) * scale).rounded()))
-    sampled.append(sorted[sourceIndex])
-  }
-
-  return sampled
-}
-
 private func compactMetricLabel(_ label: String) -> String {
   let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
   if trimmed.count <= 12 {
@@ -959,48 +833,6 @@ private func compactMetricLabel(_ label: String) -> String {
   }
 
   return String(trimmed.prefix(12))
-}
-
-private func depletionWarnings(for series: [TrendSeries], now: Date) -> [TrendWarning] {
-  series.compactMap { line in
-    guard let resetAt = line.resetAt, resetAt > now else {
-      return nil
-    }
-
-    let recentPoints = Array(line.points.suffix(8))
-    guard recentPoints.count >= 2, let first = recentPoints.first, let last = recentPoints.last else {
-      return nil
-    }
-
-    guard last.remainingPercent <= 60 else {
-      return nil
-    }
-
-    let elapsed = last.date.timeIntervalSince(first.date)
-    guard elapsed > 0 else {
-      return nil
-    }
-
-    let slope = (last.remainingPercent - first.remainingPercent) / elapsed
-    guard slope < -0.00001 else {
-      return nil
-    }
-
-    let secondsToZero = last.remainingPercent / -slope
-    guard secondsToZero.isFinite, secondsToZero > 0 else {
-      return nil
-    }
-
-    let depletionDate = last.date.addingTimeInterval(secondsToZero)
-    guard depletionDate < resetAt else {
-      return nil
-    }
-
-    return TrendWarning(
-      id: line.id,
-      message: "\(line.displayLabel) may run out before reset"
-    )
-  }
 }
 
 private func compactProviderName(for provider: QuotaProvider) -> String {
@@ -1229,4 +1061,3 @@ private extension QuotaEntry {
     )
   }
 }
-
