@@ -39,7 +39,7 @@ public struct OpenAIClient: QuotaProviderClient {
 
     let (data, response) = try await httpClient.data(for: request)
     guard (200..<300).contains(response.statusCode) else {
-      let kind: QuotaErrorKind = response.statusCode == 401 || response.statusCode == 403 ? .auth : .api
+      let kind = errorKind(forStatusCode: response.statusCode)
       if kind == .auth {
         throw ProviderClientError(
           kind: kind,
@@ -115,13 +115,20 @@ public struct OpenAIClient: QuotaProviderClient {
   }
 
   private func formatWindowName(seconds: Int) -> String {
-    let days = Int((Double(seconds) / 86_400.0).rounded())
-    if days >= 1 {
-      return "\(days)-day limit"
+    // Exact units keep labels and identity colors tied to the actual window.
+    if seconds >= 86_400, seconds % 86_400 == 0 {
+      return "\(seconds / 86_400)-day limit"
     }
-
-    let hours = max(1, Int((Double(seconds) / 3_600.0).rounded()))
-    return "\(hours)-hour limit"
+    if seconds >= 3_600, seconds % 3_600 == 0 {
+      return "\(seconds / 3_600)-hour limit"
+    }
+    if seconds >= 60, seconds % 60 == 0 {
+      return "\(seconds / 60)-minute limit"
+    }
+    if seconds > 0 {
+      return "\(seconds)-second limit"
+    }
+    return "Limit window"
   }
 }
 

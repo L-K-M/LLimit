@@ -832,6 +832,10 @@ public enum QuotaWindowKind: String, Codable, CaseIterable, Sendable {
       return minutes >= 1_200 ? .daily : .session
     }
 
+    if leadingCount(beforeUnit: "second", in: tokens) != nil {
+      return .session
+    }
+
     if let days = leadingCount(beforeUnit: "day", in: tokens) {
       if days <= 1 {
         return .daily

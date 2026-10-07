@@ -121,10 +121,27 @@ enum RetryAfterPolicy {
   }
 }
 
+enum HTTPStatusCode {
+  static let ok = 200
+  static let unauthorized = 401
+  static let forbidden = 403
+  static let notFound = 404
+  static let tooManyRequests = 429
+  static let serverErrors = 500..<600
+}
+
+func errorKind(forStatusCode statusCode: Int) -> QuotaErrorKind {
+  switch statusCode {
+  case HTTPStatusCode.unauthorized, HTTPStatusCode.forbidden: return .auth
+  case HTTPStatusCode.tooManyRequests: return .rateLimit
+  default: return .api
+  }
+}
+
 /// RFC 9110 delta-seconds or IMF-fixdate. Malformed guidance has no cooldown.
 func parseRetryAfter(_ value: String?, now: Date) -> TimeInterval? {
   guard let value = nonEmptyString(value) else { return nil }
-  if value.utf8.allSatisfy({ (48...57).contains($0) }) {
+  if value.allSatisfy({ ("0"..."9").contains($0) }) {
     return RetryAfterPolicy.boundedDelay(Double(value))
   }
 
