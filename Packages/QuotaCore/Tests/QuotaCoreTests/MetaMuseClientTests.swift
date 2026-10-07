@@ -99,6 +99,137 @@ final class MetaMuseClientTests: XCTestCase {
     XCTAssertEqual(usage.maxUsagePercent, 0)
   }
 
+  func testMalformedSubscriptionWindowsThrowDecoding() async {
+    let invalidWindows = ["{}", "null", "[]", "true", #""invalid""#] + [
+      "null", "true", #""invalid""#, #""NaN""#, #""Infinity""#, #""1e1000""#, "{}", "[]"
+    ].map { #"{"used_percent":\#($0)}"# }
+
+    for key in ["window", "weekly"] {
+      for window in invalidWindows {
+        let body = sse("response.subscription_usage", #"{"type":"response.subscription_usage","\#(key)":\#(window)}"#)
+          + sse("response.completed", #"{"type":"response.completed","response":{"id":"fixture","status":"completed"}}"#)
+        let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 200, body: body))
+        await assertThrows(kind: .decoding) {
+          try await client.fetchUsage(configuration: self.config(), now: self.now)
+        }
+      }
+    }
+  }
+
+  func testMalformedWindowFailsEvenWhenAnotherWindowIsValid() async {
+    for snapshot in [
+      #"{"window":{"used_percent":30},"weekly":{}}"#,
+      #"{"window":{},"weekly":{"used_percent":25}}"#
+    ] {
+      let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(
+        status: 200, body: sse("response.subscription_usage", snapshot)
+      ))
+      await assertThrows(kind: .decoding) {
+        try await client.fetchUsage(configuration: self.config(), now: self.now)
+      }
+    }
+  }
+
+  func testMalformedLaterSubscriptionSnapshotStillFails() async {
+    let valid = sse("response.subscription_usage", #"{"weekly":{"used_percent":30}}"#)
+    for malformed in [
+      sse("response.subscription_usage", #"{"weekly":{}}"#),
+      sse("response.completed", #"{"type":"response.completed","response":{"id":"fixture","status":"completed","subscription_usage":{"weekly":{}}}}"#)
+    ] {
+      let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 200, body: valid + malformed))
+      await assertThrows(kind: .decoding) {
+        try await client.fetchUsage(configuration: self.config(), now: self.now)
+      }
+    }
+  }
+
+  func testPresentMalformedSnapshotsDoNotBecomePayAsYouGo() async {
+    let completion = sse("response.completed", #"{"type":"response.completed","response":{"id":"fixture","status":"completed"}}"#)
+    let bodies = [
+      sse("response.subscription_usage", "{}") + completion,
+      sse("response.subscription_usage", #"{"subscription_usage":{}}"#) + completion,
+      sse("response.subscription_usage", #"{"subscription_usage":null}"#) + completion,
+      sse("response.subscription_usage", #"{"snapshot":{}}"#) + completion,
+      sse("response.subscription_usage", #"{"weekly":"#) + completion,
+      sse("response.completed", #"{"type":"response.completed","response":{"id":"fixture","status":"completed","subscription_usage":{}}}"#),
+      sse("response.completed", #"{"type":"response.completed","response":{"id":"fixture","status":"completed","snapshot":{"weekly":{}}}}"#),
+      "data: {\"type\":\"response.subscription_usage\",\"weekly\":{}}\n\n" + completion,
+      #"{"weekly":{}}"#,
+      #"{"id":"fixture","status":"completed","subscription_usage":null}"#,
+      #"{"type":"response.completed","response":{"id":"fixture","status":"completed","subscription_usage":{"weekly":{}}}}"#
+    ]
+    for body in bodies {
+      let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 200, body: body))
+      await assertThrows(kind: .decoding) {
+        try await client.fetchUsage(configuration: self.config(), now: self.now)
+      }
+    }
+  }
+
+  func testUnrecognizedOrUnfinishedResponsesDoNotBecomePayAsYouGo() async {
+    let bodies = [
+      "{}", #"{"unrelated":"value"}"#,
+      sse("unrelated", "{}") + "data: [DONE]\n\n",
+      sse("response.created", #"{"type":"response.created","response":{"id":"fixture"}}"#),
+      sse("response.incomplete", #"{"type":"response.incomplete","response":{"id":"fixture","status":"incomplete"}}"#),
+      sse("response.completed", #"{"type":"response.completed","response":{}}"#),
+      sse("response.completed", #"{"type":"response.completed","response":{"id":"fixture","status":"failed"}}"#),
+      "data: [DONE]\n\n"
+    ]
+    for body in bodies {
+      let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 200, body: body))
+      await assertThrows(kind: .api, messageContains: "no recognizable usage payload") {
+        try await client.fetchUsage(configuration: self.config(), now: self.now)
+      }
+    }
+  }
+
+  func testExplicitZeroInSubscriptionSnapshotShapes() async throws {
+    let snapshot = #"{"window":{"used_percent":0},"weekly":{"used_percent":"0"}}"#
+    let bodies = [
+      sse("response.subscription_usage", snapshot),
+      sse("response.subscription_usage", #"{"subscription_usage":\#(snapshot)}"#),
+      sse("response.subscription_usage", #"{"snapshot":\#(snapshot)}"#),
+      sse("response.completed", #"{"type":"response.completed","response":{"id":"fixture","subscription_usage":\#(snapshot)}}"#),
+      sse("response.incomplete", #"{"type":"response.incomplete","response":{"id":"fixture","subscription_usage":\#(snapshot)}}"#),
+      sse("response.subscription_usage", snapshot).replacingOccurrences(of: "\n", with: "\r\n"),
+      // SSE joins consecutive data: fields with newlines.
+      "data: {\"type\":\"response.subscription_usage\",\ndata: \"window\":{\"used_percent\":0},\"weekly\":{\"used_percent\":\"0\"}}\n\n",
+      // Compatibility leniency also accepts indentation before data:.
+      "data: {\"type\":\"response.subscription_usage\",\n data: \"window\":{\"used_percent\":0},\"weekly\":{\"used_percent\":\"0\"}}\n\n",
+      snapshot,
+      #"{"id":"fixture","subscription_usage":\#(snapshot)}"#,
+      #"{"type":"response.completed","response":{"id":"fixture","subscription_usage":\#(snapshot)}}"#
+    ]
+    for body in bodies {
+      let usage = try await MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 200, body: body))
+        .fetchUsage(configuration: config(), now: now)
+      XCTAssertEqual(usage.metrics.map(\.id), ["window", "weekly"], body)
+      XCTAssertEqual(usage.metrics.map(\.remainingPercent), [100, 100], body)
+      XCTAssertEqual(usage.maxUsagePercent, 0, body)
+      XCTAssertNil(usage.warning, body)
+    }
+  }
+
+  func testCompletedPayAsYouGoResponseShapesYieldPlaceholder() async throws {
+    let event = #"{"type":"response.completed","response":{"id":"fixture","status":"completed"}}"#
+    let bodies = [
+      sse("response.completed", event) + "data: [DONE]\n\n",
+      sse("response.completed", event).replacingOccurrences(of: "\n", with: "\r\n"),
+      "data: \(event)\n\n",
+      event,
+      #"{"id":"fixture","status":"completed"}"#
+    ]
+    for body in bodies {
+      let usage = try await MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 200, body: body))
+        .fetchUsage(configuration: config(), now: now)
+      XCTAssertEqual(usage.metrics.map(\.id), ["empty"], body)
+      XCTAssertNil(usage.metrics.first?.remainingPercent, body)
+      XCTAssertEqual(usage.maxUsagePercent, 0, body)
+      XCTAssertNil(usage.warning, body)
+    }
+  }
+
   // SSE permits CRLF; without normalization a multi-event body never splits.
   func testParsesCRLFDelimitedStream() async throws {
     let body = "event: response.subscription_usage\r\ndata: {\"type\":\"response.subscription_usage\",\"weekly\":{\"used_percent\":50}}\r\n\r\nevent: response.completed\r\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r5\"}}\r\n\r\n"
@@ -161,6 +292,19 @@ final class MetaMuseClientTests: XCTestCase {
     }
   }
 
+  func testStreamErrorAfterSubscriptionSnapshotStillThrowsAPI() async {
+    let snapshot = sse("response.subscription_usage", #"{"window":{"used_percent":30},"weekly":{"used_percent":25}}"#)
+    for terminal in [
+      sse("error", #"{"type":"error","message":"terminal-fixture"}"#),
+      sse("response.failed", #"{"type":"response.failed","response":{"id":"fixture","error":{"message":"terminal-fixture"}}}"#)
+    ] {
+      let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 200, body: snapshot + terminal))
+      await assertThrows(kind: .api, messageContains: "try again later", messageExcludes: ["terminal-fixture"]) {
+        try await client.fetchUsage(configuration: self.config(), now: self.now)
+      }
+    }
+  }
+
   // response.failed nests its error under response.error.
   func testStreamFailedEventThrowsAPI() async {
     let body = sse("response.failed", #"{"type":"response.failed","response":{"id":"r7","error":{"code":"server_error","message":"upstream unavailable"}}}"#)
@@ -186,7 +330,9 @@ final class MetaMuseClientTests: XCTestCase {
   }
 
   func testSendsMinimalStreamingProbe() async throws {
-    let mock = MuseCapturingHTTP(status: 200, body: "data: [DONE]\n\n")
+    let mock = MuseCapturingHTTP(status: 200, body: sse(
+      "response.completed", #"{"type":"response.completed","response":{"id":"fixture","status":"completed"}}"#
+    ))
     let client = MetaMuseQuotaClient(httpClient: mock)
 
     _ = try await client.fetchUsage(configuration: config(), now: now)
