@@ -1,14 +1,39 @@
 import Foundation
 
 public final class QuotaHistoryStore: @unchecked Sendable {
+  /// Entry cap shared by retention and recent reads. Default arguments of public
+  /// functions may only reference public or `@usableFromInline` declarations.
+  @usableFromInline static let defaultMaxEntries = 3_000
+
+  /// An archive as written to disk, kept with its encoding so a mirror store can
+  /// write the same bytes without encoding or decoding it again.
+  public struct Archive: Sendable {
+    public let snapshots: [QuotaSnapshot]
+    fileprivate let encoded: Data
+  }
+
+  /// How `append` treats an existing file that cannot be decoded.
+  public enum UnreadableFile: Sendable {
+    /// Throw and leave the file untouched, as a primary archive needs.
+    case fail
+    /// Start a new archive. Only for a derived copy, such as the widget's,
+    /// which no reader can use while it is unreadable.
+    case replace
+  }
+
   private let fileURL: URL
   private let encoder: JSONEncoder
   private let decoder: JSONDecoder
 
-  public init(fileURL: URL) {
+  public convenience init(fileURL: URL) {
+    self.init(fileURL: fileURL, decoder: JSONDecoder())
+  }
+
+  /// Tests inject a decoder subclass to count full-archive decodes.
+  init(fileURL: URL, decoder: JSONDecoder) {
     self.fileURL = fileURL
     self.encoder = JSONEncoder()
-    self.decoder = JSONDecoder()
+    self.decoder = decoder
     encoder.dateEncodingStrategy = .iso8601
     decoder.dateDecodingStrategy = .iso8601
     // Compact (not pretty-printed): the widget extension reads this file on every
@@ -27,10 +52,22 @@ public final class QuotaHistoryStore: @unchecked Sendable {
 
   /// Loads only the snapshots within the last `days`, capped to the newest `maxEntries`.
   /// The widget uses this so a large history file can't exhaust the extension's memory
-  /// budget while rendering the (at most 30-day) trend chart.
-  public func loadRecent(days: Int, maxEntries: Int = 3_000, now: Date = Date()) throws -> [QuotaSnapshot] {
+  /// budget while rendering the (at most 30-day) trend chart. The whole archive is
+  /// still decoded first; callers already holding it should use `recent` instead.
+  public func loadRecent(days: Int, maxEntries: Int = defaultMaxEntries, now: Date = Date()) throws -> [QuotaSnapshot] {
+    Self.recent(try load(), days: days, now: now, maxEntries: maxEntries)
+  }
+
+  /// The snapshots within the last `days`, sorted oldest first and capped to the
+  /// newest `maxEntries`.
+  public static func recent(
+    _ history: [QuotaSnapshot],
+    days: Int,
+    now: Date,
+    maxEntries: Int = defaultMaxEntries
+  ) -> [QuotaSnapshot] {
     let cutoff = now.addingTimeInterval(-Double(max(1, days)) * 86_400)
-    let recent = try load()
+    let recent = history
       .filter { $0.generatedAt >= cutoff }
       .sorted { $0.generatedAt < $1.generatedAt }
 
@@ -41,23 +78,31 @@ public final class QuotaHistoryStore: @unchecked Sendable {
   }
 
   public func save(_ snapshots: [QuotaSnapshot]) throws {
-    try FileManager.default.createDirectory(
-      at: fileURL.deletingLastPathComponent(),
-      withIntermediateDirectories: true
-    )
-
     let normalized = snapshots.sorted { $0.generatedAt < $1.generatedAt }
-    let data = try encoder.encode(normalized)
-    try data.write(to: fileURL, options: .atomic)
-    try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: fileURL.path)
+    try write(encoder.encode(normalized))
   }
 
+  /// Replaces this store's file with an archive another store wrote. Every store
+  /// encodes identically, so this is the file its own `save` would produce.
+  public func save(_ archive: Archive) throws {
+    try write(archive.encoded)
+  }
+
+  /// Returns the trimmed archive it wrote, so callers can derive views from it
+  /// or mirror it without decoding the file again.
+  @discardableResult
   public func append(
     _ snapshot: QuotaSnapshot,
     keepDays: Int = 45,
-    maxEntries: Int = 3_000
-  ) throws {
-    var history = try load()
+    maxEntries: Int = defaultMaxEntries,
+    ifUnreadable: UnreadableFile = .fail
+  ) throws -> Archive {
+    var history: [QuotaSnapshot]
+    do {
+      history = try load()
+    } catch is DecodingError where ifUnreadable == .replace {
+      history = []
+    }
     history.append(snapshot)
 
     let cutoffDays = max(1, keepDays)
@@ -70,13 +115,17 @@ public final class QuotaHistoryStore: @unchecked Sendable {
       history = Array(history.suffix(limit))
     }
 
-    try save(history)
+    let encoded = try encoder.encode(history)
+    try write(encoded)
+    return Archive(snapshots: history, encoded: encoded)
   }
 
+  /// Rewrites the archive only when some entry belongs to `accountIDs`.
   public func remove(accountIDs: Set<String>) throws {
     guard !accountIDs.isEmpty else { return }
 
-    let filtered = try load().map { snapshot in
+    let history = try load()
+    let filtered = history.map { snapshot in
       QuotaSnapshot(
         version: snapshot.version,
         generatedAt: snapshot.generatedAt,
@@ -84,6 +133,19 @@ public final class QuotaHistoryStore: @unchecked Sendable {
         failures: snapshot.failures.filter { !accountIDs.contains($0.accountID) }
       )
     }
+    // Comparing with the filter's own result keeps a single purge predicate.
+    guard filtered != history else { return }
+
     try save(filtered)
+  }
+
+  private func write(_ data: Data) throws {
+    try FileManager.default.createDirectory(
+      at: fileURL.deletingLastPathComponent(),
+      withIntermediateDirectories: true
+    )
+
+    try data.write(to: fileURL, options: .atomic)
+    try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: fileURL.path)
   }
 }
