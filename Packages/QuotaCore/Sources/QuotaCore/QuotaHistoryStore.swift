@@ -25,6 +25,12 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     do {
       data = try Data(contentsOf: fileURL)
     } catch {
+      // Quarantine like the decode path: feeding [] onward lets a later
+      // append() save() over a file we merely failed to read.
+      FileHandle.standardError.write(Data(
+        "LLimit: history read failed; quarantined \(fileURL.lastPathComponent): \(error)\n".utf8
+      ))
+      quarantineCorruptFile(fileURL)
       return []
     }
 
@@ -106,7 +112,11 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     guard lhs.failures == rhs.failures else { return false }
     guard lhs.providers.count == rhs.providers.count else { return false }
 
-    for (p1, p2) in zip(lhs.providers, rhs.providers) {
+    // Compare order-insensitively: fetch completion order must not defeat
+    // deduplication.
+    let lp = lhs.providers.sorted { $0.accountID < $1.accountID }
+    let rp = rhs.providers.sorted { $0.accountID < $1.accountID }
+    for (p1, p2) in zip(lp, rp) {
       guard p1.accountID == p2.accountID,
             p1.provider == p2.provider,
             p1.title == p2.title,
@@ -115,7 +125,9 @@ public final class QuotaHistoryStore: @unchecked Sendable {
             p1.metrics.count == p2.metrics.count
       else { return false }
 
-      for (m1, m2) in zip(p1.metrics, p2.metrics) {
+      let lm = p1.metrics.sorted { $0.id < $1.id }
+      let rm = p2.metrics.sorted { $0.id < $1.id }
+      for (m1, m2) in zip(lm, rm) {
         guard m1.id == m2.id,
               m1.label == m2.label,
               m1.remainingPercent == m2.remainingPercent,

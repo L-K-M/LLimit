@@ -313,8 +313,25 @@ func startOfNextMonth(from date: Date) -> Date? {
 /// visible file at umask defaults, leaving a readable window).
 func writeOwnerOnlyFile(_ data: Data, to fileURL: URL) throws {
   let directory = fileURL.deletingLastPathComponent()
+  // Sweep staging siblings abandoned by a crashed writer (unique names are
+  // never reused, unlike the previous fixed temp name). The hour cutoff
+  // protects any concurrent writer mid-save.
+  let staleCutoff = Date().addingTimeInterval(-3_600)
+  if let entries = try? FileManager.default.contentsOfDirectory(
+    at: directory, includingPropertiesForKeys: [.contentModificationDateKey]
+  ) {
+    for entry in entries
+    where entry.lastPathComponent.hasPrefix(".\(fileURL.lastPathComponent).")
+      && entry.lastPathComponent.hasSuffix(".tmp") {
+      let modified = (try? entry.resourceValues(forKeys: [.contentModificationDateKey]))?
+        .contentModificationDate ?? .distantPast
+      if modified < staleCutoff {
+        try? FileManager.default.removeItem(at: entry)
+      }
+    }
+  }
   // Unique staging name: overlapping writers can't clobber each other's
-  // temp file, and crash leftovers are cleaned up by the defer.
+  // temp file, and thrown-error leftovers are cleaned up by the defer.
   let tempURL = directory.appendingPathComponent(
     ".\(fileURL.lastPathComponent).\(UUID().uuidString).tmp"
   )
@@ -324,7 +341,10 @@ func writeOwnerOnlyFile(_ data: Data, to fileURL: URL) throws {
     contents: nil,
     attributes: [.posixPermissions: 0o600]
   ) else {
-    throw CocoaError(.fileWriteUnknown)
+    throw CocoaError(.fileWriteUnknown, userInfo: [
+      NSLocalizedDescriptionKey:
+        "staging create failed: \(String(cString: strerror(errno)))"
+    ])
   }
   // Non-atomic write truncates the pre-created 0600 file in place.
   try data.write(to: tempURL)

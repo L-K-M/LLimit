@@ -250,4 +250,89 @@ final class QuotaHistoryStoreTests: XCTestCase {
     let perms = attrs[.posixPermissions] as? Int
     XCTAssertEqual(perms, 0o600, "History file permissions must be 0600")
   }
+
+  func testUnreadableHistoryIsQuarantinedNotOverwritten() throws {
+    let (store, dir) = makeStore()
+    defer {
+      // Restore readability so cleanup succeeds.
+      let url = dir.appendingPathComponent("history.json")
+      try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+      try? FileManager.default.removeItem(at: dir)
+    }
+
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    try store.save([QuotaSnapshot(generatedAt: now, providers: [], failures: [])])
+    let historyURL = dir.appendingPathComponent("history.json")
+
+    // Make the file unreadable (skipped implicitly when running as root,
+    // where chmod 000 still permits reads).
+    try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: historyURL.path)
+
+    let loaded = try store.load()
+    XCTAssertTrue(loaded.isEmpty)
+
+    let leftovers = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+    XCTAssertTrue(leftovers.contains { $0.hasPrefix("history.corrupt-") },
+                  "Unreadable history must be quarantined, not silently swallowed")
+    XCTAssertFalse(FileManager.default.fileExists(atPath: historyURL.path))
+  }
+
+  func testDedupeIsInsensitiveToProviderAndMetricOrder() throws {
+    let (store, dir) = makeStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let usageA = ProviderUsage(
+      accountID: "a", provider: .anthropic, title: "Claude",
+      metrics: [
+        UsageMetric(id: "five_hour", label: "5-hour", remainingPercent: 80),
+        UsageMetric(id: "weekly", label: "Weekly", remainingPercent: 60)
+      ],
+      fetchedAt: now
+    )
+    let usageB = ProviderUsage(
+      accountID: "b", provider: .openAI, title: "OpenAI",
+      metrics: [UsageMetric(id: "monthly", label: "Monthly", remainingPercent: 50)],
+      fetchedAt: now
+    )
+    try store.append(QuotaSnapshot(
+      generatedAt: now, providers: [usageA, usageB], failures: []
+    ))
+
+    // Same data, reversed provider and metric order: still a duplicate.
+    let reorderedA = ProviderUsage(
+      accountID: "a", provider: .anthropic, title: "Claude",
+      metrics: [usageA.metrics[1], usageA.metrics[0]],
+      fetchedAt: now.addingTimeInterval(300)
+    )
+    try store.append(QuotaSnapshot(
+      generatedAt: now.addingTimeInterval(300), providers: [usageB, reorderedA], failures: []
+    ))
+
+    XCTAssertEqual(try store.load().count, 1,
+                   "Reordered but identical usage must still deduplicate")
+  }
+
+  func testSaveSweepsStaleStagingTemps() throws {
+    let (store, dir) = makeStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    // Simulate a temp file abandoned by a crashed writer an hour ago.
+    let stale = dir.appendingPathComponent(".history.json.\(UUID().uuidString).tmp")
+    try Data("stale".utf8).write(to: stale)
+    let old = Date().addingTimeInterval(-7_200)
+    try FileManager.default.setAttributes([.modificationDate: old], ofItemAtPath: stale.path)
+    // A fresh temp must survive the sweep (concurrent writer mid-save).
+    let fresh = dir.appendingPathComponent(".history.json.\(UUID().uuidString).tmp")
+    try Data("fresh".utf8).write(to: fresh)
+
+    try store.save([QuotaSnapshot(generatedAt: Date(), providers: [], failures: [])])
+
+    let entries = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+    XCTAssertFalse(entries.contains(stale.lastPathComponent),
+                   "Hour-old staging temp must be swept")
+    XCTAssertTrue(entries.contains(fresh.lastPathComponent),
+                  "Fresh staging temp belongs to a live writer; keep it")
+  }
 }
