@@ -33,11 +33,11 @@ public struct PendingEdits<Key: Hashable> {
     guard let text = drafts[key] else { return nil }
 
     let outcome = save(key, text)
-    if case .rejected(let rejection) = outcome {
-      rejections[key] = rejection
-    } else {
+    if outcome.consumesDraft {
       drafts[key] = nil
       rejections[key] = nil
+    } else if case .rejected(let rejection) = outcome {
+      rejections[key] = rejection
     }
     return outcome
   }

@@ -547,7 +547,9 @@ final class AppModel: ObservableObject {
     claudeAccountMessages[accountID] = nil
     claudeCredentialFailures.remove(accountID)
     if provider == .venice {
-      updateAccount(accountID: accountID) { $0.credentials = match.credentials }
+      let outcome = updateAccount(accountID: accountID) { $0.credentials = match.credentials }
+      // Auto-fill has no field to show a rejection under, so report it here.
+      if case .rejected(let rejection) = outcome { statusMessage = rejection.message }
       guard account(withID: accountID)?.credentials == match.credentials else { return false }
     } else {
       providerAccounts[index].credentials = match.credentials
@@ -1580,7 +1582,8 @@ final class AppModel: ObservableObject {
   }
 
   /// Returns `.applied` once the mutation is accepted, whether or not it changed
-  /// anything, or why it was refused.
+  /// anything, or why it was refused. Callers report a rejection on their own
+  /// surface: Settings fields show it inline, Auto-fill uses the status message.
   @discardableResult
   private func updateAccount(
     accountID: String,
@@ -1597,7 +1600,6 @@ final class AppModel: ObservableObject {
     if previousAccount.provider == .venice,
        previousAccount.credentials[CredentialField.veniceAPIKey] != updatedAccount.credentials[CredentialField.veniceAPIKey] {
       guard !configurationLoadFailed else {
-        statusMessage = AccountEditRejection.settingsUnreadable.message
         return .rejected(.settingsUnreadable)
       }
       do {
@@ -1605,7 +1607,6 @@ final class AppModel: ObservableObject {
         // before accepting a replacement key, including Auto-fill replacements.
         try invalidateVeniceUsage(for: previousAccount)
       } catch {
-        statusMessage = AccountEditRejection.previousUsageNotCleared.message
         return .rejected(.previousUsageNotCleared)
       }
     }
