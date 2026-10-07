@@ -266,6 +266,8 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
   public var totalDisplay: String?
   public var resetAt: Date?
   public var resetIn: String?
+  /// Provider-reported duration, never inferred from a display label.
+  public var windowSeconds: Int?
   public var isUnlimited: Bool
   public var detail: String?
 
@@ -279,6 +281,7 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
     totalDisplay: String? = nil,
     resetAt: Date? = nil,
     resetIn: String? = nil,
+    windowSeconds: Int? = nil,
     isUnlimited: Bool = false,
     detail: String? = nil
   ) {
@@ -291,6 +294,7 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
     self.totalDisplay = totalDisplay
     self.resetAt = resetAt
     self.resetIn = resetIn
+    self.windowSeconds = windowSeconds
     self.isUnlimited = isUnlimited
     self.detail = detail
   }
