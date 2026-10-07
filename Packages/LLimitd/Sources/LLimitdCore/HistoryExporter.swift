@@ -43,7 +43,9 @@ public enum HistoryExporter {
   private static func escape(_ field: String) -> String {
     // Spreadsheet-safety: a leading =, +, - or @ is interpreted as a formula by
     // Excel/Numbers even inside quotes — neutralize with a leading apostrophe.
-    let guarded = field.first.map({ "=+-@".contains($0) }) == true ? "'" + field : field
+    // Leading tabs/CRs get the same treatment: some importers trim them,
+    // re-exposing a formula prefix.
+    let guarded = field.first.map({ "=+-@\t\r".contains($0) }) == true ? "'" + field : field
     guard guarded.contains(",") || guarded.contains("\"") || guarded.contains("\n") || guarded.contains("\r") else {
       return guarded
     }
