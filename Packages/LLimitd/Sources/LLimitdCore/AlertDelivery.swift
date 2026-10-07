@@ -217,6 +217,7 @@ final class ChildProcessRunner: @unchecked Sendable {
       case setProcessGroup = "posix_spawnattr_setpgroup"
       case setFlags = "posix_spawnattr_setflags"
       case openStandardInput = "posix_spawn_file_actions_addopen"
+      case inheritDescriptor = "posix_spawn_file_actions_addinherit_np"
       case closeDescriptor = "posix_spawn_file_actions_addclose"
       case spawn = "posix_spawn"
     }
@@ -261,21 +262,32 @@ final class AlertProcessLaunch {
     sigemptyset(&blockedSignals)
     try Self.check(posix_spawnattr_setsigmask(&attributes, &blockedSignals), operation: .setSignalMask)
     try Self.check(posix_spawnattr_setpgroup(&attributes, 0), operation: .setProcessGroup)
-    try Self.check(
-      posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETPGROUP)),
-      operation: .setFlags
-    )
+    let processFlags = Int16(POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETPGROUP)
+    #if canImport(Darwin)
+    let flags = processFlags | Int16(POSIX_SPAWN_CLOEXEC_DEFAULT)
+    #else
+    let flags = processFlags
+    #endif
+    try Self.check(posix_spawnattr_setflags(&attributes, flags), operation: .setFlags)
 
     try Self.check(
       posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0),
       operation: .openStandardInput
     )
+    #if canImport(Darwin)
+    // CLOEXEC_DEFAULT keeps only explicit file actions, including stdin above.
+    // The kernel closes private FDs at spawn, even those opened after preparation.
+    for descriptor in [STDOUT_FILENO, STDERR_FILENO] {
+      try Self.check(posix_spawn_file_actions_addinherit_np(&actions, descriptor), operation: .inheritDescriptor)
+    }
+    #else
     for descriptor in (STDERR_FILENO + 1)..<Self.inheritedDescriptorLimit {
       let flags = fcntl(descriptor, F_GETFD)
       if flags >= 0, flags & FD_CLOEXEC == 0 {
         try Self.check(posix_spawn_file_actions_addclose(&actions, descriptor), operation: .closeDescriptor)
       }
     }
+    #endif
   }
 
   deinit {
