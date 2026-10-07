@@ -226,7 +226,18 @@ final class TrendChartTests: XCTestCase {
 
     let ticks = TrendAxisTicks.make(start: start, end: end, calendar: calendar, locale: enUS, maxLabels: 8)
 
-    XCTAssertEqual(ticks.map(\.label), ["Sep 16", "21", "26", "Oct 1", "6", "11"])
+    XCTAssertEqual(ticks.map(\.label), ["Sep 20", "25", "30", "Oct 5", "10", "15"])
+  }
+
+  func testDayTicksAlwaysKeepTheMostRecentMidnight() {
+    let calendar = newYorkCalendar
+    let end = date(2026, 10, 15, 12, 0, calendar)
+
+    for (spanDays, maxLabels) in [(30, 6), (30, 4), (14, 3), (20, 2), (9, 1)] {
+      let start = end.addingTimeInterval(-Double(spanDays) * 24 * hour)
+      let ticks = TrendAxisTicks.make(start: start, end: end, calendar: calendar, locale: enUS, maxLabels: maxLabels)
+      XCTAssertEqual(ticks.last?.date, date(2026, 10, 15, 0, 0, calendar), "span \(spanDays)d, budget \(maxLabels)")
+    }
   }
 
   func testTicksNeverExceedTheLabelBudget() {

@@ -184,6 +184,9 @@ private struct TrendChartPlotView: View {
   /// Room per time label, so ticks thin out on narrow widgets.
   private static let timeLabelSpacing: CGFloat = 34
   private static let axisFontSize: CGFloat = 8
+  /// Average advance of one axis-label glyph, in ems: a little over the
+  /// typical 0.5 to 0.55 so edge labels err toward staying inside.
+  private static let axisGlyphWidthEms: CGFloat = 0.58
   /// Black behind the plot and its gutters. With it, 0.9-white axis labels
   /// measure 4.9:1 on the default #5994F2 background (4.5:1 under the
   /// top-right sheen, 5.8:1 along the darker bottom).
@@ -303,7 +306,8 @@ private struct TrendChartPlotView: View {
   /// Centers a label on its tick but keeps it inside the plot's width. The
   /// width is estimated: Text cannot be measured inside this layout pass.
   private func timeLabelCenter(for tick: TrendAxisTick, plotWidth: CGFloat) -> CGFloat {
-    let halfWidth = min(plotWidth / 2, CGFloat(tick.label.count) * Self.axisFontSize * 0.29 + 1)
+    let estimatedWidth = CGFloat(tick.label.count) * Self.axisFontSize * Self.axisGlyphWidthEms
+    let halfWidth = min(plotWidth / 2, estimatedWidth / 2 + 1)
     let x = xPosition(for: tick.date, in: CGSize(width: plotWidth, height: 1))
     return min(max(x, halfWidth), plotWidth - halfWidth)
   }

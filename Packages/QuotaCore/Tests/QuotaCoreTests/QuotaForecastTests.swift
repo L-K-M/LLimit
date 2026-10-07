@@ -248,6 +248,57 @@ final class QuotaForecastTests: XCTestCase {
     XCTAssertLessThan(warning.depletionAt.timeIntervalSince(now), 12 * hour)
   }
 
+  func testLateSurgeWarnsAtAnHourlyRefreshCadence() throws {
+    // Hourly fetches put only three samples in the last two hours, so the
+    // recent pace stretches to cover four.
+    let windowStart = now.addingTimeInterval(-6 * day)
+    let surgeStart = now.addingTimeInterval(-3 * hour)
+    let history = timeline(from: windowStart, to: now, every: hour) { date in
+      let remaining: Double
+      if date <= surgeStart {
+        remaining = 100 - 70 * date.timeIntervalSince(windowStart) / surgeStart.timeIntervalSince(windowStart)
+      } else {
+        remaining = 30 - 10 * date.timeIntervalSince(surgeStart) / (3 * self.hour)
+      }
+      return [self.usage("acct", at: date, metrics: [
+        self.metric(self.weekly.id, self.weekly.label, remaining: remaining, resetAt: self.now.addingTimeInterval(self.day))
+      ])]
+    }
+
+    let warning = try XCTUnwrap(QuotaForecast.depletionWarnings(
+      for: [QuotaForecast.SeriesKey(accountID: "acct", metricID: weekly.id)],
+      history: history,
+      latest: history.last,
+      now: now,
+      refreshInterval: hour
+    ).first)
+
+    XCTAssertEqual(warning.depletionAt.timeIntervalSince(now), 6 * hour, accuracy: hour)
+  }
+
+  func testEarlyLargeBurnWarnsWhileTheWindowAverageRunsOut() throws {
+    // Half the weekly quota went in the first twelve hours, then nothing for
+    // two and a half days. At the window's average (about 17% a day) the
+    // remaining half lasts three days and the reset is four days away, so
+    // this warns on purpose: a quiet stretch alone does not make the window
+    // safe, and silencing on idle hours would also hide every overnight
+    // warning.
+    let windowStart = now.addingTimeInterval(-3 * day)
+    let burnEnd = windowStart.addingTimeInterval(12 * hour)
+    let history = timeline(from: windowStart, to: now) { date in
+      let remaining = date <= burnEnd
+        ? 100 - 50 * date.timeIntervalSince(windowStart) / (12 * self.hour)
+        : 50
+      return [self.usage("acct", at: date, metrics: [
+        self.metric(self.weekly.id, self.weekly.label, remaining: remaining, resetAt: self.now.addingTimeInterval(4 * self.day))
+      ])]
+    }
+
+    let warning = try XCTUnwrap(warnings(for: [("acct", weekly.id)], history: history).first)
+
+    XCTAssertEqual(warning.depletionAt.timeIntervalSince(now), 3 * day, accuracy: hour)
+  }
+
   func testLateSurgeAboveTheLowThresholdStaysSilent() {
     // The same surge with half the window left is a burst, not a crisis.
     let windowStart = now.addingTimeInterval(-6 * day)

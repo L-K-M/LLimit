@@ -210,10 +210,15 @@ public enum TrendSeriesBuilder {
   /// Classification parses id and label text; history repeats the same few
   /// metrics thousands of times.
   private struct WindowKindCache {
-    private var kinds: [String: QuotaWindowKind] = [:]
+    private struct MetricText: Hashable {
+      let id: String
+      let label: String
+    }
+
+    private var kinds: [MetricText: QuotaWindowKind] = [:]
 
     mutating func kind(of metric: UsageMetric) -> QuotaWindowKind {
-      let cacheKey = "\(metric.id)\u{0}\(metric.label)"
+      let cacheKey = MetricText(id: metric.id, label: metric.label)
       if let kind = kinds[cacheKey] {
         return kind
       }
@@ -299,7 +304,8 @@ public enum TrendAxisTicks {
 
     let midnights = localMidnights(start: start, end: end, calendar: calendar)
     let stride = dayStrides.first { (midnights.count + $0 - 1) / $0 <= maxLabels } ?? dayStrides[dayStrides.count - 1]
-    let chosen = thinned(midnights.enumerated().filter { $0.offset % stride == 0 }.map(\.element), to: maxLabels)
+    // Counted back from the newest midnight: the recent end is read first.
+    let chosen = thinned(midnights.enumerated().filter { (midnights.count - 1 - $0.offset) % stride == 0 }.map(\.element), to: maxLabels)
 
     if span <= weekdaySpanLimit {
       let weekday = formatter(template: "EEE", calendar: calendar, locale: locale)
@@ -379,10 +385,11 @@ public enum TrendAxisTicks {
     return midnights
   }
 
+  /// Every `step`-th date counted back from the newest, which it keeps.
   private static func thinned(_ dates: [Date], to maxCount: Int) -> [Date] {
     guard dates.count > maxCount else { return dates }
     let step = (dates.count + maxCount - 1) / maxCount
-    return dates.enumerated().filter { $0.offset % step == 0 }.map(\.element)
+    return dates.enumerated().filter { (dates.count - 1 - $0.offset) % step == 0 }.map(\.element)
   }
 
   private static func formatter(template: String, calendar: Calendar, locale: Locale) -> DateFormatter {
