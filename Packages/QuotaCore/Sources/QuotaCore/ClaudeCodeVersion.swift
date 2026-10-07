@@ -93,11 +93,11 @@ public enum ClaudeCodeVersion {
       return nil
     }
 
-    let deadline = Date().addingTimeInterval(timeout)
-    while process.isRunning, Date() < deadline {
-      Thread.sleep(forTimeInterval: 0.01)
-    }
-    if process.isRunning {
+    let exited = DispatchSemaphore(value: 0)
+    process.terminationHandler = { _ in exited.signal() }
+    // The handler can miss a process that already exited.
+    if !process.isRunning { exited.signal() }
+    if exited.wait(timeout: .now() + timeout) == .timedOut {
       process.terminate()
       // A hung process may ignore SIGTERM briefly; SIGKILL it if it lingers.
       Thread.sleep(forTimeInterval: 0.2)
