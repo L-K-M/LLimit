@@ -98,8 +98,13 @@ jobs:
     # .deb with the musl SDK: that SDK has no Glibc module, so a break there
     # would otherwise only surface when a tag is pushed.
     runs-on: ubuntu-24.04
+    env:
+      VERSION: "0.0.0~ci"
     steps:
       - uses: actions/checkout@v7
+
+      - name: Test package version configuration
+        run: python3 -m unittest discover -s scripts/tests -p test_llimit_package_version.py
 
       - name: Install Swift 6.2.3
         # Direct tarball: swift-actions/setup-swift@v2 tops out at 6.2.1, and the
@@ -123,15 +128,18 @@ jobs:
             https://download.swift.org/swift-6.2.3-release/static-sdk/swift-6.2.3-RELEASE/swift-6.2.3-RELEASE_static-linux-0.0.1.artifactbundle.tar.gz \
             --checksum f30ec724d824ef43b5546e02ca06a8682dafab4b26a99fbb0e858c347e507a2c
 
+      - name: Stamp llimit version
+        run: python3 scripts/stamp-llimit-version.py "$VERSION"
+
       - name: Build static llimit binary
         run: swift build -c release --swift-sdk x86_64-swift-linux-musl --package-path Packages/LLimitd
 
       - name: Build .deb
-        run: Packages/LLimitd/packaging/build-deb.sh "0.0.0~ci"
+        run: Packages/LLimitd/packaging/build-deb.sh "$VERSION"
 
       - name: Test the packaged binary
         run: |
-          dpkg-deb -x "Packages/LLimitd/.build/llimit_0.0.0~ci_amd64.deb" "$RUNNER_TEMP/deb"
+          dpkg-deb -x "Packages/LLimitd/.build/llimit_${VERSION}_amd64.deb" "$RUNNER_TEMP/deb"
           binary="$RUNNER_TEMP/deb/usr/bin/llimit"
           # file prints "static-pie linked" instead when the binary is PIE.
           linkage="$(file -b "$binary")"

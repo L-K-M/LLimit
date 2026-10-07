@@ -46,7 +46,10 @@ public final class QuotaDaemon {
   private let makeDiscovery: () -> CredentialDiscovery
   /// Mirrors AppModel: when the settings file can't be decoded, refuse to overwrite
   /// it (it may hold credentials) until the user fixes or removes it.
-  private var configurationLoadFailed = false
+  public private(set) var settingsLoadError: SettingsLoadError?
+  private var loggedSettingsLoadError: SettingsLoadError?
+  private var configurationLoadFailed: Bool { settingsLoadError != nil }
+  fileprivate private(set) var editingID: UUID?
   /// The settings as they were on disk when last loaded (or last merged). The basis
   /// for the three-way merge in `mergeAndSaveSettings()`: during a refresh the
   /// daemon only ever changes `credentials` of existing accounts, and the merge
@@ -88,11 +91,12 @@ public final class QuotaDaemon {
     do {
       settings = try settingsStore.load()
       settingsBase = settings
-      configurationLoadFailed = false
+      settingsLoadError = nil
+      loggedSettingsLoadError = nil
     } catch {
       settings = .default
-      configurationLoadFailed = true
-      statusMessage = "Could not load settings. Using defaults. The existing file will not be overwritten."
+      settingsLoadError = SettingsLoadError(fileURL: paths.settingsFileURL, error: error)
+      statusMessage = settingsLoadError?.localizedDescription ?? "Could not load settings"
     }
 
     do {
@@ -112,24 +116,20 @@ public final class QuotaDaemon {
   /// Callers must hold the settings lock and have loaded inside it (the CLI
   /// mutation paths do both). The daemon's refresh cycle instead uses
   /// `mergeAndSaveSettings()`, which acquires the lock itself.
-  public func saveConfiguration() throws {
-    guard !configurationLoadFailed else {
-      throw DaemonError.settingsFileUnreadable
-    }
+  func saveConfiguration() throws {
+    if let settingsLoadError { throw settingsLoadError }
     try settingsStore.save(settings)
     settingsBase = settings
   }
 
   /// Persists credential changes made during a refresh (token adoption/rotation)
   /// WITHOUT clobbering a concurrent CLI edit. Re-reads the file under the settings
-  /// lock and three-way merges: a credential key is overwritten only when the
-  /// on-disk value still matches what the daemon loaded — i.e. the CLI didn't touch
-  /// that key. Accounts added/removed/enabled by the CLI mid-refresh survive,
+  /// lock and three-way merges: the credential set is replaced only when it still
+  /// matches what the daemon loaded. Tokens from two logins must never be spliced.
+  /// Accounts added/removed/enabled by the CLI mid-refresh survive,
   /// because everything except the daemon's own credential deltas comes from disk.
   func mergeAndSaveSettings() throws {
-    guard !configurationLoadFailed else {
-      throw DaemonError.settingsFileUnreadable
-    }
+    if let settingsLoadError { throw settingsLoadError }
     try settingsLock.withLock {
       let onDisk = try settingsStore.load()
       let merged = Self.mergingCredentialChanges(base: settingsBase, current: settings, onto: onDisk)
@@ -140,8 +140,8 @@ public final class QuotaDaemon {
   }
 
   /// The merge behind `mergeAndSaveSettings`, pure for testability: replays the
-  /// credential changes between `base` and `current` onto `disk`. A key the CLI
-  /// changed concurrently (disk value ≠ base value) keeps the CLI's value — an
+  /// credential changes between `base` and `current` onto `disk`. A login the CLI
+  /// changed concurrently keeps the CLI's complete credential set: an
   /// explicit edit beats an automatic token refresh; the next cycle re-reads live
   /// tokens anyway. Accounts the CLI removed stay removed; accounts it added are
   /// untouched (the daemon never adds accounts during a refresh).
@@ -152,30 +152,44 @@ public final class QuotaDaemon {
       guard
         let baseAccount = baseByID[currentAccount.id],
         baseAccount.credentials != currentAccount.credentials,
-        let diskIndex = result.accounts.firstIndex(where: { $0.id == currentAccount.id })
+        let diskIndex = result.accounts.firstIndex(where: { $0.id == currentAccount.id }),
+        result.accounts[diskIndex].provider == currentAccount.provider,
+        result.accounts[diskIndex].credentials == baseAccount.credentials
       else { continue }
 
-      var credentials = result.accounts[diskIndex].credentials
-      for (key, currentValue) in currentAccount.credentials {
-        let baseValue = baseAccount.credentials[key]
-        guard currentValue != baseValue else { continue } // the daemon changed this key
-        if credentials[key] == baseValue {
-          credentials[key] = currentValue
-        }
-      }
-      result.accounts[diskIndex].credentials = credentials
+      result.accounts[diskIndex].credentials = currentAccount.credentials
     }
     return result
   }
 
   // MARK: - Accounts (the Settings → Accounts surface, as plain mutations)
 
+  /// Account edits reload under the lock and save before returning. Prompts and
+  /// discovery run before entering this boundary, so they cannot stall a refresh.
+  public func editingSettings<T>(_ edit: (SettingsTransaction) throws -> T) throws -> T {
+    precondition(editingID == nil, "editingSettings must not be nested")
+    return try settingsLock.withLock {
+      loadConfiguration()
+      if let settingsLoadError { throw settingsLoadError }
+      let id = UUID()
+      editingID = id
+      defer { editingID = nil }
+      do {
+        return try edit(SettingsTransaction(daemon: self, id: id))
+      } catch {
+        // Keep memory aligned with the last durable edit after a failed save.
+        settings = settingsBase
+        throw error
+      }
+    }
+  }
+
   @discardableResult
-  public func addAccount(
+  func addAccount(
     provider: QuotaProvider,
     displayName: String? = nil,
     credentials: [String: String] = [:]
-  ) -> ProviderAccount {
+  ) throws -> ProviderAccount {
     var mergedCredentials = Dictionary(uniqueKeysWithValues: provider.credentialFields.map { ($0.key, "") })
     for (key, value) in credentials {
       mergedCredentials[key] = value
@@ -190,59 +204,128 @@ public final class QuotaDaemon {
     )
 
     settings.accounts.append(account)
-    normalizeAndSave()
+    try normalizeAndSave()
     return account
   }
 
   /// Creates a new LLimit-owned account pre-filled with a detected credential.
   @discardableResult
-  public func importAccount(from detected: DiscoveredCredential) -> ProviderAccount {
+  func importAccount(from detected: DiscoveredCredential) throws -> ProviderAccount {
     let name = detected.suggestedName.trimmingCharacters(in: .whitespacesAndNewlines)
-    return addAccount(
+    return try addAccount(
       provider: detected.provider,
       displayName: name.isEmpty ? nextDisplayName(for: detected.provider) : name,
       credentials: detected.credentials
     )
   }
 
-  public func setAccountEnabled(_ accountID: String, _ enabled: Bool) throws {
+  /// Keep identity, style and history while replacing the login or display name.
+  @discardableResult
+  func updateAccount(
+    _ accountID: String, displayName: String? = nil, credentials change: CredentialChange = .unchanged
+  ) throws -> ProviderAccount {
+    guard let index = settings.accounts.firstIndex(where: { $0.id == accountID }) else {
+      throw DaemonError.unknownAccount(accountID)
+    }
+    let previous = settings.accounts[index]
+    var updated = previous
+    if let displayName {
+      let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !name.isEmpty else { throw DaemonError.blankDisplayName }
+      updated.displayName = name
+    }
+    updated.credentials = try Self.credentials(of: previous, applying: change)
+    guard updated != previous else { return previous }
+
+    if updated.credentials != previous.credentials {
+      guard !CodexAccountProfile.isManaged(previous.credentials) else {
+        throw DaemonError.managedCredentials(previous.resolvedDisplayName)
+      }
+      // Old usage belongs to the old login, including Venice's estimated allowance.
+      // Clear before saving the new login so a failed snapshot save cannot pair them.
+      try discardSnapshotEntry(for: accountID)
+    }
+    settings.accounts[index] = updated
+    try normalizeAndSave()
+    reconcileSnapshotWithCurrentAccounts()
+    return settings.account(withID: accountID) ?? updated
+  }
+
+  func reimportAccount(
+    _ accountID: String, from stableID: String? = nil, among detected: [DiscoveredCredential]
+  ) throws -> (login: DiscoveredCredential, changed: Bool) {
+    guard let account = settings.account(withID: accountID) else { throw DaemonError.unknownAccount(accountID) }
+    let logins = detected.filter { $0.provider == account.provider }
+    let login: DiscoveredCredential
+    if let stableID {
+      guard let match = logins.first(where: { $0.stableID == stableID }) else {
+        throw DaemonError.detectedLoginNotFound(stableID, available: logins.map(\.stableID))
+      }
+      login = match
+    } else {
+      guard let only = logins.first else { throw DaemonError.noDetectedLogin(account.provider) }
+      guard logins.count == 1 else {
+        throw DaemonError.ambiguousDetectedLogin(account.provider, stableIDs: logins.map(\.stableID))
+      }
+      login = only
+    }
+    let updated = try updateAccount(accountID, credentials: .replacing(with: login.credentials))
+    return (login, updated != account)
+  }
+
+  func setAccountEnabled(_ accountID: String, _ enabled: Bool) throws {
     guard let index = settings.accounts.firstIndex(where: { $0.id == accountID }) else {
       throw DaemonError.unknownAccount(accountID)
     }
     settings.accounts[index].isEnabled = enabled
+    try normalizeAndSave()
     reconcileSnapshotWithCurrentAccounts()
-    normalizeAndSave()
   }
 
-  public func removeAccount(_ accountID: String) throws {
+  func removeAccount(_ accountID: String) throws {
     guard let removed = settings.accounts.first(where: { $0.id == accountID }) else {
       throw DaemonError.unknownAccount(accountID)
     }
     settings.accounts.removeAll { $0.id == accountID }
     settings.providerTileSlots = settings.providerTileSlots.map { $0 == accountID ? "" : $0 }
+    try normalizeAndSave()
     reconcileSnapshotWithCurrentAccounts()
     purgeHistory(for: removed)
-    normalizeAndSave()
   }
 
   /// Resolves a full account ID or a unique prefix (so the CLI can take short IDs).
-  public func resolveAccountID(_ fragment: String) -> String? {
-    if settings.accounts.contains(where: { $0.id == fragment }) {
-      return fragment
+  public func resolveAccountID(_ fragment: String) throws -> String {
+    let wanted = fragment.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !wanted.isEmpty else { throw DaemonError.blankAccountID }
+    if settings.accounts.contains(where: { $0.id == wanted }) {
+      return wanted
     }
-    let matches = settings.accounts.filter { $0.id.hasPrefix(fragment) }
-    return matches.count == 1 ? matches[0].id : nil
+    let matches = settings.accounts.filter { $0.id.lowercased().hasPrefix(wanted.lowercased()) }
+    guard matches.count <= 1 else {
+      throw DaemonError.ambiguousAccount(wanted, candidates: matches.map { "\($0.id) (\($0.resolvedDisplayName))" })
+    }
+    guard let match = matches.first else { throw DaemonError.unknownAccount(wanted) }
+    return match.id
   }
 
   /// True when an existing account already holds the same token for this provider,
   /// so the CLI can say "already imported" instead of offering a duplicate.
   public func isDetectedCredentialImported(_ detected: DiscoveredCredential) -> Bool {
-    let tokens = Set(detected.credentials.values.filter { !$0.isEmpty })
-    guard !tokens.isEmpty else { return false }
-    return settings.accounts.contains { account in
-      account.provider == detected.provider
-        && !Set(account.credentials.values).isDisjoint(with: tokens)
+    account(holding: detected) != nil
+  }
+
+  public func importMatch(for detected: DiscoveredCredential, among scan: [DiscoveredCredential] = []) -> ImportMatch {
+    if let holder = account(holding: detected) { return .alreadyImported(accountID: holder.id) }
+    let otherLogins = scan.filter { $0.provider == detected.provider && $0.stableID != detected.stableID }
+    let candidates = settings.accounts.filter { account in
+      account.provider == detected.provider && !CodexAccountProfile.isManaged(account.credentials)
+        && !otherLogins.contains { Self.sharesPrimarySecret(account.credentials, $0.credentials, provider: account.provider) }
     }
+    return candidates.isEmpty ? .newAccount : .updateCandidates(accountIDs: candidates.map(\.id))
+  }
+
+  public static func editableCredentialKeys(of account: ProviderAccount) -> Set<String> {
+    Set(account.provider.credentialFields.map(\.key)).union(account.credentials.keys)
   }
 
   // MARK: - Detect & import (convenience)
@@ -266,6 +349,10 @@ public final class QuotaDaemon {
   /// settings writes (token adoption/rotation) go through `mergeAndSaveSettings()`,
   /// which re-reads the file under the lock and merges instead of overwriting.
   public func refreshNow() async {
+    if let settingsLoadError {
+      reportSettingsLoadError(settingsLoadError)
+      return
+    }
     let openAITokensChanged = await refreshExpiringChatGPTTokens()
     if openAITokensChanged {
       // Persist promptly: OpenAI rotates refresh tokens, so the stored grant is
@@ -291,8 +378,25 @@ public final class QuotaDaemon {
     // Read the previous snapshot before overwriting it so accounts that fail this
     // cycle keep showing their last-known usage instead of vanishing.
     let previous = (try? snapshotStore.load(policy: .recover)) ?? snapshot
+    var fetchedConfigurations = enabledConfigs
     var refreshed = await coordinator.refresh(configurations: enabledConfigs, previousSnapshot: previous)
       .mergingStaleUsage(from: previous)
+    if Task.isCancelled && refreshed.providers.isEmpty && refreshed.failures.isEmpty { return }
+
+    // Validate before reactive recovery too: an old auth failure must not renew
+    // a login the user replaced while the request was in flight.
+    do {
+      refreshed = try settingsLock.withLock {
+        let latest = try loadLatestSettings()
+        let validated = validatedResults(refreshed, configurations: fetchedConfigurations, settings: latest)
+        settings = latest
+        settingsBase = latest
+        return validated
+      }
+    } catch {
+      log("[llimitd] Refresh validation failed: \(error.localizedDescription)")
+      return
+    }
 
     // Reactive recovery: if an enabled OpenAI account failed authentication (a token
     // revoked before its JWT exp, or a Codex rotation that landed mid-cycle), refresh
@@ -312,24 +416,34 @@ public final class QuotaDaemon {
       }
       if !retryConfigs.isEmpty {
         let retriedIDs = Set(retryConfigs.map(\.accountID))
-        let retrySnapshot = await coordinator.refresh(configurations: retryConfigs)
+        let retrySnapshot = await coordinator.refresh(configurations: retryConfigs, previousSnapshot: refreshed)
           .mergingStaleUsage(from: refreshed)
         refreshed = refreshed.replacingResults(forAccountIDs: retriedIDs, from: retrySnapshot)
+        fetchedConfigurations.removeAll { retriedIDs.contains($0.accountID) }
+        fetchedConfigurations += retryConfigs
       }
     }
 
     do {
-      try snapshotStore.save(refreshed)
+      // The lock covers validation and publication, never the network fetch.
+      // Otherwise an edit between validation and save could resurrect old data.
+      try settingsLock.withLock {
+        let latest = try loadLatestSettings()
+        refreshed = validatedResults(refreshed, configurations: fetchedConfigurations, settings: latest)
+        refreshed.refreshIntervalMinutes = latest.refreshIntervalMinutes
+        try snapshotStore.save(refreshed)
+        settings = latest
+        settingsBase = latest
+        do {
+          try historyStore.append(refreshed)
+        } catch {
+          log("[llimitd] History append failed: \(error.localizedDescription)")
+        }
+      }
     } catch {
       statusMessage = "Snapshot save failed: \(error.localizedDescription)"
       log("[llimitd] \(statusMessage)")
       return
-    }
-
-    do {
-      try historyStore.append(refreshed)
-    } catch {
-      log("[llimitd] History append failed: \(error.localizedDescription)")
     }
 
     snapshot = refreshed
@@ -375,6 +489,11 @@ public final class QuotaDaemon {
     } catch {
       statusMessage = "Settings lock failed: \(error.localizedDescription)"
       log("[llimitd] \(statusMessage)")
+      return
+    }
+
+    if let settingsLoadError {
+      reportSettingsLoadError(settingsLoadError)
       return
     }
 
@@ -513,7 +632,7 @@ public final class QuotaDaemon {
     }
   }
 
-  private func normalizeAndSave() {
+  private func normalizeAndSave() throws {
     // Rebuild through the AppSettings initializer so account-dependent normalization
     // (providerStyleSettings, tile slots, duplicate IDs) stays in one place.
     settings = AppSettings(
@@ -523,18 +642,72 @@ public final class QuotaDaemon {
       widgetBackgroundSettings: settings.widgetBackgroundSettings,
       providerStyleSettings: settings.providerStyleSettings,
       widgetVisibility: settings.widgetVisibility,
-      providerTileSlots: settings.providerTileSlots
+      providerTileSlots: settings.providerTileSlots,
+      alertSettings: settings.alertSettings
     )
-    do {
-      try saveConfiguration()
-    } catch {
-      statusMessage = "Save failed: \(error.localizedDescription)"
-      log("[llimitd] \(statusMessage)")
+    try saveConfiguration()
+  }
+
+  private func loadLatestSettings() throws -> AppSettings {
+    do { return try settingsStore.load() }
+    catch { throw SettingsLoadError(fileURL: paths.settingsFileURL, error: error) }
+  }
+
+  private func validatedResults(
+    _ result: QuotaSnapshot, configurations: [ProviderRuntimeConfiguration], settings latest: AppSettings
+  ) -> QuotaSnapshot {
+    let valid = latest.accounts.filter { account in
+      account.isEnabled && account.hasRequiredCredentials && configurations.contains {
+        $0.accountID == account.id && $0.provider == account.provider && $0.credentials == account.credentials
+      }
+    }
+    return result.reconciled(with: valid)
+  }
+
+  private static func credentials(of account: ProviderAccount, applying change: CredentialChange) throws -> [String: String] {
+    switch change {
+    case .unchanged: return account.credentials
+    case .replacing(let values):
+      let blank = Dictionary(uniqueKeysWithValues: account.provider.credentialFields.map { ($0.key, "") })
+      return blank.merging(values) { _, new in new }
+    case .merging(let values):
+      let editable = editableCredentialKeys(of: account)
+      if let unknown = values.keys.sorted().first(where: { !editable.contains($0) }) {
+        throw DaemonError.unknownCredentialKey(unknown, provider: account.provider)
+      }
+      var result = account.credentials
+      let tokenKey = CredentialField.anthropicAccessToken
+      if account.provider == .anthropic, let token = values[tokenKey], token != result[tokenKey] {
+        result = ClaudeCodeProfile.clearManagedMetadata(from: result)
+      }
+      return result.merging(values) { _, new in new }
     }
   }
 
+  private func account(holding detected: DiscoveredCredential) -> ProviderAccount? {
+    settings.accounts.first {
+      $0.provider == detected.provider && !CodexAccountProfile.isManaged($0.credentials)
+        && Self.sharesPrimarySecret($0.credentials, detected.credentials, provider: detected.provider)
+    }
+  }
+
+  private static func sharesPrimarySecret(_ lhs: [String: String], _ rhs: [String: String], provider: QuotaProvider) -> Bool {
+    provider.credentialFields.contains { field in
+      guard field.isSecret, let value = lhs[field.key], !value.isEmpty else { return false }
+      return rhs[field.key] == value
+    }
+  }
+
+  private func discardSnapshotEntry(for accountID: String) throws {
+    guard var current = (try? snapshotStore.load()) ?? snapshot else { return }
+    current.providers.removeAll { $0.accountID == accountID }
+    current.failures.removeAll { $0.accountID == accountID }
+    try snapshotStore.save(current)
+    snapshot = current
+  }
+
   private func reconcileSnapshotWithCurrentAccounts() {
-    guard let currentSnapshot = snapshot else { return }
+    guard !configurationLoadFailed, let currentSnapshot = snapshot else { return }
 
     let activeAccounts = settings.accounts.filter { $0.isEnabled && $0.hasRequiredCredentials }
     let reconciled = currentSnapshot.reconciled(with: activeAccounts)
@@ -559,6 +732,13 @@ public final class QuotaDaemon {
     } catch {
       log("[llimitd] History purge failed: \(error.localizedDescription)")
     }
+  }
+
+  private func reportSettingsLoadError(_ error: SettingsLoadError) {
+    statusMessage = error.localizedDescription
+    guard error != loggedSettingsLoadError else { return }
+    loggedSettingsLoadError = error
+    log("[llimitd] \(statusMessage)")
   }
 
   private func nextDisplayName(for provider: QuotaProvider) -> String {
@@ -604,16 +784,89 @@ public final class QuotaDaemon {
   }
 }
 
-public enum DaemonError: LocalizedError, Sendable {
+/// A handle is valid only for the particular transaction that created it.
+public struct SettingsTransaction {
+  private let daemon: QuotaDaemon
+  private let id: UUID
+
+  fileprivate init(daemon: QuotaDaemon, id: UUID) {
+    self.daemon = daemon
+    self.id = id
+  }
+
+  private var editing: QuotaDaemon {
+    precondition(daemon.editingID == id, "SettingsTransaction used outside its transaction")
+    return daemon
+  }
+
+  @discardableResult
+  public func addAccount(provider: QuotaProvider, displayName: String? = nil, credentials: [String: String] = [:]) throws -> ProviderAccount {
+    try editing.addAccount(provider: provider, displayName: displayName, credentials: credentials)
+  }
+
+  @discardableResult
+  public func importAccount(from detected: DiscoveredCredential) throws -> ProviderAccount {
+    try editing.importAccount(from: detected)
+  }
+
+  @discardableResult
+  public func updateAccount(_ accountID: String, displayName: String? = nil, credentials: CredentialChange = .unchanged) throws -> ProviderAccount {
+    try editing.updateAccount(accountID, displayName: displayName, credentials: credentials)
+  }
+
+  public func reimportAccount(_ accountID: String, from stableID: String? = nil, among detected: [DiscoveredCredential]) throws -> (login: DiscoveredCredential, changed: Bool) {
+    try editing.reimportAccount(accountID, from: stableID, among: detected)
+  }
+
+  public func setAccountEnabled(_ accountID: String, _ enabled: Bool) throws {
+    try editing.setAccountEnabled(accountID, enabled)
+  }
+
+  public func removeAccount(_ accountID: String) throws {
+    try editing.removeAccount(accountID)
+  }
+}
+
+public enum CredentialChange: Equatable, Sendable {
+  case unchanged
+  case merging([String: String])
+  case replacing(with: [String: String])
+}
+
+public enum ImportMatch: Equatable, Sendable {
+  case alreadyImported(accountID: String)
+  case newAccount
+  case updateCandidates(accountIDs: [String])
+}
+
+public enum DaemonError: LocalizedError, Equatable, Sendable {
   case unknownAccount(String)
-  case settingsFileUnreadable
+  case blankAccountID
+  case ambiguousAccount(String, candidates: [String])
+  case blankDisplayName
+  case unknownCredentialKey(String, provider: QuotaProvider)
+  case managedCredentials(String)
+  case noDetectedLogin(QuotaProvider)
+  case detectedLoginNotFound(String, available: [String])
+  case ambiguousDetectedLogin(QuotaProvider, stableIDs: [String])
 
   public var errorDescription: String? {
     switch self {
     case .unknownAccount(let id):
-      return "No account with ID \(id)."
-    case .settingsFileUnreadable:
-      return "Save blocked because the existing settings file could not be read. Fix or remove the file, then retry."
+      return "No account matches \"\(id)\". Run `llimit accounts list` to see IDs."
+    case .blankAccountID: return "The account ID is empty."
+    case .ambiguousAccount(let fragment, let candidates):
+      return "\"\(fragment)\" matches several accounts: \(candidates.joined(separator: ", ")). Type more of the ID."
+    case .blankDisplayName: return "The account name is empty."
+    case .unknownCredentialKey(let key, let provider):
+      return "\"\(key)\" is not a \(provider.displayName) credential. Use: \(provider.credentialFields.map(\.key).joined(separator: ", "))."
+    case .managedCredentials(let name):
+      return "\(name) uses its own Codex profile. Reconnect it in the macOS app or add a separate account."
+    case .noDetectedLogin(let provider): return "No \(provider.displayName) login detected. Sign in or use `llimit accounts update`."
+    case .detectedLoginNotFound(let stableID, let available):
+      return "No detected login has ID \(stableID). Available: \(available.joined(separator: ", "))."
+    case .ambiguousDetectedLogin(let provider, let stableIDs):
+      return "Several \(provider.displayName) logins detected: \(stableIDs.joined(separator: ", ")). Choose --from <stable-id>."
     }
   }
 }

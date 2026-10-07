@@ -21,6 +21,7 @@ export RELEASE_KIND="xcode"
 export RELEASE_XCODE_PROJECT="LLimit.xcodeproj"
 export RELEASE_XCODE_SCHEME="LLimitApp"
 export RELEASE_XCODEGEN_YML="project.yml"
+export RELEASE_POST_BUMP='python3 scripts/stamp-llimit-version.py "$RELEASE_NEW_VERSION"'
 export RELEASE_CI_NOTE="CI (release.yml) will now build, ad-hoc sign, package (.zip + .dmg), and publish the GitHub Release for the tag."
 export RELEASE_INVOKED_AS="scripts/release.sh"
 
