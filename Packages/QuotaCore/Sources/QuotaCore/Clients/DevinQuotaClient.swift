@@ -53,7 +53,7 @@ public struct DevinQuotaClient: QuotaProviderClient {
     } else if let serverURL = URL(string: serverOverride), serverURL.host != nil {
       endpoint = serverURL.appending(path: Self.servicePath)
     } else {
-      throw ProviderClientError(kind: .notConfigured, message: "Devin API server \"\(serverOverride)\" is not a valid URL")
+      throw ProviderClientError(kind: .notConfigured, message: "Devin API server is not a valid URL. Check this account's server setting.")
     }
 
     var request = URLRequest(url: endpoint)
@@ -77,14 +77,13 @@ public struct DevinQuotaClient: QuotaProviderClient {
 
     let (data, response) = try await httpClient.data(for: request)
     guard (200..<300).contains(response.statusCode) else {
-      let body = String(data: data, encoding: .utf8) ?? ""
       switch response.statusCode {
       case 401, 403:
         throw ProviderClientError(kind: .auth, message: "Devin authorization failed (\(response.statusCode)) — check the API key or re-run `devin auth login`")
       case 429:
-        throw ProviderClientError(kind: .rateLimit, message: "Devin API rate limited: \(body)")
+        throw ProviderClientError(kind: .rateLimit, message: "Devin API is rate limiting requests. Try again later.", statusCode: response.statusCode)
       default:
-        throw ProviderClientError(kind: .api, message: "Devin API error \(response.statusCode): \(body)")
+        throw ProviderClientError(kind: .api, message: "Devin usage API failed (HTTP \(response.statusCode)). Try again later.", statusCode: response.statusCode)
       }
     }
 
