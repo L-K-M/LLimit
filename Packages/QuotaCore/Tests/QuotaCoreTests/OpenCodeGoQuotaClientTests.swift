@@ -125,8 +125,10 @@ final class OpenCodeGoQuotaClientTests: XCTestCase {
     // status alone decides exhaustion rather than failing the fetch.
     let body = validBody.replacingOccurrences(
       of: #""status": "ok", "percent": 60"#, with: #""status": "rate-limited", "percent": 97"#)
-    XCTAssertNotEqual(body, validBody,
-                      "fixture no longer contains the weekly-window substring; replacement was a no-op")
+    guard body != validBody else {
+      XCTFail("fixture no longer contains the weekly-window substring; replacement was a no-op")
+      return
+    }
     let usage = try await OpenCodeGoQuotaClient(httpClient: RecordingGoHTTP(status: 200, body: body))
       .fetchUsage(configuration: configuration(), now: now)
 
