@@ -40,8 +40,9 @@ source branches remain untouched.
 
 ## Cross-batch seams
 
-- Storage foundations: display/history export must use preserve-mode loads once
-  that policy is available. Retain corrupt/missing and FIFO process tests.
+- Storage foundations f0c8546 are merged. Display/history export explicitly use
+  `.preserve`; owned daemon bootstrap/refresh and history mutations use `.recover`.
+  Corrupt/missing and FIFO process tests cover bytes, permissions and filenames.
 - Provider cancellation: skip publication only for a cancelled, empty result;
   preserve completed failures. Targeted retries pass the current snapshot back
   to the coordinator.
@@ -52,3 +53,6 @@ source branches remain untouched.
   snapshot transforms and history filtering.
 - Display text: #95 may relocate `StatusRenderer.relativeAge` to
   `QuotaDisplayText`; keep all CLI callers wired to that shared implementation.
+- Settings #86: publication validation must compare latest resolved runtime
+  credentials, not stored `env:NAME` references. The settings batch owns that
+  merge regression. Keep whole-credential merging, without per-key grant splicing.
