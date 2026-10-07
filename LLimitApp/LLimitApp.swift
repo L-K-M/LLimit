@@ -3,6 +3,16 @@ import AppKit
 import QuotaCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+  func applicationDidFinishLaunching(_ notification: Notification) {
+    GlobalHotkeyService.shared.start {
+      DashboardWindowController.shared.toggleFromShortcut(model: AppModel.shared)
+    }
+  }
+
+  func applicationWillTerminate(_ notification: Notification) {
+    GlobalHotkeyService.shared.stop()
+  }
+
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
     false
   }
@@ -15,7 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct LLimitApp: App {
   @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-  @StateObject private var model = AppModel()
+  @StateObject private var model = AppModel.shared
 
   var body: some Scene {
     // Menu-bar-only app. The settings window is a normal, freely resizable AppKit
@@ -92,13 +102,24 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
   }
 }
 
+extension AppModel {
+  /// The app's only model, created on first use and never again. The menu bar
+  /// and the dashboard shortcut both reach it here, so neither depends on how
+  /// often SwiftUI initializes `LLimitApp`, and no second model can start its
+  /// own refresh loop.
+  @MainActor static let shared = AppModel()
+}
+
 /// Owns the optional always-on-top quota dashboard detached from the menu bar.
 @MainActor
 final class DashboardWindowController {
   static let shared = DashboardWindowController()
   private var window: NSPanel?
+  /// App that was frontmost when the dashboard came forward while LLimit was
+  /// inactive. A shortcut press that puts the dashboard away hands focus back.
+  private var appToRestore: NSRunningApplication?
 
-  func show(model: AppModel, near screenPoint: NSPoint? = nil, activate: Bool = true) {
+  private func makeWindowIfNeeded(model: AppModel) {
     if window == nil {
       let hosting = NSHostingController(
         rootView: MenuBarContent(model: model, presentation: .floating)
@@ -121,6 +142,13 @@ final class DashboardWindowController {
       panel.setFrameAutosaveName("LLimitFloatingDashboard")
       window = panel
     }
+  }
+
+  func show(model: AppModel, near screenPoint: NSPoint? = nil, activate: Bool = true) {
+    makeWindowIfNeeded(model: model)
+    // Read before activating, which makes LLimit the frontmost app. Nothing is
+    // restored when LLimit was already active, such as from Settings.
+    appToRestore = NSApp.isActive ? nil : NSWorkspace.shared.frontmostApplication
 
     if let screenPoint {
       positionWindow(near: screenPoint)
@@ -144,6 +172,52 @@ final class DashboardWindowController {
   func activateWindow() {
     NSApp.activate(ignoringOtherApps: true)
     window?.makeKeyAndOrderFront(nil)
+  }
+
+  /// The dashboard shortcut. A dashboard you are using goes away. A hidden one,
+  /// or one left visible while you work in another app, comes forward on the
+  /// screen under the pointer with keyboard focus, so Cmd-R and Cmd-, work.
+  func toggleFromShortcut(model: AppModel) {
+    if NSApp.isActive, let window, window.isKeyWindow {
+      dismissFromShortcut(window)
+      return
+    }
+
+    makeWindowIfNeeded(model: model)
+    moveOntoScreen(containing: NSEvent.mouseLocation)
+    show(model: model)
+  }
+
+  private func dismissFromShortcut(_ window: NSPanel) {
+    window.orderOut(nil)
+
+    // Ordering the panel out leaves LLimit active with nothing to type into,
+    // so hand focus back to the app you were in when the dashboard came forward.
+    if let appToRestore, !appToRestore.isTerminated {
+      appToRestore.activate(options: [])
+    }
+    appToRestore = nil
+  }
+
+  /// Leaves the dashboard where you put it when that is on the pointer's
+  /// screen. Otherwise centers it on that screen.
+  private func moveOntoScreen(containing point: NSPoint) {
+    guard let window,
+          let screen = NSScreen.screens.first(where: { NSMouseInRect(point, $0.frame, false) }) else {
+      return
+    }
+
+    let frame = window.frame
+    guard !screen.frame.contains(NSPoint(x: frame.midX, y: frame.midY)) else { return }
+
+    let visibleFrame = screen.visibleFrame
+    let centered = NSRect(
+      x: visibleFrame.midX - frame.width / 2,
+      y: visibleFrame.midY - frame.height / 2,
+      width: frame.width,
+      height: frame.height
+    )
+    window.setFrame(window.constrainFrameRect(centered, to: screen), display: false)
   }
 
   private func positionWindow(near screenPoint: NSPoint) {
