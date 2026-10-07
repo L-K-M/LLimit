@@ -1,5 +1,12 @@
 import Foundation
 import QuotaCore
+#if canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#elseif canImport(Darwin)
+import Darwin
+#endif
 
 /// The opt-in alert settings of `llimit daemon`: `--notify` (or
 /// `LLIMIT_NOTIFY=1`, for the systemd unit), `--on-event <cmd>` and
@@ -224,13 +231,48 @@ struct QuotaEventStateStore {
     return try decoder.decode(QuotaEventState.self, from: Data(contentsOf: fileURL))
   }
 
+  struct WriteError: LocalizedError {
+    var operation: String
+    var code: Int32
+    var errorDescription: String? { "\(operation) failed: \(String(cString: strerror(code)))" }
+  }
+
+  /// Writes a temporary file that is mode 0600 from the moment it exists, then
+  /// renames it over the old one, so the state is never readable by others nor
+  /// half-written. A mode that cannot be set fails the save.
   func save(_ state: QuotaEventState) throws {
-    try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    let directory = fileURL.deletingLastPathComponent()
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
     let encoder = JSONEncoder()
     encoder.dateEncodingStrategy = .iso8601
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-    try encoder.encode(state).write(to: fileURL, options: .atomic)
-    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+    let data = try encoder.encode(state)
+
+    let temporaryPath = directory.appendingPathComponent(".\(fileURL.lastPathComponent).\(UUID().uuidString)").path
+    let descriptor = open(temporaryPath, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o600)
+    guard descriptor >= 0 else {
+      throw WriteError(operation: "Creating \(temporaryPath)", code: errno)
+    }
+    var renamed = false
+    defer {
+      if !renamed {
+        unlink(temporaryPath)
+      }
+    }
+
+    do {
+      defer { close(descriptor) }
+      // The umask can only have narrowed 0600; set it exactly.
+      guard fchmod(descriptor, 0o600) == 0 else {
+        throw WriteError(operation: "Setting mode 0600 on \(temporaryPath)", code: errno)
+      }
+      try FileHandle(fileDescriptor: descriptor, closeOnDealloc: false).write(contentsOf: data)
+    }
+
+    guard rename(temporaryPath, fileURL.path) == 0 else {
+      throw WriteError(operation: "Replacing \(fileURL.path)", code: errno)
+    }
+    renamed = true
   }
 }

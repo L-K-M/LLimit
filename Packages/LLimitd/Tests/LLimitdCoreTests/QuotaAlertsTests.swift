@@ -110,6 +110,8 @@ final class QuotaAlertsTests: XCTestCase {
       (["--thresholds", "0"], .invalidThresholds("0")),
       (["--thresholds", "100"], .invalidThresholds("100")),
       (["--thresholds", "20,"], .invalidThresholds("20,")),
+      (["--thresholds", ","], .invalidThresholds(",")),
+      (["--thresholds", "150"], .invalidThresholds("150")),
       (["--thresholds", "twenty"], .invalidThresholds("twenty"))
     ]
     for (arguments, expected) in cases {
@@ -304,18 +306,22 @@ final class QuotaAlertsTests: XCTestCase {
   #if os(Linux)
   func testChildDoesNotInheritDaemonDescriptors() throws {
     // Like the settings lock: opened without O_CLOEXEC.
-    let descriptor = open(tempDirectory.appendingPathComponent("held").path, O_WRONLY | O_CREAT, 0o600)
+    let held = tempDirectory.appendingPathComponent("held")
+    let descriptor = open(held.path, O_WRONLY | O_CREAT, 0o600)
     XCTAssertGreaterThan(descriptor, 2)
     defer { close(descriptor) }
     let listing = tempDirectory.appendingPathComponent("fds")
 
+    // Compares what the hook's descriptors point to: the numbers alone can
+    // collide with descriptors the shell opens for itself.
     let runner = ChildProcessRunner(log: log)
-    runner.run(executable: try script("list-fds", "ls /proc/self/fd > \"\(listing.path)\""), arguments: [], environment: ["PATH": "/usr/bin:/bin"])
+    let lister = try script("list-fds", "for f in /proc/$$/fd/*; do readlink \"$f\"; done > \"\(listing.path)\"")
+    runner.run(executable: lister, arguments: [], environment: ["PATH": "/usr/bin:/bin"])
     runner.waitUntilIdle()
 
-    let listed = try String(contentsOf: listing, encoding: .utf8).split(separator: "\n").map(String.init)
-    XCTAssertTrue(listed.contains("0"))
-    XCTAssertFalse(listed.contains(String(descriptor)), "\(listed)")
+    let targets = try String(contentsOf: listing, encoding: .utf8).split(separator: "\n").map(String.init)
+    XCTAssertTrue(targets.contains("/dev/null"), "\(targets)")
+    XCTAssertFalse(targets.contains(held.resolvingSymlinksInPath().path), "\(targets)")
   }
   #endif
 
@@ -384,6 +390,49 @@ final class QuotaAlertsTests: XCTestCase {
     XCTAssertEqual(mode?.intValue, 0o600)
     XCTAssertEqual(paths.alertsStateFileURL.deletingLastPathComponent(), paths.snapshotFileURL.deletingLastPathComponent())
     XCTAssertEqual(paths.alertsStateFileURL.lastPathComponent, "alerts-state.json")
+  }
+
+  func testStateFileIsPrivateRegardlessOfUmaskAndReplacesTheOldOne() throws {
+    let previousMask = umask(0)
+    defer { umask(previousMask) }
+    try FileManager.default.createDirectory(at: paths.dataDirectory, withIntermediateDirectories: true)
+    try Data("{}".utf8).write(to: paths.alertsStateFileURL)
+    try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: paths.alertsStateFileURL.path)
+
+    var state = QuotaEventState()
+    state.failureLatches = [.init(accountID: "a", kind: .auth)]
+    let store = QuotaEventStateStore(fileURL: paths.alertsStateFileURL)
+    try store.save(state)
+
+    let mode = try FileManager.default.attributesOfItem(atPath: paths.alertsStateFileURL.path)[.posixPermissions] as? NSNumber
+    XCTAssertEqual(mode?.intValue, 0o600)
+    XCTAssertEqual(try store.load(), state)
+    XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: paths.dataDirectory.path), ["alerts-state.json"])
+  }
+
+  func testSlowHookDoesNotBlockTheRefresh() async throws {
+    let runner = ChildProcessRunner(timeout: 2, log: log)
+    let sink = EventHookSink(executable: try script("slow", "exec sleep 5"), runner: runner, inheritedEnvironment: ["PATH": "/usr/bin:/bin"])
+    let monitor = QuotaAlertMonitor(stateFileURL: paths.alertsStateFileURL, config: .default, sinks: [sink], log: log)
+    let client = ScriptedClient()
+    client.error = ProviderClientError(kind: .auth, message: "expired")
+    let daemon = QuotaDaemon(
+      paths: paths,
+      coordinator: QuotaCoordinator(clients: [client]),
+      makeDiscovery: { CredentialDiscovery(homeDirectories: [self.tempDirectory]) },
+      log: { _ in }
+    )
+    daemon.loadConfiguration()
+    daemon.addAccount(provider: .anthropic, credentials: [CredentialField.anthropicAccessToken: "test-token"])
+    daemon.onSnapshotSaved = { previous, current in monitor.process(previous: previous, current: current) }
+
+    let start = Date()
+    await daemon.refreshNow()
+
+    XCTAssertLessThan(Date().timeIntervalSince(start), 1, "the refresh waited for the hook")
+    XCTAssertTrue(loggedText.contains("Alert: Claude: sign-in needed"))
+    runner.waitUntilIdle()
+    XCTAssertTrue(loggedText.contains("slow did not finish within 2s"))
   }
 
   func testUnreadableStateStartsFresh() throws {

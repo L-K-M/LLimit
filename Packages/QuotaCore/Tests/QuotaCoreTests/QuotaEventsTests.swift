@@ -116,6 +116,10 @@ final class QuotaEventsTests: XCTestCase {
     XCTAssertTrue(run.step(reading(24, at: t0 + 900), now: t0 + 900).isEmpty)
     XCTAssertTrue(run.step(reading(19, at: t0 + 1_800), now: t0 + 1_800).isEmpty)
 
+    // Exactly threshold + hysteresis is not yet a recovery: it must be exceeded.
+    XCTAssertTrue(run.step(reading(25, at: t0 + 2_000), now: t0 + 2_000).isEmpty)
+    XCTAssertTrue(run.step(reading(19, at: t0 + 2_200), now: t0 + 2_200).isEmpty)
+
     XCTAssertTrue(run.step(reading(26, at: t0 + 2_700), now: t0 + 2_700).isEmpty)
     XCTAssertEqual(run.step(reading(19, at: t0 + 3_600), now: t0 + 3_600).map(\.threshold), [20])
   }
@@ -175,6 +179,14 @@ final class QuotaEventsTests: XCTestCase {
   func testConfigNormalizesThresholds() {
     XCTAssertEqual(QuotaEventConfig(thresholds: [5, 20, 20, 0, 100, -3]).thresholds, [20, 5])
     XCTAssertEqual(QuotaEventConfig.default.thresholds, [20, 5])
+    XCTAssertEqual(QuotaEventConfig(thresholds: [150]).thresholds, [])
+  }
+
+  func testUnsortedThresholdsStillAlertForTheLowest() {
+    var run = Run(config: QuotaEventConfig(thresholds: [5, 20]))
+    let events = run.step(reading(3, at: t0), now: t0)
+    XCTAssertEqual(events.map(\.threshold), [5])
+    XCTAssertEqual(events.first?.severity, .critical)
   }
 
   func testAccountsAndMetricsAreTrackedIndependently() {
@@ -186,7 +198,7 @@ final class QuotaEventsTests: XCTestCase {
     ], at: t0)
 
     let events = run.step(first, now: t0)
-    XCTAssertEqual(events.map(\.accountID), ["a", "b"])
+    XCTAssertEqual(events.map(\.accountID).sorted(), ["a", "b"])
 
     let second = snapshot([
       usage(account: "a", title: "A", [metric(remaining: 17, resetAt: reset), metric("seven_day", label: "7-day limit", remaining: 15)], at: t0 + 900),
@@ -213,12 +225,22 @@ final class QuotaEventsTests: XCTestCase {
     XCTAssertEqual(run.state.thresholdLatches.count, 1)
   }
 
-  func testMetricThatDisappearsIsForgotten() {
+  func testMetricMissingForOneRefreshKeepsItsLatch() {
+    var run = Run()
+    XCTAssertEqual(run.step(reading(10, at: t0, id: "m"), now: t0).count, 1)
+
+    // The provider omits the metric once, then reports it again, still low.
+    XCTAssertTrue(run.step(reading(80, at: t0 + 900, id: "other"), now: t0 + 900).isEmpty)
+    XCTAssertTrue(run.step(reading(10, at: t0 + 1_800, id: "m"), now: t0 + 1_800).isEmpty)
+  }
+
+  func testMetricMissingForTwoRefreshesIsForgotten() {
     var run = Run()
     _ = run.step(reading(10, at: t0, id: "old"), now: t0)
     _ = run.step(reading(80, at: t0 + 900, id: "new"), now: t0 + 900)
+    _ = run.step(reading(80, at: t0 + 1_800, id: "new"), now: t0 + 1_800)
     XCTAssertTrue(run.state.thresholdLatches.isEmpty)
-    XCTAssertEqual(run.step(reading(10, at: t0 + 1_800, id: "old"), now: t0 + 1_800).count, 1)
+    XCTAssertEqual(run.step(reading(10, at: t0 + 2_700, id: "old"), now: t0 + 2_700).count, 1)
   }
 
   // MARK: - Resets
@@ -269,6 +291,38 @@ final class QuotaEventsTests: XCTestCase {
     let after = reset + 60
     let events = run.step(reading(12, resetAt: after + hour, at: after), now: after)
     XCTAssertFalse(events.contains { $0.kind == .reset })
+  }
+
+  func testResetIsNotRepeatedWithinTheWindowItOpened() {
+    var run = Run()
+    let firstReset = t0 + hour
+    _ = run.step(reading(3, resetAt: firstReset, at: t0), now: t0)
+    let afterReset = firstReset + 60
+    let nextReset = afterReset + 5 * hour
+    XCTAssertEqual(run.step(reading(100, resetAt: nextReset, at: afterReset), now: afterReset).map(\.kind), [.reset])
+
+    // A provider glitch two hours later: one low reading whose window "ends" a
+    // minute later, then the real numbers again. The window the reset opened
+    // is still running, so this is not a second reset.
+    let glitch = afterReset + 2 * hour
+    _ = run.step(reading(10, resetAt: glitch + 60, at: glitch), now: glitch)
+    let recovered = glitch + 900
+    let events = run.step(reading(100, resetAt: nextReset, at: recovered), now: recovered)
+    XCTAssertFalse(events.contains { $0.kind == .reset })
+  }
+
+  func testEachLowWindowAnnouncesItsOwnReset() {
+    var run = Run()
+    let firstReset = t0 + hour
+    _ = run.step(reading(3, resetAt: firstReset, at: t0), now: t0)
+    let second = firstReset + 60
+    let nextReset = second + 5 * hour
+    XCTAssertEqual(run.step(reading(100, resetAt: nextReset, at: second), now: second).map(\.kind), [.reset])
+
+    let low = nextReset - hour
+    _ = run.step(reading(4, resetAt: nextReset, at: low), now: low)
+    let third = nextReset + 60
+    XCTAssertEqual(run.step(reading(100, resetAt: third + 5 * hour, at: third), now: third).map(\.kind), [.reset])
   }
 
   func testResetIsAnnouncedOnceWhenThePreviousSnapshotRepeats() {
@@ -331,8 +385,8 @@ final class QuotaEventsTests: XCTestCase {
   }
 
   func testTransientFailuresDoNotAlert() {
-    var run = Run()
     for kind in [QuotaErrorKind.network, .rateLimit, .api, .unknown] {
+      var run = Run()
       let failing = snapshot([], failures: [ProviderFailure(accountID: "acct-1", provider: .openAI, kind: kind, message: "x")], at: t0)
       XCTAssertTrue(run.step(failing, now: t0).isEmpty, "\(kind)")
     }
@@ -389,6 +443,17 @@ final class QuotaEventsTests: XCTestCase {
     XCTAssertEqual(run.step(weekly(80, nextReset, nextNudge), now: nextNudge).map(\.kind), [.expiringUnused])
   }
 
+  func testExpiringUnusedIgnoresAResetShiftWithinTheOngoingWindow() {
+    var run = Run()
+    let reset = t0 + 9 * hour
+    let first = run.step(reading(62, resetAt: reset, at: t0, id: "seven_day", label: "7-day limit"), now: t0)
+    XCTAssertEqual(first.map(\.kind), [.expiringUnused])
+
+    // The provider moves the same window's reset by three hours, beyond the jitter tolerance.
+    let later = t0 + hour
+    XCTAssertTrue(run.step(reading(60, resetAt: reset + 3 * hour, at: later, id: "seven_day", label: "7-day limit"), now: later).isEmpty)
+  }
+
   func testExpiringUnusedFiltersByKindAndThresholds() {
     func events(id: String, label: String, remaining: Int, resetIn: TimeInterval) -> [QuotaEventKind] {
       var run = Run()
@@ -434,6 +499,7 @@ final class QuotaEventsTests: XCTestCase {
 
     // A daemon restart: the state comes back from JSON with whole-second dates.
     let restored = try decoder.decode(QuotaEventState.self, from: encoder.encode(first.state))
+    XCTAssertNotEqual(restored, first.state, "the round trip should drop sub-second precision")
     let second = QuotaEvents.detect(previous: combined, current: combined, now: t0 + 900, state: restored)
     XCTAssertTrue(second.events.isEmpty)
   }
@@ -441,6 +507,17 @@ final class QuotaEventsTests: XCTestCase {
   func testUnknownOrMissingStateKeysDecodeAsEmpty() throws {
     let state = try JSONDecoder().decode(QuotaEventState.self, from: Data(#"{"future":1}"#.utf8))
     XCTAssertEqual(state, QuotaEventState())
+  }
+
+  func testStateEntriesTolerateMissingOptionalAndUnknownKeys() throws {
+    // Synthesized Codable already decodes optionals with decodeIfPresent and
+    // ignores keys it does not know, so entries stay readable across versions.
+    let json = #"{"thresholdLatches":[{"accountID":"a","metricID":"m","threshold":20,"addedLater":true}],"#
+      + #""resetMarks":[{"accountID":"a","metricID":"m","endedAt":0}]}"#
+    let state = try JSONDecoder().decode(QuotaEventState.self, from: Data(json.utf8))
+
+    XCTAssertEqual(state.thresholdLatches, [.init(accountID: "a", metricID: "m", threshold: 20, resetAt: nil)])
+    XCTAssertEqual(state.resetMarks.first?.nextResetAt, nil)
   }
 
   // MARK: - Copy
@@ -466,7 +543,7 @@ final class QuotaEventsTests: XCTestCase {
     event.kind = .reset
     event.remainingPercent = 100
     XCTAssertEqual(event.title, "Claude Work: 5-hour limit reset")
-    XCTAssertEqual(event.body(now: t0), "100% left again.")
+    XCTAssertEqual(event.body(now: t0), "100% left again, resets in 2h 10m.")
 
     let failure = QuotaEvent(kind: .failure, severity: .critical, accountID: "a", accountName: "ChatGPT", provider: .openAI, failureKind: .auth)
     XCTAssertEqual(failure.title, "ChatGPT: sign-in needed")
