@@ -81,7 +81,9 @@ public enum TrendRenderer {
           samples[key, default: []].append((at: snapshot.generatedAt, value: value))
           displayTitle[key] = usage.title
           displayLabel[key] = metric.label
-          isPercent[key] = metric.remainingPercent != nil
+          // Percent scale applies only when every sample in the series is
+          // percent-based — a mixed series needs observed-range normalization.
+          isPercent[key] = (isPercent[key] ?? true) && metric.remainingPercent != nil
           if let percent = metric.remainingPercent {
             latestValue[key] = "\(percent)% left"
           } else if let amount = metric.remainingAmount {
