@@ -236,8 +236,8 @@ public struct MetaMuseQuotaClient: QuotaProviderClient {
         continue
       }
 
-      // Stream-level errors arrive as HTTP 200 events; they must not read as
-      // a healthy pay-as-you-go stream.
+      // Terminal errors fail the refresh even after a valid quota snapshot;
+      // the caller's stale merge preserves the last-good usage.
       let rawType = eventName ?? (object["type"] as? String)
       let type = rawType.flatMap(EventType.init(rawValue:))
       if type == .error || type == .failed || object["error"] is [String: Any] {

@@ -193,6 +193,9 @@ final class MetaMuseClientTests: XCTestCase {
       sse("response.completed", #"{"type":"response.completed","response":{"id":"fixture","subscription_usage":\#(snapshot)}}"#),
       sse("response.incomplete", #"{"type":"response.incomplete","response":{"id":"fixture","subscription_usage":\#(snapshot)}}"#),
       sse("response.subscription_usage", snapshot).replacingOccurrences(of: "\n", with: "\r\n"),
+      // SSE joins consecutive data: fields with newlines.
+      "data: {\"type\":\"response.subscription_usage\",\ndata: \"window\":{\"used_percent\":0},\"weekly\":{\"used_percent\":\"0\"}}\n\n",
+      // Compatibility leniency also accepts indentation before data:.
       "data: {\"type\":\"response.subscription_usage\",\n data: \"window\":{\"used_percent\":0},\"weekly\":{\"used_percent\":\"0\"}}\n\n",
       snapshot,
       #"{"id":"fixture","subscription_usage":\#(snapshot)}"#,
@@ -286,6 +289,19 @@ final class MetaMuseClientTests: XCTestCase {
     let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 200, body: body))
     await assertThrows(kind: .api, messageContains: "Check the API key", messageExcludes: ["bad key", "invalid_api_key"]) {
       try await client.fetchUsage(configuration: self.config(), now: self.now)
+    }
+  }
+
+  func testStreamErrorAfterSubscriptionSnapshotStillThrowsAPI() async {
+    let snapshot = sse("response.subscription_usage", #"{"window":{"used_percent":30},"weekly":{"used_percent":25}}"#)
+    for terminal in [
+      sse("error", #"{"type":"error","message":"terminal-fixture"}"#),
+      sse("response.failed", #"{"type":"response.failed","response":{"id":"fixture","error":{"message":"terminal-fixture"}}}"#)
+    ] {
+      let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 200, body: snapshot + terminal))
+      await assertThrows(kind: .api, messageContains: "try again later", messageExcludes: ["terminal-fixture"]) {
+        try await client.fetchUsage(configuration: self.config(), now: self.now)
+      }
     }
   }
 

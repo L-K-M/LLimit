@@ -50,6 +50,59 @@ final class QuotaCoordinatorTests: XCTestCase {
     )
   }
 
+  func testMuseStreamErrorAfterSubscriptionSnapshotKeepsLastGoodUsage() async throws {
+    let snapshot = "event: response.subscription_usage\ndata: {\"weekly\":{\"used_percent\":10}}\n\n"
+    for terminal in [
+      "event: error\ndata: {\"type\":\"error\",\"message\":\"terminal-fixture\"}\n\n",
+      "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"fixture\",\"error\":{\"message\":\"terminal-fixture\"}}}\n\n"
+    ] {
+      try await assertMalformedSubscriptionKeepsLastGoodUsage(
+        provider: .metaMuse, kind: .api, http: SubscriptionFixtureHTTP(museBody: snapshot + terminal)
+      )
+    }
+  }
+
+  func testSubscriptionFixtureRejectsUnexpectedRoutes() async {
+    let routes = [
+      ("POST", "https://fixture.invalid/v1/responses"),
+      ("POST", "https://api.meta.ai/v1/unexpected"),
+      ("GET", "https://fixture.invalid/api/v1/users/me/plan/usage-limits"),
+      ("GET", "https://api.cline.bot/unexpected/balance"),
+      ("GET", "https://api.cline.bot/api/v1/users/usr-OTHER/balance"),
+      ("GET", "https://api.cline.bot/api/v1/unexpected"),
+      ("GET", "https://api.meta.ai/v1/responses"),
+      ("POST", "https://api.cline.bot/api/v1/users/me"),
+      ("GET", "http://api.cline.bot/api/v1/users/me"),
+      ("GET", "https://api.cline.bot/api/v1/users/me?unexpected=1")
+    ]
+    for (method, url) in routes {
+      var request = URLRequest(url: URL(string: url)!)
+      request.httpMethod = method
+      do {
+        _ = try await SubscriptionFixtureHTTP().data(for: request)
+        XCTFail("Unexpected fixture route accepted: \(method) \(url)")
+      } catch let error as URLError {
+        XCTAssertEqual(error.code, .unsupportedURL, "\(method) \(url)")
+      } catch {
+        XCTFail("Unexpected fixture error: \(error)")
+      }
+    }
+  }
+
+  func testSubscriptionFixtureRejectsMissingURL() async {
+    var request = URLRequest(url: URL(string: "https://fixture.invalid")!)
+    request.url = nil
+    XCTAssertNil(request.url)
+    do {
+      _ = try await SubscriptionFixtureHTTP().data(for: request)
+      XCTFail("Expected a bad URL error")
+    } catch let error as URLError {
+      XCTAssertEqual(error.code, .badURL)
+    } catch {
+      XCTFail("Unexpected fixture error: \(error)")
+    }
+  }
+
   private func assertMalformedSubscriptionKeepsLastGoodUsage(
     provider: QuotaProvider, kind: QuotaErrorKind, http: SubscriptionFixtureHTTP,
     file: StaticString = #filePath, line: UInt = #line
@@ -86,22 +139,30 @@ final class QuotaCoordinatorTests: XCTestCase {
 
 // All responses are local fixtures, including those used by the live coordinator's clients.
 private struct SubscriptionFixtureHTTP: HTTPClient {
+  private static let successStatus = 200
+
   var clineLimits = #"{"success":true,"data":{"limits":[{"type":"weekly","percentUsed":60}]}}"#
   var museBody = "event: response.subscription_usage\ndata: {\"weekly\":{\"used_percent\":70}}\n\n"
 
   func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+    guard let url = request.url else { throw URLError(.badURL) }
+
+    // Exact routes expose request drift instead of returning unrelated payloads.
     let body: String
-    if request.url?.host == "api.meta.ai" {
+    switch (request.httpMethod, url.absoluteString) {
+    case ("POST", "https://api.meta.ai/v1/responses"):
       body = museBody
-    } else if request.url?.path.hasSuffix("/plan/usage-limits") == true {
+    case ("GET", "https://api.cline.bot/api/v1/users/me/plan/usage-limits"):
       body = clineLimits
-    } else if request.url?.path.hasSuffix("/balance") == true {
+    case ("GET", "https://api.cline.bot/api/v1/users/usr-FIXTURE/balance"):
       body = #"{"success":true,"data":{"balance":4250000}}"#
-    } else {
+    case ("GET", "https://api.cline.bot/api/v1/users/me"):
       body = #"{"success":true,"data":{"id":"usr-FIXTURE"}}"#
+    default:
+      throw URLError(.unsupportedURL)
     }
 
-    return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    return (Data(body.utf8), HTTPURLResponse(url: url, statusCode: Self.successStatus, httpVersion: nil, headerFields: nil)!)
   }
 }
 
