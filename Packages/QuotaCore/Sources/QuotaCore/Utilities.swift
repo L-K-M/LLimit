@@ -330,8 +330,13 @@ func writeOwnerOnlyAtomically(_ data: Data, to fileURL: URL) throws {
     try data.write(to: temporaryURL)
     // rename(2) atomically replaces the destination on the same filesystem and
     // preserves the temp file's mode.
-    guard rename(temporaryURL.path, fileURL.path) == 0 else {
-      throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+    if rename(temporaryURL.path, fileURL.path) != 0 {
+      let code = errno // capture now — the catch path's removeItem clobbers it
+      throw NSError(domain: NSPOSIXErrorDomain, code: Int(code), userInfo: [
+        NSFilePathErrorKey: fileURL.path,
+        NSLocalizedFailureReasonErrorKey:
+          "could not atomically replace \(fileURL.lastPathComponent) (errno \(code))",
+      ])
     }
   } catch {
     try? FileManager.default.removeItem(at: temporaryURL)
