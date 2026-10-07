@@ -121,6 +121,58 @@ final class CLIStatusTests: XCTestCase {
     XCTAssertFalse(FileManager.default.fileExists(atPath: paths.snapshotFileURL.path))
   }
 
+  func testMalformedDisplayReadsPreserveBytesPermissionsAndNames() throws {
+    try prepareSettings(.corrupt)
+    try FileManager.default.createDirectory(at: paths.dataDirectory, withIntermediateDirectories: true)
+    let original = Data("malformed \(credentialSentinel)".utf8)
+    for url in [paths.snapshotFileURL, paths.historyFileURL] {
+      try original.write(to: url)
+      try FileManager.default.setAttributes([.posixPermissions: 0o644, .modificationDate: modificationDate], ofItemAtPath: url.path)
+    }
+    let commands: [([String], Int32)] = [
+      (["status"], 0), (["status", "--json"], 0), (["status", "--compact"], 0),
+      (["status", "--format", "{name}"], 0), (["check"], 3), (["pick"], 3),
+      (["resets"], 0), (["resets", "--json"], 0), (["export", "--format", "csv"], 1)
+    ]
+    for (args, expectedCode) in commands {
+      let result = try runCLI(args)
+      XCTAssertEqual(result.code, expectedCode, "\(args): \(result.stderr)")
+      XCTAssertFalse(result.stdout.contains(credentialSentinel))
+      XCTAssertFalse(result.stderr.contains(credentialSentinel))
+      XCTAssertFalse(result.stderr.contains("Quarantined"))
+      for url in [paths.snapshotFileURL, paths.historyFileURL] {
+        XCTAssertEqual(try Data(contentsOf: url), original)
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        XCTAssertEqual(attributes[.modificationDate] as? Date, modificationDate)
+        XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o644)
+      }
+      XCTAssertEqual(Set(try FileManager.default.contentsOfDirectory(atPath: paths.dataDirectory.path)),
+                     Set([paths.snapshotFileURL.lastPathComponent, paths.historyFileURL.lastPathComponent]))
+    }
+  }
+
+  func testCSVExportUsesOnlyHistoryAndHardensQuotedFormulaFields() throws {
+    try prepareSettings(.corrupt)
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let title = " \t=HYPERLINK(\"x\",\"y\")"
+    let snapshot = QuotaSnapshot(generatedAt: now, providers: [ProviderUsage(
+      accountID: "test-account", provider: .anthropic, title: title,
+      metrics: [UsageMetric(id: "@SUM(1)", label: "Quarter,\n\"window\"", remainingPercent: 62)], fetchedAt: now
+    )], failures: [], refreshIntervalMinutes: 30)
+    try QuotaHistoryStore(fileURL: paths.historyFileURL).save([snapshot])
+    let before = try Data(contentsOf: paths.historyFileURL)
+    let result = try runCLI(["export", "--format", "CSV"])
+
+    XCTAssertEqual(result.code, 0)
+    XCTAssertEqual(result.stderr, "")
+    XCTAssertEqual(result.stdout, HistoryExporter.csv(history: [snapshot]))
+    XCTAssertTrue(result.stdout.contains("\"' \t=HYPERLINK(\"\"x\"\",\"\"y\"\")\""))
+    XCTAssertTrue(result.stdout.contains(",'@SUM(1),"))
+    XCTAssertTrue(result.stdout.contains("\"Quarter,\n\"\"window\"\"\""))
+    XCTAssertEqual(try Data(contentsOf: paths.historyFileURL), before)
+    XCTAssertFalse(FileManager.default.fileExists(atPath: paths.snapshotFileURL.path))
+  }
+
   func testWatchReopensSnapshotAndPipesCleanJSON() throws {
     try prepareSettings(.corrupt)
     let now = Date(timeIntervalSince1970: Date().timeIntervalSince1970.rounded(.down))
@@ -157,6 +209,20 @@ final class CLIStatusTests: XCTestCase {
     XCTAssertEqual(pick.stdout, "")
     XCTAssertEqual(try runCLI(["status", "--watch", "0"]).code, 64)
     XCTAssertEqual(try runCLI(["--version"]).stdout, "llimit \(LLimitdInfo.version) (LLimitd, QuotaCore)\n")
+
+    let now = Date(timeIntervalSince1970: Date().timeIntervalSince1970.rounded(.down))
+    var snapshot = QuotaSnapshot(generatedAt: now, providers: [ProviderUsage(accountID: "test-account", provider: .anthropic, title: "Work",
+      metrics: [UsageMetric(id: "weekly", label: "Weekly", remainingPercent: 0)], fetchedAt: now)], failures: [])
+    try SnapshotStore(fileURL: paths.snapshotFileURL).save(snapshot)
+    XCTAssertEqual(try runCLI(["check"]).code, 1)
+    XCTAssertEqual(try runCLI(["check", "anthropic", "--min", "0"]).code, 0)
+    snapshot.failures = [.init(accountID: "test-account", provider: .anthropic, kind: .auth, message: "expired", title: "Work")]
+    try SnapshotStore(fileURL: paths.snapshotFileURL).save(snapshot)
+    XCTAssertEqual(try runCLI(["check"]).code, 2)
+    snapshot.failures = []
+    snapshot.providers[0].fetchedAt = now.addingTimeInterval(-3 * 3_600)
+    try SnapshotStore(fileURL: paths.snapshotFileURL).save(snapshot)
+    XCTAssertEqual(try runCLI(["check"]).code, 2)
   }
 
   private func prepareSettings(_ fixture: SettingsFixture) throws {
