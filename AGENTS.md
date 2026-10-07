@@ -240,10 +240,10 @@ Linux:
   return a 500). Response: `userStatus.planStatus` carries
   `dailyQuotaRemainingPercent`/`weeklyQuotaRemainingPercent` + `*QuotaResetAtUnix`
   epoch strings, `availablePromptCredits` (-1 on quota-billed plans), and
-  `planInfo.planName`. Protobuf-JSON omits proto3 zeros. Outside
-  `BILLING_STRATEGY_CREDITS` plans, a missing percent with a positive reset is
-  an exhausted window (no reset: no window); on those plans a missing credit
-  count is 0. Honor
+  `planInfo.planName`. Protobuf-JSON omits proto3 zeros. On
+  `BILLING_STRATEGY_CREDITS` plans a missing credit count is 0; on every other
+  plan a missing percent with a positive reset is an exhausted window (no
+  reset: no window). Honor
   `planInfo.hideDailyQuota`/`hideWeeklyQuota`; `overageBalanceMicros` is int64
   micro-dollars, the CLI's "Extra usage balance".
 - **Meta Muse**: no standalone usage endpoint exists (`/muse-code/usage` et al.
