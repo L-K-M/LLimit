@@ -31,6 +31,10 @@ func printUsage() {
       llimit accounts enable <account-id>
       llimit accounts disable <account-id>
       llimit accounts remove <account-id>
+      llimit accounts update <account-id> [--name <name>] [--set key[=value] …]
+      llimit accounts rename <account-id> <name>
+      llimit accounts reimport <account-id> [--from <stable-id>]
+      llimit accounts import [--id <stable-id> | --all] --new
       llimit refresh
       llimit status [--json]
       llimit daemon
@@ -42,10 +46,28 @@ func printUsage() {
   )
 }
 
+/// Loads settings for a command. An unreadable settings file stops every command
+/// that works with the settings. `status` only renders the saved snapshot, so it
+/// carries on and bars keep showing the last-known usage; the problem goes to
+/// stderr.
 func makeDaemon() -> QuotaDaemon {
   let daemon = QuotaDaemon(paths: LinuxPaths())
   daemon.loadConfiguration()
-  return daemon
+  guard let settingsError = daemon.settingsLoadError else { return daemon }
+
+  if arguments.first == "status" {
+    FileHandle.standardError.write(Data("llimit: warning: \(settingsError.localizedDescription)\n".utf8))
+    return daemon
+  }
+  fail(settingsError.localizedDescription)
+}
+
+/// Prints the note shared by `add` and `update` when required fields are empty.
+func noteMissingCredentials(of account: ProviderAccount) {
+  let missing = account.missingCredentialLabels
+  if !missing.isEmpty {
+    print("Note: still missing \(missing.joined(separator: ", ")); the account will be skipped until complete.")
+  }
 }
 
 // MARK: - accounts
@@ -73,6 +95,16 @@ func runAccounts(_ args: [String]) {
       fail("accounts remove needs an account ID")
     }
     accountsRemove(fragment)
+  case "update":
+    accountsUpdate(Array(args.dropFirst()))
+  case "rename":
+    let rest = args.dropFirst()
+    guard let fragment = rest.first, rest.count > 1 else {
+      fail("accounts rename needs an account ID and a name")
+    }
+    accountsUpdate([fragment, "--name", rest.dropFirst().joined(separator: " ")])
+  case "reimport":
+    accountsReimport(Array(args.dropFirst()))
   default:
     fail("unknown accounts subcommand: \(subcommand)")
   }
@@ -133,6 +165,10 @@ func accountsAdd(_ args: [String]) {
     fail("accounts add needs --provider <id> where id is one of: \(QuotaProvider.allCases.map(\.rawValue).joined(separator: ", "))")
   }
 
+  // Load first, so an unreadable settings file stops the command before any
+  // secret is typed.
+  let daemon = makeDaemon()
+
   // Fill any fields not given via --set by prompting. Secrets are read with terminal
   // echo disabled; when stdin is not a TTY (scripts), required fields must come from
   // --set instead.
@@ -154,29 +190,24 @@ func accountsAdd(_ args: [String]) {
     credentials[field.key] = value
   }
 
-  let daemon = makeDaemon()
   // Lock from re-load through save so a concurrent daemon token-refresh save
   // cannot silently drop the new account (and vice versa).
   let account: ProviderAccount
   do {
-    account = try daemon.settingsLock.withLock {
-      daemon.loadConfiguration()
-      return daemon.addAccount(provider: provider, displayName: name, credentials: credentials)
+    account = try daemon.editingSettings {
+      try daemon.addAccount(provider: provider, displayName: name, credentials: credentials)
     }
   } catch {
     fail(error.localizedDescription)
   }
   print("Added \(account.resolvedDisplayName) [\(account.provider.rawValue)] — id \(account.id)")
-
-  let missing = account.missingCredentialLabels
-  if !missing.isEmpty {
-    print("Note: still missing \(missing.joined(separator: ", ")); the account will be skipped until complete.")
-  }
+  noteMissingCredentials(of: account)
 }
 
 func accountsImport(_ args: [String]) {
   var wantedID: String?
   var importAll = false
+  var addSeparately = false
 
   var index = 0
   while index < args.count {
@@ -187,6 +218,8 @@ func accountsImport(_ args: [String]) {
       wantedID = args[index]
     case "--all":
       importAll = true
+    case "--new":
+      addSeparately = true
     default:
       fail("unknown option: \(args[index])")
     }
@@ -204,27 +237,104 @@ func accountsImport(_ args: [String]) {
     return
   }
 
-  func importOne(_ detected: DiscoveredCredential) {
-    if daemon.isDetectedCredentialImported(detected) {
-      print("\(detected.provider.displayName) from \(detected.sourceLabel): already imported, skipping.")
-      return
+  /// What to do with one detected login. Decided before taking the settings lock,
+  /// so a prompt never holds up the daemon.
+  enum ImportDecision {
+    case skip
+    case add
+    case update(accountID: String)
+  }
+  /// Set when a login was left alone because only the user can tell whether it
+  /// renews an existing account; the command then exits non-zero.
+  var undecided = false
+
+  func alreadyImported(_ detected: DiscoveredCredential) {
+    print("\(detected.provider.displayName) from \(detected.sourceLabel): already imported, skipping.")
+  }
+
+  /// A renewed token shares nothing with the expired one, so it can't be matched
+  /// automatically: ask whether it updates an existing account or is a new one.
+  func chooseUpdate(for detected: DiscoveredCredential, among accountIDs: [String]) -> ImportDecision {
+    let accounts = accountIDs.compactMap { daemon.settings.account(withID: $0) }
+    let login = "\(detected.provider.displayName) from \(detected.sourceLabel)"
+
+    guard isatty(STDIN_FILENO) == 1 else {
+      undecided = true
+      let names = accounts.map { "\($0.resolvedDisplayName) (\($0.id))" }.joined(separator: ", ")
+      FileHandle.standardError.write(Data("""
+        llimit: \(login) is a different login than \(names); not imported.
+          To update an account with it: llimit accounts reimport <account-id> --from \(detected.stableID)
+          To add it as a separate account: llimit accounts import --id \(detected.stableID) --new
+
+        """.utf8))
+      return .skip
     }
-    let account = daemon.importAccount(from: detected)
-    print("Imported \(account.resolvedDisplayName) [\(account.provider.rawValue)] from \(detected.sourceLabel) — id \(account.id)")
+
+    print("\n\(login) is a different login than:")
+    for (offset, account) in accounts.enumerated() {
+      print("  \(offset + 1). \(account.resolvedDisplayName) [\(account.provider.rawValue)] — id \(account.id)")
+    }
+    let range = accounts.count == 1 ? "1" : "1-\(accounts.count)"
+    print("Update account [\(range)] with it, add a [n]ew account, or Enter to skip: ", terminator: "")
+    let answer = readLine()?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+    if answer.isEmpty {
+      print("Skipped.")
+      return .skip
+    }
+    if answer == "n" {
+      return .add
+    }
+    guard let choice = Int(answer), accounts.indices.contains(choice - 1) else {
+      fail("invalid selection: \(answer)")
+    }
+    return .update(accountID: accounts[choice - 1].id)
+  }
+
+  func decide(_ detected: DiscoveredCredential) -> ImportDecision {
+    switch daemon.importMatch(for: detected, among: daemon.detectedCredentials) {
+    case .alreadyImported:
+      alreadyImported(detected)
+      return .skip
+    case .newAccount:
+      return .add
+    case .updateCandidates(let accountIDs):
+      return addSeparately ? .add : chooseUpdate(for: detected, among: accountIDs)
+    }
+  }
+
+  func apply(_ decision: ImportDecision, to detected: DiscoveredCredential) throws {
+    switch decision {
+    case .skip:
+      return
+    case .add:
+      // Checked again under the lock: another process may have imported it.
+      if daemon.isDetectedCredentialImported(detected) {
+        alreadyImported(detected)
+        return
+      }
+      let account = try daemon.importAccount(from: detected)
+      print("Imported \(account.resolvedDisplayName) [\(account.provider.rawValue)] from \(detected.sourceLabel) — id \(account.id)")
+    case .update(let accountID):
+      let account = try daemon.updateAccount(accountID, credentials: .replacing(with: detected.credentials))
+      print("Updated \(account.resolvedDisplayName) [\(account.provider.rawValue)] from \(detected.sourceLabel) — id \(account.id)")
+    }
   }
 
   /// Imports mutate settings, so they run under the settings lock with a fresh
   /// load — the daemon may be mid-refresh and holding a stale copy otherwise.
   func importing(_ detected: [DiscoveredCredential]) {
+    let decisions = detected.map { ($0, decide($0)) }
     do {
-      try daemon.settingsLock.withLock {
-        daemon.loadConfiguration()
-        for credential in detected {
-          importOne(credential)
+      try daemon.editingSettings {
+        for (credential, decision) in decisions {
+          try apply(decision, to: credential)
         }
       }
     } catch {
       fail(error.localizedDescription)
+    }
+    if undecided {
+      exit(1)
     }
   }
 
@@ -243,9 +353,18 @@ func accountsImport(_ args: [String]) {
 
   print("Discovered local logins:")
   for (offset, detected) in daemon.detectedCredentials.enumerated() {
-    let imported = daemon.isDetectedCredentialImported(detected) ? " (already imported)" : ""
+    let state: String
+    switch daemon.importMatch(for: detected, among: daemon.detectedCredentials) {
+    case .alreadyImported:
+      state = " (already imported)"
+    case .newAccount:
+      state = ""
+    case .updateCandidates(let accountIDs):
+      let names = accountIDs.compactMap { daemon.settings.account(withID: $0)?.resolvedDisplayName }
+      state = " (differs from \(names.joined(separator: ", ")))"
+    }
     print("  \(offset + 1). \(detected.provider.displayName) — \(detected.suggestedName) [\(detected.stableID)]")
-    print("      from \(detected.sourceLabel)\(imported)")
+    print("      from \(detected.sourceLabel)\(state)")
   }
 
   guard isatty(STDIN_FILENO) == 1 else {
@@ -276,17 +395,12 @@ func accountsImport(_ args: [String]) {
 func accountsSetEnabled(_ fragment: String, enabled: Bool) {
   let daemon = makeDaemon()
   do {
-    try daemon.settingsLock.withLock {
-      daemon.loadConfiguration()
-      guard let accountID = daemon.resolveAccountID(fragment) else {
-        throw DaemonError.unknownAccount(fragment)
-      }
+    try daemon.editingSettings {
+      let accountID = try daemon.resolveAccountID(fragment)
       try daemon.setAccountEnabled(accountID, enabled)
       let name = daemon.settings.account(withID: accountID)?.resolvedDisplayName ?? accountID
       print("\(name) \(enabled ? "enabled" : "disabled").")
     }
-  } catch DaemonError.unknownAccount {
-    fail("no account matching \"\(fragment)\" (or the prefix is ambiguous)")
   } catch {
     fail(error.localizedDescription)
   }
@@ -295,17 +409,132 @@ func accountsSetEnabled(_ fragment: String, enabled: Bool) {
 func accountsRemove(_ fragment: String) {
   let daemon = makeDaemon()
   do {
-    try daemon.settingsLock.withLock {
-      daemon.loadConfiguration()
-      guard let accountID = daemon.resolveAccountID(fragment) else {
-        throw DaemonError.unknownAccount(fragment)
-      }
+    try daemon.editingSettings {
+      let accountID = try daemon.resolveAccountID(fragment)
       let name = daemon.settings.account(withID: accountID)?.resolvedDisplayName ?? accountID
       try daemon.removeAccount(accountID)
       print("Removed \(name).")
     }
-  } catch DaemonError.unknownAccount {
-    fail("no account matching \"\(fragment)\" (or the prefix is ambiguous)")
+  } catch {
+    fail(error.localizedDescription)
+  }
+}
+
+func accountsUpdate(_ args: [String]) {
+  guard let fragment = args.first else {
+    fail("accounts update needs an account ID")
+  }
+
+  var name: String?
+  var values: [String: String] = [:]
+  var promptedKeys: [String] = []
+  var index = 1
+  while index < args.count {
+    let arg = args[index]
+    func takeValue() -> String {
+      guard index + 1 < args.count else { fail("\(arg) needs a value") }
+      index += 1
+      return args[index]
+    }
+    switch arg {
+    case "--name":
+      name = takeValue()
+    case "--set":
+      // `--set key` without a value prompts for it, which keeps a secret out
+      // of the shell history and the process list.
+      let pair = takeValue()
+      if let equals = pair.firstIndex(of: "=") {
+        values[String(pair[..<equals])] = String(pair[pair.index(after: equals)...])
+      } else {
+        promptedKeys.append(pair)
+      }
+    default:
+      fail("unknown option: \(arg)")
+    }
+    index += 1
+  }
+
+  guard name != nil || !values.isEmpty || !promptedKeys.isEmpty else {
+    fail("accounts update needs --name or --set")
+  }
+
+  let daemon = makeDaemon()
+  let accountID: String
+  do {
+    accountID = try daemon.resolveAccountID(fragment)
+  } catch {
+    fail(error.localizedDescription)
+  }
+  guard let account = daemon.settings.account(withID: accountID) else {
+    fail(DaemonError.unknownAccount(fragment).localizedDescription)
+  }
+
+  // Reject a mistyped key before asking for its secret.
+  let editable = QuotaDaemon.editableCredentialKeys(of: account)
+  if let unknown = (Array(values.keys) + promptedKeys).sorted().first(where: { !editable.contains($0) }) {
+    fail(DaemonError.unknownCredentialKey(unknown, provider: account.provider).localizedDescription)
+  }
+
+  for key in promptedKeys {
+    let field = account.provider.credentialFields.first { $0.key == key }
+    if let help = field?.help {
+      print("  \(help)")
+    }
+    // Keys outside the form are hidden companions such as refresh tokens, so
+    // they are read as secrets too.
+    let value = readField(prompt: "\(field?.label ?? key) (Enter keeps the current value): ", secret: field?.isSecret ?? true)
+    if !value.isEmpty {
+      values[key] = value
+    }
+  }
+
+  guard name != nil || !values.isEmpty else {
+    print("No changes.")
+    return
+  }
+
+  do {
+    let updated = try daemon.editingSettings {
+      try daemon.updateAccount(accountID, displayName: name, credentials: values.isEmpty ? .unchanged : .merging(values))
+    }
+    print("Updated \(updated.resolvedDisplayName) [\(updated.provider.rawValue)] — id \(updated.id)")
+    noteMissingCredentials(of: updated)
+  } catch {
+    fail(error.localizedDescription)
+  }
+}
+
+func accountsReimport(_ args: [String]) {
+  guard let fragment = args.first else {
+    fail("accounts reimport needs an account ID")
+  }
+
+  var stableID: String?
+  var index = 1
+  while index < args.count {
+    switch args[index] {
+    case "--from":
+      guard index + 1 < args.count else { fail("--from needs a value") }
+      index += 1
+      stableID = args[index]
+    default:
+      fail("unknown option: \(args[index])")
+    }
+    index += 1
+  }
+
+  let daemon = makeDaemon()
+  do {
+    let accountID = try daemon.resolveAccountID(fragment)
+    let result = try daemon.editingSettings {
+      try daemon.reimportAccount(accountID, from: stableID)
+    }
+    let name = daemon.settings.account(withID: accountID)?.resolvedDisplayName ?? accountID
+    if result.changed {
+      print("Updated \(name) from \(result.login.sourceLabel) — id \(accountID)")
+    } else {
+      print("\(name) already holds the login from \(result.login.sourceLabel); nothing changed.")
+    }
   } catch {
     fail(error.localizedDescription)
   }
