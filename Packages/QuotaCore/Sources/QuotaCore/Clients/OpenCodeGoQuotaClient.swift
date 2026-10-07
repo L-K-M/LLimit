@@ -71,8 +71,9 @@ public struct OpenCodeGoQuotaClient: QuotaProviderClient {
       metric(from: windows.weekly, id: "weekly", label: "Weekly limit", now: now),
       metric(from: windows.monthly, id: "monthly", label: "Monthly limit", now: now)
     ]
-    let maxUsage = max(windows.rolling.percent, windows.weekly.percent, windows.monthly.percent)
-    let limited = [windows.rolling, windows.weekly, windows.monthly].contains { $0.status == .rateLimited }
+    let allWindows = [windows.rolling, windows.weekly, windows.monthly]
+    let maxUsage = allWindows.map(\.effectivePercent).max() ?? 0
+    let limited = allWindows.contains(where: \.isExhausted)
 
     return ProviderUsage(
       accountID: configuration.accountID,
@@ -88,7 +89,6 @@ public struct OpenCodeGoQuotaClient: QuotaProviderClient {
 
   private func metric(from window: GoUsageWindow, id: String, label: String, now: Date) throws -> UsageMetric {
     guard (0...100).contains(window.percent),
-          window.status != .rateLimited || window.percent == 100,
           window.resetsAt.contains("T"),
           let resetAt = parseISO8601(window.resetsAt) else {
       throw Self.invalidResponse
@@ -96,11 +96,11 @@ public struct OpenCodeGoQuotaClient: QuotaProviderClient {
     return UsageMetric(
       id: id,
       label: label,
-      remainingPercent: 100 - window.percent,
+      remainingPercent: window.isExhausted ? 0 : 100 - window.percent,
       usedDisplay: "\(window.percent)%",
       resetAt: resetAt,
       resetIn: formatResetCountdown(to: resetAt, now: now),
-      detail: window.status == .rateLimited ? "Limit reached" : nil
+      detail: window.isExhausted ? "Limit reached" : nil
     )
   }
 
@@ -128,4 +128,8 @@ private struct GoUsageWindow: Decodable {
   let status: Status
   let percent: Int
   let resetsAt: String
+
+  // Migrated keys can be rate-limited below 100%; the flag is authoritative.
+  var isExhausted: Bool { status == .rateLimited }
+  var effectivePercent: Int { isExhausted ? 100 : percent }
 }
