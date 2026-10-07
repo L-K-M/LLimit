@@ -80,6 +80,78 @@ final class SnapshotMergeTests: XCTestCase {
     XCTAssertTrue(merged.providers.isEmpty)
   }
 
+  func testCarriedWindowPastItsResetLosesItsPreResetReading() throws {
+    let elapsedReset = t0.addingTimeInterval(600)
+    let futureReset = t0.addingTimeInterval(86_400)
+    let previous = QuotaSnapshot(
+      generatedAt: t0,
+      providers: [ProviderUsage(
+        accountID: "claude-1", provider: .anthropic, title: "Claude",
+        metrics: [
+          UsageMetric(id: "five-hour", label: "5-hour limit", remainingPercent: 8, remainingAmount: 8,
+                      estimatedTotal: 100, usedDisplay: "92% used", totalDisplay: "100%",
+                      resetAt: elapsedReset, resetIn: "10m"),
+          UsageMetric(id: "weekly", label: "Weekly limit", remainingPercent: 60, usedDisplay: "40% used",
+                      resetAt: futureReset, resetIn: "1d")
+        ],
+        maxUsagePercent: 92, fetchedAt: t0
+      )],
+      failures: []
+    )
+    let fresh = QuotaSnapshot(
+      generatedAt: t0.addingTimeInterval(900),
+      providers: [],
+      failures: [failure("claude-1", provider: .anthropic)]
+    )
+
+    let carried = try XCTUnwrap(fresh.mergingStaleUsage(from: previous).providers.first)
+
+    // The 5-hour window reset after the last success, so its 8% is known to be wrong.
+    let elapsed = carried.metrics[0]
+    XCTAssertNil(elapsed.remainingPercent)
+    XCTAssertNil(elapsed.remainingAmount)
+    XCTAssertNil(elapsed.estimatedTotal)
+    XCTAssertNil(elapsed.usedDisplay)
+    XCTAssertNil(elapsed.resetIn)
+    XCTAssertEqual(elapsed.resetAt, elapsedReset)
+    XCTAssertEqual(elapsed.totalDisplay, "100%")
+    XCTAssertEqual(elapsed.detail, "Window reset since the last successful refresh")
+    // A window that has not reset yet keeps its last-known reading.
+    XCTAssertEqual(carried.metrics[1], previous.providers[0].metrics[1])
+    XCTAssertEqual(carried.maxUsagePercent, 40)
+    XCTAssertEqual(carried.fetchedAt, t0)
+  }
+
+  func testCarriedUsageWithEveryWindowElapsedHasNoMaxUsage() throws {
+    var previousUsage = usage("claude-1", provider: .anthropic, remaining: 8, at: t0)
+    previousUsage.metrics[0].resetAt = t0.addingTimeInterval(900)
+    let previous = QuotaSnapshot(generatedAt: t0, providers: [previousUsage], failures: [])
+    // A reset exactly at the refresh time has already happened.
+    let fresh = QuotaSnapshot(
+      generatedAt: t0.addingTimeInterval(900),
+      providers: [],
+      failures: [failure("claude-1", provider: .anthropic)]
+    )
+
+    let carried = try XCTUnwrap(fresh.mergingStaleUsage(from: previous).providers.first)
+
+    XCTAssertNil(carried.metrics[0].remainingPercent)
+    XCTAssertNil(carried.maxUsagePercent)
+  }
+
+  func testFreshUsageIsNotClearedByTheCarryRule() {
+    var freshUsage = usage("claude-1", provider: .anthropic, remaining: 8, at: t0.addingTimeInterval(900))
+    freshUsage.metrics[0].resetAt = t0
+    let previous = QuotaSnapshot(generatedAt: t0, providers: [], failures: [])
+    let fresh = QuotaSnapshot(
+      generatedAt: t0.addingTimeInterval(900),
+      providers: [freshUsage],
+      failures: [failure("zai-1", provider: .zai)]
+    )
+
+    XCTAssertEqual(fresh.mergingStaleUsage(from: previous).providers, [freshUsage])
+  }
+
   func testReconcileRemovesInactiveAccountsAndUpdatesNames() {
     let current = QuotaSnapshot(
       generatedAt: t0,
@@ -99,6 +171,27 @@ final class SnapshotMergeTests: XCTestCase {
     XCTAssertEqual(reconciled.providers.map(\.accountID), ["claude-1"])
     XCTAssertEqual(reconciled.providers.first?.title, "Work Claude")
     XCTAssertTrue(reconciled.failures.isEmpty)
+  }
+
+  func testReconcileRenamesFailures() {
+    let current = QuotaSnapshot(
+      generatedAt: t0,
+      providers: [],
+      failures: [ProviderFailure(accountID: "claude-1", provider: .anthropic, kind: .auth,
+                                 message: "boom", title: "Old name")]
+    )
+    let account = ProviderAccount(id: "claude-1", provider: .anthropic, displayName: "Work Claude")
+
+    XCTAssertEqual(current.reconciled(with: [account]).failures.first?.title, "Work Claude")
+  }
+
+  func testFailureTitleIsOptionalWhenDecoding() throws {
+    let legacy = Data(#"{"accountID":"a","provider":"kimi","kind":"auth","message":"m"}"#.utf8)
+    XCTAssertNil(try JSONDecoder().decode(ProviderFailure.self, from: legacy).title)
+
+    let titled = ProviderFailure(accountID: "a", provider: .kimi, kind: .auth, message: "m", title: "Kimi Work")
+    let decoded = try JSONDecoder().decode(ProviderFailure.self, from: JSONEncoder().encode(titled))
+    XCTAssertEqual(decoded, titled)
   }
 
   func testReconcileMapsLegacyProviderKeyForSoleAccount() {

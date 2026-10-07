@@ -21,6 +21,18 @@ final class QuotaCoordinatorTests: XCTestCase {
     XCTAssertEqual(snapshot.providers.first?.accountID, QuotaProvider.openAI.rawValue)
     XCTAssertEqual(snapshot.failures.first?.provider, .zhipu)
   }
+
+  func testFailureCarriesTheAccountDisplayName() async {
+    let coordinator = QuotaCoordinator(clients: [MockClient(provider: .anthropic, shouldFail: true)])
+    let snapshot = await coordinator.refresh(
+      configurations: [
+        ProviderRuntimeConfiguration(accountID: "work", provider: .anthropic, displayName: "Claude Work",
+                                     isEnabled: true, credentials: [:])
+      ]
+    )
+
+    XCTAssertEqual(snapshot.failures.first?.title, "Claude Work")
+  }
 }
 
 private struct MockClient: QuotaProviderClient {

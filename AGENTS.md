@@ -63,7 +63,7 @@ Google Antigravity, Devin, Meta Muse, OpenCode Go, Venice, Cline.
     deltas onto a fresh read) — never across a network fetch.
   - `Sources/LLimitdCore/StatusRenderer.swift` — `llimit status` output and the
     `status --json` bar contract (`text`/`tooltip`/`class`/`percentage` +
-    `accounts`), built only from the snapshot.
+    `accounts`/`failures`), built only from the snapshot.
   - `Sources/llimit/main.swift` — the CLI (accounts add/list/import/enable/
     disable/remove, refresh, status, daemon, paths).
   - `examples/` — waybar/polybar/eww modules consuming the JSON contract.
