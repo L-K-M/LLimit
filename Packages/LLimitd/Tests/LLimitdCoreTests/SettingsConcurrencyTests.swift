@@ -278,6 +278,32 @@ final class SettingsConcurrencyTests: XCTestCase {
     XCTAssertFalse(merged.accounts.contains { $0.id == id }, "merge resurrected a removed account")
   }
 
+  func testMergePreservesEnvironmentReferences() {
+    let base = settingsWithAccounts([account(.anthropic, token: "env:LLIMIT_TOKEN")])
+    var current = base
+    current.accounts[0].credentials[CredentialField.anthropicEmail] = "new@example.com"
+    var disk = base
+    disk.accounts[0].isEnabled = false
+
+    let merged = QuotaDaemon.mergingCredentialChanges(base: base, current: current, onto: disk)
+
+    XCTAssertEqual(merged.accounts[0].credentials[CredentialField.anthropicAccessToken], "env:LLIMIT_TOKEN")
+    XCTAssertEqual(merged.accounts[0].credentials[CredentialField.anthropicEmail], "new@example.com")
+    XCTAssertFalse(merged.accounts[0].isEnabled)
+  }
+
+  func testMergeCannotPersistResolvedEnvironmentCredentials() {
+    let base = settingsWithAccounts([account(.anthropic, token: "env:LLIMIT_TOKEN")])
+    var current = base
+    current.accounts[0].credentials[CredentialField.anthropicAccessToken] = "resolved-secret"
+    current.accounts[0].credentials[CredentialField.anthropicEmail] = "new@example.com"
+
+    let merged = QuotaDaemon.mergingCredentialChanges(base: base, current: current, onto: base)
+
+    XCTAssertEqual(merged.accounts[0].credentials[CredentialField.anthropicAccessToken], "env:LLIMIT_TOKEN")
+    XCTAssertEqual(merged.accounts[0].credentials[CredentialField.anthropicEmail], "new@example.com")
+  }
+
   func testCredentialMergeDoesNotSpliceRotatedGrantIntoReplacedLogin() {
     let original = ProviderAccount(id: "account", provider: .openAI, credentials: [
       CredentialField.openAIAccessToken: "old-access", CredentialField.openAIRefreshToken: "old-refresh"

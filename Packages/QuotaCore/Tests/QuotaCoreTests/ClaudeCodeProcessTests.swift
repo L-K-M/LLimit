@@ -28,20 +28,88 @@ final class ClaudeCodeProcessTests: XCTestCase {
     ]
     let profile = directory.appendingPathComponent("private-profile")
 
-    let environment = ClaudeCodeProcess.environment(parent: parent, profileDirectory: profile)
+    let environment = ClaudeCodeProcess.environment(
+      parent: parent, profileDirectory: profile, executable: URL(fileURLWithPath: "/opt/claude-test/bin/claude"))
 
     XCTAssertEqual(environment, [
       "HOME": "/Users/example", "USER": "example", "LOGNAME": "example",
-      "PATH": "/usr/bin:/bin", "TMPDIR": "/tmp/example", "LANG": "en_US.UTF-8",
+      "PATH": "/opt/claude-test/bin:/opt/homebrew/bin:/usr/local/bin:/Users/example/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+      "TMPDIR": "/tmp/example", "LANG": "en_US.UTF-8",
       "LC_ALL": "C", "TERM": "xterm-256color", "CLAUDE_CONFIG_DIR": profile.path,
       "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
     ])
+  }
+
+  func testEnvironmentKeepsProxyAndCertificateSettingsButNotProviderOverrides() {
+    let network = [
+      "HTTPS_PROXY": "http://proxy.example.invalid:8080", "https_proxy": "http://lower.example.invalid:8080",
+      "HTTP_PROXY": "http://proxy.example.invalid:8080", "http_proxy": "http://lower.example.invalid:8080",
+      "NO_PROXY": "localhost,.example.invalid", "no_proxy": "localhost", "ALL_PROXY": "http://all.example.invalid:8080",
+      "NODE_EXTRA_CA_CERTS": "/etc/corporate/ca.pem", "SSL_CERT_FILE": "/etc/corporate/bundle.pem",
+      "SSL_CERT_DIR": "/etc/corporate/certs"
+    ]
+    let overrides = [
+      "ANTHROPIC_BASE_URL": "https://example.invalid", "ANTHROPIC_API_KEY": "wrong-account",
+      "CLAUDE_CONFIG_DIR": "/another/profile", "CLAUDE_CODE_CLIENT_CERT": "/tmp/another-identity.pem",
+      "REQUESTS_CA_BUNDLE": "/etc/corporate/python.pem"
+    ]
+
+    let environment = ClaudeCodeProcess.environment(
+      parent: network.merging(overrides) { $1 }, profileDirectory: directory,
+      executable: directory.appendingPathComponent("claude"))
+
+    for (key, value) in network { XCTAssertEqual(environment[key], value, key) }
+    XCTAssertNil(environment["ANTHROPIC_BASE_URL"])
+    XCTAssertNil(environment["ANTHROPIC_API_KEY"])
+    XCTAssertNil(environment["CLAUDE_CODE_CLIENT_CERT"])
+    XCTAssertNil(environment["REQUESTS_CA_BUNDLE"])
+    XCTAssertEqual(environment["CLAUDE_CONFIG_DIR"], directory.standardizedFileURL.path)
+  }
+
+  func testEnvironmentSearchesBesideExecutableAndItsSymlinkTargetFirst() throws {
+    let target = directory.appendingPathComponent("lib/node_modules/claude-code/cli.js")
+    try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try "".write(to: target, atomically: true, encoding: .utf8)
+    let link = directory.appendingPathComponent("bin/claude")
+    try FileManager.default.createDirectory(at: link.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: "../lib/node_modules/claude-code/cli.js")
+
+    let environment = ClaudeCodeProcess.environment(
+      parent: ["PATH": "/usr/bin:/bin:relative::/usr/bin", "HOME": "/home/example"],
+      profileDirectory: directory, executable: link)
+
+    XCTAssertEqual(environment["PATH"]?.split(separator: ":").map(String.init), [
+      link.deletingLastPathComponent().path, target.resolvingSymlinksInPath().deletingLastPathComponent().path,
+      "/opt/homebrew/bin", "/usr/local/bin", "/home/example/.local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"
+    ])
+  }
+
+  func testNpmInstalledCLIFindsItsInterpreterWithMinimalParentPath() async throws {
+    // npm installs `#!/usr/bin/env node` scripts beside node, a directory that
+    // a Finder-launched app's PATH does not contain.
+    let bin = directory.appendingPathComponent("node-prefix/bin", isDirectory: true)
+    try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+    let interpreter = bin.appendingPathComponent("fakenode")
+    try "#!/bin/sh\nexec /bin/sh \"$@\"\n".write(to: interpreter, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: interpreter.path)
+    let executable = bin.appendingPathComponent("claude")
+    try "#!/usr/bin/env fakenode\nexit 0\n".write(to: executable, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+
+    let result = try await ClaudeCodeProcess().run(
+      executable: executable, arguments: ["auth", "login"],
+      environment: ClaudeCodeProcess.environment(
+        parent: ["PATH": "/usr/bin:/bin", "HOME": directory.path], profileDirectory: directory, executable: executable),
+      workingDirectory: directory, timeout: 5)
+
+    XCTAssertEqual(result, .completed(status: 0))
   }
 
   func testEnvironmentUsesOnlyExplicitRenewalMaterial() {
     let environment = ClaudeCodeProcess.environment(
       parent: ["CLAUDE_CODE_OAUTH_REFRESH_TOKEN": "unrelated-login", "HOME": "/home/example"],
       profileDirectory: directory,
+      executable: directory.appendingPathComponent("claude"),
       renewal: ClaudeCodeRenewalMaterial(refreshToken: "selected-profile-refresh", scopes: ["user:profile", "user:inference"])
     )
 
@@ -53,9 +121,10 @@ final class ClaudeCodeProcessTests: XCTestCase {
 
   func testOnlyRenewalUsesSimpleModeToSuppressStartupAuthentication() {
     let parent = ["CLAUDE_CODE_SIMPLE": "0", "HOME": "/home/example"]
-    let interactive = ClaudeCodeProcess.environment(parent: parent, profileDirectory: directory)
+    let executable = directory.appendingPathComponent("claude")
+    let interactive = ClaudeCodeProcess.environment(parent: parent, profileDirectory: directory, executable: executable)
     let renewal = ClaudeCodeProcess.environment(
-      parent: parent, profileDirectory: directory,
+      parent: parent, profileDirectory: directory, executable: executable,
       renewal: ClaudeCodeRenewalMaterial(refreshToken: "selected-profile-refresh", scopes: ["user:profile"]))
 
     XCTAssertNil(interactive["CLAUDE_CODE_SIMPLE"])
@@ -80,6 +149,7 @@ final class ClaudeCodeProcessTests: XCTestCase {
     let environment = ClaudeCodeProcess.environment(
       parent: ["PATH": "/usr/bin:/bin", "CLAUDE_CONFIG_DIR": "/another/profile"],
       profileDirectory: profile,
+      executable: executable,
       renewal: ClaudeCodeRenewalMaterial(refreshToken: "fixture-only-grant", scopes: ["user:profile"]))
 
     let result = try await runner.run(

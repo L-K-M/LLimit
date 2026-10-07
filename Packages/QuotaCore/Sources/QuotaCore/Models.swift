@@ -262,6 +262,10 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
   public var remainingAmount: Double?
   /// An observed balance used as the denominator when the server supplies no total.
   public var estimatedTotal: Double?
+  /// Fingerprint of the credential that produced this reading, so an estimate
+  /// observed under one API key is never carried onto a different key.
+  /// See `credentialFingerprint` — not a credential itself.
+  public var estimateKeyHash: String?
   public var usedDisplay: String?
   public var totalDisplay: String?
   public var resetAt: Date?
@@ -275,6 +279,7 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
     remainingPercent: Int? = nil,
     remainingAmount: Double? = nil,
     estimatedTotal: Double? = nil,
+    estimateKeyHash: String? = nil,
     usedDisplay: String? = nil,
     totalDisplay: String? = nil,
     resetAt: Date? = nil,
@@ -287,6 +292,7 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
     self.remainingPercent = remainingPercent
     self.remainingAmount = remainingAmount
     self.estimatedTotal = estimatedTotal
+    self.estimateKeyHash = estimateKeyHash
     self.usedDisplay = usedDisplay
     self.totalDisplay = totalDisplay
     self.resetAt = resetAt
@@ -477,11 +483,26 @@ public struct ProviderAccount: Codable, Hashable, Identifiable, Sendable {
   }
 
   public var missingCredentialLabels: [String] {
-    provider.missingCredentialLabels(in: credentials)
+    missingCredentialLabels(environment: ProcessInfo.processInfo.environment)
+  }
+
+  func missingCredentialLabels(environment: [String: String]) -> [String] {
+    // env:NAME references count as present only when the variable is set —
+    // an unset reference is reported as a missing credential.
+    provider.missingCredentialLabels(in: credentials.resolvingEnvironmentReferences(environment))
   }
 
   public var hasRequiredCredentials: Bool {
     missingCredentialLabels.isEmpty
+  }
+
+  /// Request-only credentials. Persist the account, never this resolved copy.
+  public func runtimeConfiguration(
+    environment: [String: String] = ProcessInfo.processInfo.environment
+  ) -> ProviderRuntimeConfiguration {
+    ProviderRuntimeConfiguration(
+      accountID: id, provider: provider, displayName: resolvedDisplayName,
+      isEnabled: isEnabled, credentials: credentials.resolvingEnvironmentReferences(environment))
   }
 
   public func redactedCredentials() -> ProviderAccount {

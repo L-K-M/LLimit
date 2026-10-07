@@ -124,18 +124,58 @@ public struct CodexProfileStore: Sendable {
   }
 }
 
-public enum CodexConnectionError: Error, LocalizedError, Sendable {
-  case cliUnavailable, invalidProfile, unfinishedOperation, storage, signInFailed, cancelled, incompatibleCLI
+public enum CodexConnectionError: Error, LocalizedError, Equatable, Sendable {
+  case cliNotFound, invalidProfile, unfinishedOperation, storage, signInFailed, cancelled, incompatibleCLI
+  /// An installed candidate could not report its version, for example because
+  /// its Node.js runtime is missing. The path names the install to repair.
+  case cliFailed(path: String, CodexCLIFailure)
+  case cliTooOld(path: String, version: String)
 
   public var errorDescription: String? {
     switch self {
-    case .cliUnavailable: return "Install Codex CLI 0.144.4 or later to connect this OpenAI account."
+    case .cliNotFound:
+      return "Codex CLI was not found. Install Codex CLI \(CodexCLIProbe.minimumVersion) or later to connect this OpenAI account."
+    case .cliFailed(let path, let failure):
+      return "Codex CLI at \(path) failed to run (\(failure.summary)). \(failure.advice)"
+    case .cliTooOld(let path, let version):
+      return "Codex CLI \(version) at \(path) is too old. Update it to \(CodexCLIProbe.minimumVersion) or later, then connect this OpenAI account."
     case .invalidProfile: return "This OpenAI login could not be verified. Reconnect the account."
     case .unfinishedOperation: return "A previous Codex operation has not finished safely. Reconnect this account if it does not recover."
     case .storage: return "Could not save this OpenAI connection. Check LLimit’s storage permissions."
     case .signInFailed: return "OpenAI sign-in did not finish. Connect this account to try again."
     case .cancelled: return "OpenAI sign-in was canceled."
     case .incompatibleCLI: return "Codex could not complete this request. Try again or reconnect the account."
+    }
+  }
+}
+
+/// Why an installed Codex executable could not report a supported version.
+public enum CodexCLIFailure: Error, Equatable, Sendable {
+  case launch
+  case exit(Int32)
+  case signal(Int32)
+  case timeout
+  case unrecognizedVersion
+  case excessiveOutput
+
+  var summary: String {
+    switch self {
+    case .launch: return "it could not be started"
+    case .exit(let status): return "exit \(status)"
+    case .signal(let signal): return "signal \(signal)"
+    case .timeout: return "it did not answer in time"
+    case .unrecognizedVersion: return "unrecognized version output"
+    case .excessiveOutput: return "too much output for a version"
+    }
+  }
+
+  /// A slow start is usually transient; anything else points at the install.
+  var advice: String {
+    switch self {
+    case .timeout:
+      return "Try connecting this OpenAI account again in a moment."
+    case .launch, .exit, .signal, .unrecognizedVersion, .excessiveOutput:
+      return "Reinstall it or check that its runtime, such as Node.js, is installed, then connect this OpenAI account."
     }
   }
 }

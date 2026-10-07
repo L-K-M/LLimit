@@ -194,6 +194,27 @@ final class ClaudeCodeProfileTests: XCTestCase {
     ])
   }
 
+  func testAutomaticAdoptionCannotReplaceEnvironmentManagedToken() {
+    var external = stored
+    external[CredentialField.anthropicAccessToken] = "env:CLAUDE_TOKEN"
+
+    let adopted = ClaudeCodeProfile.adoption(
+      for: external, credentials: token("new", expiresIn: 7200), identity: identity, profileID: profileID, now: now)
+
+    XCTAssertNil(adopted, "The variable owner, not CLI adoption, controls this token")
+    XCTAssertEqual(external[CredentialField.anthropicAccessToken], "env:CLAUDE_TOKEN")
+  }
+
+  func testAutomaticAdoptionPreservesEnvironmentMetadata() throws {
+    var external = stored
+    external[CredentialField.anthropicEmail] = "env:CLAUDE_EMAIL"
+    let adopted = try XCTUnwrap(ClaudeCodeProfile.adoption(
+      for: external, credentials: token("new", expiresIn: 7200), identity: identity, profileID: profileID, now: now))
+
+    XCTAssertEqual(adopted[CredentialField.anthropicAccessToken], "new")
+    XCTAssertEqual(adopted[CredentialField.anthropicEmail], "env:CLAUDE_EMAIL")
+  }
+
   func testSettingsRedactionRemovesAllProfileMetadata() {
     let account = ProviderAccount(provider: .anthropic, displayName: "Claude", credentials: stored)
     let settings = AppSettings(accounts: [account])

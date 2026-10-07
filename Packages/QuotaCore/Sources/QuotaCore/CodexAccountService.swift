@@ -12,15 +12,26 @@ public struct CodexLoginHandle: Sendable {
 public actor CodexAccountService: ManagedOpenAIUsageSource {
   private let store: CodexProfileStore
   private let executableOverride: URL?
+  private let executableCandidates: [URL]
   private let parentEnvironment: [String: String]
+  /// The executable that last passed the version probe. Fetches reuse it until
+  /// its installed file changes instead of spawning a probe every time.
+  private var verifiedExecutable: (url: URL, fingerprint: ManagedCLIFingerprint)?
   private var sessions: [UUID: CodexRPCSession] = [:]
   private var closingTasks: [UUID: Task<Void, Error>] = [:]
   private var cleanupTasks: [UUID: Task<Void, Never>] = [:]
 
   public init(root: URL, executable: URL? = nil,
               environment: [String: String] = ProcessInfo.processInfo.environment) {
+    self.init(root: root, executable: executable,
+              candidates: ManagedCLI.codex.candidates(environment: environment), environment: environment)
+  }
+
+  /// Tests supply their own candidates, because discovery finds real installs.
+  init(root: URL, executable: URL?, candidates: [URL], environment: [String: String]) {
     store = CodexProfileStore(root: root)
     executableOverride = executable
+    executableCandidates = candidates
     parentEnvironment = environment
   }
 
@@ -118,9 +129,7 @@ public actor CodexAccountService: ManagedOpenAIUsageSource {
 
   private func open(_ profile: CodexAccountProfile) async throws -> CodexRPCSession {
     guard sessions[profile.id] == nil else { throw CodexConnectionError.unfinishedOperation }
-    let executable: URL
-    if let executableOverride { executable = executableOverride }
-    else { executable = try await Self.executable(environment: parentEnvironment) }
+    let executable = try await verifiedExecutableURL()
     // Discovery awaits a bounded version probe. Re-check ownership after that
     // suspension before acquiring the durable marker for this profile.
     guard sessions[profile.id] == nil else { throw CodexConnectionError.unfinishedOperation }
@@ -135,11 +144,19 @@ public actor CodexAccountService: ManagedOpenAIUsageSource {
     let session = CodexRPCSession(
       executable: executable,
       arguments: ["app-server", "-c", "cli_auth_credentials_store=\"file\"", "-c", "forced_login_method=\"chatgpt\""],
-      environment: Self.environment(parent: parentEnvironment, directory: directory),
+      environment: Self.environment(parent: parentEnvironment, directory: directory, executable: executable),
       workingDirectory: directory.appendingPathComponent("work", isDirectory: true))
     sessions[profile.id] = session
     do { try await session.start() }
     catch {
+      // A child that could not launch, or went away before its handshake,
+      // points at the executable or its runtime. Probe again so the next
+      // attempt reports why. Startup's other errors (timeout, cancellation, a
+      // rejected or malformed reply) leave a verified executable that a new
+      // probe would accept again, so they keep it.
+      if let error = error as? CodexRPCError, [.launchFailed, .sessionClosed, .writeFailed].contains(error) {
+        verifiedExecutable = nil
+      }
       // Startup can fail after a child has begun loading its credentials. Only
       // this owner may recover it; callers rejected by open own no session.
       await recoverSession(profile, session: session)
@@ -206,21 +223,24 @@ public actor CodexAccountService: ManagedOpenAIUsageSource {
     return .incompatibleCLI
   }
 
-  public static func environment(parent: [String: String], directory: URL) -> [String: String] {
+  public static func environment(parent: [String: String], directory: URL, executable: URL) -> [String: String] {
     // API keys, auth overrides, remote servers, inherited config and debug/log
     // settings must not redirect a managed connection to the ordinary CLI login.
-    let allowed = ["HOME", "USER", "LOGNAME", "PATH", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE",
-                   "SSL_CERT_FILE", "SSL_CERT_DIR", "CODEX_CA_CERTIFICATE", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY"]
-    var result = parent.filter { allowed.contains($0.key) }
+    let allowed: Set<String> = ["HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE", "CODEX_CA_CERTIFICATE"]
+    var result = parent.filter { allowed.contains($0.key) || ManagedCLI.sharedEnvironmentKeys.contains($0.key) }
+    result["PATH"] = ManagedCLI.searchPath(for: executable, environment: parent)
     result["CODEX_HOME"] = directory.path
     return result
   }
 
-  public static func executable(environment: [String: String]) async throws -> URL {
-    // Homebrew takes priority over old npm shims earlier on PATH.
-    var candidates = ["/opt/homebrew/bin/codex", "/usr/local/bin/codex"]
-    if let home = environment["HOME"] { candidates.append(home + "/.local/bin/codex") }
-    candidates += (environment["PATH"] ?? "").split(separator: ":").filter { $0.hasPrefix("/") }.map { String($0) + "/codex" }
-    return try await CodexCLIProbe.firstSupported(candidates.map { URL(fileURLWithPath: $0) }, environment: environment)
+  private func verifiedExecutableURL() async throws -> URL {
+    if let executableOverride { return executableOverride }
+    if let verified = verifiedExecutable, ManagedCLIFingerprint(executable: verified.url) == verified.fingerprint {
+      return verified.url
+    }
+    verifiedExecutable = nil
+    let executable = try await CodexCLIProbe.firstSupported(executableCandidates, environment: parentEnvironment)
+    verifiedExecutable = ManagedCLIFingerprint(executable: executable).map { (executable, $0) }
+    return executable
   }
 }

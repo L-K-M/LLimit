@@ -69,6 +69,18 @@ final class AnthropicClientTests: XCTestCase {
     await assertThrows(kind: .rateLimit) { try await client.fetchUsage(configuration: self.config(), now: self.now) }
   }
 
+  func testUserAgentUsesInstalledVersionOrNoCLIFallback() async throws {
+    for version: String? in ["2.1.0-rc.1", nil] {
+      let http = RecordingAnthropicHTTP()
+      let client = AnthropicClient(httpClient: http, claudeVersion: { version })
+      _ = try await client.fetchUsage(configuration: config(), now: now)
+      let request = await http.request
+
+      XCTAssertEqual(request?.value(forHTTPHeaderField: "User-Agent"), "claude-code/\(version ?? "1.0.110")")
+      XCTAssertEqual(request?.value(forHTTPHeaderField: "anthropic-beta"), "oauth-2025-04-20")
+    }
+  }
+
   private func assertThrows(
     kind: QuotaErrorKind,
     _ block: @escaping () async throws -> ProviderUsage,
@@ -83,6 +95,16 @@ final class AnthropicClientTests: XCTestCase {
     } catch {
       XCTFail("Unexpected error: \(error)", file: file, line: line)
     }
+  }
+}
+
+private actor RecordingAnthropicHTTP: HTTPClient {
+  private(set) var request: URLRequest?
+
+  func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+    self.request = request
+    let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!
+    return (Data("{}".utf8), response)
   }
 }
 

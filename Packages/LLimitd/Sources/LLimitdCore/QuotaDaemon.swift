@@ -40,6 +40,7 @@ public final class QuotaDaemon {
   private let historyStore: QuotaHistoryStore
   private let coordinator: QuotaCoordinator
   private let makeDiscovery: () -> CredentialDiscovery
+  private let credentialEnvironment: [String: String]
   /// Mirrors AppModel: when the settings file can't be decoded, refuse to overwrite
   /// it (it may hold credentials) until the user fixes or removes it.
   public private(set) var settingsLoadError: SettingsLoadError?
@@ -58,6 +59,7 @@ public final class QuotaDaemon {
     paths: LinuxPaths,
     coordinator: QuotaCoordinator = .live(),
     makeDiscovery: @escaping () -> CredentialDiscovery = { CredentialDiscovery() },
+    environment: [String: String] = ProcessInfo.processInfo.environment,
     log: @escaping (String) -> Void = { line in
       // Unbuffered: the daemon's stdout is a pipe (journald), where print()
       // would sit in the stdio buffer.
@@ -71,6 +73,7 @@ public final class QuotaDaemon {
     self.historyStore = QuotaHistoryStore(fileURL: paths.historyFileURL)
     self.coordinator = coordinator
     self.makeDiscovery = makeDiscovery
+    self.credentialEnvironment = environment
     self.log = log
   }
 
@@ -148,6 +151,7 @@ public final class QuotaDaemon {
       else { continue }
 
       result.accounts[diskIndex].credentials = currentAccount.credentials
+        .preservingEnvironmentReferences(from: baseAccount.credentials)
     }
     return result
   }
@@ -514,7 +518,11 @@ public final class QuotaDaemon {
       let credentials = settings.accounts[index].credentials
       guard let refreshToken = credentials[CredentialField.openAIRefreshToken], !refreshToken.isEmpty else { continue }
 
-      let access = credentials[CredentialField.openAIAccessToken] ?? ""
+      // Variable owners renew their grants; LLimit cannot persist a rotation.
+      if refreshToken.isEnvironmentReference
+        || credentials[CredentialField.openAIAccessToken]?.isEnvironmentReference == true { continue }
+
+      let access = credentials.resolvingEnvironmentReferences(credentialEnvironment)[CredentialField.openAIAccessToken] ?? ""
       if !access.isEmpty, !ChatGPTOAuth.isAccessTokenExpired(access) { continue }
 
       if await refreshOpenAIAccount(id: accountID, refreshToken: refreshToken) {
@@ -539,6 +547,7 @@ public final class QuotaDaemon {
       guard let updated = OpenAICredentialSync.adoption(
         for: settings.accounts[index].credentials,
         among: live,
+        environment: credentialEnvironment,
         expiry: ChatGPTOAuth.accessTokenExpiry
       ) else { continue }
       settings.accounts[index].credentials = updated
@@ -553,16 +562,19 @@ public final class QuotaDaemon {
   @discardableResult
   private func refreshOpenAIAccount(id accountID: String, refreshToken: String) async -> Bool {
     guard let previous = settings.accounts.first(where: { $0.id == accountID })?.credentials,
-          !CodexAccountProfile.isManaged(previous) else { return false }
+          !CodexAccountProfile.isManaged(previous), !refreshToken.isEnvironmentReference,
+          previous[CredentialField.openAIAccessToken]?.isEnvironmentReference != true else { return false }
     do {
       let result = try await ChatGPTOAuth.refresh(refreshToken: refreshToken)
       guard let index = settings.accounts.firstIndex(where: { $0.id == accountID }),
             settings.accounts[index].credentials == previous else { return false }
       settings.accounts[index].credentials[CredentialField.openAIAccessToken] = result.accessToken
-      if let newRefresh = result.refreshToken {
+      if let newRefresh = result.refreshToken,
+         previous[CredentialField.openAIRefreshToken]?.isEnvironmentReference != true {
         settings.accounts[index].credentials[CredentialField.openAIRefreshToken] = newRefresh
       }
-      if let newAccountID = result.accountID {
+      if let newAccountID = result.accountID,
+         previous[CredentialField.openAIAccountID]?.isEnvironmentReference != true {
         settings.accounts[index].credentials[CredentialField.openAIAccountID] = newAccountID
       }
       return true
@@ -599,7 +611,9 @@ public final class QuotaDaemon {
       }
 
       let refreshToken = settings.accounts[index].credentials[CredentialField.openAIRefreshToken] ?? ""
-      if !refreshToken.isEmpty, await refreshOpenAIAccount(id: accountID, refreshToken: refreshToken) {
+      if !refreshToken.isEmpty, !refreshToken.isEnvironmentReference,
+         settings.accounts[index].credentials[CredentialField.openAIAccessToken]?.isEnvironmentReference != true,
+         await refreshOpenAIAccount(id: accountID, refreshToken: refreshToken) {
         recovered.insert(accountID)
       }
     }
@@ -610,15 +624,7 @@ public final class QuotaDaemon {
   // MARK: - Internals
 
   private func runtimeConfigurations() -> [ProviderRuntimeConfiguration] {
-    settings.accounts.map { account in
-      ProviderRuntimeConfiguration(
-        accountID: account.id,
-        provider: account.provider,
-        displayName: account.resolvedDisplayName,
-        isEnabled: account.isEnabled,
-        credentials: account.credentials
-      )
-    }
+    settings.accounts.map { $0.runtimeConfiguration(environment: credentialEnvironment) }
   }
 
   private func normalizeAndSave() throws {
@@ -645,8 +651,9 @@ public final class QuotaDaemon {
     _ result: QuotaSnapshot, configurations: [ProviderRuntimeConfiguration], settings latest: AppSettings
   ) -> QuotaSnapshot {
     let valid = latest.accounts.filter { account in
-      account.isEnabled && account.hasRequiredCredentials && configurations.contains {
-        $0.accountID == account.id && $0.provider == account.provider && $0.credentials == account.credentials
+      let current = account.runtimeConfiguration(environment: credentialEnvironment)
+      return current.isEnabled && current.provider.hasRequiredCredentials(current.credentials) && configurations.contains {
+        $0.matchesCurrentAccount(account, environment: credentialEnvironment)
       }
     }
     return result.reconciled(with: valid)
@@ -697,7 +704,10 @@ public final class QuotaDaemon {
   private func reconcileSnapshotWithCurrentAccounts() {
     guard !configurationLoadFailed, let currentSnapshot = snapshot else { return }
 
-    let activeAccounts = settings.accounts.filter { $0.isEnabled && $0.hasRequiredCredentials }
+    let activeAccounts = settings.accounts.filter {
+      let runtime = $0.runtimeConfiguration(environment: credentialEnvironment)
+      return runtime.isEnabled && runtime.provider.hasRequiredCredentials(runtime.credentials)
+    }
     let reconciled = currentSnapshot.reconciled(with: activeAccounts)
     guard reconciled != currentSnapshot else { return }
 

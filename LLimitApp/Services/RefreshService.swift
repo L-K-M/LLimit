@@ -5,7 +5,8 @@ struct RefreshService {
   let coordinator: QuotaCoordinator
   let snapshotStore: SnapshotStore
 
-  func refresh(configurations: [ProviderRuntimeConfiguration], credentialFailures: [ProviderFailure]) async -> QuotaSnapshot {
+  func refresh(configurations: [ProviderRuntimeConfiguration], credentialFailures: [ProviderFailure],
+               skippedAccountIDs: Set<String> = []) async -> QuotaSnapshot {
     // Read the previous snapshot before overwriting it so accounts that fail this cycle
     // can keep showing their last-known usage instead of vanishing from the widgets.
     let previous = try? snapshotStore.load(policy: .recover)
@@ -14,6 +15,7 @@ struct RefreshService {
     // AppModel validates credentials again before saving: they may have changed
     // while this fetch was in flight.
     return snapshot.mergingStaleUsage(from: previous)
+      .carryingResults(forSkippedAccountIDs: skippedAccountIDs, from: previous)
   }
 
   /// Fetches usage without persisting — used to re-fetch a subset of accounts (e.g. an
