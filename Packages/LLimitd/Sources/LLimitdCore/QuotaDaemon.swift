@@ -29,6 +29,10 @@ public final class QuotaDaemon {
   /// convenience only — imported accounts are fully owned and stored by LLimit.
   public private(set) var detectedCredentials: [DiscoveredCredential] = []
   public private(set) var discoveryDiagnostics: [String] = []
+  /// Called after each refresh saves its snapshot, with the snapshot it
+  /// replaced. Runs on the refresh loop, so it must return promptly (the alert
+  /// monitor hands its child processes to a background queue).
+  public var onSnapshotSaved: ((_ previous: QuotaSnapshot?, _ current: QuotaSnapshot) -> Void)?
 
   public let paths: LinuxPaths
   /// Serializes settings read-modify-write cycles against other llimit processes
@@ -329,6 +333,7 @@ public final class QuotaDaemon {
     }
 
     snapshot = refreshed
+    onSnapshotSaved?(previous, refreshed)
     statusMessage = "Refreshed \(refreshed.providers.count) account(s), \(refreshed.failures.count) failure(s)"
     log("[llimitd] \(statusMessage)")
   }

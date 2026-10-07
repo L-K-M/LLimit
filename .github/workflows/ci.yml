@@ -32,6 +32,9 @@ jobs:
       - name: Install xcbeautify
         run: brew install xcbeautify
 
+      - name: Test macOS alert subprocess delivery
+        run: swift test --package-path Packages/LLimitd --filter QuotaAlertsTests
+
       - name: Build app
         run: |
           set -o pipefail
