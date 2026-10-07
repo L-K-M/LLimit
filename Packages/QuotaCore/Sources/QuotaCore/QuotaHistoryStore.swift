@@ -34,7 +34,13 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     }
 
     let data = try Data(contentsOf: fileURL)
-    return try decoder.decode([QuotaSnapshot].self, from: data)
+    do {
+      return try decoder.decode([QuotaSnapshot].self, from: data)
+    } catch {
+      guard quarantineCorruptFile(at: fileURL) else { throw error }
+      reportPersistenceIssue("Quarantined undecodable \(fileURL.lastPathComponent).")
+      return []
+    }
   }
 
   /// Decodes the archive, then selects recent source/publication activity.
@@ -64,8 +70,7 @@ public final class QuotaHistoryStore: @unchecked Sendable {
       withIntermediateDirectories: true
     )
 
-    try data.write(to: fileURL, options: .atomic)
-    try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: fileURL.path)
+    try writeOwnerOnlyAtomically(data, to: fileURL)
   }
 
   /// Archives new fetches and changed failure states. Equal fresh values survive.

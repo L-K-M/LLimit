@@ -38,11 +38,12 @@ public enum ChatGPTOAuth {
 
     let (data, response) = try await httpClient.data(for: request)
     guard (200..<300).contains(response.statusCode) else {
-      let body = (String(data: data, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
       let kind: QuotaErrorKind = (response.statusCode == 400 || response.statusCode == 401) ? .auth : .api
       throw ProviderClientError(
         kind: kind,
-        message: "ChatGPT token refresh failed \(response.statusCode)\(body.isEmpty ? "" : ": \(body)")",
+        message: kind == .auth
+          ? "ChatGPT token refresh failed (HTTP \(response.statusCode)). Reconnect this account or import its credentials again."
+          : "ChatGPT token refresh failed (HTTP \(response.statusCode)). Try again later.",
         statusCode: response.statusCode
       )
     }

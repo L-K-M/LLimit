@@ -35,9 +35,8 @@ public struct ZhipuQuotaClient: QuotaProviderClient {
 
     let (data, response) = try await httpClient.data(for: request)
     guard (200..<300).contains(response.statusCode) else {
-      let body = String(data: data, encoding: .utf8) ?? ""
       let kind: QuotaErrorKind = response.statusCode == 401 || response.statusCode == 403 ? .auth : .api
-      throw ProviderClientError(kind: kind, message: "\(provider.displayName) API error \(response.statusCode): \(body)")
+      throw ProviderClientError(kind: kind, message: "\(provider.displayName) usage API failed (HTTP \(response.statusCode)). Try again later.", statusCode: response.statusCode)
     }
 
     let payload = try parseJSONObject(from: data)
@@ -46,8 +45,7 @@ public struct ZhipuQuotaClient: QuotaProviderClient {
       let responseCode = parseNumeric(payload["code"]),
       responseCode == 200
     else {
-      let message = payload["msg"] as? String ?? "Unknown response"
-      throw ProviderClientError(kind: .api, message: "\(provider.displayName) API returned non-success payload: \(message)")
+      throw ProviderClientError(kind: .api, message: "\(provider.displayName) rejected the usage request. Check the API key or try again later.")
     }
 
     guard

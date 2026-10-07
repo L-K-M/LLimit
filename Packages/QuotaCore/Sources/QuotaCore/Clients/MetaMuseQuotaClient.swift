@@ -32,6 +32,19 @@ public struct MetaMuseQuotaClient: QuotaProviderClient {
   /// accepts. Contributor tier means Meta may train on the "ping" content.
   private static let probeModel = "muse-spark-1.3-contributor"
 
+  private enum EventType: String {
+    case subscriptionUsage = "response.subscription_usage"
+    case completed = "response.completed"
+    case incomplete = "response.incomplete"
+    case failed = "response.failed"
+    case error
+  }
+
+  private struct SubscriptionSnapshot {
+    let window: (fields: [String: Any], usedPercent: Double)?
+    let weekly: (fields: [String: Any], usedPercent: Double)?
+  }
+
   private let endpoint: URL
   private let httpClient: any HTTPClient
 
@@ -65,32 +78,30 @@ public struct MetaMuseQuotaClient: QuotaProviderClient {
 
     let (data, response) = try await httpClient.data(for: request)
     guard (200..<300).contains(response.statusCode) else {
-      let detail = apiErrorMessage(in: data) ?? String(data: data, encoding: .utf8) ?? ""
       switch response.statusCode {
       case 401, 403:
         throw ProviderClientError(kind: .auth, message: "Meta authorization failed (\(response.statusCode)) — check the API key or run `muse login` again")
       case 429:
-        throw ProviderClientError(kind: .rateLimit, message: "Meta API rate limited: \(detail)")
+        throw ProviderClientError(kind: .rateLimit, message: "Meta API is rate limiting requests. Try again later.", statusCode: response.statusCode)
       default:
-        throw ProviderClientError(kind: .api, message: "Meta API error \(response.statusCode): \(detail)")
+        throw ProviderClientError(kind: .api, message: "Meta API unavailable (HTTP \(response.statusCode)). Try again later.", statusCode: response.statusCode)
       }
     }
 
     let body = String(data: data, encoding: .utf8) ?? ""
-    let parsed = subscriptionUsageSnapshot(in: body)
+    let parsed = try subscriptionUsageSnapshot(in: body)
     let snapshot = parsed.snapshot
 
     var metrics: [UsageMetric] = []
 
-    if let window = snapshot?["window"] as? [String: Any],
-       let used = parseNumeric(window["used_percent"]) {
-      let resetAt = parseDateValue(window["resets_at"])
-      let durationMins = parseNumeric(window["window_duration_mins"]).flatMap(roundedInt)
+    if let window = snapshot?.window {
+      let resetAt = parseDateValue(window.fields["resets_at"])
+      let durationMins = parseNumeric(window.fields["window_duration_mins"]).flatMap(roundedInt)
       metrics.append(
         UsageMetric(
           id: "window",
           label: windowLabel(durationMins: durationMins),
-          remainingPercent: percentRemaining(fromUsedPercent: used),
+          remainingPercent: percentRemaining(fromUsedPercent: window.usedPercent),
           resetAt: resetAt,
           resetIn: resetAt.map { formatResetCountdown(to: $0, now: now) },
           windowSeconds: durationMins.flatMap { reportedWindowSeconds(count: $0, unitSeconds: 60) }
@@ -98,14 +109,13 @@ public struct MetaMuseQuotaClient: QuotaProviderClient {
       )
     }
 
-    if let weekly = snapshot?["weekly"] as? [String: Any],
-       let used = parseNumeric(weekly["used_percent"]) {
-      let resetAt = parseDateValue(weekly["resets_at"])
+    if let weekly = snapshot?.weekly {
+      let resetAt = parseDateValue(weekly.fields["resets_at"])
       metrics.append(
         UsageMetric(
           id: "weekly",
           label: "Weekly limit",
-          remainingPercent: percentRemaining(fromUsedPercent: used),
+          remainingPercent: percentRemaining(fromUsedPercent: weekly.usedPercent),
           resetAt: resetAt,
           resetIn: resetAt.map { formatResetCountdown(to: $0, now: now) }
         )
@@ -113,17 +123,16 @@ public struct MetaMuseQuotaClient: QuotaProviderClient {
     }
 
     if metrics.isEmpty {
-      // A recognizable stream without a snapshot is a pay-as-you-go key;
-      // an unrecognizable body means the undocumented frame moved — fail
-      // loudly instead of wearing a green placeholder.
-      guard parsed.sawRecognizablePayload else {
-        // Prefer the API's own explanation — "bad key" beats "format changed".
-        let excerpt = String(body.prefix(200))
+      // A present snapshot must report a window. Only a completed response
+      // without a snapshot establishes a pay-as-you-go result.
+      guard parsed.sawCompletedResponse else {
+        // Failed streams can contain credentials or generated text; publish only recovery advice.
         let detail = parsed.streamError ?? apiErrorMessage(in: data)
         throw ProviderClientError(
           kind: .api,
-          message: detail.map { "Meta API error: \($0) (body: \(excerpt))" }
-            ?? "Meta API response contained no recognizable usage payload — stream format may have changed (body: \(excerpt))"
+          message: detail == nil
+            ? "Meta API response contained no recognizable usage payload. Try again later."
+            : "Meta API request failed. Check the API key or try again later."
         )
       }
       metrics.append(UsageMetric(id: "empty", label: "Pay-as-you-go — no subscription quota"))
@@ -153,21 +162,52 @@ public struct MetaMuseQuotaClient: QuotaProviderClient {
     return "\(mins)-minute limit"
   }
 
+  private func subscriptionWindow(in snapshot: [String: Any]?, key: String) throws -> (
+    fields: [String: Any], usedPercent: Double
+  )? {
+    guard let value = snapshot?[key] else { return nil }
+    guard let fields = value as? [String: Any] else { throw invalidSubscriptionSnapshot }
+
+    // Numeric strings are supported, but a partial parse such as "1e1000"
+    // must not turn an invalid percentage into a small finite reading.
+    let usedPercent: Double?
+    if let string = fields["used_percent"] as? String {
+      usedPercent = Double(string.trimmingCharacters(in: .whitespacesAndNewlines))
+    } else {
+      usedPercent = parseNumeric(fields["used_percent"])
+    }
+    guard let usedPercent, usedPercent.isFinite else { throw invalidSubscriptionSnapshot }
+
+    return (fields, usedPercent)
+  }
+
+  private func decodeSubscriptionSnapshot(_ fields: [String: Any]) throws -> SubscriptionSnapshot {
+    let window = try subscriptionWindow(in: fields, key: "window")
+    let weekly = try subscriptionWindow(in: fields, key: "weekly")
+    guard window != nil || weekly != nil else { throw invalidSubscriptionSnapshot }
+
+    return SubscriptionSnapshot(window: window, weekly: weekly)
+  }
+
+  private var invalidSubscriptionSnapshot: ProviderClientError {
+    ProviderClientError(kind: .decoding, message: "Meta returned incomplete or invalid subscription usage data")
+  }
+
   /// Pulls the SubscriptionUsageSnapshot out of an SSE body. The dedicated
   /// `response.subscription_usage` event is checked first; the same snapshot
   /// can also ride inside the `response` object of a terminal event. If the
   /// body isn't SSE at all (server ignored `stream`), it is tried as a plain
-  /// JSON response. `sawRecognizablePayload` distinguishes a healthy stream
-  /// that simply carries no snapshot (pay-as-you-go) from an undecodable
-  /// body, which is a protocol break worth surfacing as an error.
-  /// `streamError` carries the message of a stream-level error event so the
-  /// thrown failure can headline the API's own explanation.
-  private func subscriptionUsageSnapshot(in body: String) -> (
-    snapshot: [String: Any]?,
-    sawRecognizablePayload: Bool,
+  /// JSON response. `sawCompletedResponse` distinguishes a completed response
+  /// without a subscription snapshot from an unrecognized or unfinished body.
+  /// A dedicated subscription event or snapshot field is never absence.
+  /// `streamError` identifies a failed stream; its raw explanation stays transient.
+  private func subscriptionUsageSnapshot(in body: String) throws -> (
+    snapshot: SubscriptionSnapshot?,
+    sawCompletedResponse: Bool,
     streamError: String?
   ) {
-    var sawRecognizablePayload = false
+    var snapshot: SubscriptionSnapshot?
+    var sawCompletedResponse = false
 
     // SSE permits CRLF line endings; normalize or multi-event bodies stay one
     // unsplittable block and their concatenated data: lines fail JSON parsing.
@@ -182,41 +222,80 @@ public struct MetaMuseQuotaClient: QuotaProviderClient {
           dataLines.append(String(trimmed.dropFirst(5)).trimmingCharacters(in: .whitespaces))
         }
       }
-      guard !dataLines.isEmpty else { continue }
+      guard !dataLines.isEmpty else {
+        if eventName == EventType.subscriptionUsage.rawValue { throw invalidSubscriptionSnapshot }
+        continue
+      }
       let joined = dataLines.joined(separator: "\n")
       guard joined != "[DONE]" else {
-        sawRecognizablePayload = true
+        if eventName == EventType.subscriptionUsage.rawValue { throw invalidSubscriptionSnapshot }
         continue
       }
       guard
         let object = try? JSONSerialization.jsonObject(with: Data(joined.utf8)) as? [String: Any]
-      else { continue }
-
-      // Stream-level errors arrive as HTTP 200 events; they must not read as
-      // a healthy pay-as-you-go stream.
-      let type = eventName ?? (object["type"] as? String)
-      if type == "error" || type == "response.failed" || object["error"] is [String: Any] {
-        return (nil, false, streamErrorMessage(in: object) ?? type)
+      else {
+        if eventName == EventType.subscriptionUsage.rawValue { throw invalidSubscriptionSnapshot }
+        continue
       }
-      sawRecognizablePayload = true
 
-      if type == "response.subscription_usage", let snapshot = snapshotDict(in: object) {
-        return (snapshot, true, nil)
+      // Terminal errors fail the refresh even after a valid quota snapshot;
+      // the caller's stale merge preserves the last-good usage.
+      let rawType = eventName ?? (object["type"] as? String)
+      let type = rawType.flatMap(EventType.init(rawValue:))
+      if type == .error || type == .failed || object["error"] is [String: Any] {
+        return (nil, false, streamErrorMessage(in: object) ?? rawType)
       }
-      if (type == "response.completed" || type == "response.incomplete"),
-         let responseObject = object["response"] as? [String: Any],
-         let snapshot = snapshotDict(in: responseObject) {
-        return (snapshot, true, nil)
+
+      // Keep the first reading, but validate later snapshots before success.
+      if type == .subscriptionUsage {
+        let candidate = try decodeSubscriptionSnapshot(try snapshotDict(in: object) ?? object)
+        snapshot = snapshot ?? candidate
+        continue
+      }
+      if (type == .completed || type == .incomplete),
+         let responseObject = object["response"] as? [String: Any] {
+        if let fields = try snapshotDict(in: responseObject) {
+          let candidate = try decodeSubscriptionSnapshot(fields)
+          snapshot = snapshot ?? candidate
+        }
+      }
+      if isCompletedResponse(object, type: rawType) {
+        sawCompletedResponse = true
       }
     }
 
     guard
       let object = try? JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any]
-    else { return (nil, sawRecognizablePayload, nil) }
-    if (object["type"] as? String) == "error" || object["error"] is [String: Any] {
+    else { return (snapshot, sawCompletedResponse, nil) }
+    let rawType = object["type"] as? String
+    let type = rawType.flatMap(EventType.init(rawValue:))
+    if type == .error || type == .failed || object["error"] is [String: Any] {
       return (nil, false, streamErrorMessage(in: object) ?? object["type"] as? String)
     }
-    return (snapshotDict(in: object), true, nil)
+    if let fields = try snapshotDict(in: object) {
+      return (try decodeSubscriptionSnapshot(fields), false, nil)
+    }
+    if let responseObject = object["response"] as? [String: Any],
+       let fields = try snapshotDict(in: responseObject) {
+      return (try decodeSubscriptionSnapshot(fields), false, nil)
+    }
+    if type == .subscriptionUsage { throw invalidSubscriptionSnapshot }
+
+    return (snapshot, sawCompletedResponse || isCompletedResponse(object, type: rawType), nil)
+  }
+
+  private func isCompletedResponse(_ object: [String: Any], type: String?) -> Bool {
+    let response: [String: Any]
+    if type == EventType.completed.rawValue, let nested = object["response"] as? [String: Any] {
+      response = nested
+    } else if type == nil, object["status"] as? String == "completed" {
+      response = object
+    } else {
+      return false
+    }
+    guard nonEmptyString(response["id"]) != nil else { return false }
+
+    return response["status"] == nil || response["status"] as? String == "completed"
   }
 
   /// Reads the human explanation out of a stream error event or error
@@ -237,15 +316,14 @@ public struct MetaMuseQuotaClient: QuotaProviderClient {
   /// The snapshot's nesting varies with where it was carried: the dedicated
   /// event may put it at top level or under `subscription_usage`, and the
   /// terminal event nests it inside `response`.
-  private func snapshotDict(in object: [String: Any]) -> [String: Any]? {
-    if object["window"] is [String: Any] || object["weekly"] is [String: Any] {
+  private func snapshotDict(in object: [String: Any]) throws -> [String: Any]? {
+    if object["window"] != nil || object["weekly"] != nil {
       return object
     }
     for key in ["subscription_usage", "snapshot"] {
-      if let nested = object[key] as? [String: Any],
-         nested["window"] is [String: Any] || nested["weekly"] is [String: Any] {
-        return nested
-      }
+      guard let value = object[key] else { continue }
+      guard let nested = value as? [String: Any] else { throw invalidSubscriptionSnapshot }
+      return nested
     }
     return nil
   }

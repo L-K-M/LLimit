@@ -39,6 +39,7 @@ public struct QuotaCoordinator: Sendable {
 
   public func refresh(configurations: [ProviderRuntimeConfiguration], now: Date = Date(),
                       previousSnapshot: QuotaSnapshot? = nil) async -> QuotaSnapshot {
+    let failureMessages = FailureMessagePolicy(configurations: configurations)
     let targets = configurations
       .filter { $0.isEnabled }
       .filter { clientsByProvider[$0.provider] != nil }
@@ -65,7 +66,7 @@ public struct QuotaCoordinator: Sendable {
                 accountID: configuration.accountID,
                 provider: configuration.provider,
                 kind: error.kind,
-                message: error.message
+                message: failureMessages.redacted(error.message)
               )
             )
           } catch {
@@ -77,7 +78,7 @@ public struct QuotaCoordinator: Sendable {
                 accountID: configuration.accountID,
                 provider: configuration.provider,
                 kind: .unknown,
-                message: error.localizedDescription
+                message: "Could not read usage. Try again later."
               )
             )
           }
@@ -107,6 +108,33 @@ public struct QuotaCoordinator: Sendable {
     }
     let failures = ordered.compactMap(\.failure)
     return QuotaSnapshot(generatedAt: now, providers: usages, failures: failures)
+  }
+}
+
+private struct FailureMessagePolicy: Sendable {
+  private static let maximumScalarCount = 512
+  private let secrets: [String]
+
+  init(configurations: [ProviderRuntimeConfiguration]) {
+    let hiddenSecretKeys: Set<String> = [CredentialField.openAIRefreshToken, CredentialField.kimiRefreshToken]
+    let values = configurations.flatMap { configuration in
+      let keys = Set(configuration.provider.credentialFields.filter(\.isSecret).map(\.key))
+        .union(hiddenSecretKeys)
+      return configuration.credentials.compactMap { key, value in
+        keys.contains(key) && !value.isEmpty ? value : nil
+      }
+    }
+    secrets = Set(values).sorted { $0.count > $1.count }
+  }
+
+  func redacted(_ message: String) -> String {
+    // Redact before truncation so a length boundary cannot retain a secret prefix.
+    let redacted = secrets.reduce(message) { $0.replacingOccurrences(of: $1, with: "[redacted]") }
+    let clean = redacted.components(separatedBy: .controlCharacters)
+      .joined(separator: " ")
+      .split(whereSeparator: \.isWhitespace)
+      .joined(separator: " ")
+    return String(String.UnicodeScalarView(clean.unicodeScalars.prefix(Self.maximumScalarCount)))
   }
 }
 

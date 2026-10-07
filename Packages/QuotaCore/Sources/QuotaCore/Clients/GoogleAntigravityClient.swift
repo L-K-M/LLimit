@@ -107,9 +107,8 @@ public struct GoogleAntigravityClient: QuotaProviderClient {
 
     let (data, response) = try await httpClient.data(for: request)
     guard (200..<300).contains(response.statusCode) else {
-      let body = String(data: data, encoding: .utf8) ?? ""
       let kind: QuotaErrorKind = response.statusCode == 400 || response.statusCode == 401 ? .auth : .api
-      throw ProviderClientError(kind: kind, message: "Google token refresh failed \(response.statusCode): \(body)")
+      throw ProviderClientError(kind: kind, message: "Google token refresh failed (HTTP \(response.statusCode)). Update this account's credentials or try again later.", statusCode: response.statusCode)
     }
 
     guard
@@ -133,9 +132,8 @@ public struct GoogleAntigravityClient: QuotaProviderClient {
 
     let (data, response) = try await httpClient.data(for: request)
     guard (200..<300).contains(response.statusCode) else {
-      let body = String(data: data, encoding: .utf8) ?? ""
       let kind: QuotaErrorKind = response.statusCode == 401 || response.statusCode == 403 ? .auth : .api
-      throw ProviderClientError(kind: kind, message: "Google quota API failed \(response.statusCode): \(body)")
+      throw ProviderClientError(kind: kind, message: "Google quota API failed (HTTP \(response.statusCode)). Try again later.", statusCode: response.statusCode)
     }
 
     return try parseJSONObject(from: data)
