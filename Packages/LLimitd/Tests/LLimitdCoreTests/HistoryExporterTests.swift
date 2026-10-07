@@ -55,6 +55,16 @@ final class HistoryExporterTests: XCTestCase {
     XCTAssertTrue(csv.contains("'@SUM(1)"))
   }
 
+  func testCSVNeutralizesWhitespaceMaskedFormulas() {
+    var snapshot = history()[0]
+    snapshot.providers[0].title = "\t=1+1"
+    var csv = HistoryExporter.csv(history: [snapshot])
+    XCTAssertTrue(csv.contains("'\t=1+1"))
+    snapshot.providers[0].title = "\r@SUM(1)"
+    csv = HistoryExporter.csv(history: [snapshot])
+    XCTAssertTrue(csv.contains("\"'\r@SUM(1)\""))
+  }
+
   func testJSONRoundTrips() throws {
     let json = try HistoryExporter.json(history: history())
     let data = try XCTUnwrap(json.data(using: .utf8))
