@@ -128,6 +128,54 @@ final class DevinClientTests: XCTestCase {
     XCTAssertEqual(usage.warning, "Ask your account admin to raise it")
   }
 
+  func testTopLevelPlanInfoOverridesNestedCreditAndHideRules() async throws {
+    let credit = try await fetch(#"{"planInfo":{"planName":"Core","billingStrategy":"BILLING_STRATEGY_CREDITS","hideDailyQuota":true,"devinInfo":{"accountDisplayName":"Current team"}},"userStatus":{"planStatus":{"planInfo":{"planName":"Old","billingStrategy":"BILLING_STRATEGY_QUOTA"},"dailyQuotaResetAtUnix":"1789372800"}}}"#)
+    XCTAssertEqual(credit.subtitle, "Core plan · Current team")
+    XCTAssertEqual(credit.metrics.map(\.id), ["credits"])
+    XCTAssertEqual(credit.metrics.first?.usedDisplay, "0")
+
+    let quota = try await fetch(#"{"planInfo":{"planName":"Pro","billingStrategy":"BILLING_STRATEGY_QUOTA","hideDailyQuota":true,"devinInfo":{"requestUsageAction":{"label":"Ask your current admin"}}},"userStatus":{"planStatus":{"planInfo":{"billingStrategy":"BILLING_STRATEGY_CREDITS","hideWeeklyQuota":true},"dailyQuotaRemainingPercent":42,"weeklyQuotaResetAtUnix":"1789891200"}}}"#)
+    XCTAssertEqual(quota.metrics.map(\.id), ["quota-weekly"])
+    XCTAssertEqual(quota.metrics.first?.remainingPercent, 0)
+    XCTAssertEqual(quota.maxUsagePercent, 100)
+    XCTAssertEqual(quota.warning, "Ask your current admin")
+  }
+
+  func testImplicitProtoZerosAndNestedPlanCompatibility() async throws {
+    let exhausted = try await fetch(#"{"userStatus":{"planStatus":{"planInfo":{"planName":"Pro","billingStrategy":"BILLING_STRATEGY_QUOTA"},"dailyQuotaResetAtUnix":"1789372800","weeklyQuotaRemainingPercent":87,"weeklyQuotaResetAtUnix":"1789891200","availablePromptCredits":-1}}}"#)
+    XCTAssertEqual(exhausted.metrics.map(\.id), ["quota-daily", "quota-weekly"])
+    XCTAssertEqual(exhausted.metrics.map(\.remainingPercent), [0, 87])
+    XCTAssertEqual(exhausted.metrics.first?.resetAt, Date(timeIntervalSince1970: 1_789_372_800))
+    XCTAssertEqual(exhausted.warning, "Quota exhausted")
+
+    let nullAndZero = try await fetch(#"{"userStatus":{"planStatus":{"dailyQuotaRemainingPercent":null,"dailyQuotaResetAtUnix":"1789372800","weeklyQuotaResetAtUnix":"0"}}}"#)
+    XCTAssertEqual(nullAndZero.metrics.map(\.id), ["empty"])
+
+    let hidden = try await fetch(#"{"userStatus":{"planStatus":{"planInfo":{"hideWeeklyQuota":true},"dailyQuotaRemainingPercent":70,"weeklyQuotaResetAtUnix":"1789891200"}}}"#)
+    XCTAssertEqual(hidden.metrics.map(\.id), ["quota-daily"])
+    XCTAssertNil(hidden.warning)
+
+    let credits = try await fetch(#"{"userStatus":{"planStatus":{"planInfo":{"billingStrategy":"BILLING_STRATEGY_CREDITS"},"dailyQuotaResetAtUnix":"1789372800","planEnd":"2026-10-13T19:56:36Z"}}}"#)
+    XCTAssertEqual(credits.metrics.map(\.id), ["credits"])
+    XCTAssertEqual(credits.metrics.first?.usedDisplay, "0")
+    XCTAssertNotNil(credits.metrics.first?.resetAt)
+  }
+
+  func testOverageMicrosTakePrecedenceAndKeepRoundedSign() async throws {
+    for (micros, display) in [("4250000", "$4.25"), ("-1500000", "-$1.50"), ("-4000", "$0.00")] {
+      let usage = try await fetch(#"{"userStatus":{"planStatus":{"dailyQuotaRemainingPercent":42,"overageBalanceMicros":"\#(micros)","usageBalance":15}}}"#)
+      let balance = try XCTUnwrap(usage.metrics.first { $0.id == "balance" })
+      XCTAssertEqual(balance.usedDisplay, display)
+      XCTAssertNil(balance.remainingPercent)
+      XCTAssertEqual(defaultRingMetrics(for: usage).map(\.id), ["quota-daily"])
+      XCTAssertEqual(usage.maxUsagePercent, 58)
+    }
+  }
+
+  private func fetch(_ json: String) async throws -> ProviderUsage {
+    try await DevinQuotaClient(httpClient: MockHTTP(status: 200, body: json)).fetchUsage(configuration: config(), now: now)
+  }
+
   func testEmptyPayloadYieldsPlaceholderMetric() async throws {
     let client = DevinQuotaClient(httpClient: MockHTTP(status: 200, body: "{}"))
 
