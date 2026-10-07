@@ -62,13 +62,7 @@ struct ClaudeProfileService {
   }
 
   func executable() throws -> URL {
-    let home = FileManager.default.homeDirectoryForCurrentUser
-    var candidates = [home.appendingPathComponent(".local/bin/claude"),
-                      URL(fileURLWithPath: "/opt/homebrew/bin/claude"),
-                      URL(fileURLWithPath: "/usr/local/bin/claude")]
-    for path in (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":") where path.hasPrefix("/") {
-      candidates.append(URL(fileURLWithPath: String(path)).appendingPathComponent("claude"))
-    }
+    let candidates = ManagedCLI.claude.candidates(environment: ProcessInfo.processInfo.environment)
     guard let executable = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0.path) }) else {
       throw Failure.cliMissing
     }
