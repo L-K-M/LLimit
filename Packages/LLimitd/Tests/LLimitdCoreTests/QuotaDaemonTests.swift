@@ -40,19 +40,19 @@ final class QuotaDaemonTests: XCTestCase {
       .write(to: claudeDirectory.appendingPathComponent(".credentials.json"))
 
     let daemon = makeDaemon(coordinator: QuotaCoordinator(clients: [ClaudeAccountClient()]))
-    let imported = daemon.importAccount(from: DiscoveredCredential(
+    let imported = try daemon.importAccount(from: DiscoveredCredential(
       stableID: "anthropic:previous-login",
       provider: .anthropic,
       suggestedName: "Personal Claude",
       sourceLabel: "Previously imported login",
       credentials: [CredentialField.anthropicAccessToken: "sk-ant-oat-personal"]
     ))
-    let manual = daemon.addAccount(
+    let manual = try daemon.addAccount(
       provider: .anthropic,
       displayName: "Work Claude",
       credentials: [CredentialField.anthropicAccessToken: "sk-ant-oat-work"]
     )
-    let managed = daemon.addAccount(
+    let managed = try daemon.addAccount(
       provider: .anthropic,
       displayName: "Profile Claude",
       credentials: [
@@ -61,12 +61,12 @@ final class QuotaDaemonTests: XCTestCase {
         CredentialField.anthropicCredentialSource: ClaudeCodeCredentialSource.managedProfile.rawValue
       ]
     )
-    let disabled = daemon.addAccount(
+    let disabled = try daemon.addAccount(
       provider: .anthropic,
       credentials: [CredentialField.anthropicAccessToken: "sk-ant-oat-disabled"]
     )
     try daemon.setAccountEnabled(disabled.id, false)
-    let unconfigured = daemon.addAccount(provider: .anthropic)
+    let unconfigured = try daemon.addAccount(provider: .anthropic)
     let originalAccounts = daemon.settings.accounts
 
     await daemon.refreshNow()
@@ -96,11 +96,11 @@ final class QuotaDaemonTests: XCTestCase {
     let daemon = makeDaemon(coordinator: QuotaCoordinator(clients: [client]))
     var managedCredentials = CodexAccountProfile().credentials(identity: CodexAccountIdentity(accountID: "workspace", userID: "member"))
     managedCredentials[CredentialField.openAIAccessToken] = oldAccess
-    let managed = daemon.addAccount(provider: .openAI, credentials: managedCredentials)
+    let managed = try daemon.addAccount(provider: .openAI, credentials: managedCredentials)
     var malformedCredentials = managedCredentials
     malformedCredentials[CredentialField.openAICodexProfileID] = "malformed"
-    let malformed = daemon.addAccount(provider: .openAI, credentials: malformedCredentials)
-    let imported = daemon.addAccount(provider: .openAI, credentials: [
+    let malformed = try daemon.addAccount(provider: .openAI, credentials: malformedCredentials)
+    let imported = try daemon.addAccount(provider: .openAI, credentials: [
       CredentialField.openAIAccessToken: oldAccess, CredentialField.openAIAccountID: "workspace"
     ])
 
@@ -127,7 +127,7 @@ final class QuotaDaemonTests: XCTestCase {
 
   func testAddAccountPersistsWithMode0600() throws {
     let daemon = makeDaemon()
-    let account = daemon.addAccount(
+    let account = try daemon.addAccount(
       provider: .anthropic,
       credentials: [CredentialField.anthropicAccessToken: "sk-ant-oat-secret"]
     )
@@ -142,16 +142,16 @@ final class QuotaDaemonTests: XCTestCase {
     XCTAssertEqual(reloaded.settings.accounts.first?.credentials[CredentialField.anthropicAccessToken], "sk-ant-oat-secret")
   }
 
-  func testAddAccountAssignsUniqueDisplayNames() {
+  func testAddAccountAssignsUniqueDisplayNames() throws {
     let daemon = makeDaemon()
-    let first = daemon.addAccount(provider: .kimi, credentials: [CredentialField.kimiAPIKey: "k1"])
-    let second = daemon.addAccount(provider: .kimi, credentials: [CredentialField.kimiAPIKey: "k2"])
+    let first = try daemon.addAccount(provider: .kimi, credentials: [CredentialField.kimiAPIKey: "k1"])
+    let second = try daemon.addAccount(provider: .kimi, credentials: [CredentialField.kimiAPIKey: "k2"])
 
     XCTAssertEqual(first.resolvedDisplayName, "Kimi")
     XCTAssertEqual(second.resolvedDisplayName, "Kimi 2")
   }
 
-  func testImportAccountCopiesDetectedCredential() {
+  func testImportAccountCopiesDetectedCredential() throws {
     let daemon = makeDaemon()
     let detected = DiscoveredCredential(
       stableID: "anthropic:claude-code",
@@ -161,7 +161,7 @@ final class QuotaDaemonTests: XCTestCase {
       credentials: [CredentialField.anthropicAccessToken: "sk-ant-oat-imported"]
     )
 
-    let account = daemon.importAccount(from: detected)
+    let account = try daemon.importAccount(from: detected)
 
     XCTAssertEqual(account.provider, .anthropic)
     XCTAssertEqual(account.credentials[CredentialField.anthropicAccessToken], "sk-ant-oat-imported")
@@ -170,7 +170,7 @@ final class QuotaDaemonTests: XCTestCase {
 
   func testEnableDisableAndRemovePersist() throws {
     let daemon = makeDaemon()
-    let account = daemon.addAccount(
+    let account = try daemon.addAccount(
       provider: .zhipu,
       credentials: [CredentialField.zhipuAPIKey: "key"]
     )
@@ -183,16 +183,20 @@ final class QuotaDaemonTests: XCTestCase {
 
     try daemon.removeAccount(account.id)
     XCTAssertTrue(makeDaemon().settings.accounts.isEmpty)
-    XCTAssertThrowsError(try daemon.removeAccount(account.id))
+    XCTAssertThrowsError(try daemon.removeAccount(account.id)) { error in
+      XCTAssertEqual(error as? DaemonError, .unknownAccount(account.id))
+    }
   }
 
-  func testResolveAccountIDAcceptsUniquePrefix() {
+  func testResolveAccountIDAcceptsUniquePrefix() throws {
     let daemon = makeDaemon()
-    let account = daemon.addAccount(provider: .zai, credentials: [CredentialField.zaiAPIKey: "key"])
+    let account = try daemon.addAccount(provider: .zai, credentials: [CredentialField.zaiAPIKey: "key"])
 
-    XCTAssertEqual(daemon.resolveAccountID(account.id), account.id)
-    XCTAssertEqual(daemon.resolveAccountID(String(account.id.prefix(8))), account.id)
-    XCTAssertNil(daemon.resolveAccountID("does-not-exist"))
+    XCTAssertEqual(try daemon.resolveAccountID(account.id), account.id)
+    XCTAssertEqual(try daemon.resolveAccountID(String(account.id.prefix(8))), account.id)
+    XCTAssertThrowsError(try daemon.resolveAccountID("does-not-exist")) { error in
+      XCTAssertEqual(error as? DaemonError, .unknownAccount("does-not-exist"))
+    }
   }
 
   func testUnreadableSettingsFileBlocksSaving() throws {
@@ -218,7 +222,7 @@ final class QuotaDaemonTests: XCTestCase {
 
     let echoingClient = EchoingClient(provider: .anthropic, remaining: 73)
     let daemon = makeDaemon(coordinator: QuotaCoordinator(clients: [echoingClient]))
-    let account = daemon.addAccount(
+    let account = try daemon.addAccount(
       provider: .anthropic,
       credentials: [CredentialField.anthropicAccessToken: token]
     )
@@ -251,7 +255,7 @@ final class QuotaDaemonTests: XCTestCase {
 
     let succeeding = EchoingClient(provider: .zhipu, remaining: 64, at: date)
     let daemon = makeDaemon(coordinator: QuotaCoordinator(clients: [succeeding]))
-    let account = daemon.addAccount(provider: .zhipu, credentials: [CredentialField.zhipuAPIKey: "key"])
+    let account = try daemon.addAccount(provider: .zhipu, credentials: [CredentialField.zhipuAPIKey: "key"])
 
     await daemon.refreshNow()
     XCTAssertEqual(daemon.snapshot?.providers.count, 1)
@@ -275,7 +279,7 @@ final class QuotaDaemonTests: XCTestCase {
     let client = VeniceBalanceClient(balances: [100, 75], reset: reset)
     let daemon = makeDaemon(coordinator: QuotaCoordinator(clients: [client]))
     let key = "venice-daemon-test-key"
-    let account = daemon.addAccount(provider: .venice, credentials: [CredentialField.veniceAPIKey: key])
+    let account = try daemon.addAccount(provider: .venice, credentials: [CredentialField.veniceAPIKey: key])
 
     await daemon.refreshNow()
     XCTAssertEqual(daemon.snapshot?.providers.first?.metrics.first?.remainingPercent, 100)
@@ -315,14 +319,14 @@ final class QuotaDaemonTests: XCTestCase {
     let reset = Date().addingTimeInterval(3_600)
     let client = VeniceBalanceClient(balances: [100], reset: reset)
     let daemon = makeDaemon(coordinator: QuotaCoordinator(clients: [client]))
-    let original = daemon.addAccount(provider: .venice, credentials: [CredentialField.veniceAPIKey: "old-venice-test-key"])
+    let original = try daemon.addAccount(provider: .venice, credentials: [CredentialField.veniceAPIKey: "old-venice-test-key"])
     await daemon.refreshNow()
     XCTAssertEqual(daemon.snapshot?.providers.first?.metrics.first?.estimatedTotal, 100)
 
     // The CLI replaces an API key by removing and adding the account. A new ID
     // must begin a new estimate even when its reset time and provider match.
     try daemon.removeAccount(original.id)
-    let replacement = daemon.addAccount(provider: .venice, credentials: [CredentialField.veniceAPIKey: "new-venice-test-key"])
+    let replacement = try daemon.addAccount(provider: .venice, credentials: [CredentialField.veniceAPIKey: "new-venice-test-key"])
     let restarted = makeDaemon(coordinator: QuotaCoordinator(clients: [VeniceBalanceClient(balances: [25], reset: reset)]))
     await restarted.refreshNow()
 

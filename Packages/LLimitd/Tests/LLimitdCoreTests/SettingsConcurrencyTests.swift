@@ -56,7 +56,7 @@ final class SettingsConcurrencyTests: XCTestCase {
     let cli = makeDaemon(coordinator: QuotaCoordinator(clients: []))
     try cli.settingsLock.withLock {
       cli.loadConfiguration()
-      cli.addAccount(provider: .kimi, displayName: name, credentials: [CredentialField.kimiAPIKey: "k"])
+      try cli.addAccount(provider: .kimi, displayName: name, credentials: [CredentialField.kimiAPIKey: "k"])
     }
   }
 
@@ -79,7 +79,7 @@ final class SettingsConcurrencyTests: XCTestCase {
     let daemon = makeDaemon(coordinator: QuotaCoordinator(clients: [
       GatedClient(provider: .openAI, gate: gate)
     ]))
-    daemon.addAccount(
+    try daemon.addAccount(
       provider: .openAI,
       credentials: [
         CredentialField.openAIAccessToken: originalToken,

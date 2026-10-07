@@ -1710,7 +1710,9 @@ final class AppModel: ObservableObject {
   }
 
   private func reconcileSnapshotWithCurrentAccounts() {
-    guard let currentSnapshot = snapshot else { return }
+    // Without readable settings the account list is the empty fallback, and
+    // reconciling against it would erase every saved result.
+    guard !configurationLoadFailed, let currentSnapshot = snapshot else { return }
 
     let activeAccounts = providerAccounts.filter { $0.isEnabled && $0.hasRequiredCredentials }
     let reconciled = currentSnapshot.reconciled(with: activeAccounts)

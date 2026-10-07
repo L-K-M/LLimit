@@ -45,7 +45,10 @@ llimit accounts add --provider opencode-go      # prompts for your OpenCode Go A
 llimit accounts add --provider venice           # prompts for your Venice API key
 llimit accounts add --provider cline            # prompts for your Cline API key
 llimit accounts import                          # list discovered local logins, import one
-llimit accounts enable|disable|remove <id>      # id may be a unique prefix
+llimit accounts enable|disable|remove <id>      # id may be a unique prefix, any case
+llimit accounts rename <id> <name>
+llimit accounts update <id> --set anthropic.access_token   # prompts, input hidden
+llimit accounts reimport <id>                   # refresh credentials from a local login
 llimit refresh                                  # one-shot fetch, writes the snapshot
 llimit status                                   # human-readable
 llimit status --json                            # waybar/polybar contract
@@ -56,6 +59,31 @@ Fetch errors never crash the daemon: a failed account records a `ProviderFailure
 and keeps showing its last-known usage (same `mergingStaleUsage(from:)` behavior as
 the macOS app). The daemon reloads settings every cycle, so `llimit accounts …`
 edits from another shell take effect without a restart.
+
+`update`, `rename` and `reimport` change an account in place: its ID, history and
+colors stay. Use them when a token expires instead of removing the account and
+adding it again. `update --set key=value` sets a value directly. `--set key` with
+no value prompts for it in a terminal, which keeps a secret out of your shell
+history; press Enter to keep the current value. Without a terminal it fails
+instead of saving nothing. `reimport` reads the login that a local tool
+currently holds for the account's provider. When several are detected, choose
+one with `--from <stable-id>`. A new Claude token or Venice key also clears
+data that belonged to the old one: managed-profile details for Claude, and the
+estimated DIEM allowance for Venice.
+
+`accounts import` matches logins by their primary secret, the access token or
+API key. If a detected login differs from your existing accounts of that
+provider, such as a renewed Claude token, `import` asks whether to update one of
+those accounts, add a new one, or skip. Without a terminal it skips the login,
+prints the matching `reimport` command, and exits with status 1. Pass `--new`
+to add it as a separate account.
+
+If the settings file can't be read or parsed, every command that uses it stops
+and names the file and the failing location, such as `accounts[0].provider`. The
+message never quotes the file's contents. LLimit never overwrites the file and
+keeps the saved snapshot. `llimit status` still renders the last snapshot, with
+a warning on stderr. The daemon logs the problem once and skips refreshes until
+the file is fixed.
 
 OpenCode Go reports rolling, weekly, and monthly subscription limits. Add it with
 `--provider opencode-go`, or import the `opencode-go` API key from OpenCode's
