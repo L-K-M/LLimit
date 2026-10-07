@@ -47,6 +47,9 @@ final class ZhipuQuotaClientTests: XCTestCase {
         let weekly = try XCTUnwrap(usage.metrics.first { $0.id == "tokens-weekly" }, context)
         XCTAssertEqual(weekly.label, "Weekly token limit", context)
         XCTAssertEqual(weekly.remainingPercent, 15, context)
+        // The weekly entry carries no counts, so the line falls back to the
+        // used percentage out of 100, as a count-less token entry always has.
+        XCTAssertEqual(weekly.usageLine, "85 / 100", context)
         XCTAssertEqual(weekly.resetAt, Date(timeIntervalSince1970: 1_700_300_000), context)
         XCTAssertEqual(QuotaWindowKind.classify(metricID: weekly.id, label: weekly.label), .weekly, context)
 
@@ -70,6 +73,48 @@ final class ZhipuQuotaClientTests: XCTestCase {
     XCTAssertEqual(metric.remainingPercent, 10)
     XCTAssertEqual(QuotaWindowKind.classify(metricID: metric.id, label: metric.label), .other)
     XCTAssertEqual(usage.maxUsagePercent, 90)
+  }
+
+  // A `unit` that is present but not a number is no known shape: it must not
+  // take the legacy 5-hour identity, and its text is not echoed into the id
+  // or label, where the classifier would read a word like "HOUR" as a cadence.
+  func testNonNumericUnitIsUnrecognizedRatherThanLegacy() async throws {
+    let textUnit = #"{"type": "TOKENS_LIMIT", "unit": "HOUR", "number": 5, "percentage": 70}"#
+    let usage = try await fetch(payload(tokenLimits: [textUnit, Self.fiveHourEntry], planReset: nil))
+
+    XCTAssertEqual(usage.metrics.map(\.id), ["tokens-uunknown-n5", "tokens", "mcp"])
+    let unknown = try XCTUnwrap(usage.metrics.first { $0.id == "tokens-uunknown-n5" })
+    XCTAssertEqual(unknown.label, "Token limit (unit unknown, number 5)")
+    XCTAssertEqual(QuotaWindowKind.classify(metricID: unknown.id, label: unknown.label), .other)
+
+    let session = try XCTUnwrap(usage.metrics.first { $0.id == "tokens" })
+    XCTAssertEqual(session.label, "5-hour token limit")
+    XCTAssertEqual(session.remainingPercent, 60)
+
+    // JSON null is no unit at all, so that entry is still the legacy shape.
+    let nullUnit = #"{"type": "TOKENS_LIMIT", "unit": null, "percentage": 40}"#
+    let legacy = try await fetch(payload(tokenLimits: [nullUnit], planReset: nil))
+    XCTAssertEqual(legacy.metrics.map(\.id), ["tokens", "mcp"])
+    XCTAssertEqual(legacy.metrics.first?.label, "Token limit")
+  }
+
+  // An unreadable percentage fails the refresh wherever the entry sits, as
+  // it always has for the token entry. Skipping it would silently drop a
+  // window, possibly the binding weekly cap; failing lets the coordinator
+  // record the error and keep the account's last good usage.
+  func testMalformedTokenEntryFailsTheRefreshInEitherPosition() async {
+    let malformed = #"{"type": "TOKENS_LIMIT", "unit": 6, "number": 1, "percentage": "n/a"}"#
+
+    for tokenLimits in [[malformed, Self.fiveHourEntry], [Self.fiveHourEntry, malformed]] {
+      do {
+        _ = try await fetch(payload(tokenLimits: tokenLimits, planReset: nil))
+        XCTFail("A malformed token entry must fail the refresh")
+      } catch let error as ProviderClientError {
+        XCTAssertEqual(error.kind, .decoding)
+      } catch {
+        XCTFail("Unexpected error: \(error)")
+      }
+    }
   }
 
   // The shape this client was written for: one TOKENS_LIMIT entry without

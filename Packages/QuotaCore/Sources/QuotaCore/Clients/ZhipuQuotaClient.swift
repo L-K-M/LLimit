@@ -177,22 +177,32 @@ public struct ZhipuQuotaClient: QuotaProviderClient {
   /// History and colors key on the metric id, so the 5-hour window keeps the
   /// `tokens` id it has always had.
   private enum TokenWindow {
-    /// No numeric `unit`: the single-entry shape this client was written for.
-    /// It keeps its original id and per-host label.
+    /// No `unit` (absent or JSON null): the single-entry shape this client was
+    /// written for. It keeps its original id and per-host label.
     case unannotated
     case fiveHour
     case weekly
-    /// A code pair with no known meaning. It gets a neutral id and label,
-    /// never a guessed cadence.
+    /// A code pair with no known meaning, or a `unit` that is present but not
+    /// a number. It gets a neutral id and label, never a guessed cadence.
     case unrecognized(unit: String, number: String?)
 
+    /// Stands in for a `unit` that is present but not a number. The raw text
+    /// is not echoed: it is unbounded, and a word like "HOUR" in the label
+    /// would make `QuotaWindowKind.classify` read a cadence into it.
+    private static let unreadableUnit = "unknown"
+
     init(entry: [String: Any]) {
-      guard let unitValue = parseNumeric(entry["unit"]), let unit = formatIntLike(unitValue) else {
+      guard let rawUnit = entry["unit"], !(rawUnit is NSNull) else {
         self = .unannotated
         return
       }
 
       let number = parseNumeric(entry["number"])
+      guard let unitValue = parseNumeric(rawUnit), let unit = formatIntLike(unitValue) else {
+        self = .unrecognized(unit: Self.unreadableUnit, number: formatIntLike(number))
+        return
+      }
+
       switch (unitValue, number) {
       case (3, 5?):
         self = .fiveHour
