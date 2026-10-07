@@ -49,6 +49,9 @@ public final class QuotaDaemon {
   /// and repeating the same line each interval would bury it.
   private var loggedSettingsLoadError: SettingsLoadError?
   private var configurationLoadFailed: Bool { settingsLoadError != nil }
+  /// True while `editingSettings` runs its edit; a `SettingsTransaction` is only
+  /// usable then.
+  fileprivate private(set) var isEditing = false
   /// The settings as they were on disk when last loaded (or last merged). The basis
   /// for the three-way merge in `mergeAndSaveSettings()`: during a refresh the
   /// daemon only ever changes `credentials` of existing accounts, and the merge
@@ -112,7 +115,7 @@ public final class QuotaDaemon {
   /// Callers must hold the settings lock and have loaded inside it (the CLI
   /// mutation paths do both). The daemon's refresh cycle instead uses
   /// `mergeAndSaveSettings()`, which acquires the lock itself.
-  public func saveConfiguration() throws {
+  func saveConfiguration() throws {
     if let settingsLoadError {
       throw settingsLoadError
     }
@@ -172,21 +175,34 @@ public final class QuotaDaemon {
 
   /// Runs one account edit as a transaction: holds the settings lock, re-loads the
   /// file inside it (the daemon may have saved rotated tokens since this process
-  /// loaded), and refuses to edit the empty fallback of an unreadable file. The
-  /// mutations below expect to run inside it; each one saves before returning and
-  /// throws when the save fails.
-  public func editingSettings<T>(_ edit: () throws -> T) throws -> T {
-    try settingsLock.withLock {
+  /// loaded), and refuses to edit the empty fallback of an unreadable file. Other
+  /// modules can reach the mutations below only through the `SettingsTransaction`
+  /// passed to `edit`; each one saves before returning and throws when the save
+  /// fails.
+  ///
+  /// Do not nest transactions. The flock is not recursive, so an inner one would
+  /// wait for the outer one forever; nesting stops with a precondition failure
+  /// instead.
+  public func editingSettings<T>(_ edit: (SettingsTransaction) throws -> T) throws -> T {
+    precondition(!isEditing, "editingSettings must not be nested")
+    return try settingsLock.withLock {
       loadConfiguration()
       if let settingsLoadError {
         throw settingsLoadError
       }
-      return try edit()
+
+      isEditing = true
+      defer { isEditing = false }
+      return try edit(SettingsTransaction(daemon: self))
     }
   }
 
+  // The mutations below are internal: callers in other modules go through
+  // `SettingsTransaction`, which runs them under the lock. Tests call them
+  // directly against settings they loaded themselves.
+
   @discardableResult
-  public func addAccount(
+  func addAccount(
     provider: QuotaProvider,
     displayName: String? = nil,
     credentials: [String: String] = [:]
@@ -206,7 +222,7 @@ public final class QuotaDaemon {
 
   /// Creates a new LLimit-owned account pre-filled with a detected credential.
   @discardableResult
-  public func importAccount(from detected: DiscoveredCredential) throws -> ProviderAccount {
+  func importAccount(from detected: DiscoveredCredential) throws -> ProviderAccount {
     let name = detected.suggestedName.trimmingCharacters(in: .whitespacesAndNewlines)
     return try addAccount(
       provider: detected.provider,
@@ -220,7 +236,7 @@ public final class QuotaDaemon {
   /// that belongs to the old login is cleared: managed Claude metadata when the
   /// token changes, and a Venice account's DIEM estimate when the key changes.
   @discardableResult
-  public func updateAccount(
+  func updateAccount(
     _ accountID: String,
     displayName: String? = nil,
     credentials change: CredentialChange = .unchanged
@@ -263,18 +279,20 @@ public final class QuotaDaemon {
 
   /// Replaces an account's credentials with the login detected on this machine for
   /// its provider (`llimit accounts reimport`), keeping its id, name, history and
-  /// style. `stableID` picks one when several logins are detected. Returns the
-  /// login used and whether the account changed.
-  public func reimportAccount(
+  /// style. `detected` is a scan taken before the transaction, so no files are
+  /// read while the lock is held; `stableID` picks one login when it holds
+  /// several for the provider. Returns the login used and whether the account
+  /// changed.
+  func reimportAccount(
     _ accountID: String,
-    from stableID: String? = nil
+    from stableID: String? = nil,
+    among detected: [DiscoveredCredential]
   ) throws -> (login: DiscoveredCredential, changed: Bool) {
     guard let account = settings.account(withID: accountID) else {
       throw DaemonError.unknownAccount(accountID)
     }
 
-    scanForDetectedCredentials()
-    let logins = detectedCredentials.filter { $0.provider == account.provider }
+    let logins = detected.filter { $0.provider == account.provider }
     let login: DiscoveredCredential
     if let stableID {
       guard let match = logins.first(where: { $0.stableID == stableID }) else {
@@ -295,7 +313,7 @@ public final class QuotaDaemon {
     return (login, updated != account)
   }
 
-  public func setAccountEnabled(_ accountID: String, _ enabled: Bool) throws {
+  func setAccountEnabled(_ accountID: String, _ enabled: Bool) throws {
     guard let index = settings.accounts.firstIndex(where: { $0.id == accountID }) else {
       throw DaemonError.unknownAccount(accountID)
     }
@@ -304,7 +322,7 @@ public final class QuotaDaemon {
     reconcileSnapshotWithCurrentAccounts()
   }
 
-  public func removeAccount(_ accountID: String) throws {
+  func removeAccount(_ accountID: String) throws {
     guard let removed = settings.accounts.first(where: { $0.id == accountID }) else {
       throw DaemonError.unknownAccount(accountID)
     }
@@ -715,9 +733,12 @@ public final class QuotaDaemon {
     }
   }
 
-  /// Drops one account's usage and failure from the saved snapshot.
+  /// Drops one account's usage and failure from the saved snapshot. An unreadable
+  /// snapshot file falls back to the loaded copy, or to nothing to clear, so it
+  /// cannot block a key change; snapshots hold no credentials, so replacing a
+  /// corrupt one loses nothing that matters.
   private func discardSnapshotEntry(for accountID: String) throws {
-    guard let current = try snapshotStore.load() ?? snapshot else { return }
+    guard let current = (try? snapshotStore.load()) ?? snapshot else { return }
 
     let empty = QuotaSnapshot(generatedAt: current.generatedAt, providers: [], failures: [])
     let cleared = current.replacingResults(forAccountIDs: [accountID], from: empty)
@@ -810,6 +831,64 @@ public final class QuotaDaemon {
   }
 }
 
+/// The account edits of one `QuotaDaemon.editingSettings` transaction, the only
+/// way other modules can change accounts: each edit runs under the settings lock
+/// against a fresh load. Only `editingSettings` creates one, and it is usable only
+/// until that call returns. Methods match the daemon's internal mutations.
+public struct SettingsTransaction {
+  private let daemon: QuotaDaemon
+
+  fileprivate init(daemon: QuotaDaemon) {
+    self.daemon = daemon
+  }
+
+  /// The daemon, checked to still be inside this transaction: a handle kept
+  /// past `editingSettings` would edit without the lock.
+  private var editing: QuotaDaemon {
+    precondition(daemon.isEditing, "SettingsTransaction used outside editingSettings")
+    return daemon
+  }
+
+  @discardableResult
+  public func addAccount(
+    provider: QuotaProvider,
+    displayName: String? = nil,
+    credentials: [String: String] = [:]
+  ) throws -> ProviderAccount {
+    try editing.addAccount(provider: provider, displayName: displayName, credentials: credentials)
+  }
+
+  @discardableResult
+  public func importAccount(from detected: DiscoveredCredential) throws -> ProviderAccount {
+    try editing.importAccount(from: detected)
+  }
+
+  @discardableResult
+  public func updateAccount(
+    _ accountID: String,
+    displayName: String? = nil,
+    credentials change: CredentialChange = .unchanged
+  ) throws -> ProviderAccount {
+    try editing.updateAccount(accountID, displayName: displayName, credentials: change)
+  }
+
+  public func reimportAccount(
+    _ accountID: String,
+    from stableID: String? = nil,
+    among detected: [DiscoveredCredential]
+  ) throws -> (login: DiscoveredCredential, changed: Bool) {
+    try editing.reimportAccount(accountID, from: stableID, among: detected)
+  }
+
+  public func setAccountEnabled(_ accountID: String, _ enabled: Bool) throws {
+    try editing.setAccountEnabled(accountID, enabled)
+  }
+
+  public func removeAccount(_ accountID: String) throws {
+    try editing.removeAccount(accountID)
+  }
+}
+
 /// How `QuotaDaemon.updateAccount` changes an account's credentials.
 public enum CredentialChange: Equatable, Sendable {
   case unchanged
@@ -832,7 +911,7 @@ public enum ImportMatch: Equatable, Sendable {
   case updateCandidates(accountIDs: [String])
 }
 
-public enum DaemonError: LocalizedError, Sendable {
+public enum DaemonError: LocalizedError, Equatable, Sendable {
   case unknownAccount(String)
   case blankAccountID
   case ambiguousAccount(String, candidates: [String])

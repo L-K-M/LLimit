@@ -63,8 +63,9 @@ edits from another shell take effect without a restart.
 `update`, `rename` and `reimport` change an account in place: its ID, history and
 colors stay. Use them when a token expires instead of removing the account and
 adding it again. `update --set key=value` sets a value directly. `--set key` with
-no value prompts for it, which keeps a secret out of your shell history; press
-Enter to keep the current value. `reimport` reads the login that a local tool
+no value prompts for it in a terminal, which keeps a secret out of your shell
+history; press Enter to keep the current value. Without a terminal it fails
+instead of saving nothing. `reimport` reads the login that a local tool
 currently holds for the account's provider. When several are detected, choose
 one with `--from <stable-id>`. A new Claude token or Venice key also clears
 data that belonged to the old one: managed-profile details for Claude, and the

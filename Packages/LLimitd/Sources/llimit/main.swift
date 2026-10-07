@@ -194,8 +194,8 @@ func accountsAdd(_ args: [String]) {
   // cannot silently drop the new account (and vice versa).
   let account: ProviderAccount
   do {
-    account = try daemon.editingSettings {
-      try daemon.addAccount(provider: provider, displayName: name, credentials: credentials)
+    account = try daemon.editingSettings { transaction in
+      try transaction.addAccount(provider: provider, displayName: name, credentials: credentials)
     }
   } catch {
     fail(error.localizedDescription)
@@ -275,19 +275,30 @@ func accountsImport(_ args: [String]) {
       print("  \(offset + 1). \(account.resolvedDisplayName) [\(account.provider.rawValue)] — id \(account.id)")
     }
     let range = accounts.count == 1 ? "1" : "1-\(accounts.count)"
-    print("Update account [\(range)] with it, add a [n]ew account, or Enter to skip: ", terminator: "")
-    let answer = readLine()?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
-    if answer.isEmpty {
-      print("Skipped.")
-      return .skip
+    // Ask again on a typo instead of exiting, which would drop the answers
+    // already given for other logins.
+    while true {
+      print("Update account [\(range)] with it, add a [n]ew account, or Enter to skip: ", terminator: "")
+      guard let line = readLine() else {
+        // End of input is not an answer: leave the login alone and say so.
+        undecided = true
+        print("\nNo answer; \(login) not imported.")
+        return .skip
+      }
+
+      let answer = line.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+      if answer.isEmpty {
+        print("Skipped.")
+        return .skip
+      }
+      if answer == "n" {
+        return .add
+      }
+      if let choice = Int(answer), accounts.indices.contains(choice - 1) {
+        return .update(accountID: accounts[choice - 1].id)
+      }
+      print("Invalid selection: \(answer). Choose \(range), n, or press Enter to skip.")
     }
-    if answer == "n" {
-      return .add
-    }
-    guard let choice = Int(answer), accounts.indices.contains(choice - 1) else {
-      fail("invalid selection: \(answer)")
-    }
-    return .update(accountID: accounts[choice - 1].id)
   }
 
   func decide(_ detected: DiscoveredCredential) -> ImportDecision {
@@ -302,7 +313,7 @@ func accountsImport(_ args: [String]) {
     }
   }
 
-  func apply(_ decision: ImportDecision, to detected: DiscoveredCredential) throws {
+  func apply(_ decision: ImportDecision, to detected: DiscoveredCredential, in transaction: SettingsTransaction) throws {
     switch decision {
     case .skip:
       return
@@ -312,10 +323,10 @@ func accountsImport(_ args: [String]) {
         alreadyImported(detected)
         return
       }
-      let account = try daemon.importAccount(from: detected)
+      let account = try transaction.importAccount(from: detected)
       print("Imported \(account.resolvedDisplayName) [\(account.provider.rawValue)] from \(detected.sourceLabel) — id \(account.id)")
     case .update(let accountID):
-      let account = try daemon.updateAccount(accountID, credentials: .replacing(with: detected.credentials))
+      let account = try transaction.updateAccount(accountID, credentials: .replacing(with: detected.credentials))
       print("Updated \(account.resolvedDisplayName) [\(account.provider.rawValue)] from \(detected.sourceLabel) — id \(account.id)")
     }
   }
@@ -325,9 +336,9 @@ func accountsImport(_ args: [String]) {
   func importing(_ detected: [DiscoveredCredential]) {
     let decisions = detected.map { ($0, decide($0)) }
     do {
-      try daemon.editingSettings {
+      try daemon.editingSettings { transaction in
         for (credential, decision) in decisions {
-          try apply(decision, to: credential)
+          try apply(decision, to: credential, in: transaction)
         }
       }
     } catch {
@@ -395,9 +406,9 @@ func accountsImport(_ args: [String]) {
 func accountsSetEnabled(_ fragment: String, enabled: Bool) {
   let daemon = makeDaemon()
   do {
-    try daemon.editingSettings {
+    try daemon.editingSettings { transaction in
       let accountID = try daemon.resolveAccountID(fragment)
-      try daemon.setAccountEnabled(accountID, enabled)
+      try transaction.setAccountEnabled(accountID, enabled)
       let name = daemon.settings.account(withID: accountID)?.resolvedDisplayName ?? accountID
       print("\(name) \(enabled ? "enabled" : "disabled").")
     }
@@ -409,10 +420,10 @@ func accountsSetEnabled(_ fragment: String, enabled: Bool) {
 func accountsRemove(_ fragment: String) {
   let daemon = makeDaemon()
   do {
-    try daemon.editingSettings {
+    try daemon.editingSettings { transaction in
       let accountID = try daemon.resolveAccountID(fragment)
       let name = daemon.settings.account(withID: accountID)?.resolvedDisplayName ?? accountID
-      try daemon.removeAccount(accountID)
+      try transaction.removeAccount(accountID)
       print("Removed \(name).")
     }
   } catch {
@@ -457,6 +468,11 @@ func accountsUpdate(_ args: [String]) {
   guard name != nil || !values.isEmpty || !promptedKeys.isEmpty else {
     fail("accounts update needs --name or --set")
   }
+  // Without a terminal nobody can answer the prompt, and reading nothing would
+  // keep the old value while the command appeared to succeed.
+  if let key = promptedKeys.first, isatty(STDIN_FILENO) != 1 {
+    fail("--set \(key) without a value prompts for it, which needs a terminal; pass --set \(key)=<value> instead")
+  }
 
   let daemon = makeDaemon()
   let accountID: String
@@ -494,8 +510,8 @@ func accountsUpdate(_ args: [String]) {
   }
 
   do {
-    let updated = try daemon.editingSettings {
-      try daemon.updateAccount(accountID, displayName: name, credentials: values.isEmpty ? .unchanged : .merging(values))
+    let updated = try daemon.editingSettings { transaction in
+      try transaction.updateAccount(accountID, displayName: name, credentials: values.isEmpty ? .unchanged : .merging(values))
     }
     print("Updated \(updated.resolvedDisplayName) [\(updated.provider.rawValue)] — id \(updated.id)")
     noteMissingCredentials(of: updated)
@@ -524,10 +540,12 @@ func accountsReimport(_ args: [String]) {
   }
 
   let daemon = makeDaemon()
+  // Scan before taking the lock, so no files are read while it is held.
+  daemon.scanForDetectedCredentials()
   do {
     let accountID = try daemon.resolveAccountID(fragment)
-    let result = try daemon.editingSettings {
-      try daemon.reimportAccount(accountID, from: stableID)
+    let result = try daemon.editingSettings { transaction in
+      try transaction.reimportAccount(accountID, from: stableID, among: daemon.detectedCredentials)
     }
     let name = daemon.settings.account(withID: accountID)?.resolvedDisplayName ?? accountID
     if result.changed {

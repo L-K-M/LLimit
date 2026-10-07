@@ -51,6 +51,18 @@ final class AccountIntegrityTests: XCTestCase {
     try Data(text.utf8).write(to: paths.settingsFileURL)
   }
 
+  /// Asserts that `expression` throws exactly `expected`.
+  private func assertThrows<T>(
+    _ expected: DaemonError,
+    _ expression: @autoclosure () throws -> T,
+    file: StaticString = #filePath,
+    line: UInt = #line
+  ) {
+    XCTAssertThrowsError(try expression(), file: file, line: line) { error in
+      XCTAssertEqual(error as? DaemonError, expected, file: file, line: line)
+    }
+  }
+
   /// Turns the settings path into a non-empty directory, so the next save fails
   /// (even as root) while the daemon still holds the settings it loaded.
   private func breakSettingsSaves(paths: LinuxPaths) throws {
@@ -101,6 +113,8 @@ final class AccountIntegrityTests: XCTestCase {
     let (daemon, account) = try await makeRefreshedAccount()
     try breakSettingsSaves(paths: daemon.paths)
 
+    // The thrown error is Foundation's file-write error, whose type differs by
+    // platform; what matters is that the save failure is not swallowed.
     XCTAssertThrowsError(try daemon.addAccount(provider: .kimi, credentials: [CredentialField.kimiAPIKey: "k"]))
     XCTAssertThrowsError(try daemon.setAccountEnabled(account.id, false))
   }
@@ -123,7 +137,7 @@ final class AccountIntegrityTests: XCTestCase {
     try writeSettingsFile(corrupt, paths: daemon.paths)
 
     var ran = false
-    XCTAssertThrowsError(try daemon.editingSettings { ran = true }) { error in
+    XCTAssertThrowsError(try daemon.editingSettings { _ in ran = true }) { error in
       let description = error.localizedDescription
       XCTAssertTrue(description.contains(daemon.paths.settingsFileURL.path), description)
       XCTAssertTrue(description.contains("not valid JSON"), description)
@@ -133,20 +147,47 @@ final class AccountIntegrityTests: XCTestCase {
     XCTAssertEqual(try String(contentsOf: daemon.paths.settingsFileURL, encoding: .utf8), corrupt)
   }
 
+  func testSettingsLoadErrorNamesTheLocationButNotTheValue() throws {
+    let daemon = makeDaemon()
+    try writeSettingsFile(
+      #"{"accounts": [{"id": "A", "provider": "kimi", "displayName": "A", "isEnabled": true, "credentials": {"kimi.api_key": 271828}}]}"#,
+      paths: daemon.paths
+    )
+
+    daemon.loadConfiguration()
+
+    let reason = try XCTUnwrap(daemon.settingsLoadError?.reason)
+    XCTAssertEqual(reason, "wrong type at accounts[0].credentials.kimi.api_key, expected String")
+  }
+
+  func testTransactionSeesAnotherProcessesEdit() throws {
+    let stale = makeDaemon()
+    let other = makeDaemon()
+    let added = try other.addAccount(provider: .zai, credentials: [CredentialField.zaiAPIKey: "key"])
+
+    try stale.editingSettings { transaction in
+      try transaction.addAccount(provider: .kimi, credentials: [CredentialField.kimiAPIKey: "k"])
+    }
+
+    XCTAssertEqual(makeDaemon().settings.accounts.map(\.provider), [.zai, .kimi])
+    XCTAssertEqual(makeDaemon().settings.accounts.first?.id, added.id)
+  }
+
   // MARK: - Account id resolution
 
   func testBlankAccountIDMatchesNothing() throws {
     let daemon = makeDaemon()
     try daemon.addAccount(provider: .zai, credentials: [CredentialField.zaiAPIKey: "key"])
 
-    XCTAssertThrowsError(try daemon.resolveAccountID(""))
-    XCTAssertThrowsError(try daemon.resolveAccountID("  "))
+    assertThrows(.blankAccountID, try daemon.resolveAccountID(""))
+    assertThrows(.blankAccountID, try daemon.resolveAccountID("  "))
   }
 
   func testAccountIDPrefixIsCaseInsensitive() throws {
     let daemon = makeDaemon()
     let account = try daemon.addAccount(provider: .zai, credentials: [CredentialField.zaiAPIKey: "key"])
 
+    XCTAssertGreaterThan(account.id.count, 8)
     XCTAssertEqual(try daemon.resolveAccountID(String(account.id.prefix(8)).lowercased()), account.id)
   }
 
@@ -156,10 +197,7 @@ final class AccountIntegrityTests: XCTestCase {
       ProviderAccount(id: "AB12-TWO", provider: .kimi, displayName: "Two")
     ])
 
-    XCTAssertThrowsError(try daemon.resolveAccountID("ab12")) { error in
-      let description = error.localizedDescription
-      XCTAssertTrue(description.contains("AB12-ONE (One)") && description.contains("AB12-TWO (Two)"), description)
-    }
+    assertThrows(.ambiguousAccount("ab12", candidates: ["AB12-ONE (One)", "AB12-TWO (Two)"]), try daemon.resolveAccountID("ab12"))
     XCTAssertEqual(try daemon.resolveAccountID("AB12-TWO"), "AB12-TWO")
   }
 
@@ -170,8 +208,8 @@ final class AccountIntegrityTests: XCTestCase {
     let historyBefore = try Data(contentsOf: daemon.paths.historyFileURL)
     let styleBefore = daemon.settings.styleOverride(for: account.id)
 
-    let updated = try daemon.editingSettings {
-      try daemon.updateAccount(account.id, displayName: "  Work Zhipu ", credentials: .merging([CredentialField.zhipuAPIKey: "new-key"]))
+    let updated = try daemon.editingSettings { transaction in
+      try transaction.updateAccount(account.id, displayName: "  Work Zhipu ", credentials: .merging([CredentialField.zhipuAPIKey: "new-key"]))
     }
 
     XCTAssertEqual(updated.id, account.id)
@@ -232,10 +270,12 @@ final class AccountIntegrityTests: XCTestCase {
     let managed = try daemon.addAccount(provider: .openAI, credentials: managedCredentials)
     let saved = try Data(contentsOf: daemon.paths.settingsFileURL)
 
-    XCTAssertThrowsError(try daemon.updateAccount(account.id, credentials: .merging(["kimi.apikey": "typo"])))
-    XCTAssertThrowsError(try daemon.updateAccount(account.id, displayName: "   "))
-    XCTAssertThrowsError(try daemon.updateAccount("missing", displayName: "Name"))
-    XCTAssertThrowsError(try daemon.updateAccount(managed.id, credentials: .merging([CredentialField.openAIAccessToken: "other"])))
+    assertThrows(.unknownCredentialKey("kimi.apikey", provider: .kimi),
+                 try daemon.updateAccount(account.id, credentials: .merging(["kimi.apikey": "typo"])))
+    assertThrows(.blankDisplayName, try daemon.updateAccount(account.id, displayName: "   "))
+    assertThrows(.unknownAccount("missing"), try daemon.updateAccount("missing", displayName: "Name"))
+    assertThrows(.managedCredentials(managed.resolvedDisplayName),
+                 try daemon.updateAccount(managed.id, credentials: .merging([CredentialField.openAIAccessToken: "other"])))
     XCTAssertEqual(try Data(contentsOf: daemon.paths.settingsFileURL), saved)
 
     // A managed account can still be renamed; only its sign-in belongs to Codex.
@@ -252,7 +292,10 @@ final class AccountIntegrityTests: XCTestCase {
       CredentialField.anthropicExpiresAt: "1700000000"
     ])
 
-    let result = try daemon.editingSettings { try daemon.reimportAccount(account.id) }
+    daemon.scanForDetectedCredentials()
+    let result = try daemon.editingSettings { transaction in
+      try transaction.reimportAccount(account.id, among: daemon.detectedCredentials)
+    }
 
     XCTAssertTrue(result.changed)
     XCTAssertEqual(result.login.stableID, "anthropic:claude-code")
@@ -261,7 +304,7 @@ final class AccountIntegrityTests: XCTestCase {
     XCTAssertEqual(reloaded.displayName, "Claude Personal")
     XCTAssertEqual(reloaded.credentials, [CredentialField.anthropicAccessToken: "sk-ant-oat-renewed"])
 
-    XCTAssertFalse(try daemon.editingSettings { try daemon.reimportAccount(account.id) }.changed)
+    XCTAssertFalse(try daemon.reimportAccount(account.id, among: daemon.detectedCredentials).changed)
   }
 
   func testReimportNeedsAChoiceAmongSeveralLogins() throws {
@@ -271,15 +314,17 @@ final class AccountIntegrityTests: XCTestCase {
     let kimi = try daemon.addAccount(provider: .kimi, credentials: [CredentialField.kimiAPIKey: "expired"])
     let zai = try daemon.addAccount(provider: .zai, credentials: [CredentialField.zaiAPIKey: "key"])
 
-    XCTAssertThrowsError(try daemon.reimportAccount(kimi.id)) { error in
-      let description = error.localizedDescription
-      XCTAssertTrue(description.contains("kimi:kimi-cli") && description.contains("kimi:kimi-code"), description)
-    }
-    XCTAssertThrowsError(try daemon.reimportAccount(kimi.id, from: "kimi:elsewhere"))
-    XCTAssertThrowsError(try daemon.reimportAccount(zai.id))
+    daemon.scanForDetectedCredentials()
+    let scan = daemon.detectedCredentials
+    let kimiLogins = ["kimi:kimi-cli", "kimi:kimi-code"]
+
+    assertThrows(.ambiguousDetectedLogin(.kimi, stableIDs: kimiLogins), try daemon.reimportAccount(kimi.id, among: scan))
+    assertThrows(.detectedLoginNotFound("kimi:elsewhere", available: kimiLogins),
+                 try daemon.reimportAccount(kimi.id, from: "kimi:elsewhere", among: scan))
+    assertThrows(.noDetectedLogin(.zai), try daemon.reimportAccount(zai.id, among: scan))
     XCTAssertEqual(makeDaemon().settings.accounts.first?.credentials[CredentialField.kimiAPIKey], "expired")
 
-    try daemon.reimportAccount(kimi.id, from: "kimi:kimi-code")
+    XCTAssertTrue(try daemon.reimportAccount(kimi.id, from: "kimi:kimi-code", among: scan).changed)
     XCTAssertEqual(makeDaemon().settings.account(withID: kimi.id)?.credentials[CredentialField.kimiAPIKey], "kimi-code-token")
   }
 
@@ -363,7 +408,8 @@ private actor VeniceBalances: QuotaProviderClient {
   }
 
   func fetchUsage(configuration: ProviderRuntimeConfiguration, now: Date) async throws -> ProviderUsage {
-    let balance = balances.removeFirst()
+    // The last balance repeats, so an extra fetch reads it again instead of trapping.
+    let balance = balances.count > 1 ? balances.removeFirst() : (balances.first ?? 0)
     return ProviderUsage(
       accountID: configuration.accountID,
       provider: provider,

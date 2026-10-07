@@ -183,7 +183,9 @@ final class QuotaDaemonTests: XCTestCase {
 
     try daemon.removeAccount(account.id)
     XCTAssertTrue(makeDaemon().settings.accounts.isEmpty)
-    XCTAssertThrowsError(try daemon.removeAccount(account.id))
+    XCTAssertThrowsError(try daemon.removeAccount(account.id)) { error in
+      XCTAssertEqual(error as? DaemonError, .unknownAccount(account.id))
+    }
   }
 
   func testResolveAccountIDAcceptsUniquePrefix() throws {
@@ -192,7 +194,9 @@ final class QuotaDaemonTests: XCTestCase {
 
     XCTAssertEqual(try daemon.resolveAccountID(account.id), account.id)
     XCTAssertEqual(try daemon.resolveAccountID(String(account.id.prefix(8))), account.id)
-    XCTAssertThrowsError(try daemon.resolveAccountID("does-not-exist"))
+    XCTAssertThrowsError(try daemon.resolveAccountID("does-not-exist")) { error in
+      XCTAssertEqual(error as? DaemonError, .unknownAccount("does-not-exist"))
+    }
   }
 
   func testUnreadableSettingsFileBlocksSaving() throws {
