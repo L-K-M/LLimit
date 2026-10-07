@@ -15,6 +15,9 @@ live in [`examples/`](examples/).
   - `SettingsLock.swift` — flock-based mutual exclusion for settings read-modify-write
     (daemon token refresh vs. concurrent `llimit accounts …`).
   - `StatusRenderer.swift` — human-readable status and the waybar JSON contract.
+  - `StatusReader.swift` loads the snapshot without settings or reconciliation.
+  - `ScriptCommands.swift` and `StatusTemplate.swift` handle status/check/pick options,
+    selection and templates. QuotaCore owns headroom ranking and freshness.
 - `Sources/llimit/` — the CLI executable (`main.swift`).
 - `examples/` — waybar / polybar / eww modules consuming `llimit status --json`.
 - `tray/` — the tray icon (Python/PyGObject; see "Tray icon"). `llimit_tray.py`
@@ -46,9 +49,19 @@ llimit accounts add --provider venice           # prompts for your Venice API ke
 llimit accounts add --provider cline            # prompts for your Cline API key
 llimit accounts import                          # list discovered local logins, import one
 llimit accounts enable|disable|remove <id>      # id may be a unique prefix
+llimit accounts rename <id> <name>
+llimit accounts update <id> --set anthropic.access_token  # hidden terminal prompt
+llimit accounts reimport <id> [--from <stable-id>]
 llimit refresh                                  # one-shot fetch, writes the snapshot
 llimit status                                   # human-readable
 llimit status --json                            # waybar/polybar contract
+llimit status --compact                         # short percentages or balances
+llimit status --worst --format '{name} {remaining}'
+llimit check [<id|provider>] --min 10            # script exit status
+llimit pick --provider anthropic,openai          # most current headroom
+llimit resets [--json] [--days 7]                # chronological radar
+llimit export [--format csv|json] [--days N]     # history only
+llimit --version
 llimit daemon                                   # refresh loop in the foreground
 ```
 
@@ -56,6 +69,26 @@ Fetch errors never crash the daemon: a failed account records a `ProviderFailure
 and keeps showing its last-known usage (same `mergingStaleUsage(from:)` behavior as
 the macOS app). The daemon reloads settings every cycle, so `llimit accounts …`
 edits from another shell take effect without a restart.
+
+`status`, `check`, `pick` and `resets`, including compact and watch output, read
+only the snapshot. They neither open settings nor rewrite the cache. `export`
+reads only history. Missing or corrupt snapshots render as no data.
+
+`update`, `rename` and `reimport` keep the account ID, style and history. A changed
+login clears its cached results, including any estimated Venice allowance.
+In-flight requests using the old credentials cannot publish after the edit.
+`--set key=value` sets a field directly; `--set key` prompts with input hidden
+and needs a terminal. Enter keeps the current value. Reimport replaces the
+complete credential set; use `--from` when multiple local logins exist.
+
+Import compares primary access tokens or API keys. A different login prompts
+you to update an existing account, add a new account, or skip. In scripts, use
+`accounts reimport <id> --from <stable-id>` or `accounts import --id <stable-id>
+--new` to make that choice explicit. Managed Codex logins remain profile-owned.
+
+Unreadable settings block account edits and refreshes without overwriting the
+file or dropping the saved snapshot. The daemon logs each distinct load error
+once, naming its structural location without printing credential values.
 
 OpenCode Go reports rolling, weekly, and monthly subscription limits. Add it with
 `--provider opencode-go`, or import the `opencode-go` API key from OpenCode's
@@ -106,6 +139,76 @@ credentials, ever. Ready-made modules:
 
 See [`examples/README.md`](examples/README.md) for the full key-by-key contract.
 
+## Status lines and scripts
+
+`status --format '<template>'` expands one line per account, joined by
+`--separator` (default ` · `). Unknown placeholders remain literal; values
+contain no control characters, newlines or tabs.
+
+| Placeholder | Value |
+| --- | --- |
+| `{id}`, `{name}`, `{provider}` | Account ID, display name, provider ID |
+| `{remaining}` | Lowest bounded percentage, `≈` for estimates, `unlimited`, or `n/a` |
+| `{metric}`, `{kind}` | Limiting window label and kind |
+| `{reset}` | Live limiting-window countdown; empty when unknown |
+| `{class}` | Same account classification as status JSON |
+| `{age}`, `{stale}` | Reading age; `stale` or empty |
+
+`--account <id|provider>` is repeatable. IDs accept case-insensitive unique
+prefixes; provider IDs select only their own accounts. `--worst` selects the
+least headroom, including carried usage. `--kind` selects session, daily,
+weekly, monthly or other for templates and ranking. Blank templates and
+ambiguous prefixes are usage errors.
+
+`--watch [duration]` reloads and renders every interval, default 60s, range
+1s to 1d. Human, compact and template output redraw on a terminal. Pipes get
+plain frames; JSON always gets one clean object per tick. Diagnostics are
+deduplicated during watch.
+
+### Check and pick
+
+`check <id>` tests one account; `check <provider>` tests that provider's best
+current account. `pick` chooses the most current headroom, optionally restricted
+by repeated or comma-separated `--provider` values. Unlimited quota ranks above
+percentages. Ties prefer the sooner reset; equally limiting windows use their
+latest reset. Amount-only metrics never become percentages.
+
+With no target, `check` tests every account and lists every issue. Failure or
+stale data takes exit priority over missing quota, then below-minimum quota.
+A healthy account cannot mask another account's failure.
+
+| Exit | Meaning |
+| --- | --- |
+| 0 | Meets `--min` (default 1) |
+| 1 | Below `--min`; equality passes |
+| 2 | Stale or failing |
+| 3 | No snapshot, matching account or quota data |
+| 64 | Usage error |
+
+`pick` prints `<id><TAB><name>` or `--format`. On failure stdout stays empty;
+the reason goes to stderr. `check` prints its verdict on stdout, except usage
+errors, which go to stderr.
+
+Default freshness is `max(60 minutes, 2 × refreshIntervalMinutes)`. The daemon
+records that optional, credential-free metadata in `QuotaSnapshot`; legacy
+snapshots use 2h. `--max-age` overrides it for check/pick. Durations accept
+`90`, `90s`, `30m`, `2h`, `1.5h` and `1d`.
+
+## Reset radar and export
+
+`resets` lists future absolute reset dates, soonest first, within `--days`
+(1–90, default 7). Unlimited and amount-only limits keep their context. Failed
+accounts contribute no rows and the output states how many may be missing.
+JSON distinguishes no snapshot from an empty schedule and includes the
+snapshot timestamp, stale flag, failure count, window kind, amounts and live
+countdowns. Status JSON adds the same radar under `resets`.
+
+`export` defaults to JSON; `--format csv` emits one row per metric sample.
+`--days` filters the complete archive without the widget's sample cap. CSV
+quotes delimiters and line breaks and neutralizes formula prefixes, including
+whitespace-masked formulas. Empty history produces an empty export and a
+diagnostic on stderr.
+
 ## Tray icon
 
 `llimit-tray` puts LLimit in the system tray and shows every account and every
@@ -119,6 +222,8 @@ It is a display surface only: it shells out to `llimit status --json` and never
 reads the settings file, so it never touches credentials. Account management
 stays in the CLI. The tray icon colour follows the same
 `ok`/`warning`/`critical`/`error`/`empty` classes the bar modules use.
+Failed accounts have named error rows. Reset countdowns use absolute dates;
+text-only changes relabel an open menu instead of rebuilding it.
 
 The popup, dumped straight off the D-Bus menu a panel would render:
 
@@ -185,6 +290,7 @@ To build the package yourself:
 
 ```
 swift sdk install <static-linux SDK for your Swift version>   # once
+python3 scripts/stamp-llimit-version.py <version>
 swift build -c release --swift-sdk x86_64-swift-linux-musl --package-path Packages/LLimitd
 Packages/LLimitd/packaging/build-deb.sh <version>
 ```
@@ -197,3 +303,5 @@ swift test  --package-path Packages/LLimitd
 ```
 
 No third-party dependencies; the only dependency is `../QuotaCore` by path.
+`scripts/release.sh` stamps the CLI through the shared post-bump hook; the tag
+build also stamps it before compilation. Packaging rejects a version mismatch.

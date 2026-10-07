@@ -120,6 +120,9 @@ jobs:
       - name: Version from tag
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
 
+      - name: Stamp llimit version
+        run: python3 scripts/stamp-llimit-version.py "$VERSION"
+
       - name: Build static llimit binary
         run: swift build -c release --swift-sdk x86_64-swift-linux-musl --package-path Packages/LLimitd
 

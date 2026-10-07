@@ -65,7 +65,8 @@ public struct QuotaCoordinator: Sendable {
                 accountID: configuration.accountID,
                 provider: configuration.provider,
                 kind: error.kind,
-                message: error.message
+                message: error.message,
+                title: configuration.displayName
               )
             )
           } catch {
@@ -77,7 +78,8 @@ public struct QuotaCoordinator: Sendable {
                 accountID: configuration.accountID,
                 provider: configuration.provider,
                 kind: .unknown,
-                message: error.localizedDescription
+                message: error.localizedDescription,
+                title: configuration.displayName
               )
             )
           }

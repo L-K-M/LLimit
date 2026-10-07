@@ -10,7 +10,8 @@
 json=$(llimit status --json 2>/dev/null) || exit 0
 [ -n "$json" ] || exit 0
 
-text=$(printf '%s' "$json" | jq -r '.text // "LLimit"')
+# Break polybar's formatting/click-region opener in account names.
+text=$(printf '%s' "$json" | jq -r '.text // "LLimit"' | sed 's/%{/% {/g')
 class=$(printf '%s' "$json" | jq -r '.class // "empty"')
 
 # Keep these in sync with the waybar/eww example palettes.
@@ -22,4 +23,4 @@ case "$class" in
   *)        color='#6c7086' ;;  # grey: empty / no snapshot yet
 esac
 
-echo "%{F$color}$text%{F-}"
+printf '%%{F%s}%s%%{F-}\n' "$color" "$text"

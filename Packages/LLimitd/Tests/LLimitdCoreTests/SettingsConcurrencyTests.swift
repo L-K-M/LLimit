@@ -27,7 +27,7 @@ final class SettingsConcurrencyTests: XCTestCase {
     QuotaDaemon(
       paths: paths,
       coordinator: coordinator,
-      makeDiscovery: { CredentialDiscovery(homeDirectories: [self.tempDirectory]) },
+      makeDiscovery: { CredentialDiscovery(homeDirectories: [self.tempDirectory], environment: [:]) },
       log: { _ in }
     )
   }
@@ -56,7 +56,7 @@ final class SettingsConcurrencyTests: XCTestCase {
     let cli = makeDaemon(coordinator: QuotaCoordinator(clients: []))
     try cli.settingsLock.withLock {
       cli.loadConfiguration()
-      cli.addAccount(provider: .kimi, displayName: name, credentials: [CredentialField.kimiAPIKey: "k"])
+      try cli.addAccount(provider: .kimi, displayName: name, credentials: [CredentialField.kimiAPIKey: "k"])
     }
   }
 
@@ -79,7 +79,7 @@ final class SettingsConcurrencyTests: XCTestCase {
     let daemon = makeDaemon(coordinator: QuotaCoordinator(clients: [
       GatedClient(provider: .openAI, gate: gate)
     ]))
-    daemon.addAccount(
+    try daemon.addAccount(
       provider: .openAI,
       credentials: [
         CredentialField.openAIAccessToken: originalToken,
@@ -117,7 +117,7 @@ final class SettingsConcurrencyTests: XCTestCase {
       renewedToken
     )
 
-    await gate.release()
+    gate.release()
     _ = try await edit.value
     _ = await cycle.value
 
@@ -133,6 +133,86 @@ final class SettingsConcurrencyTests: XCTestCase {
   }
 
   // MARK: - The merge itself
+
+  func testOldCredentialSuccessIsNotRepublishedAfterUpdate() async throws {
+    try await assertObsoleteFetchRejected(.replaceCredentials)
+  }
+
+  func testOldCredentialFailureDoesNotCarryUsageAfterUpdate() async throws {
+    try await assertObsoleteFetchRejected(.replaceCredentials, outcome: .failure)
+  }
+
+  func testInFlightResultDoesNotResurrectRemovedAccount() async throws {
+    try await assertObsoleteFetchRejected(.remove)
+  }
+
+  func testInFlightResultDoesNotResurrectDisabledAccount() async throws {
+    try await assertObsoleteFetchRejected(.disable)
+  }
+
+  private enum ConcurrentEdit {
+    case replaceCredentials
+    case remove
+    case disable
+  }
+
+  private func assertObsoleteFetchRejected(
+    _ change: ConcurrentEdit,
+    outcome: GatedClient.Outcome = .success
+  ) async throws {
+    let gate = FetchGate()
+    let daemon = makeDaemon(coordinator: QuotaCoordinator(clients: [
+      GatedClient(provider: .zhipu, gate: gate, outcome: outcome),
+      CurrentKimiClient()
+    ]))
+    daemon.loadConfiguration()
+    let obsolete = try daemon.addAccount(provider: .zhipu, credentials: [CredentialField.zhipuAPIKey: "old-test-key"])
+    let current = try daemon.addAccount(provider: .kimi, credentials: [CredentialField.kimiAPIKey: "test-key"])
+    let previous = QuotaSnapshot(generatedAt: Date(), providers: [ProviderUsage(
+      accountID: obsolete.id, provider: .zhipu, title: obsolete.resolvedDisplayName,
+      metrics: [UsageMetric(id: "weekly", label: "Weekly", remainingPercent: 70)], fetchedAt: Date()
+    )], failures: [])
+    try SnapshotStore(fileURL: paths.snapshotFileURL).save(previous)
+    try QuotaHistoryStore(fileURL: paths.historyFileURL).append(previous)
+
+    let cycle = Task { await daemon.refreshCycle(bootstrap: false) }
+    await gate.waitUntilEntered()
+
+    // The second writer must finish while the provider is still waiting.
+    let completion = CompletionFlag()
+    let edit = Task {
+      let cli = makeDaemon(coordinator: QuotaCoordinator(clients: []))
+      try cli.editingSettings { transaction in
+        switch change {
+        case .replaceCredentials:
+          try transaction.updateAccount(obsolete.id, credentials: .merging([CredentialField.zhipuAPIKey: "new-test-key"]))
+        case .remove:
+          try transaction.removeAccount(obsolete.id)
+        case .disable:
+          try transaction.setAccountEnabled(obsolete.id, false)
+        }
+      }
+      completion.mark()
+    }
+    for _ in 0..<40 where !completion.isMarked {
+      try? await Task.sleep(nanoseconds: 50_000_000)
+    }
+    XCTAssertTrue(completion.isMarked, "Settings lock spans the provider fetch")
+    gate.release()
+    try await edit.value
+    await cycle.value
+
+    let saved = try XCTUnwrap(SnapshotStore(fileURL: paths.snapshotFileURL).load())
+    XCTAssertEqual(saved.providers.map(\.accountID), [current.id])
+    XCTAssertFalse(saved.failures.contains { $0.accountID == obsolete.id })
+    XCTAssertEqual(daemon.snapshot?.providers.map(\.accountID), saved.providers.map(\.accountID))
+    XCTAssertEqual(daemon.snapshot?.failures, saved.failures)
+    let history = try QuotaHistoryStore(fileURL: paths.historyFileURL).load()
+    XCTAssertFalse(history.last?.providers.contains { $0.accountID == obsolete.id } ?? true)
+    if case .remove = change {
+      XCTAssertFalse(history.contains { $0.providers.contains { $0.accountID == obsolete.id } })
+    }
+  }
 
   private func settingsWithAccounts(_ accounts: [ProviderAccount]) -> AppSettings {
     AppSettings(accounts: accounts)
@@ -196,6 +276,22 @@ final class SettingsConcurrencyTests: XCTestCase {
     let merged = QuotaDaemon.mergingCredentialChanges(base: base, current: current, onto: disk)
 
     XCTAssertFalse(merged.accounts.contains { $0.id == id }, "merge resurrected a removed account")
+  }
+
+  func testCredentialMergeDoesNotSpliceRotatedGrantIntoReplacedLogin() {
+    let original = ProviderAccount(id: "account", provider: .openAI, credentials: [
+      CredentialField.openAIAccessToken: "old-access", CredentialField.openAIRefreshToken: "old-refresh"
+    ])
+    let base = AppSettings(accounts: [original])
+    var current = base
+    current.accounts[0].credentials[CredentialField.openAIAccessToken] = "rotated-access"
+    current.accounts[0].credentials[CredentialField.openAIRefreshToken] = "rotated-refresh"
+    var disk = base
+    disk.accounts[0].credentials[CredentialField.openAIAccessToken] = "explicit-replacement"
+
+    let merged = QuotaDaemon.mergingCredentialChanges(base: base, current: current, onto: disk)
+
+    XCTAssertEqual(merged.accounts[0].credentials, disk.accounts[0].credentials)
   }
 }
 
@@ -262,7 +358,7 @@ private final class FetchGate: @unchecked Sendable {
     }
   }
 
-  func release() async {
+  func release() {
     lock.lock()
     isReleased = true
     let continuation = releaseContinuation
@@ -273,12 +369,21 @@ private final class FetchGate: @unchecked Sendable {
 }
 
 private struct GatedClient: QuotaProviderClient {
+  enum Outcome {
+    case success
+    case failure
+  }
+
   let provider: QuotaProvider
   let gate: FetchGate
+  var outcome: Outcome = .success
 
   func fetchUsage(configuration: ProviderRuntimeConfiguration, now: Date) async throws -> ProviderUsage {
     gate.fetchEntered()
     await gate.waitUntilReleased()
+    if outcome == .failure {
+      throw ProviderClientError(kind: .auth, message: "old-test-key rejected")
+    }
     return ProviderUsage(
       accountID: configuration.accountID,
       provider: provider,
@@ -286,5 +391,14 @@ private struct GatedClient: QuotaProviderClient {
       metrics: [UsageMetric(id: "weekly", label: "Weekly limit", remainingPercent: 50)],
       fetchedAt: now
     )
+  }
+}
+
+private struct CurrentKimiClient: QuotaProviderClient {
+  let provider: QuotaProvider = .kimi
+
+  func fetchUsage(configuration: ProviderRuntimeConfiguration, now: Date) async throws -> ProviderUsage {
+    ProviderUsage(accountID: configuration.accountID, provider: provider, title: configuration.displayName,
+                  metrics: [UsageMetric(id: "weekly", label: "Weekly", remainingPercent: 80)], fetchedAt: now)
   }
 }
