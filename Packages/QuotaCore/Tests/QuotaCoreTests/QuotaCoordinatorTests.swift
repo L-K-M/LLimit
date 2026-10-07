@@ -25,6 +25,21 @@ final class QuotaCoordinatorTests: XCTestCase {
     XCTAssertEqual(snapshot.failures.first?.provider, .zhipu)
   }
 
+  func testRefreshWithNoTargetsUsesTheCurrentTimestamp() async {
+    let previousTime = Date(timeIntervalSince1970: 1_700_000_000)
+    let now = previousTime.addingTimeInterval(600)
+    let previous = QuotaSnapshot(generatedAt: previousTime, providers: [sampleUsage(provider: .openAI, at: previousTime)],
+                                 failures: [ProviderFailure(provider: .openAI, kind: .auth, message: "Rejected")])
+    let coordinator = QuotaCoordinator(clients: [MockClient(provider: .openAI, shouldFail: false)])
+    for configurations in [[], [ProviderRuntimeConfiguration(provider: .openAI, isEnabled: false, credentials: [:])],
+                           [ProviderRuntimeConfiguration(provider: .kimi, isEnabled: true, credentials: [:])]] {
+      let snapshot = await coordinator.refresh(configurations: configurations, now: now, previousSnapshot: previous)
+      XCTAssertEqual(snapshot.generatedAt, now)
+      XCTAssertTrue(snapshot.providers.isEmpty)
+      XCTAssertTrue(snapshot.failures.isEmpty)
+    }
+  }
+
   func testPartialCancellationKeepsPreviousUsageAndCompletedAuthFailure() async {
     let signal = RefreshSignal()
     let coordinator = QuotaCoordinator(clients: [

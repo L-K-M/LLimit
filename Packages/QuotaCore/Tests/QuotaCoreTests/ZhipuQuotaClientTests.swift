@@ -95,7 +95,7 @@ final class ZhipuQuotaClientTests: XCTestCase {
   }
 
   func testUnknownCodesRemainNeutralAndMalformedKnownWindowsFail() async throws {
-    for (unit, id) in [("5", "tokens-u5-n1"), (#""HOUR""#, "tokens-uunknown-n1")] {
+    for (unit, id) in [("5", "tokens-u5-n1"), ("3", "tokens-u3-n1")] {
       let usage = try await fetch(tokenPayload([#"{"type":"TOKENS_LIMIT","unit":\#(unit),"number":1,"percentage":90}"#]))
       let metric = try XCTUnwrap(usage.metrics.first)
       XCTAssertEqual(metric.id, id)
@@ -112,15 +112,85 @@ final class ZhipuQuotaClientTests: XCTestCase {
     }
   }
 
+  func testMalformedDescriptorsFailInsteadOfConflatingTokenCaps() async {
+    let descriptorPairs = [
+      (#""unit":"HOUR","number":1"#, #""unit":"WEEK","number":1"#),
+      (#""unit":3.51,"number":1"#, #""unit":3.52,"number":1"#),
+      (#""unit":5,"number":1.51"#, #""unit":5,"number":1.52"#),
+      (#""unit":"3invalid","number":5"#, #""unit":3,"number":"5invalid""#),
+      (#""unit":true,"number":1"#, #""unit":{},"number":1"#)
+    ]
+    for provider in [QuotaProvider.zai, .zhipu] {
+      for (first, second) in descriptorPairs {
+        let entries = [first, second].map { #"{"type":"TOKENS_LIMIT",\#($0),"percentage":40}"# }
+        for orderedEntries in [entries, entries.reversed().map { $0 }] {
+          do {
+            _ = try await fetch(tokenPayload(orderedEntries), provider: provider)
+            XCTFail("Malformed descriptors must fail instead of dropping a token cap")
+          } catch let error as ProviderClientError {
+            XCTAssertEqual(error.kind, .decoding)
+            XCTAssertFalse(error.message.contains("3invalid"))
+            XCTAssertFalse(error.message.contains("5invalid"))
+            XCTAssertFalse(error.message.contains("HOUR"))
+          } catch { XCTFail("Unexpected error: \(error)") }
+        }
+      }
+    }
+  }
+
+  func testKnownAndNeutralDescriptorsPreserveTheirIDsAndLabels() async throws {
+    let descriptors = [
+      (#""unit":"3","number":"5""#, "tokens", "5-hour token limit"),
+      (#""unit":3.0,"number":5.0"#, "tokens", "5-hour token limit"),
+      (#""unit":6,"number":1"#, "tokens-weekly", "Weekly token limit"),
+      (#""unit":3,"number":7"#, "tokens-u3-n7", "Token limit (unit 3, number 7)"),
+      (#""unit":6,"number":2"#, "tokens-u6-n2", "Token limit (unit 6, number 2)"),
+      (#""unit":5"#, "tokens-u5", "Token limit (unit 5)"),
+      (#""unit":null"#, "tokens", "Token limit"),
+      // Adjacent large integers must not acquire the same rounded identity.
+      (#""unit":9007199254740992,"number":1"#, "tokens-u9007199254740992-n1", "Token limit (unit 9007199254740992, number 1)"),
+      (#""unit":9007199254740993,"number":1"#, "tokens-u9007199254740993-n1", "Token limit (unit 9007199254740993, number 1)")
+    ]
+    for (descriptor, id, label) in descriptors {
+      let usage = try await fetch(tokenPayload([#"{"type":"TOKENS_LIMIT",\#(descriptor),"percentage":40}"#]))
+      let metric = try XCTUnwrap(usage.metrics.first)
+      XCTAssertEqual(metric.id, id)
+      XCTAssertEqual(metric.label, label)
+      if id.hasPrefix("tokens-u") {
+        XCTAssertEqual(QuotaWindowKind.classify(metricID: id, label: label), .other)
+      }
+    }
+  }
+
+  func testReportedRetryGuidanceReachesTheFailureDeadline() async {
+    let endpoint = URL(string: "https://api.z.ai/api/monitor/usage/quota/limit")!
+    let configuration = ProviderRuntimeConfiguration(provider: .zai, isEnabled: true, credentials: [CredentialField.zaiAPIKey: Self.apiKey])
+    for (header, delay) in [("120", 120.0), ("Tue, 14 Nov 2023 22:18:20 GMT", 300.0),
+                            ("malformed", nil), (nil, nil)] as [(String?, TimeInterval?)] {
+      let http = MockZhipuHTTP(status: 429, body: "secret response", expectedKey: Self.apiKey,
+                              headers: header.map { ["Retry-After": $0] } ?? [:])
+      let client = ZhipuQuotaClient(provider: .zai, endpoint: endpoint, accountLabel: "Z.ai", httpClient: http)
+      let snapshot = await QuotaCoordinator(clients: [client]).refresh(configurations: [configuration], now: now)
+      XCTAssertEqual(snapshot.failures.first?.kind, .rateLimit)
+      XCTAssertEqual(snapshot.failures.first?.retryAt, delay.map { now.addingTimeInterval($0) })
+      XCTAssertFalse(snapshot.failures.first?.message.contains("secret response") ?? true)
+    }
+  }
+
   func testSuccessMarkersAreAuthoritativeAnd429IsRateLimit() async throws {
-    let noCode = payload(planReset: nil).replacingOccurrences(of: "\"code\": 200,", with: "")
+    let base = payload(planReset: nil)
+    let noCode = base.replacingOccurrences(of: "\"code\": 200,", with: "")
+    XCTAssertNotEqual(noCode, base, "Missing-code fixture replacement must match")
     let noCodeUsage = try await fetch(noCode)
     XCTAssertEqual(noCodeUsage.metrics.first?.remainingPercent, 60)
-    let codeOnly = payload(planReset: nil).replacingOccurrences(of: "\"success\": true,", with: "")
+    let codeOnly = base.replacingOccurrences(of: "\"success\": true,", with: "")
+    XCTAssertNotEqual(codeOnly, base, "Code-only fixture replacement must match")
     let codeOnlyUsage = try await fetch(codeOnly)
     XCTAssertEqual(codeOnlyUsage.metrics.first?.remainingPercent, 60)
+    let rejected = base.replacingOccurrences(of: "\"success\": true", with: "\"success\": false")
+    XCTAssertNotEqual(rejected, base, "Failure fixture replacement must match")
     do {
-      _ = try await fetch(payload(planReset: nil).replacingOccurrences(of: "\"success\": true", with: "\"success\": false"))
+      _ = try await fetch(rejected)
       XCTFail("Explicit failure must override code 200")
     } catch let error as ProviderClientError { XCTAssertEqual(error.kind, .api) }
 
@@ -188,6 +258,7 @@ private struct MockZhipuHTTP: HTTPClient {
   let status: Int
   let body: String
   let expectedKey: String
+  var headers: [String: String] = [:]
 
   func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
     XCTAssertEqual(request.httpMethod, "GET")
@@ -199,7 +270,7 @@ private struct MockZhipuHTTP: HTTPClient {
       url: request.url!,
       statusCode: status,
       httpVersion: "HTTP/1.1",
-      headerFields: nil
+      headerFields: headers
     )!
     return (body.data(using: .utf8)!, response)
   }

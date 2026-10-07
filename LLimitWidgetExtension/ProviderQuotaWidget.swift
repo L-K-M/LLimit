@@ -806,8 +806,9 @@ private struct ProviderTileRingPaceTick: View {
     GeometryReader { proxy in
       let center = CGPoint(x: proxy.size.width / 2, y: proxy.size.height / 2)
       let outerRadius = min(proxy.size.width, proxy.size.height) / 2
-      let innerRadius = outerRadius - lineWidth
-      let angle = Angle.degrees(360 * remainingFraction - 90).radians
+      let innerRadius = max(0, outerRadius - lineWidth)
+      let fraction = min(max(remainingFraction, 0), 1)
+      let angle = Angle.degrees(360 * fraction - 90).radians
       let dx = CGFloat(cos(angle))
       let dy = CGFloat(sin(angle))
 

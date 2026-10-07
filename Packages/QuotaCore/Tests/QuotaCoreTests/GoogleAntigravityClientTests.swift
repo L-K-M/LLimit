@@ -40,7 +40,11 @@ private struct AntigravityFixtureHTTP: HTTPClient {
   let body: String
 
   func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
-    let responseBody = request.url?.host == "oauth2.googleapis.com" ? #"{"access_token":"fixture-access","expires_in":3600}"# : body
-    return (Data(responseBody.utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    guard let url = request.url,
+          let response = HTTPURLResponse(url: url, statusCode: HTTPStatusCode.ok, httpVersion: nil, headerFields: nil) else {
+      throw URLError(.badURL)
+    }
+    let responseBody = url.host == "oauth2.googleapis.com" ? #"{"access_token":"fixture-access","expires_in":3600}"# : body
+    return (Data(responseBody.utf8), response)
   }
 }

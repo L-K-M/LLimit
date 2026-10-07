@@ -146,7 +146,8 @@ public struct QuotaCoordinator: Sendable {
       }
     }
 
-    let generatedAt = ordered.allSatisfy(\.isCancelled) ? previousSnapshot?.generatedAt ?? now : now
+    let onlyCancelled = !ordered.isEmpty && ordered.allSatisfy(\.isCancelled)
+    let generatedAt = onlyCancelled ? previousSnapshot?.generatedAt ?? now : now
     return QuotaSnapshot(generatedAt: generatedAt, providers: usages, failures: failures)
   }
 }

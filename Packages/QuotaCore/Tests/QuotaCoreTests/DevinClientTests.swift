@@ -161,7 +161,7 @@ final class DevinClientTests: XCTestCase {
     XCTAssertNotNil(credits.metrics.first?.resetAt)
   }
 
-  func testOverageMicrosTakePrecedenceAndKeepRoundedSign() async throws {
+  func testOverageMicrosTakePrecedenceAndSignFollowsRoundedValue() async throws {
     for (micros, display) in [("4250000", "$4.25"), ("-1500000", "-$1.50"), ("-4000", "$0.00")] {
       let usage = try await fetch(#"{"userStatus":{"planStatus":{"dailyQuotaRemainingPercent":42,"overageBalanceMicros":"\#(micros)","usageBalance":15}}}"#)
       let balance = try XCTUnwrap(usage.metrics.first { $0.id == "balance" })

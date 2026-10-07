@@ -36,7 +36,9 @@ public struct ZhipuQuotaClient: QuotaProviderClient {
     let (data, response) = try await httpClient.data(for: request)
     guard (200..<300).contains(response.statusCode) else {
       let kind = errorKind(forStatusCode: response.statusCode)
-      throw ProviderClientError(kind: kind, message: "\(provider.displayName) usage API failed (HTTP \(response.statusCode)). Try again later.", statusCode: response.statusCode)
+      let retryAfter = kind == .rateLimit ? parseRetryAfter(response.value(forHTTPHeaderField: "Retry-After"), now: now) : nil
+      throw ProviderClientError(kind: kind, message: "\(provider.displayName) usage API failed (HTTP \(response.statusCode)). Try again later.",
+                                statusCode: response.statusCode, retryAfter: retryAfter)
     }
 
     let payload = try parseJSONObject(from: data)
@@ -60,7 +62,7 @@ public struct ZhipuQuotaClient: QuotaProviderClient {
     var maxUsagePercent = 0
 
     for tokenLimit in limits where (tokenLimit["type"] as? String) == "TOKENS_LIMIT" {
-      let window = TokenWindow(entry: tokenLimit)
+      let window = try TokenWindow(entry: tokenLimit)
       guard
         let percentage = parseNumeric(tokenLimit["percentage"]),
         let remaining = percentRemaining(fromUsedPercent: percentage)
@@ -176,24 +178,38 @@ public struct ZhipuQuotaClient: QuotaProviderClient {
     case unannotated
     case fiveHour
     case weekly
-    case unrecognized(unit: String, number: String?)
+    case unrecognized(unit: Int, number: Int?)
 
-    init(entry: [String: Any]) {
+    init(entry: [String: Any]) throws {
       guard let rawUnit = entry["unit"], !(rawUnit is NSNull) else {
         self = .unannotated
         return
       }
-      let number = parseNumeric(entry["number"])
-      guard let unitValue = parseNumeric(rawUnit), let unit = formatIntLike(unitValue) else {
-        // Raw unit text could imply a cadence or contain unbounded content.
-        self = .unrecognized(unit: "unknown", number: formatIntLike(number))
-        return
+      guard let unit = try Self.descriptorInteger(rawUnit) else { throw Self.invalidDescriptor }
+      let number = try Self.descriptorInteger(entry["number"])
+      switch (unit, number) {
+      case (ReportedUnit.hours.rawValue, 5?): self = .fiveHour
+      case (ReportedUnit.weeks.rawValue, 1?): self = .weekly
+      default: self = .unrecognized(unit: unit, number: number)
       }
-      switch (unitValue, number) {
-      case (Double(ReportedUnit.hours.rawValue), 5?): self = .fiveHour
-      case (Double(ReportedUnit.weeks.rawValue), 1?): self = .weekly
-      default: self = .unrecognized(unit: unit, number: formatIntLike(number))
+    }
+
+    // Malformed descriptors cannot share a placeholder id or rounded count:
+    // failing preserves last-good quota instead of silently dropping a cap.
+    private static func descriptorInteger(_ value: Any?) throws -> Int? {
+      guard let value, !(value is NSNull) else { return nil }
+      if let text = value as? String {
+        guard let integer = Int(text.trimmingCharacters(in: .whitespacesAndNewlines)) else { throw invalidDescriptor }
+        return integer
       }
+      guard let number = value as? NSNumber, let numeric = parseNumeric(number) else { throw invalidDescriptor }
+      if let integer = Int(number.stringValue) { return integer }
+      guard let integer = roundedInt(numeric), Double(integer) == numeric else { throw invalidDescriptor }
+      return integer
+    }
+
+    private static var invalidDescriptor: ProviderClientError {
+      ProviderClientError(kind: .decoding, message: "Token window has an invalid unit or number. Try again later.")
     }
 
     var metricID: String {
