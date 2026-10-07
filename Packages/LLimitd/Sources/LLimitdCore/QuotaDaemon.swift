@@ -642,7 +642,8 @@ public final class QuotaDaemon {
       widgetBackgroundSettings: settings.widgetBackgroundSettings,
       providerStyleSettings: settings.providerStyleSettings,
       widgetVisibility: settings.widgetVisibility,
-      providerTileSlots: settings.providerTileSlots
+      providerTileSlots: settings.providerTileSlots,
+      alertSettings: settings.alertSettings
     )
     try saveConfiguration()
   }
