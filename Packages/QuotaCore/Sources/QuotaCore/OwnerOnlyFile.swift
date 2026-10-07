@@ -12,6 +12,13 @@ private let ownerOnlyFileMode: mode_t = 0o600
 /// Creates private bytes before atomic replacement; chmod after an atomic
 /// Foundation write leaves its temporary credential file readable meanwhile.
 func writeOwnerOnlyAtomically(_ data: Data, to fileURL: URL) throws {
+  try withStoreFileLock(at: fileURL) {
+    try writeOwnerOnlyAtomicallyLocked(data, to: fileURL)
+  }
+}
+
+/// Internal owner operations already holding the sidecar use this to avoid relocking.
+func writeOwnerOnlyAtomicallyLocked(_ data: Data, to fileURL: URL) throws {
   let directory = fileURL.deletingLastPathComponent()
   let temporaryURL = directory.appendingPathComponent(".\(fileURL.lastPathComponent).\(UUID().uuidString).tmp")
   let descriptor = open(temporaryURL.path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, ownerOnlyFileMode)
