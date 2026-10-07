@@ -143,4 +143,16 @@ final class AccountIntegrityTests: XCTestCase {
     XCTAssertFalse(daemon.isDetectedCredentialImported(login))
     XCTAssertEqual(daemon.importMatch(for: login), .updateCandidates(accountIDs: [account.id]))
   }
+
+  func testAccountEditsPreserveAlertPreferences() throws {
+    let preferences = QuotaAlertSettings(enabled: true, warningPercent: 35, criticalPercent: 7, notifyOnFailure: false)
+    let account = ProviderAccount(id: "test-account", provider: .kimi, credentials: [CredentialField.kimiAPIKey: "test-key"])
+    try SettingsStore(fileURL: paths.settingsFileURL).save(AppSettings(accounts: [account], alertSettings: preferences))
+    let daemon = daemon()
+
+    _ = try daemon.editingSettings { try $0.updateAccount(account.id, displayName: "Renamed") }
+    XCTAssertEqual(try SettingsStore(fileURL: paths.settingsFileURL).load().alertSettings, preferences)
+    try daemon.editingSettings { try $0.setAccountEnabled(account.id, false) }
+    XCTAssertEqual(try SettingsStore(fileURL: paths.settingsFileURL).load().alertSettings, preferences)
+  }
 }
