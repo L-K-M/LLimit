@@ -30,6 +30,22 @@ public struct QuotaAlertSettings: Codable, Hashable, Sendable {
     }
     self.notifyOnFailure = notifyOnFailure
   }
+
+  private enum CodingKeys: String, CodingKey {
+    case enabled, warningPercent, criticalPercent, notifyOnFailure
+  }
+
+  /// Route decoding through the validating init so persisted values are
+  /// clamped into range and critical stays below warning even if the
+  /// settings file was edited by hand.
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    self.init(
+      enabled: try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? false,
+      warningPercent: try container.decodeIfPresent(Int.self, forKey: .warningPercent) ?? 25,
+      criticalPercent: try container.decodeIfPresent(Int.self, forKey: .criticalPercent) ?? 10,
+      notifyOnFailure: try container.decodeIfPresent(Bool.self, forKey: .notifyOnFailure) ?? true)
+  }
 }
 
 public struct QuotaAlert: Equatable, Sendable {

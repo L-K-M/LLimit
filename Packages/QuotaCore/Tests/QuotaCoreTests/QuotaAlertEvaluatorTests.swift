@@ -137,6 +137,20 @@ final class QuotaAlertEvaluatorTests: XCTestCase {
     XCTAssertFalse(QuotaAlertSettings().enabled)
   }
 
+  func testDecodeRestoresClampAndOrdering() throws {
+    // A hand-edited or version-skewed settings file bypasses init clamps
+    // with synthesized Codable — decode must re-validate.
+    let json = #"{"enabled":true,"warningPercent":10,"criticalPercent":80,"notifyOnFailure":false}"#
+    let decoded = try JSONDecoder().decode(QuotaAlertSettings.self, from: Data(json.utf8))
+    XCTAssertTrue(decoded.enabled)
+    XCTAssertEqual(decoded.warningPercent, 10)
+    XCTAssertLessThan(decoded.criticalPercent, decoded.warningPercent)
+    XCTAssertFalse(decoded.notifyOnFailure)
+    // Missing keys fall back to defaults (alerts stay opt-in).
+    let empty = try JSONDecoder().decode(QuotaAlertSettings.self, from: Data(#"{}"#.utf8))
+    XCTAssertFalse(empty.enabled)
+  }
+
   func testCriticalCanNeverMeetOrExceedWarning() {
     // A decoded/constructed config with inverted bands would silently swallow
     // every warning alert — the initializer restores the invariant.
