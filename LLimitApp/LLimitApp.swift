@@ -555,7 +555,7 @@ private struct GlossBar: View {
   var evenPaceRemaining: Double?
 
   // Neutral geometry preserves the fill's window identity color.
-  private static let paceTickColor = Color.white.opacity(0.85)
+  private static let paceTickColor = DashboardPalette.primaryText.opacity(0.85)
   private static let paceTickSize = CGSize(width: 2, height: 9)
 
   var body: some View {

@@ -21,11 +21,13 @@ source branches were not merged into this batch.
 | #96 | `dad9a2f` | Settings-order identity bars, failure/stale cues |
 | #106 | `e83920e` | Opt-in Carbon shortcut, shared model, focus restoration |
 
-Dependencies: storage `f0c8546`, CLI `9f8c1d2`, main `eeb2b8b`.
+Dependencies: published storage `10543ad`, CLI `3462deb` (includes `694af69`),
+main/provider `2f1f90d`.
 `QuotaFreshness` and `HeadroomRanking` come from the CLI dependency.
 `StatusRenderer.relativeAge` forwards to `QuotaDisplayText`, retaining its
-existing CLI consumers. History/trend and provider pace integration remain
-separate dependencies of the parent integration.
+existing CLI consumers. Main's reported durations, cooldowns, cancellation and
+#103 pace ticks are retained. App bar ticks use adaptive neutral text color.
+History/trend code remains owned by the parent's #116 integration.
 
 ## Automated checks
 
