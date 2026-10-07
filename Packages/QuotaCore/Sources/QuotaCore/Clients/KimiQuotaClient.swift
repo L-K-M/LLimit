@@ -32,6 +32,22 @@ public struct KimiQuotaClient: QuotaProviderClient {
   private let endpoint: URL
   private let httpClient: any HTTPClient
 
+  private enum ReportedTimeUnit: String {
+    case minute = "TIME_UNIT_MINUTE"
+    case hour = "TIME_UNIT_HOUR"
+    case day = "TIME_UNIT_DAY"
+    case week = "TIME_UNIT_WEEK"
+
+    var seconds: Int {
+      switch self {
+      case .minute: return 60
+      case .hour: return 3_600
+      case .day: return 86_400
+      case .week: return 604_800
+      }
+    }
+  }
+
   public init(
     endpoint: URL = URL(string: "https://api.kimi.com/coding/v1/usages")!,
     httpClient: any HTTPClient
@@ -81,12 +97,18 @@ public struct KimiQuotaClient: QuotaProviderClient {
       }
     }
 
-    if let windows = payload["limits"] as? [[String: Any]] {
-      for (index, item) in windows.enumerated() {
+    if let windows = payload["limits"] as? [Any] {
+      // One malformed element cannot hide every readable window. Preserve
+      // original positions for neutral fallback ids.
+      for (index, rawItem) in windows.enumerated() {
+        guard let item = rawItem as? [String: Any] else { continue }
         let detail = (item["detail"] as? [String: Any]) ?? item
         let window = (item["window"] as? [String: Any]) ?? [:]
         let descriptor = windowDescriptor(item: item, detail: detail, window: window, index: index)
-        if let metric = metric(from: detail, id: descriptor.id, label: descriptor.label, now: now) {
+        if let metric = metric(
+          from: detail, id: descriptor.id, label: descriptor.label,
+          windowSeconds: descriptor.windowSeconds, now: now
+        ) {
           metrics.append(metric)
         }
       }
@@ -110,7 +132,10 @@ public struct KimiQuotaClient: QuotaProviderClient {
     )
   }
 
-  private func metric(from data: [String: Any], id: String, label: String, now: Date) -> UsageMetric? {
+  private func metric(
+    from data: [String: Any], id: String, label: String,
+    windowSeconds: Int? = nil, now: Date
+  ) -> UsageMetric? {
     let limit = parseNumeric(data["limit"])
     var used = parseNumeric(data["used"])
     if used == nil, let limit, let remaining = parseNumeric(data["remaining"]) {
@@ -133,7 +158,8 @@ public struct KimiQuotaClient: QuotaProviderClient {
       usedDisplay: formatIntLike(used),
       totalDisplay: formatIntLike(limit),
       resetAt: resetAt,
-      resetIn: resetAt.map { formatResetCountdown(to: $0, now: now) }
+      resetIn: resetAt.map { formatResetCountdown(to: $0, now: now) },
+      windowSeconds: windowSeconds
     )
   }
 
@@ -147,7 +173,7 @@ public struct KimiQuotaClient: QuotaProviderClient {
     detail: [String: Any],
     window: [String: Any],
     index: Int
-  ) -> (id: String, label: String) {
+  ) -> (id: String, label: String, windowSeconds: Int?) {
     var override: String?
     for key in ["name", "title", "scope"] {
       if let label = nonEmptyString(item[key]) ?? nonEmptyString(detail[key]) {
@@ -165,11 +191,16 @@ public struct KimiQuotaClient: QuotaProviderClient {
       let duration, duration > 0, let rawCount = roundedInt(duration),
       let unit = windowUnit(count: rawCount, timeUnit: timeUnit)
     else {
-      return (id: "limit-\(index)", label: override ?? "Limit #\(index + 1)")
+      return (id: "limit-\(index)", label: override ?? "Limit #\(index + 1)", windowSeconds: nil)
     }
 
     let cadence = "\(unit.count)-\(unit.name)"
-    return (id: "window-\(cadence)", label: override ?? "\(cadence) limit")
+    // Scale the reported count, not its folded display unit (300 min = 5 h).
+    let rawDuration = window["duration"] ?? item["duration"] ?? detail["duration"]
+    let windowSeconds = ReportedTimeUnit(rawValue: timeUnit).flatMap {
+      reportedWindowSeconds(value: rawDuration, unitSeconds: $0.seconds)
+    }
+    return (id: "window-\(cadence)", label: override ?? "\(cadence) limit", windowSeconds: windowSeconds)
   }
 
   /// Normalizes a protobuf `TIME_UNIT_*` window to a classifier-friendly unit

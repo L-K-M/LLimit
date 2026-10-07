@@ -97,7 +97,7 @@ public struct ClineQuotaClient: QuotaProviderClient {
 
     return UsageMetric(
       id: window.type, label: "\(windowName(window.type)) remaining",
-      remainingPercent: 100 - window.usedPercent, usedDisplay: "\(window.usedPercent)% used",
+      remainingPercent: clampPercent(100 - window.usedPercent), usedDisplay: "\(window.usedPercent)% used",
       resetAt: resetAt, resetIn: resetAt.map { formatResetCountdown(to: $0, now: now) },
       detail: "ClinePass subscription window."
     )

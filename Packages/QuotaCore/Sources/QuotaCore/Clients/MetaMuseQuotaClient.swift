@@ -102,7 +102,8 @@ public struct MetaMuseQuotaClient: QuotaProviderClient {
           label: windowLabel(durationMins: parseNumeric(window.fields["window_duration_mins"]).flatMap(roundedInt)),
           remainingPercent: percentRemaining(fromUsedPercent: window.usedPercent),
           resetAt: resetAt,
-          resetIn: resetAt.map { formatResetCountdown(to: $0, now: now) }
+          resetIn: resetAt.map { formatResetCountdown(to: $0, now: now) },
+          windowSeconds: reportedWindowSeconds(value: window.fields["window_duration_mins"], unitSeconds: 60)
         )
       )
     }

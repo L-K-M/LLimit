@@ -133,6 +133,13 @@ final class KimiClientTests: XCTestCase {
     XCTAssertEqual(metric.remainingPercent, 60)
   }
 
+  func testHeterogeneousLimitsKeepReadableWindowsAndOriginalFallbackIDs() async throws {
+    let json = #"{"limits":["garbage",{"detail":{"limit":"200","used":"50"}},{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"200","used":"50"}}]}"#
+    let usage = try await KimiQuotaClient(httpClient: MockHTTP(status: 200, body: json)).fetchUsage(configuration: config(), now: now)
+    XCTAssertEqual(usage.metrics.map(\.id), ["limit-1", "window-5-hour"])
+    XCTAssertEqual(usage.metrics.map(\.remainingPercent), [75, 75])
+  }
+
   func testMinuteAndWeekWindowsClassify() async throws {
     let json = #"""
     {
