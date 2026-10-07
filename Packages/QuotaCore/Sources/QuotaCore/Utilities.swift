@@ -317,7 +317,9 @@ func writeOwnerOnlyAtomically(_ data: Data, to fileURL: URL) throws {
     atPath: temporaryURL.path, contents: nil,
     attributes: [.posixPermissions: 0o600]
   ) else {
-    throw CocoaError(.fileWriteFileExists)
+    // createFile only reports Bool — include the temp path so "directory
+    // missing" vs "permissions denied" is at least guessable downstream.
+    throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: temporaryURL.path])
   }
   do {
     try data.write(to: temporaryURL)
