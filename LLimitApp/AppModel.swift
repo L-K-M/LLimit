@@ -529,6 +529,8 @@ final class AppModel: ObservableObject {
   /// Fills an existing account's credentials from a login detected on this Mac (the
   /// per-account "Auto-fill" action). Running this on demand also triggers the macOS
   /// Keychain prompt for Claude, which a background scan can't surface clearly.
+  /// Returns true only when the detected login replaced the account's whole credential
+  /// set (every field, never a merge); false leaves the credentials unchanged.
   @discardableResult
   func autofillCredentials(forAccountID accountID: String) -> Bool {
     guard let index = providerAccounts.firstIndex(where: { $0.id == accountID }) else { return false }
@@ -1170,23 +1172,27 @@ final class AppModel: ObservableObject {
   /// Saves one committed Settings text field. Settings keeps keystrokes in a draft and
   /// commits once (Return, focus loss, navigation, window close or quit), so a key
   /// replacement and its Venice history purge run only when the value really changed.
-  func commitAccountEdit(_ draft: String, to field: EditableAccountField, accountID: String) {
-    guard let savedAccount = account(withID: accountID),
-          let value = savedAccount.committedText(draft, for: field) else { return }
+  /// A rejection leaves the account unchanged; Settings keeps the draft and its reason.
+  func commitAccountEdit(_ draft: String, to field: EditableAccountField, accountID: String) -> AccountEditOutcome {
+    guard let savedAccount = account(withID: accountID) else { return .accountMissing }
+    guard let value = savedAccount.committedText(draft, for: field) else { return .unchanged }
 
     switch field {
     case .displayName:
-      updateAccount(accountID: accountID) { account in
+      return updateAccount(accountID: accountID) { account in
         account.displayName = value
       }
     case .credential(let fieldKey):
-      guard !codexAccountIsManaged(accountID), !codexAccountIsBusy(accountID) else { return }
-      // Settings hides a managed Claude account's token fields. A draft committed
-      // now was typed before a connection finished and must not undo it.
-      guard ClaudeCodeProfile.profile(from: savedAccount.credentials) == nil else { return }
+      if codexAccountIsBusy(accountID) { return .rejected(.signInInProgress) }
+      // A connection owns every credential of its account, and Settings hides all
+      // manual fields while connected. A draft committed now was typed before the
+      // connection finished and must not undo it. Anthropic has only the token field.
+      if codexAccountIsManaged(accountID) || ClaudeCodeProfile.profile(from: savedAccount.credentials) != nil {
+        return .rejected(.managedConnection)
+      }
       claudeAccountMessages[accountID] = nil
       claudeCredentialFailures.remove(accountID)
-      updateAccount(accountID: accountID) { account in
+      return updateAccount(accountID: accountID) { account in
         if account.provider == .anthropic && fieldKey == CredentialField.anthropicAccessToken {
           account.credentials = ClaudeCodeProfile.clearManagedMetadata(from: account.credentials)
         }
@@ -1573,12 +1579,15 @@ final class AppModel: ObservableObject {
     )
   }
 
+  /// Returns `.applied` once the mutation is accepted, whether or not it changed
+  /// anything, or why it was refused.
+  @discardableResult
   private func updateAccount(
     accountID: String,
     mutate: (inout ProviderAccount) -> Void
-  ) {
+  ) -> AccountEditOutcome {
     guard let index = providerAccounts.firstIndex(where: { $0.id == accountID }) else {
-      return
+      return .accountMissing
     }
 
     let previousAccount = providerAccounts[index]
@@ -1588,16 +1597,16 @@ final class AppModel: ObservableObject {
     if previousAccount.provider == .venice,
        previousAccount.credentials[CredentialField.veniceAPIKey] != updatedAccount.credentials[CredentialField.veniceAPIKey] {
       guard !configurationLoadFailed else {
-        statusMessage = "Could not change this key because the settings file could not be read."
-        return
+        statusMessage = AccountEditRejection.settingsUnreadable.message
+        return .rejected(.settingsUnreadable)
       }
       do {
         // The observed DIEM denominator belongs to this key. Clear it durably
         // before accepting a replacement key, including Auto-fill replacements.
         try invalidateVeniceUsage(for: previousAccount)
       } catch {
-        statusMessage = "Could not clear this account's previous usage. Check LLimit's storage permissions and try again."
-        return
+        statusMessage = AccountEditRejection.previousUsageNotCleared.message
+        return .rejected(.previousUsageNotCleared)
       }
     }
     providerAccounts[index] = updatedAccount
@@ -1609,6 +1618,7 @@ final class AppModel: ObservableObject {
     }
     reloadAccountStatuses()
     saveConfiguration()
+    return .applied
   }
 
   private func invalidateVeniceUsage(for account: ProviderAccount) throws {

@@ -30,7 +30,8 @@ struct SettingsView: View {
   /// Uncommitted text of account name and credential fields. Saving a credential can
   /// clear a Venice account's history, so keystrokes stay here until the field commits:
   /// on Return, focus loss, leaving the field or account, window close, or quit.
-  @State private var accountDrafts: [AccountFieldKey: String] = [:]
+  /// A rejected draft stays visible with its reason and is retried by the next commit.
+  @State private var accountDrafts = PendingEdits<AccountFieldKey>()
   @FocusState private var focusedAccountField: AccountFieldKey?
   @State private var hostWindow = HostWindowReference()
 
@@ -84,10 +85,13 @@ struct SettingsView: View {
     }
     // The window is reused after closing (`isReleasedWhenClosed` is false), so closing
     // it does not reliably make this view disappear. Commit when it closes instead.
+    // Rejected drafts survive the close and show again, with their reason, on reopen.
     .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { notification in
       guard let window = notification.object as? NSWindow, window === hostWindow.window else { return }
       commitAccountDrafts()
     }
+    // One last attempt on quit. A draft that is still rejected cannot be saved and
+    // is lost with the process; it is not retried.
     .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
       commitAccountDrafts()
     }
@@ -887,8 +891,8 @@ struct SettingsView: View {
     VStack(alignment: .leading, spacing: 12) {
       HStack(spacing: 10) {
         Button {
-          // Auto-fill replaces the credentials at once; a draft committed later
-          // would overwrite them. A failed auto-fill keeps the drafts.
+          // Auto-fill replaces every credential field at once; a draft committed
+          // later would overwrite it. A failed auto-fill keeps the drafts.
           if model.autofillCredentials(forAccountID: account.id) {
             discardCredentialDrafts(for: account.id)
           }
@@ -1122,36 +1126,47 @@ struct SettingsView: View {
 
   private func draftBinding(for key: AccountFieldKey) -> Binding<String> {
     Binding(
-      get: { accountDrafts[key] ?? model.account(withID: key.accountID)?.savedText(for: key.field) ?? "" },
-      set: { accountDrafts[key] = $0 }
+      get: { accountDrafts.text(for: key) ?? model.account(withID: key.accountID)?.savedText(for: key.field) ?? "" },
+      set: { accountDrafts.edit(key, text: $0) }
     )
   }
 
   /// Commits on Return and when the field leaves the screen, such as a collapsed
   /// disclosure group. Focus moving elsewhere commits through `focusedAccountField`.
+  /// Shows why the last commit was rejected while the draft waits for another try.
   private func committingDraft(_ field: some View, key: AccountFieldKey) -> some View {
-    field
-      .focused($focusedAccountField, equals: key)
-      .onSubmit { commitAccountDraft(key) }
-      .onDisappear { commitAccountDraft(key) }
+    VStack(alignment: .leading, spacing: 4) {
+      field
+        .focused($focusedAccountField, equals: key)
+        .onSubmit { commitAccountDraft(key) }
+        .onDisappear { commitAccountDraft(key) }
+
+      if let rejection = accountDrafts.rejection(for: key) {
+        Text(rejection.message)
+          .font(.caption)
+          .foregroundStyle(.orange)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+    }
   }
 
   private func commitAccountDraft(_ key: AccountFieldKey) {
-    guard let draft = accountDrafts.removeValue(forKey: key) else { return }
-    model.commitAccountEdit(draft, to: key.field, accountID: key.accountID)
+    accountDrafts.commit(key, using: saveAccountDraft)
   }
 
   /// Also runs before connecting or refreshing an account: clicking a button keeps
   /// text focus, and those actions should use what you typed.
   private func commitAccountDrafts() {
-    for key in Array(accountDrafts.keys) {
-      commitAccountDraft(key)
-    }
+    accountDrafts.commitAll(using: saveAccountDraft)
+  }
+
+  private func saveAccountDraft(_ key: AccountFieldKey, _ text: String) -> AccountEditOutcome {
+    model.commitAccountEdit(text, to: key.field, accountID: key.accountID)
   }
 
   private func discardCredentialDrafts(for accountID: String) {
-    accountDrafts = accountDrafts.filter { key, _ in
-      key.accountID != accountID || key.field == .displayName
+    accountDrafts.discard { key in
+      key.accountID == accountID && key.field != .displayName
     }
   }
 

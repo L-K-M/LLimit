@@ -38,3 +38,42 @@ extension ProviderAccount {
     }
   }
 }
+
+/// What committing one account field did. Only a rejection leaves the typed text
+/// unsaved; Settings then keeps the draft and shows `AccountEditRejection.message`.
+public enum AccountEditOutcome: Equatable, Sendable {
+  case applied
+  case unchanged
+  case accountMissing
+  case rejected(AccountEditRejection)
+
+  /// Whether the draft is used up. A rejected draft stays for another try.
+  public var consumesDraft: Bool {
+    if case .rejected = self { return false }
+    return true
+  }
+}
+
+public enum AccountEditRejection: Equatable, Sendable {
+  /// An OpenAI browser sign-in for this account is still running.
+  case signInInProgress
+  /// The account is connected; its official CLI owns the credentials.
+  case managedConnection
+  /// The settings file could not be read at launch, so a key change cannot be saved.
+  case settingsUnreadable
+  /// Replacing a Venice key could not first clear the previous key's usage.
+  case previousUsageNotCleared
+
+  public var message: String {
+    switch self {
+    case .signInInProgress:
+      return "Not saved while OpenAI sign-in is running. Finish or cancel the sign-in, then try again."
+    case .managedConnection:
+      return "Not saved because this account is connected. Its sign-in manages these credentials."
+    case .settingsUnreadable:
+      return "Could not change this key because the settings file could not be read."
+    case .previousUsageNotCleared:
+      return "Could not clear this account's previous usage. Check LLimit's storage permissions and try again."
+    }
+  }
+}
