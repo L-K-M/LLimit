@@ -33,7 +33,15 @@ public final class SnapshotStore: @unchecked Sendable {
     guard FileManager.default.fileExists(atPath: fileURL.path) else {
       return nil
     }
-    let data = try Data(contentsOf: fileURL)
+    let data: Data
+    do {
+      data = try Data(contentsOf: fileURL)
+    } catch {
+      FileHandle.standardError.write(Data(
+        "LLimit: snapshot read failed; ignoring \(fileURL.lastPathComponent): \(error)\n".utf8
+      ))
+      return nil
+    }
     let snapshot: QuotaSnapshot
     do {
       snapshot = try decoder.decode(QuotaSnapshot.self, from: data)
@@ -54,8 +62,7 @@ public final class SnapshotStore: @unchecked Sendable {
       withIntermediateDirectories: true
     )
     let data = try encoder.encode(snapshot)
-    try data.write(to: fileURL, options: .atomic)
-    try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+    try writeOwnerOnlyFile(data, to: fileURL)
   }
 
   public func debugInfo() -> String {

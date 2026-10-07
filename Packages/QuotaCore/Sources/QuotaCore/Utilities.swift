@@ -300,3 +300,21 @@ func startOfNextMonth(from date: Date) -> Date? {
 
   return monthEndDate(year: year, month: month)
 }
+
+/// Atomically writes `data` at `fileURL` with owner-only (`0600`)
+/// permissions. The payload is staged in a sibling temp file and chmodded
+/// before the swap, so the file never exists at its final path with wider
+/// permissions (an atomic write alone creates the visible file at umask
+/// defaults, leaving a readable window).
+func writeOwnerOnlyFile(_ data: Data, to fileURL: URL) throws {
+  let directory = fileURL.deletingLastPathComponent()
+  let tempURL = directory.appendingPathComponent(".\(fileURL.lastPathComponent).tmp")
+  try? FileManager.default.removeItem(at: tempURL)
+  try data.write(to: tempURL)
+  try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tempURL.path)
+  // FileManager.replaceItemAt is unreliable on Linux corelibs, so swap via
+  // remove + move: the destination is briefly absent rather than briefly
+  // world-readable, and a missing file regenerates on the next save.
+  try? FileManager.default.removeItem(at: fileURL)
+  try FileManager.default.moveItem(at: tempURL, to: fileURL)
+}

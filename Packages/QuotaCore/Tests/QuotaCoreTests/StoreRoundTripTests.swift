@@ -31,6 +31,14 @@ final class StoreRoundTripTests: XCTestCase {
     let attrs = try FileManager.default.attributesOfItem(atPath: fileURL.path)
     XCTAssertEqual(attrs[.posixPermissions] as? Int, 0o600,
                    "Snapshot file must be owner-only")
+
+    // Saving again exercises the replace path of the staged write.
+    try store.save(snapshot)
+    XCTAssertNotNil(try store.load())
+    let siblings = try FileManager.default.contentsOfDirectory(atPath: tempDir.path)
+    XCTAssertEqual(siblings, ["snapshot.json"],
+                   "No staged temp files may remain after save")
+    defer { try? FileManager.default.removeItem(at: tempDir) }
   }
 
   func testSnapshotStoreQuarantinesCorruptFile() throws {
