@@ -65,26 +65,29 @@ public struct AnthropicClient: QuotaProviderClient {
     let payload = try parseJSONObject(from: data)
 
     var metrics: [UsageMetric] = []
-    var maxUsage = 0
+    var maxUsage: Int?
+    var unreadableWindows = 0
 
-    let windows: [(key: String, id: String, label: String)] = [
-      ("five_hour", "five_hour", "5-hour limit"),
-      ("seven_day", "seven_day", "Weekly limit"),
-      ("seven_day_opus", "seven_day_opus", "Weekly (Opus)")
-    ]
-
-    for window in windows {
-      guard let object = payload[window.key] as? [String: Any] else { continue }
-      guard let utilization = parseNumeric(object["utilization"]) else { continue }
-
-      guard let usedPercent = roundedPercent(utilization) else { continue }
-      maxUsage = max(maxUsage, usedPercent)
+    for window in Self.usageWindows(in: payload) {
+      // Null means an unavailable window, not schema drift.
+      guard let rawWindow = payload[window.key], !(rawWindow is NSNull) else { continue }
+      guard let object = rawWindow as? [String: Any] else {
+        unreadableWindows += 1
+        continue
+      }
+      if object["utilization"] is NSNull { continue }
+      guard let utilization = parseNumeric(object["utilization"]),
+            let usedPercent = roundedPercent(utilization) else {
+        unreadableWindows += 1
+        continue
+      }
+      maxUsage = max(maxUsage ?? 0, usedPercent)
 
       let resetAt = parseDateValue(object["resets_at"])
 
       metrics.append(
         UsageMetric(
-          id: window.id,
+          id: window.key,
           label: window.label,
           remainingPercent: clampPercent(100 - usedPercent),
           resetAt: resetAt,
@@ -93,35 +96,90 @@ public struct AnthropicClient: QuotaProviderClient {
       )
     }
 
-    if metrics.isEmpty {
+    // All unreadable windows are a failed refresh; readable windows survive
+    // partial drift. Spend alone cannot hide the loss of bounded quota.
+    if metrics.isEmpty, unreadableWindows > 0 {
+      throw ProviderClientError(kind: .decoding, message: "Claude usage response had no readable quota windows. Try again later.")
+    }
+
+    let extraUsage = Self.extraUsageMetric(from: payload)
+    if metrics.isEmpty, extraUsage == nil {
       metrics.append(UsageMetric(id: "empty", label: "No usage data available"))
     }
+    if let extraUsage { metrics.append(extraUsage) }
 
     return ProviderUsage(
       accountID: configuration.accountID,
       provider: .anthropic,
       title: configuration.displayName,
-      subtitle: subtitle(from: payload),
       metrics: metrics,
       maxUsagePercent: maxUsage,
-      warning: maxUsage >= 80 ? "High usage" : nil,
+      warning: (maxUsage ?? 0) >= 80 ? "High usage" : nil,
       fetchedAt: now
     )
   }
 
-  private func subtitle(from payload: [String: Any]) -> String? {
+  // Established windows retain their order and ids for history and colors.
+  private static let knownWindows: [(key: String, label: String)] = [
+    ("five_hour", "5-hour limit"),
+    ("seven_day", "Weekly limit"),
+    ("seven_day_opus", "Weekly (Opus)"),
+    ("seven_day_sonnet", "Weekly (Sonnet)")
+  ]
+  private static let windowCadences: [(prefix: String, name: String)] = [
+    ("five_hour_", "5-hour"), ("seven_day_", "Weekly")
+  ]
+
+  private static func usageWindows(in payload: [String: Any]) -> [(key: String, label: String)] {
+    let knownKeys = Set(knownWindows.map(\.key))
+    let additional = payload.keys.sorted().compactMap { key -> (key: String, label: String)? in
+      guard !knownKeys.contains(key),
+            let cadence = windowCadences.first(where: { key.hasPrefix($0.prefix) }) else { return nil }
+      let scope = String(key.dropFirst(cadence.prefix.count))
+      guard !scope.isEmpty else { return nil }
+      return (key, "\(cadence.name) (\(scopeName(scope)))")
+    }
+    return knownWindows + additional
+  }
+
+  private static func scopeName(_ scope: String) -> String {
+    if scope == "oauth_apps" { return "OAuth apps" }
+    return scope.split(separator: "_").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
+  }
+
+  private static let usDollarCurrencyCode = "USD"
+  private static let centsPerDollar = 100.0
+
+  /// Amount-only spend stays outside rings, quota warnings, and primary colors.
+  private static func extraUsageMetric(from payload: [String: Any]) -> UsageMetric? {
     guard
       let extra = payload["extra_usage"] as? [String: Any],
-      (extra["is_enabled"] as? Bool) == true,
       let used = parseNumeric(extra["used_credits"]),
       used > 0
     else {
       return nil
     }
 
-    if let limit = parseNumeric(extra["monthly_limit"]), limit > 0 {
-      return "Extra: $\(formatIntLike(used) ?? "0") / $\(formatIntLike(limit) ?? "0")"
-    }
-    return "Extra usage on"
+    let limit = parseNumeric(extra["monthly_limit"]).flatMap { $0 > 0 ? $0 : nil }
+    let isCapReached = limit.map { used >= $0 } ?? false
+    // Claude can disable extra usage at the cap; keep that spend visible.
+    guard (extra["is_enabled"] as? Bool) == true || isCapReached else { return nil }
+
+    let currency = nonEmptyString(extra["currency"])?.uppercased() ?? usDollarCurrencyCode
+    let usedDisplay = currency == usDollarCurrencyCode ? dollars(fromCents: used) : (isCapReached ? "Cap reached" : "On")
+    let totalDisplay = currency == usDollarCurrencyCode ? limit.map(dollars(fromCents:)) : nil
+    return UsageMetric(id: "extra_usage", label: "Extra usage", usedDisplay: usedDisplay, totalDisplay: totalDisplay,
+                       detail: isCapReached ? "Monthly spending cap reached." : nil)
+  }
+
+  private static func dollars(fromCents cents: Double) -> String {
+    let formatter = NumberFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.numberStyle = .decimal
+    formatter.usesGroupingSeparator = false
+    formatter.minimumFractionDigits = 2
+    formatter.maximumFractionDigits = 2
+    let amount = cents / centsPerDollar
+    return "$" + (formatter.string(from: NSNumber(value: amount)) ?? String(format: "%.2f", amount))
   }
 }

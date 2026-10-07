@@ -81,8 +81,11 @@ public struct KimiQuotaClient: QuotaProviderClient {
       }
     }
 
-    if let windows = payload["limits"] as? [[String: Any]] {
-      for (index, item) in windows.enumerated() {
+    if let windows = payload["limits"] as? [Any] {
+      // One malformed element cannot hide every readable window. Preserve
+      // original positions for neutral fallback ids.
+      for (index, rawItem) in windows.enumerated() {
+        guard let item = rawItem as? [String: Any] else { continue }
         let detail = (item["detail"] as? [String: Any]) ?? item
         let window = (item["window"] as? [String: Any]) ?? [:]
         let descriptor = windowDescriptor(item: item, detail: detail, window: window, index: index)
