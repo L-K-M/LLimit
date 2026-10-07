@@ -64,11 +64,9 @@ public struct KimiQuotaClient: QuotaProviderClient {
         // routing 404 looks identical, so hint rather than assert.
         throw ProviderClientError(kind: .api, message: "Kimi usage endpoint not found (404) — if this persists, check that the key is a Kimi for Coding key; Moonshot open-platform keys are not accepted")
       case 429:
-        let body = String(data: data, encoding: .utf8) ?? ""
-        throw ProviderClientError(kind: .rateLimit, message: "Kimi API rate limited: \(body)")
+        throw ProviderClientError(kind: .rateLimit, message: "Kimi API is rate limiting requests. Try again later.", statusCode: response.statusCode)
       default:
-        let body = String(data: data, encoding: .utf8) ?? ""
-        throw ProviderClientError(kind: .api, message: "Kimi API error \(response.statusCode): \(body)")
+        throw ProviderClientError(kind: .api, message: "Kimi usage API failed (HTTP \(response.statusCode)). Try again later.", statusCode: response.statusCode)
       }
     }
 

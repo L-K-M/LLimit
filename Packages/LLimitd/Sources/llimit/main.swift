@@ -396,7 +396,8 @@ func readField(prompt: String, secret: Bool) -> String {
     return readLine()?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
   }
 
-  #if canImport(Glibc) || canImport(Darwin)
+  // The shipped .deb is the static musl build, which has no Glibc module.
+  #if canImport(Glibc) || canImport(Musl) || canImport(Darwin)
   var previous = termios()
   tcgetattr(STDIN_FILENO, &previous)
   var noEcho = previous

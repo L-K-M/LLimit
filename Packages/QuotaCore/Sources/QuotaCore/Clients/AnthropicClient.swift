@@ -40,7 +40,6 @@ public struct AnthropicClient: QuotaProviderClient {
 
     let (data, response) = try await httpClient.data(for: request)
     guard (200..<300).contains(response.statusCode) else {
-      let body = (String(data: data, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
       if response.statusCode == 401 || response.statusCode == 403 {
         throw ProviderClientError(
           kind: .auth,
@@ -55,8 +54,7 @@ public struct AnthropicClient: QuotaProviderClient {
           statusCode: response.statusCode
         )
       }
-      let suffix = body.isEmpty ? "" : ": \(body)"
-      throw ProviderClientError(kind: .api, message: "Claude usage API error \(response.statusCode)\(suffix)", statusCode: response.statusCode)
+      throw ProviderClientError(kind: .api, message: "Claude usage API failed (HTTP \(response.statusCode)). Try again later.", statusCode: response.statusCode)
     }
 
     let payload = try parseJSONObject(from: data)
