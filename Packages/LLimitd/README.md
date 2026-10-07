@@ -18,10 +18,13 @@ live in [`examples/`](examples/).
   - `StatusTemplate.swift` — `llimit status --format` templates.
   - `ScriptCommands.swift` — options and results of `status`, `check` and `pick`,
     ranked by QuotaCore's `HeadroomRanking`.
+  - `QuotaAlerts.swift`, `AlertDelivery.swift`: opt-in alerts through QuotaCore's
+    `QuotaEvents` detector, with dedupe state, notify-send and `--on-event` hooks.
 - `Sources/llimit/` — the CLI executable (`main.swift`; `SnapshotCommands.swift`
   holds the snapshot-only `status`, `check` and `pick`).
 - `examples/` — waybar / polybar / eww modules consuming `llimit status --json`,
-  tmux and starship status lines, and an agent wrapper built on `llimit pick`.
+  tmux and starship status lines, an agent wrapper built on `llimit pick`, and
+  `--on-event` hooks in `examples/hooks/`.
 - `tray/` — the tray icon (Python/PyGObject; see "Tray icon"). `llimit_tray.py`
   keeps its menu model as a pure function so it is unit-tested without GTK;
   `tray/tests/` holds those tests and `tray/icons/` the per-status SVGs.
@@ -36,6 +39,7 @@ live in [`examples/`](examples/).
 | settings lock | `$XDG_CONFIG_HOME/LLimit/quota-settings.lock` | flock sidecar; never holds data |
 | snapshot | `$XDG_DATA_HOME/LLimit/quota-snapshot.json` | credential-free; the IPC contract |
 | history | `$XDG_DATA_HOME/LLimit/quota-history.json` | credential-free |
+| alerts state | `$XDG_DATA_HOME/LLimit/alerts-state.json` | mode 0600, credential-free; only written with alerts on |
 
 XDG defaults (`~/.config`, `~/.local/share`) apply when the variables are unset;
 relative XDG values are ignored per the spec. Run `llimit paths` to see the
@@ -61,6 +65,7 @@ llimit status --worst --format '{name} {remaining}'  # one short line, see below
 llimit check anthropic --min 10                 # exit status for scripts
 llimit pick --provider anthropic,openai         # account with the most quota left
 llimit daemon                                   # refresh loop in the foreground
+llimit daemon --notify                          # ...with desktop alerts (see "Alerts")
 ```
 
 `status`, `check` and `pick` read only the snapshot, never the settings file, so
@@ -131,6 +136,90 @@ Packages/LLimitd/systemd/install.sh -- --timer  # one-shot service + 30-min time
 Units land in `~/.config/systemd/user/` and assume the binary at `~/.local/bin/llimit`.
 The daemon service is the launch-at-login replacement (`WantedBy=default.target`);
 the timer pair is an alternative for people who prefer no long-running process.
+
+## Alerts
+
+Alerts are off by default. With them on, the daemon tells you when quota runs
+low, when a window that ran low resets, when an account needs a new sign-in,
+and when a weekly or monthly window is about to reset mostly unused.
+
+```
+llimit daemon --notify                          # desktop notifications through notify-send
+llimit daemon --on-event ~/bin/llimit-hook      # run your own executable per event
+llimit daemon --notify --thresholds 30,10       # thresholds in % remaining (default 20,5)
+LLIMIT_NOTIFY=1 llimit daemon                   # same as --notify; meant for the systemd unit
+```
+
+| `LLIMIT_EVENT` | when | severity |
+| --- | --- | --- |
+| `threshold` | remaining falls to or below a threshold; a drop past several sends one alert for the lowest | `critical` at the lowest threshold, otherwise `normal` |
+| `reset` | a window that had reached the highest threshold resets and its quota comes back | `normal` |
+| `failure` | an account fails authentication or its usage response cannot be read (network and rate-limit errors are ignored) | `critical` |
+| `recovered` | that account refreshes successfully again | `normal` |
+| `expiringUnused` | a weekly or monthly window resets within 24 hours with 50% or more left | `normal` |
+
+Each alert is sent once, including for conditions that already hold when you
+turn alerts on. A threshold fires again only after remaining climbs 5 points
+above it or its window ends, and `expiringUnused` fires once per window. What was sent is recorded in `alerts-state.json`, so restarting the
+daemon does not repeat alerts. Alerts need the daemon: `llimit refresh` and
+the timer units do not send them.
+
+`--notify` needs `notify-send` (`libnotify-bin` on Debian and Ubuntu). When it
+is missing, the daemon logs one warning and keeps running without it.
+
+### Hooks
+
+`--on-event <cmd>` runs an executable (a path, or a name on `PATH`) once per
+event, without a shell and without arguments. It inherits the daemon's
+environment and receives the event only through these variables, which are
+unset when they do not apply:
+
+| variable | value |
+| --- | --- |
+| `LLIMIT_EVENT` | `threshold`, `reset`, `failure`, `recovered` or `expiringUnused` |
+| `LLIMIT_SEVERITY` | `normal` or `critical` |
+| `LLIMIT_ACCOUNT_ID`, `LLIMIT_ACCOUNT_NAME`, `LLIMIT_PROVIDER` | the account |
+| `LLIMIT_METRIC`, `LLIMIT_METRIC_LABEL` | the limit's id and display label |
+| `LLIMIT_REMAINING` | remaining percent |
+| `LLIMIT_ESTIMATED` | `1` when that percentage is an estimate |
+| `LLIMIT_THRESHOLD` | the threshold crossed |
+| `LLIMIT_RESETS_AT` | when the current window resets, ISO 8601 |
+| `LLIMIT_FAILURE_KIND` | `auth` or `decoding` |
+| `LLIMIT_SUMMARY`, `LLIMIT_BODY` | a ready-made notification title and text |
+
+Provider error messages and credentials are never passed. Hooks run one at a
+time with stdin on `/dev/null`. One still running after 10 seconds is stopped
+(SIGTERM, then SIGKILL, along with anything it started), so a slow hook never
+delays a refresh. Examples: [`examples/hooks/notify-send.sh`](examples/hooks/notify-send.sh)
+for custom desktop notifications and [`examples/hooks/ntfy.sh`](examples/hooks/ntfy.sh)
+to push alerts to a phone through [ntfy](https://ntfy.sh).
+
+### With systemd
+
+The shipped unit leaves alerts off. Turn them on with a drop-in, which
+survives reinstalls and package upgrades:
+
+```
+systemctl --user edit llimit.service
+```
+
+```ini
+[Service]
+Environment=LLIMIT_NOTIFY=1
+```
+
+For a hook, replace the command line in the same drop-in (`/usr/bin/llimit`
+for the .deb):
+
+```ini
+[Service]
+ExecStart=
+ExecStart=%h/.local/bin/llimit daemon --on-event %h/.config/LLimit/hooks/ntfy.sh
+Environment=NTFY_TOPIC=your-unguessable-topic
+```
+
+Then run `systemctl --user restart llimit.service`. Desktop notifications use
+the session bus address the systemd user manager normally provides.
 
 ## Status bars
 

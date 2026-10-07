@@ -39,6 +39,7 @@ func printUsage() {
       llimit status [--json | --format <template> [--separator <text>]] [--account <id|provider>]…
                     [--worst] [--kind <kind>] [--watch [<duration>]]
       llimit daemon
+      llimit daemon [--notify] [--on-event <cmd>] [--thresholds 20,5]
       llimit paths
       llimit check <account-id|provider> [--min <pct>] [--max-age <duration>] [--kind <kind>]
       llimit pick [--provider <id>[,<id>…]] [--kind <kind>] [--min <pct>] [--max-age <duration>]
@@ -616,11 +617,29 @@ func installShutdownHandlers(cancel: @escaping () -> Void) {
   }
 }
 
-func runDaemon() async {
+func runDaemon(_ args: [String]) async {
   let daemon = QuotaDaemon(paths: LinuxPaths())
   for line in ["[llimitd] settings: \(daemon.paths.settingsFileURL.path)",
                "[llimitd] snapshot: \(daemon.paths.snapshotFileURL.path)"] {
     FileHandle.standardOutput.write(Data((line + "\n").utf8))
+  }
+  // Alerts are opt-in: without --notify, --on-event or LLIMIT_NOTIFY=1 nothing
+  // is detected and no alerts state is written.
+  do {
+    let environment = ProcessInfo.processInfo.environment
+    let options = try DaemonAlertOptions.parse(arguments: args, environment: environment)
+    let alerts = try QuotaAlertMonitor.make(options: options, paths: daemon.paths, environment: environment) { line in
+      FileHandle.standardOutput.write(Data((line + "\n").utf8))
+    }
+    if let alerts {
+      daemon.onSnapshotSaved = { [weak daemon] previous, current in
+        guard let daemon else { return }
+        let names = daemon.settings.accounts.map { ($0.id, $0.resolvedDisplayName) }
+        alerts.process(previous: previous, current: current, accountNames: Dictionary(names) { first, _ in first })
+      }
+    }
+  } catch {
+    fail(error.localizedDescription)
   }
   let loop = Task { await daemon.runRefreshLoop() }
   installShutdownHandlers { loop.cancel() }
@@ -669,7 +688,7 @@ case "refresh":
 case "status":
   runStatus(Array(arguments.dropFirst()))
 case "daemon":
-  await runDaemon()
+  await runDaemon(Array(arguments.dropFirst()))
 case "paths":
   let paths = LinuxPaths()
   print("settings: \(paths.settingsFileURL.path)")

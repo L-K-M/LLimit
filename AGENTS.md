@@ -67,6 +67,9 @@ Google Antigravity, Devin, Meta Muse, OpenCode Go, Venice, Cline.
   - `Sources/LLimitdCore/StatusTemplate.swift`, `ScriptCommands.swift` —
     `status --format` templates and the snapshot-only `status`/`check`/`pick`
     options and exit statuses, ranked by QuotaCore's `HeadroomRanking`.
+  - `Sources/LLimitdCore/QuotaAlerts.swift`, `AlertDelivery.swift`: opt-in
+    `daemon --notify`/`--on-event` delivery of QuotaCore's `QuotaEvents`. Hooks get
+    an env-only payload: never provider error text or credentials.
   - `Sources/llimit/main.swift` — the CLI (accounts add/list/import/update/rename/
     reimport/enable/disable/remove, refresh, status, check, pick, daemon, paths).
   - `examples/` — waybar/polybar/eww modules consuming the JSON contract, plus
