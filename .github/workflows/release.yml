@@ -19,7 +19,7 @@ env:
 jobs:
   release:
     name: Build & publish (unsigned)
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
 
@@ -90,7 +90,7 @@ jobs:
 
   release-linux:
     name: Build & publish Linux .deb
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: release        # the macOS job creates the GitHub Release; this appends to it
     steps:
       - uses: actions/checkout@v7

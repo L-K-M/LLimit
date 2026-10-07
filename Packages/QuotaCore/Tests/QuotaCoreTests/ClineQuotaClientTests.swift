@@ -154,6 +154,30 @@ final class ClineQuotaClientTests: XCTestCase {
     await assertFailure(.decoding) { try await self.fetch(limits: limits) }
   }
 
+  func testRecognizedWindowsRequireReportedFinitePercentages() async {
+    for type in ["five_hour", "weekly", "monthly"] {
+      let windows = [#"{"type":"\#(type)"}"#] + ["null", "true", #""25""#, "{}", "[]", "1e1000"].map {
+        #"{"type":"\#(type)","percentUsed":\#($0)}"#
+      }
+      for window in windows {
+        let bare = #"{"limits":[\#(window)]}"#
+        for body in [bare, #"{"success":true,"data":\#(bare)}"#] {
+          await assertFailure(.decoding) { try await self.fetch(limits: body) }
+        }
+      }
+    }
+  }
+
+  func testExplicitZeroWindowSharesRemainValidInWrappedAndBarePayloads() async throws {
+    let bare = #"{"limits":[{"type":"five_hour","percentUsed":0},{"type":"weekly","percentUsed":0},{"type":"monthly","percentUsed":0}]}"#
+    for body in [bare, #"{"success":true,"data":\#(bare)}"#] {
+      let usage = try await fetch(limits: body)
+      XCTAssertEqual(usage.metrics.map(\.remainingPercent), [100, 100, 100, nil])
+      XCTAssertEqual(usage.maxUsagePercent, 0)
+      XCTAssertNil(usage.warning)
+    }
+  }
+
   func testUnknownWindowTypesSurviveWithServerSuppliedIdentity() async throws {
     let limits = #"""
     {"success":true,"data":{"limits":[{"type":"daily","percentUsed":10,"resetsAt":"2026-09-29T00:00:00Z"},

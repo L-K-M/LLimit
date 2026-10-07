@@ -30,7 +30,7 @@ public struct URLSessionHTTPClient: HTTPClient {
       if let providerError = error as? ProviderClientError {
         throw providerError
       }
-      throw ProviderClientError(kind: .network, message: error.localizedDescription)
+      throw ProviderClientError(kind: .network, message: "Could not reach the provider. Check your connection and try again.")
     }
   }
 }
