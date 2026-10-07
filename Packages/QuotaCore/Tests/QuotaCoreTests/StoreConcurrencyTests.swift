@@ -1,7 +1,41 @@
 import XCTest
 @testable import QuotaCore
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#endif
 
 final class StoreConcurrencyTests: XCTestCase {
+  func testNonRegularSidecarIsRejectedWithoutBlockingOrChangingItsMode() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let url = directory.appendingPathComponent("history.json")
+    let lockURL = url.appendingPathExtension("access.lock")
+    XCTAssertEqual(mkfifo(lockURL.path, 0o644), 0)
+    let completion = DispatchSemaphore(value: 0)
+    let attempt = Task.detached {
+      defer { completion.signal() }
+      do {
+        try withStoreFileLock(at: url) {}
+        return false
+      } catch { return true }
+    }
+
+    let completed = completion.wait(timeout: .now() + 0.2)
+    // Unblock the old write-only open so a failing regression never hangs tests.
+    let reader = completed == .timedOut ? open(lockURL.path, O_RDONLY | O_NONBLOCK) : -1
+    defer { if reader >= 0 { close(reader) } }
+    let rejected = await attempt.value
+    XCTAssertEqual(completed, .success, "A FIFO sidecar must not block open")
+    XCTAssertTrue(rejected)
+    let attributes = try FileManager.default.attributesOfItem(atPath: lockURL.path)
+    XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o644)
+  }
+
   func testRecoveryCannotQuarantineAConcurrentValidReplacement() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

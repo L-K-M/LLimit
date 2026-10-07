@@ -38,6 +38,7 @@ final class StoreSafetyTests: XCTestCase {
 
     for url in urls {
       XCTAssertEqual(try modeBits(url), 0o600, url.lastPathComponent)
+      XCTAssertEqual(try modeBits(url.appendingPathExtension("access.lock")), 0o600)
     }
     XCTAssertEqual(try artifacts().count, urls.count)
   }
