@@ -260,6 +260,24 @@ final class DevinClientTests: XCTestCase {
     XCTAssertNotNil(usage.metrics.first?.resetAt)
   }
 
+  // A credit plan's signal is its credit count; a stray reset must not
+  // invent an exhausted quota window for it.
+  func testCreditPlanResetWithoutPercentIsNoWindow() async throws {
+    let json = #"""
+    {"userStatus": {"planStatus": {
+      "planInfo": {"billingStrategy": "BILLING_STRATEGY_CREDITS"},
+      "availablePromptCredits": 120,
+      "dailyQuotaResetAtUnix": "1789372800"
+    }}}
+    """#
+    let client = DevinQuotaClient(httpClient: MockHTTP(status: 200, body: json))
+
+    let usage = try await client.fetchUsage(configuration: config(), now: now)
+
+    XCTAssertEqual(usage.metrics.map(\.id), ["credits"])
+    XCTAssertNil(usage.warning)
+  }
+
   func testNonCreditPlanWithoutCreditsKeyShowsNoCredits() async throws {
     let json = #"""
     {"userStatus": {"planStatus": {
@@ -304,6 +322,17 @@ final class DevinClientTests: XCTestCase {
     let usage = try await client.fetchUsage(configuration: config(), now: now)
 
     XCTAssertEqual(usage.metrics.first { $0.id == "balance" }?.usedDisplay, "-$1.50")
+  }
+
+  func testSubCentNegativeOverageBalanceDropsSign() async throws {
+    let json = #"""
+    {"userStatus": {"planStatus": {"overageBalanceMicros": "-4000"}}}
+    """#
+    let client = DevinQuotaClient(httpClient: MockHTTP(status: 200, body: json))
+
+    let usage = try await client.fetchUsage(configuration: config(), now: now)
+
+    XCTAssertEqual(usage.metrics.first { $0.id == "balance" }?.usedDisplay, "$0.00")
   }
 
   func testEmptyPayloadYieldsPlaceholderMetric() async throws {

@@ -24,9 +24,11 @@ import FoundationNetworking
 /// plans (the daily/weekly percents carry the signal) and a real count on
 /// credit-billed ones.
 ///
-/// Every scalar has proto3 implicit presence, so protobuf-JSON omits zeros: an
-/// exhausted window arrives as its reset epoch alone, and a spent credit plan
-/// sends no credit count.
+/// The percents, resets, `availablePromptCredits` and `overageBalanceMicros`
+/// are proto3 implicit-presence scalars (none is marked `optional` in the
+/// generated `PlanStatus` descriptor, can1357/oh-my-pi `devin-proto.ts`), so
+/// protobuf-JSON omits zeros: an exhausted window arrives as its reset epoch
+/// alone, and a spent credit plan sends no credit count.
 public struct DevinQuotaClient: QuotaProviderClient {
   public let provider: QuotaProvider = .devin
   public static let defaultServerURL = URL(string: "https://server.codeium.com")!
@@ -105,6 +107,7 @@ public struct DevinQuotaClient: QuotaProviderClient {
     let planInfo = (planStatus["planInfo"] as? [String: Any]) ?? [:]
     let devinInfo = (planInfo["devinInfo"] as? [String: Any]) ?? [:]
 
+    let isCreditBilled = nonEmptyString(planInfo["billingStrategy"]) == Self.creditBillingStrategy
     var metrics: [UsageMetric] = []
 
     func quotaWindow(id: String, label: String, percentKey: String, resetKey: String, hiddenKey: String) {
@@ -118,8 +121,10 @@ public struct DevinQuotaClient: QuotaProviderClient {
         percent = parsed
       } else {
         // An omitted percent is the implicit 0 of an exhausted window, but
-        // only a dated window exists; with no reset the plan has none.
-        guard resetAt != nil else { return }
+        // only a dated window exists; with no reset the plan has none. A
+        // credit plan's signal is its credit count, so a stray reset there
+        // must not invent an exhausted window.
+        guard resetAt != nil, !isCreditBilled else { return }
         percent = 0
       }
 
@@ -146,7 +151,6 @@ public struct DevinQuotaClient: QuotaProviderClient {
     // Credit-billed plans report a real count; quota-billed ones send -1. An
     // omitted count is the implicit 0, but only a credit plan has a count.
     let rawCredits = planStatus["availablePromptCredits"]
-    let isCreditBilled = nonEmptyString(planInfo["billingStrategy"]) == Self.creditBillingStrategy
     let credits = rawCredits == nil && isCreditBilled ? 0 : parseNumeric(rawCredits)
     if let credits, credits >= 0 {
       let resetAt = parseDateValue(planStatus["planEnd"])
@@ -210,8 +214,10 @@ public struct DevinQuotaClient: QuotaProviderClient {
   }
 
   /// Keeps the sign, so a negative balance never reads as a positive amount.
+  /// The sign follows the rounded cents, so a sub-cent debit is "$0.00".
   private static func dollars(_ value: Double) -> String {
-    let sign = value < 0 ? "-" : ""
-    return sign + "$" + String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), abs(value))
+    let cents = (value * 100).rounded()
+    let sign = cents < 0 ? "-" : ""
+    return sign + "$" + String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), abs(cents) / 100)
   }
 }
