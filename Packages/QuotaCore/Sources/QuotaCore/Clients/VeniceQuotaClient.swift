@@ -77,6 +77,10 @@ public struct VeniceQuotaClient: QuotaProviderClient {
       }
       metrics.append(UsageMetric(
         id: "daily-diem", label: "Daily DIEM remaining", remainingPercent: remainingPercent, remainingAmount: diem,
+        // The fingerprint binds any estimate carried forward by
+        // VeniceQuotaEstimate to the key that produced the reading, so
+        // replacing the key can never inherit the old key's denominator.
+        estimateKeyHash: credentialFingerprint(apiKey),
         usedDisplay: "\(Self.amount(diem)) DIEM", resetAt: resetAt,
         resetIn: formatResetCountdown(to: resetAt, now: now), detail: detail
       ))

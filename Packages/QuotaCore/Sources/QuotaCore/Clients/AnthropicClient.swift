@@ -12,14 +12,28 @@ import FoundationNetworking
 public struct AnthropicClient: QuotaProviderClient {
   public let provider: QuotaProvider = .anthropic
   private let httpClient: any HTTPClient
+  private let claudeVersion: @Sendable () -> String?
 
   private static let usageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
-  // Must look like Claude Code or the endpoint drops us into a hostile rate-limit bucket.
-  private static let userAgent = "claude-code/1.0.110"
+  // Must look like Claude Code or the endpoint drops us into a hostile
+  // rate-limit bucket. Track the installed CLI's version so the UA doesn't
+  // drift stale as Claude Code updates; the constant is the no-CLI fallback.
+  private static let fallbackVersion = "1.0.110"
+  // Computed per request: ClaudeCodeVersion.current() probes in the
+  // background and returns nil until it lands, so the first requests after
+  // launch use the fallback and later ones pick up the real version.
+  private var userAgent: String {
+    "claude-code/\(claudeVersion() ?? Self.fallbackVersion)"
+  }
   private static let oauthBetaHeader = "oauth-2025-04-20"
 
   public init(httpClient: any HTTPClient) {
+    self.init(httpClient: httpClient, claudeVersion: { ClaudeCodeVersion.current() })
+  }
+
+  init(httpClient: any HTTPClient, claudeVersion: @escaping @Sendable () -> String?) {
     self.httpClient = httpClient
+    self.claudeVersion = claudeVersion
   }
 
   public func fetchUsage(configuration: ProviderRuntimeConfiguration, now: Date) async throws -> ProviderUsage {
@@ -36,7 +50,7 @@ public struct AnthropicClient: QuotaProviderClient {
     request.setValue(Self.oauthBetaHeader, forHTTPHeaderField: "anthropic-beta")
     request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+    request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
 
     let (data, response) = try await httpClient.data(for: request)
     guard (200..<300).contains(response.statusCode) else {

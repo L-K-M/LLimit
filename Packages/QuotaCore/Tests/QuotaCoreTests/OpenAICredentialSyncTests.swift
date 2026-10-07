@@ -108,4 +108,48 @@ final class OpenAICredentialSyncTests: XCTestCase {
     let updated = OpenAICredentialSync.adopting(live: live, into: stored)
     XCTAssertEqual(updated?[CredentialField.openAIRefreshToken], "r_keep")
   }
+
+  func testAdoptingPreservesEnvironmentReferences() {
+    // env: values are pointers to externally managed secrets; syncing the live
+    // Codex file must not replace them with persisted tokens.
+    let stored = creds(
+      access: "env:LLIMIT_TEST_ACCESS",
+      refresh: "env:LLIMIT_TEST_REFRESH",
+      account: "acct_A"
+    )
+    let live = [creds(access: "newA", refresh: "r1", account: "acct_A")]
+    let exp = expiryMap(["newA": base.addingTimeInterval(3600)])
+
+    XCTAssertNil(OpenAICredentialSync.adoption(for: stored, among: live, expiry: exp))
+
+    // Mixed storage: the literal access token still syncs, the pointer survives.
+    let mixed = creds(access: "old", refresh: "env:LLIMIT_TEST_REFRESH", account: "acct_A")
+    let exp2 = expiryMap(["old": base, "newA": base.addingTimeInterval(3600)])
+    let updated = OpenAICredentialSync.adoption(for: mixed, among: live, expiry: exp2)
+    XCTAssertEqual(updated?[CredentialField.openAIAccessToken], "newA")
+    XCTAssertEqual(updated?[CredentialField.openAIRefreshToken], "env:LLIMIT_TEST_REFRESH")
+  }
+
+  func testAdoptionMatchesResolvedIdentityWithoutSavingIt() {
+    let stored = creds(access: "old", refresh: "env:REFRESH", account: "env:ACCOUNT")
+    let live = [creds(access: "new", refresh: "new-refresh", account: "acct_A")]
+    let environment = ["ACCOUNT": "acct_A", "REFRESH": "external-refresh"]
+    let adopted = OpenAICredentialSync.adoption(
+      for: stored, among: live, environment: environment,
+      expiry: expiryMap(["old": base, "new": base.addingTimeInterval(3600)]))
+
+    XCTAssertEqual(adopted?[CredentialField.openAIAccessToken], "new")
+    XCTAssertEqual(adopted?[CredentialField.openAIAccountID], "env:ACCOUNT")
+    XCTAssertEqual(adopted?[CredentialField.openAIRefreshToken], "env:REFRESH")
+  }
+
+  func testResolvedExternalAccessPreventsDowngradingTheRefreshGrant() {
+    let stored = creds(access: "env:ACCESS", refresh: "current-refresh", account: "acct_A")
+    let live = [creds(access: "old", refresh: "old-refresh", account: "acct_A")]
+    let adopted = OpenAICredentialSync.adoption(
+      for: stored, among: live, environment: ["ACCESS": "new"],
+      expiry: expiryMap(["old": base, "new": base.addingTimeInterval(3600)]))
+
+    XCTAssertNil(adopted, "A pointer must compare by its resolved token's expiry")
+  }
 }

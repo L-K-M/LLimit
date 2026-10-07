@@ -59,6 +59,19 @@ final class VeniceQuotaClientTests: XCTestCase {
     XCTAssertFalse(String(decoding: try JSONEncoder().encode(usage), as: UTF8.self).contains(fixtureKey))
   }
 
+  func testDailyDIEMMetricIsStampedWithKeyFingerprint() async throws {
+    let http = VeniceHTTPStub(.response(200, usageBody), .response(200, billingBody))
+    let usage = try await VeniceQuotaClient(httpClient: http)
+      .fetchUsage(configuration: configuration(), now: now)
+    let metric = try XCTUnwrap(usage.metrics.first)
+    XCTAssertEqual(metric.estimateKeyHash, credentialFingerprint(fixtureKey))
+    XCTAssertNotEqual(metric.estimateKeyHash, credentialFingerprint("other-key"))
+    XCTAssertNil(usage.metrics[1].estimateKeyHash)
+    // The stamp is a change-detection fingerprint: stable, and never the key.
+    XCTAssertEqual(credentialFingerprint(fixtureKey), credentialFingerprint(fixtureKey))
+    XCTAssertFalse(metric.estimateKeyHash?.contains(fixtureKey) ?? true)
+  }
+
   func testInferenceKeyReturnsAmountsWithoutInventingPercentages() async throws {
     for deniedStatus in [401, 403] {
       let http = VeniceHTTPStub(.response(200, usageBody), .response(deniedStatus, #"{"error":"Admin API key required"}"#))
