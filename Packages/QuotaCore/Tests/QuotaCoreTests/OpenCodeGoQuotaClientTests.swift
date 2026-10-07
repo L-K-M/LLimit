@@ -120,10 +120,22 @@ final class OpenCodeGoQuotaClientTests: XCTestCase {
     }
   }
 
+  func testRateLimitedFlagWinsWithoutChangingReportedUse() async throws {
+    let body = validBody.replacingOccurrences(of: #""status": "ok", "percent": 60"#, with: #""status": "rate-limited", "percent": 97"#)
+    XCTAssertNotEqual(body, validBody)
+    let usage = try await OpenCodeGoQuotaClient(httpClient: RecordingGoHTTP(status: 200, body: body)).fetchUsage(configuration: configuration(), now: now)
+    let weekly = try XCTUnwrap(usage.metrics.first { $0.id == "weekly" })
+    XCTAssertEqual(weekly.remainingPercent, 0)
+    XCTAssertEqual(weekly.usedDisplay, "97%")
+    XCTAssertEqual(weekly.detail, "Limit reached")
+    XCTAssertEqual(usage.maxUsagePercent, 100)
+    XCTAssertEqual(usage.warning, "Limit reached")
+    XCTAssertEqual(usage.metrics.first { $0.id == "session-rolling" }?.remainingPercent, 75)
+  }
+
   func testRejectsInvalidStatusAndResetTimestamp() async {
     let invalidBodies = [
       validBody.replacingOccurrences(of: "\"status\": \"ok\"", with: "\"status\": \"unknown\""),
-      validBody.replacingOccurrences(of: "\"status\": \"ok\"", with: "\"status\": \"rate-limited\""),
       validBody.replacingOccurrences(of: "2026-09-27T19:34:56.123Z", with: "invalid fixture-go-key"),
       validBody.replacingOccurrences(of: "2026-09-27T19:34:56.123Z", with: "2026-09-27")
     ]

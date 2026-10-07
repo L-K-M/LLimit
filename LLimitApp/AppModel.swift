@@ -276,6 +276,8 @@ final class AppModel: ObservableObject {
     do {
       var refreshed = await refreshService.refresh(
         configurations: enabledConfigs, credentialFailures: claudeFailures, skippedAccountIDs: selection.skippedAccountIDs)
+      // Preserve completed usage and real failures when cancellation arrives late.
+      if Task.isCancelled, refreshed.providers.isEmpty, refreshed.failures.isEmpty { return }
       refreshed = removingChangedVeniceResults(
         from: refreshed, configurations: enabledConfigs, credentialRevisions: credentialRevisions)
       try refreshService.save(refreshed)
