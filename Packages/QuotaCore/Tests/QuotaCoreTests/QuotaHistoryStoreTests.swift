@@ -155,6 +155,38 @@ final class QuotaHistoryStoreTests: XCTestCase {
     XCTAssertEqual(history.last?.failures, [failure("a")])
   }
 
+  func testChangingFailureDeadlineAndTitleDoesNotEvictObservationsOrRewriteArchive() throws {
+    let (store, dir) = makeStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let url = dir.appendingPathComponent("history.json")
+    let success = QuotaSnapshot(generatedAt: base, providers: [reading("healthy", at: base)], failures: [])
+    try store.append(success, maxEntries: 2)
+
+    let failedAt = base.addingTimeInterval(900)
+    var limited = ProviderFailure(accountID: "limited", provider: .anthropic, kind: .rateLimit,
+      message: "Try again later", retryAt: failedAt.addingTimeInterval(900))
+    limited.title = "Original name"
+    let failureSnapshot = QuotaSnapshot(generatedAt: failedAt, providers: [], failures: [limited])
+    try store.append(failureSnapshot, maxEntries: 2)
+    let original = try Data(contentsOf: url)
+
+    for cycle in 1...10 {
+      let date = failedAt.addingTimeInterval(Double(cycle) * 900)
+      limited.retryAt = date.addingTimeInterval(900)
+      limited.title = "Renamed account"
+      let archive = try store.append(QuotaSnapshot(generatedAt: date, providers: [], failures: [limited]), maxEntries: 2)
+
+      XCTAssertEqual(archive.snapshots, [success, failureSnapshot])
+      XCTAssertEqual(try Data(contentsOf: url), original)
+    }
+
+    limited.kind = .auth
+    let changed = QuotaSnapshot(generatedAt: failedAt.addingTimeInterval(11 * 900), providers: [], failures: [limited])
+    let archive = try store.append(changed, maxEntries: 3)
+    XCTAssertEqual(archive.snapshots, [success, failureSnapshot, changed])
+    XCTAssertEqual(archive.snapshots.last?.failures, [limited])
+  }
+
   func testDuplicateStillPrunesRetentionAndCannotResurrectExpiredCarry() throws {
     let (store, dir) = makeStore()
     defer { try? FileManager.default.removeItem(at: dir) }

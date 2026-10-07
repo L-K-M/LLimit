@@ -157,9 +157,10 @@ public final class QuotaHistoryStore: @unchecked Sendable {
       }
     }
 
-    // Completion order and duplicate failures do not represent state changes.
-    return Set(snapshot.failures).filter {
-      states[FailureKey(provider: $0.provider, accountID: $0.accountID)] != $0
+    // Deadlines and display names belong to the live snapshot, not failure transitions.
+    return Set(snapshot.failures).filter { failure in
+      guard let previous = states[FailureKey(provider: failure.provider, accountID: failure.accountID)] else { return true }
+      return previous.kind != failure.kind || previous.message != failure.message
     }.sorted {
       ($0.provider.rawValue, $0.accountID, $0.kind.rawValue, $0.message)
         < ($1.provider.rawValue, $1.accountID, $1.kind.rawValue, $1.message)
