@@ -805,9 +805,10 @@ private func trendChartData(for entry: QuotaEntry, days: Int) -> TrendChartData 
         )
       )
 
-      // Retired lines have no current value to project.
-      guard !line.isRetired else { continue }
+      // Retired lines have no current value to project. One forecast per
+      // metric keeps warning ids unique.
       let key = QuotaForecast.SeriesKey(accountID: line.accountID, metricID: line.metricID)
+      guard !line.isRetired, !forecastKeys.contains(key) else { continue }
       forecastKeys.append(key)
       warningLabels[key] = "\(compactProviderName(for: usage)) \(compactMetricLabel(line.label))"
     }
@@ -862,16 +863,20 @@ private func seriesStyle(for kind: QuotaWindowKind) -> (lineWidth: CGFloat, opac
   }
 }
 
-/// Same-hue repeats within one account: a long dash, then dots. The two
-/// rhythms stay distinct because dashed lines use butt caps.
+/// Same-hue repeats within one account: a long dash, dots, then dash-dot.
+/// The rhythms stay distinct because dashed lines use butt caps. Four
+/// same-hue lines happen when retired lines join live ones (an OpenAI slot
+/// that changed window, a renamed per-model quota); a fifth repeats dash-dot.
 private func trendDashPattern(forDuplicateOrdinal ordinal: Int) -> [CGFloat] {
   switch ordinal {
   case 0:
     return []
   case 1:
     return [5, 3]
-  default:
+  case 2:
     return [1.5, 2.5]
+  default:
+    return [5, 2.5, 1.5, 2.5]
   }
 }
 

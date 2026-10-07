@@ -6,7 +6,8 @@ final class QuotaForecastTests: XCTestCase {
   private let minute: TimeInterval = 60
   private let hour: TimeInterval = 3_600
   private let day: TimeInterval = 86_400
-  private let refreshInterval: TimeInterval = 30 * 60
+  private static let refreshInterval: TimeInterval = 30 * 60
+  private var refreshInterval: TimeInterval { Self.refreshInterval }
   private let weekly = (id: "secondary", label: "7-day limit")
 
   // MARK: - Regressions from the trend widget's old forecast
@@ -196,6 +197,95 @@ final class QuotaForecastTests: XCTestCase {
     XCTAssertEqual(warnings, [])
   }
 
+  func testNonPositiveRefreshIntervalStillAcceptsRecentData() {
+    // Fetched ten minutes ago: fresh for any refresh interval LLimit allows.
+    var history = overpacedWeek(account: "acct", usedPercentPerDay: 21)
+    let last = history.removeLast()
+    let tenMinutesAgo = now.addingTimeInterval(-10 * minute)
+    history.append(QuotaSnapshot(
+      generatedAt: last.generatedAt,
+      providers: last.providers.map { usage in
+        var usage = usage
+        usage.fetchedAt = tenMinutesAgo
+        return usage
+      },
+      failures: []
+    ))
+
+    for interval in [0, -60] as [TimeInterval] {
+      let warnings = QuotaForecast.depletionWarnings(
+        for: [QuotaForecast.SeriesKey(accountID: "acct", metricID: weekly.id)],
+        history: history,
+        latest: history.last,
+        now: now,
+        refreshInterval: interval
+      )
+      XCTAssertEqual(warnings.map(\.accountID), ["acct"], "refresh interval \(interval)")
+    }
+  }
+
+  func testLateSurgeAtLowRemainingWarns() throws {
+    // Six quiet days left 30%, then the last three hours burned 10 more.
+    // The window average (about 13% a day) would last past tomorrow's
+    // reset; the recent pace empties the window within hours.
+    let windowStart = now.addingTimeInterval(-6 * day)
+    let surgeStart = now.addingTimeInterval(-3 * hour)
+    let resetAt = now.addingTimeInterval(day)
+    let history = timeline(from: windowStart, to: now) { date in
+      let remaining: Double
+      if date <= surgeStart {
+        remaining = 100 - 70 * date.timeIntervalSince(windowStart) / surgeStart.timeIntervalSince(windowStart)
+      } else {
+        remaining = 30 - 10 * date.timeIntervalSince(surgeStart) / (3 * self.hour)
+      }
+      return [self.usage("acct", at: date, metrics: [
+        self.metric(self.weekly.id, self.weekly.label, remaining: remaining, resetAt: resetAt)
+      ])]
+    }
+
+    let warning = try XCTUnwrap(warnings(for: [("acct", weekly.id)], history: history).first)
+
+    XCTAssertLessThan(warning.depletionAt.timeIntervalSince(now), 12 * hour)
+  }
+
+  func testLateSurgeAboveTheLowThresholdStaysSilent() {
+    // The same surge with half the window left is a burst, not a crisis.
+    let windowStart = now.addingTimeInterval(-6 * day)
+    let surgeStart = now.addingTimeInterval(-3 * hour)
+    let history = timeline(from: windowStart, to: now) { date in
+      let remaining: Double
+      if date <= surgeStart {
+        remaining = 100 - 40 * date.timeIntervalSince(windowStart) / surgeStart.timeIntervalSince(windowStart)
+      } else {
+        remaining = 60 - 10 * date.timeIntervalSince(surgeStart) / (3 * self.hour)
+      }
+      return [self.usage("acct", at: date, metrics: [
+        self.metric(self.weekly.id, self.weekly.label, remaining: remaining, resetAt: self.now.addingTimeInterval(self.day))
+      ])]
+    }
+
+    XCTAssertEqual(warnings(for: [("acct", weekly.id)], history: history), [])
+  }
+
+  func testChartLineKeyMatchesForecastForBlankMetricID() throws {
+    // A blank id falls back to the label on both sides.
+    let history = overpacedWeek(account: "acct", usedPercentPerDay: 21, metricID: " ", label: "7-day limit")
+    let settings = AppSettings(accounts: [ProviderAccount(id: "acct", provider: .openAI)])
+    let content = TrendSeriesBuilder.build(snapshots: history, latest: history.last, settings: settings)
+    let line = try XCTUnwrap(content.accounts.first?.series.first)
+
+    let warnings = QuotaForecast.depletionWarnings(
+      for: [QuotaForecast.SeriesKey(accountID: line.accountID, metricID: line.metricID)],
+      history: history,
+      latest: history.last,
+      now: now,
+      refreshInterval: refreshInterval
+    )
+
+    XCTAssertEqual(line.metricID, "7-day limit")
+    XCTAssertEqual(warnings.map(\.metricID), ["7-day limit"])
+  }
+
   // MARK: - Fixtures
 
   /// A seven-day window that reset two days ago and has been used steadily since.
@@ -228,7 +318,7 @@ final class QuotaForecastTests: XCTestCase {
   private func timeline(
     from start: Date,
     to end: Date,
-    every step: TimeInterval = 30 * 60,
+    every step: TimeInterval = QuotaForecastTests.refreshInterval,
     _ usages: (Date) -> [ProviderUsage]
   ) -> [QuotaSnapshot] {
     stride(from: start.timeIntervalSince1970, through: end.timeIntervalSince1970, by: step).map { seconds in
@@ -245,6 +335,9 @@ final class QuotaForecastTests: XCTestCase {
     ProviderUsage(accountID: accountID, provider: .openAI, title: accountID, metrics: metrics, fetchedAt: date)
   }
 
+  /// `remainingPercent` is an Int, so linear fixtures drop in whole-percent
+  /// steps. Keep slope-derived assertions coarse (`accuracy: hour`, wide
+  /// margins around now and the reset): a tight failure here is rounding.
   private func metric(_ id: String, _ label: String, remaining: Double, resetAt: Date?) -> UsageMetric {
     UsageMetric(id: id, label: label, remainingPercent: Int(remaining.rounded()), resetAt: resetAt)
   }

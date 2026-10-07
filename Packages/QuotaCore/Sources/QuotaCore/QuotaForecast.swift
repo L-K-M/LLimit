@@ -37,8 +37,10 @@ public struct QuotaDepletionWarning: Hashable, Sendable {
 ///
 /// Only live, fresh data may warn: the metric must be in the latest snapshot,
 /// the account must not be failing, and its last fetch must be recent. The
-/// pace is the window's average since its last reset, measured on raw
-/// samples, so one burst inside a quiet week does not raise an alarm.
+/// main pace is the window's average since its last reset, measured on raw
+/// samples, so one burst inside a quiet week does not raise an alarm. Once
+/// little is left, the recent pace may warn too, so a late surge that will
+/// empty the window before its reset is not averaged away.
 public enum QuotaForecast {
   public struct SeriesKey: Hashable, Sendable {
     public let accountID: String
@@ -61,10 +63,19 @@ public enum QuotaForecast {
   static let resetJumpThreshold: Double = 4
   /// Data older than this many refresh intervals is too stale to project.
   static let freshnessIntervals: Double = 2
+  /// The shortest refresh cadence LLimit allows. A smaller or non-positive
+  /// interval from a caller must not make every reading look stale.
+  static let minimumRefreshInterval = TimeInterval(AppSettings.refreshIntervalRange.lowerBound * 60)
   static let minimumSampleCount = 4
   static let minimumObservedSpan: TimeInterval = 3_600
   /// Share of the window that must be observed before its pace counts.
   static let minimumWindowFraction = 0.1
+  /// At or below this many percent left, the recent pace may warn even
+  /// when the window's average pace would last until the reset.
+  static let lowRemainingPercent: Double = 25
+  /// The recent pace covers at least this long, over at least
+  /// `minimumSampleCount` samples.
+  static let recentPaceSpan: TimeInterval = 2 * 3_600
 
   /// Warnings for `keys`, earliest depletion first. `history` may include
   /// `latest`; `refreshInterval` is the app's refresh cadence in seconds.
@@ -102,7 +113,7 @@ public enum QuotaForecast {
     guard
       !latest.failures.contains(where: { $0.accountID == key.accountID }),
       let usage = latest.providers.first(where: { $0.accountID == key.accountID }),
-      now.timeIntervalSince(usage.fetchedAt) <= freshnessIntervals * refreshInterval,
+      now.timeIntervalSince(usage.fetchedAt) <= freshnessIntervals * max(refreshInterval, minimumRefreshInterval),
       let metric = usage.metrics.first(where: { $0.trendSeriesID == key.metricID }),
       !metric.isUnlimited,
       metric.remainingPercent != nil,
@@ -116,24 +127,14 @@ public enum QuotaForecast {
     }
 
     let window = currentWindow(of: samples(for: key, in: snapshots))
-    guard
-      window.count >= minimumSampleCount,
-      let first = window.first,
-      let last = window.last
-    else {
+    let projections = [
+      averagePaceDepletion(of: window, windowLength: windowLength),
+      recentPaceDepletion(of: window)
+    ]
+    // The earliest projection that lands between now and the reset.
+    guard let depletionAt = projections.compactMap({ $0 }).filter({ $0 > now && $0 < resetAt }).min() else {
       return nil
     }
-
-    let span = last.date.timeIntervalSince(first.date)
-    guard span >= max(minimumObservedSpan, minimumWindowFraction * windowLength) else {
-      return nil
-    }
-
-    let consumed = first.remainingPercent - last.remainingPercent
-    guard consumed > 0 else { return nil }
-
-    let depletionAt = last.date.addingTimeInterval(last.remainingPercent / consumed * span)
-    guard depletionAt > now, depletionAt < resetAt else { return nil }
 
     return QuotaDepletionWarning(
       accountID: key.accountID,
@@ -142,6 +143,42 @@ public enum QuotaForecast {
       depletionAt: depletionAt,
       resetAt: resetAt
     )
+  }
+
+  /// Depletion at the window's average pace since its last reset, once
+  /// enough of the window is observed for the average to mean something.
+  private static func averagePaceDepletion(of window: [Sample], windowLength: TimeInterval) -> Date? {
+    guard window.count >= minimumSampleCount, let first = window.first, let last = window.last else {
+      return nil
+    }
+
+    let span = last.date.timeIntervalSince(first.date)
+    guard span >= max(minimumObservedSpan, minimumWindowFraction * windowLength) else {
+      return nil
+    }
+    return projectedDepletion(from: first, to: last)
+  }
+
+  /// Depletion at the pace of the last `recentPaceSpan`, only once the
+  /// window is nearly spent: a late surge then decides whether it lasts,
+  /// while the same burst with plenty left is noise.
+  private static func recentPaceDepletion(of window: [Sample]) -> Date? {
+    guard let last = window.last, last.remainingPercent <= lowRemainingPercent else { return nil }
+
+    let anchorDate = last.date.addingTimeInterval(-recentPaceSpan)
+    guard let anchorIndex = window.lastIndex(where: { $0.date <= anchorDate }) else { return nil }
+
+    let recent = window[anchorIndex...]
+    guard recent.count >= minimumSampleCount, let first = recent.first else { return nil }
+    return projectedDepletion(from: first, to: last)
+  }
+
+  /// Straight-line projection from `first` through `last` to 0%.
+  private static func projectedDepletion(from first: Sample, to last: Sample) -> Date? {
+    let consumed = first.remainingPercent - last.remainingPercent
+    let span = last.date.timeIntervalSince(first.date)
+    guard consumed > 0, span > 0 else { return nil }
+    return last.date.addingTimeInterval(last.remainingPercent / consumed * span)
   }
 
   /// One sample per provider fetch, dated by `fetchedAt`: snapshots that

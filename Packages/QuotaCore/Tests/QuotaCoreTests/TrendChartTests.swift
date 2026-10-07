@@ -18,7 +18,7 @@ final class TrendChartTests: XCTestCase {
       UsageMetric(id: "primary", label: "7-day limit", remainingPercent: 66)
     ])])
 
-    let content = TrendSeriesBuilder.build(snapshots: [after, before], latest: after, settings: settings)
+    let content = TrendSeriesBuilder.build(snapshots: [before, after], latest: after, settings: settings)
     let series = try XCTUnwrap(content.accounts.first).series
 
     XCTAssertEqual(series.map(\.metricID), ["primary", "secondary", "primary"])
@@ -49,6 +49,21 @@ final class TrendChartTests: XCTestCase {
     let content = TrendSeriesBuilder.build(snapshots: [before, after], latest: after, settings: settings)
 
     XCTAssertEqual(try XCTUnwrap(content.accounts.first).series.map(\.metricID), ["tokens", "mcp"])
+  }
+
+  func testHidingShortTermLimitsKeepsAnAccountWhoseOnlyWindowIsShort() throws {
+    // The short-term filter never empties an account, so it cannot be the
+    // reason for an empty chart.
+    var settings = AppSettings(accounts: [account("z1", .zai)])
+    settings.widgetVisibility.showShortTermLimitsInTrend = false
+    let latest = snapshot(at: now, [usage("z1", .zai, [
+      UsageMetric(id: "tokens", label: "5-hour token limit", remainingPercent: 70)
+    ])])
+
+    let content = TrendSeriesBuilder.build(snapshots: [latest], latest: latest, settings: settings)
+
+    XCTAssertNil(content.emptyReason)
+    XCTAssertEqual(try XCTUnwrap(content.accounts.first).series.map(\.slot.kind), [.session])
   }
 
   func testSlotComesFromTheNewestUsage() throws {
@@ -177,6 +192,18 @@ final class TrendChartTests: XCTestCase {
     XCTAssertEqual(ticks.map { normalized($0.label) }, ["3 PM", "6 PM", "9 PM", "Sun", "3 AM", "6 AM", "9 AM", "12 PM"])
     // 1 AM happens twice, so midnight to 3 AM is four hours.
     XCTAssertEqual(ticks[4].date.timeIntervalSince(ticks[3].date), 4 * hour)
+  }
+
+  func testRepeatedFallBackHourGetsOneTick() {
+    let calendar = newYorkCalendar
+    let start = date(2026, 10, 31, 23, 30, calendar)
+    let end = date(2026, 11, 1, 4, 30, calendar)
+
+    let ticks = TrendAxisTicks.make(start: start, end: end, calendar: calendar, locale: enUS, maxLabels: 8)
+
+    XCTAssertEqual(ticks.map { normalized($0.label) }, ["Sun", "1 AM", "2 AM", "3 AM", "4 AM"])
+    // The first 1 AM (daylight time) keeps the tick.
+    XCTAssertEqual(ticks[1].date.timeIntervalSince(ticks[0].date), hour)
   }
 
   func testWeekSpanUsesLocalMidnightsAcrossSpringForward() {

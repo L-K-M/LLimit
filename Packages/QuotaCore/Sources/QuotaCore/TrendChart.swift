@@ -285,9 +285,10 @@ public enum TrendAxisTicks {
   private static let hourStrides = [1, 2, 3, 4, 6, 12]
   private static let dayStrides = [1, 2, 3, 5, 7, 10, 14]
 
-  /// At most `maxLabels` ticks at local hour or midnight boundaries inside
-  /// `start...end`. A midnight among hour ticks shows its weekday, and
-  /// day-of-month ticks show the month at the first tick and at month changes.
+  /// At most `maxLabels` ticks at local hour or midnight boundaries after
+  /// `start`, up to and including `end`. A midnight among hour ticks shows
+  /// its weekday, and day-of-month ticks show the month at the first tick
+  /// and at month changes.
   public static func make(start: Date, end: Date, calendar: Calendar, locale: Locale, maxLabels: Int) -> [TrendAxisTick] {
     guard end > start, maxLabels > 0 else { return [] }
 
@@ -334,16 +335,21 @@ public enum TrendAxisTicks {
   }
 
   private static func hourTicks(start: Date, end: Date, calendar: Calendar, locale: Locale, maxLabels: Int) -> [TrendAxisTick] {
+    func hourOfDay(_ date: Date) -> Int { calendar.component(.hour, from: date) }
+
     var hours: [Date] = []
     var next = calendar.dateInterval(of: .hour, for: start)?.end
     while let current = next, current <= end {
-      hours.append(current)
+      // The hour that repeats when clocks fall back keeps only its first
+      // tick: two "1 AM" labels side by side would read as a mistake.
+      if hours.last.map(hourOfDay) != hourOfDay(current) {
+        hours.append(current)
+      }
       // Adding an hour steps through repeated and skipped DST hours.
       guard let following = calendar.date(byAdding: .hour, value: 1, to: current), following > current else { break }
       next = following
     }
 
-    func hourOfDay(_ date: Date) -> Int { calendar.component(.hour, from: date) }
     let stride = hourStrides.first { stride in
       hours.filter { hourOfDay($0) % stride == 0 }.count <= maxLabels
     } ?? hourStrides[hourStrides.count - 1]
