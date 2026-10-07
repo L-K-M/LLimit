@@ -15,8 +15,13 @@ live in [`examples/`](examples/).
   - `SettingsLock.swift` — flock-based mutual exclusion for settings read-modify-write
     (daemon token refresh vs. concurrent `llimit accounts …`).
   - `StatusRenderer.swift` — human-readable status and the waybar JSON contract.
-- `Sources/llimit/` — the CLI executable (`main.swift`).
-- `examples/` — waybar / polybar / eww modules consuming `llimit status --json`.
+  - `StatusTemplate.swift` — `llimit status --format` templates.
+  - `ScriptCommands.swift` — options and results of `status`, `check` and `pick`,
+    ranked by QuotaCore's `HeadroomRanking`.
+- `Sources/llimit/` — the CLI executable (`main.swift`; `SnapshotCommands.swift`
+  holds the snapshot-only `status`, `check` and `pick`).
+- `examples/` — waybar / polybar / eww modules consuming `llimit status --json`,
+  tmux and starship status lines, and an agent wrapper built on `llimit pick`.
 - `tray/` — the tray icon (Python/PyGObject; see "Tray icon"). `llimit_tray.py`
   keeps its menu model as a pure function so it is unit-tested without GTK;
   `tray/tests/` holds those tests and `tray/icons/` the per-status SVGs.
@@ -52,8 +57,14 @@ llimit accounts reimport <id>                   # refresh credentials from a loc
 llimit refresh                                  # one-shot fetch, writes the snapshot
 llimit status                                   # human-readable
 llimit status --json                            # waybar/polybar contract
+llimit status --worst --format '{name} {remaining}'  # one short line, see below
+llimit check anthropic --min 10                 # exit status for scripts
+llimit pick --provider anthropic,openai         # account with the most quota left
 llimit daemon                                   # refresh loop in the foreground
 ```
+
+`status`, `check` and `pick` read only the snapshot, never the settings file, so
+bars and prompts can poll them as often as they like.
 
 Fetch errors never crash the daemon: a failed account records a `ProviderFailure`
 and keeps showing its last-known usage (same `mergingStaleUsage(from:)` behavior as
@@ -81,9 +92,9 @@ to add it as a separate account.
 If the settings file can't be read or parsed, every command that uses it stops
 and names the file and the failing location, such as `accounts[0].provider`. The
 message never quotes the file's contents. LLimit never overwrites the file and
-keeps the saved snapshot. `llimit status` still renders the last snapshot, with
-a warning on stderr. The daemon logs the problem once and skips refreshes until
-the file is fixed.
+keeps the saved snapshot. `llimit status`, `check` and `pick` read only the
+snapshot, so they keep working. The daemon logs the problem once and skips
+refreshes until the file is fixed.
 
 OpenCode Go reports rolling, weekly, and monthly subscription limits. Add it with
 `--provider opencode-go`, or import the `opencode-go` API key from OpenCode's
@@ -133,6 +144,90 @@ credentials, ever. Ready-made modules:
 - `examples/eww/` — `defpoll` widget; eww parses the JSON natively.
 
 See [`examples/README.md`](examples/README.md) for the full key-by-key contract.
+
+## Status lines and scripts
+
+### Templates
+
+`llimit status --format '<template>'` prints one expansion per account, joined
+by `--separator` (default ` · `), for tmux, starship, i3blocks or a shell prompt:
+
+```
+$ llimit status --format '{name} {remaining}'
+Claude 35% · Kimi 95% · OpenAI 55%
+$ llimit status --worst --format '{name} {remaining} {kind}, resets in {reset}'
+Claude 35% weekly, resets in 2d 3h
+```
+
+| placeholder | value |
+| --- | --- |
+| `{id}` | account id |
+| `{name}` | account name |
+| `{provider}` | provider id, e.g. `anthropic` |
+| `{remaining}` | `42%`, `≈42%` when estimated, `unlimited`, or `n/a` without a percentage |
+| `{metric}` | label of the limit behind `{remaining}`, e.g. `7-day limit` |
+| `{kind}` | that limit's window: `session`, `daily`, `weekly`, `monthly`, `other` |
+| `{reset}` | time until that limit resets, e.g. `3h 12m`; empty when unknown |
+| `{class}` | `ok`, `warning` (< 40%), `critical` (< 15%), `error` (refresh failed), `empty` |
+| `{age}` | age of the account's data, e.g. `4 min ago` |
+| `{stale}` | `stale` when the data is older than two hours, otherwise empty |
+
+`{remaining}` is the account's lowest remaining percentage, like the bar
+headline; balances without a percentage show `n/a` (the `--json` output has
+them). Unknown placeholders are printed as written. Values never contain line
+breaks or tabs.
+
+The other status options also work with the default and `--json` output:
+
+- `--account <id|provider>` (repeatable) shows only those accounts. Ids may be
+  shortened to a unique prefix; a provider id selects all of its accounts.
+- `--worst` shows only the account with the least quota left, including stale or
+  failing accounts with data on record.
+- `--kind <kind>` ranks `--worst` and fills `{remaining}` from one window kind.
+- `--watch [duration]` re-renders every interval (default 60s; a bare number is
+  seconds, as in `--max-age`) until interrupted, flushing each render, for
+  consumers that read a stream (i3blocks `interval=persist`, waybar without
+  `interval`). Each distinct warning is printed to stderr only once.
+- A provider or account with nothing in the snapshot selects nothing and gets a
+  warning on stderr. A blank `--format` template is an error.
+
+Without these options, `llimit status` and `llimit status --json` print exactly
+what they always have.
+
+### `check` and `pick`
+
+```
+llimit check <account-id|provider> [--min <pct>] [--max-age <duration>] [--kind <kind>]
+llimit pick [--provider <id>[,<id>…]] [--kind <kind>] [--min <pct>] [--max-age <duration>] [--format <template>]
+```
+
+Both rank accounts by headroom: the lowest remaining percentage across an
+account's limits (or across one `--kind` of window). Unlimited quota ranks above
+every percentage, and ties go to the account whose limit resets sooner. Accounts
+whose last refresh failed, or whose data is older than `--max-age` (default
+`2h`; accepts `90s`, `30m`, `2h`, `1d`), are excluded. Raise `--max-age` if your
+refresh interval is longer than two hours.
+
+`check` reports on one account, or on the best account of a provider, and prints
+one line. `pick` prints the best account as `<id><TAB><name>`, or through
+`--format` with the template placeholders above; when nothing qualifies, stdout
+stays empty and the reason goes to stderr. `--min` defaults to 1 (not exhausted).
+
+| exit status | meaning |
+| --- | --- |
+| 0 | ok: at least `--min` percent left |
+| 1 | below `--min` |
+| 2 | stale or failing: no current data, refreshing may help |
+| 3 | no data: no snapshot, unknown account, or no quota reported |
+| 64 | usage error |
+
+```
+if llimit check anthropic --min 10 >/dev/null; then claude; else codex; fi
+```
+
+`examples/agent-wrapper/llimit-agent` does this with `pick`, and
+`examples/tmux/` and `examples/starship/` show the templates in a status line and
+a prompt.
 
 ## Tray icon
 

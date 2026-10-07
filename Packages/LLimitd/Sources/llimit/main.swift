@@ -36,9 +36,19 @@ func printUsage() {
       llimit accounts reimport <account-id> [--from <stable-id>]
       llimit accounts import [--id <stable-id> | --all] --new
       llimit refresh
-      llimit status [--json]
+      llimit status [--json | --format <template> [--separator <text>]] [--account <id|provider>]…
+                    [--worst] [--kind <kind>] [--watch [<duration>]]
       llimit daemon
       llimit paths
+      llimit check <account-id|provider> [--min <pct>] [--max-age <duration>] [--kind <kind>]
+      llimit pick [--provider <id>[,<id>…]] [--kind <kind>] [--min <pct>] [--max-age <duration>]
+                  [--format <template>]
+
+    check and pick exit 0 ok, 1 below --min (default 1), 2 stale (older than --max-age,
+    default 2h) or failing, 3 no data, 64 usage error. Durations: 90 or 90s, 30m, 2h,
+    1d; --watch defaults to 60s. Window kinds: session, daily, weekly, monthly, other.
+    Template placeholders: {id} {name} {provider} {remaining} {metric} {kind} {reset}
+    {class} {age} {stale}.
 
     Providers: \(QuotaProvider.allCases.map(\.rawValue).joined(separator: ", "))
     Account IDs may be shortened to any unique prefix.
@@ -47,18 +57,13 @@ func printUsage() {
 }
 
 /// Loads settings for a command. An unreadable settings file stops every command
-/// that works with the settings. `status` only renders the saved snapshot, so it
-/// carries on and bars keep showing the last-known usage; the problem goes to
-/// stderr.
+/// that works with the settings. `status`, `check` and `pick` never call this:
+/// they read only the saved snapshot, so bars keep showing the last-known usage.
 func makeDaemon() -> QuotaDaemon {
   let daemon = QuotaDaemon(paths: LinuxPaths())
   daemon.loadConfiguration()
   guard let settingsError = daemon.settingsLoadError else { return daemon }
 
-  if arguments.first == "status" {
-    FileHandle.standardError.write(Data("llimit: warning: \(settingsError.localizedDescription)\n".utf8))
-    return daemon
-  }
   fail(settingsError.localizedDescription)
 }
 
@@ -576,12 +581,21 @@ func runRefresh() async {
   print(StatusRenderer.humanReadable(snapshot: daemon.snapshot))
 }
 
+/// Renders the snapshot only (see SnapshotCommands.swift); `--watch` repeats the
+/// render until interrupted.
 func runStatus(_ args: [String]) {
-  let daemon = makeDaemon()
-  if args.contains("--json") {
-    print(StatusRenderer.waybarJSON(snapshot: daemon.snapshot))
-  } else {
-    print(StatusRenderer.humanReadable(snapshot: daemon.snapshot))
+  let options: StatusOptions
+  do {
+    options = try StatusOptions.parse(args)
+  } catch {
+    fail(error.localizedDescription)
+  }
+
+  let warnings = StatusWarnings()
+  while true {
+    printStatus(options, warnings: warnings)
+    guard let interval = options.watchInterval else { return }
+    Thread.sleep(forTimeInterval: interval)
   }
 }
 
@@ -661,6 +675,10 @@ case "paths":
   print("settings: \(paths.settingsFileURL.path)")
   print("snapshot: \(paths.snapshotFileURL.path)")
   print("history:  \(paths.historyFileURL.path)")
+case "check":
+  runCheck(Array(arguments.dropFirst()))
+case "pick":
+  runPick(Array(arguments.dropFirst()))
 case "help", "--help", "-h":
   printUsage()
 default:
