@@ -26,13 +26,19 @@ func quarantineCorruptFile(at fileURL: URL) -> Bool {
   let quarantined = fileURL.deletingLastPathComponent()
     .appendingPathComponent(prefix + UUID().uuidString)
   do {
+    // Privacy is required before moving a legacy loose file into quarantine.
+    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
     try FileManager.default.moveItem(at: fileURL, to: quarantined)
-    // Order retention by quarantine time, not an old source file's age.
-    try FileManager.default.setAttributes(
-      [.posixPermissions: 0o600, .modificationDate: Date()], ofItemAtPath: quarantined.path)
   } catch {
     reportPersistenceIssue("Could not quarantine \(fileURL.lastPathComponent); recovery stopped.")
     return false
+  }
+
+  // The private bytes are preserved. A timestamp failure cannot undo the move.
+  do {
+    try FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: quarantined.path)
+  } catch {
+    reportPersistenceIssue("Preserved \(fileURL.lastPathComponent), but could not record its quarantine time.")
   }
 
   let directory = fileURL.deletingLastPathComponent()

@@ -23,6 +23,7 @@ func writeOwnerOnlyAtomically(_ data: Data, to fileURL: URL) throws {
     }
     try writeAll(data, to: descriptor, fileURL: fileURL)
     try synchronize(descriptor, fileURL: fileURL)
+    try verifyOwnerOnlyFile(descriptor, fileURL: fileURL)
   } catch {
     close(descriptor)
     try? FileManager.default.removeItem(at: temporaryURL)
@@ -39,8 +40,6 @@ func writeOwnerOnlyAtomically(_ data: Data, to fileURL: URL) throws {
     try? FileManager.default.removeItem(at: temporaryURL)
     throw error
   }
-
-  try verifyOwnerOnlyFile(at: fileURL)
 
   // The bytes have committed. A directory-sync failure cannot undo that
   // replacement, so report it without encouraging a rotating-grant replay.
@@ -74,9 +73,9 @@ private func synchronize(_ descriptor: Int32, fileURL: URL) throws {
   }
 }
 
-private func verifyOwnerOnlyFile(at fileURL: URL) throws {
+private func verifyOwnerOnlyFile(_ descriptor: Int32, fileURL: URL) throws {
   var status = stat()
-  guard lstat(fileURL.path, &status) == 0 else { throw privateFileError("verify", fileURL: fileURL) }
+  guard fstat(descriptor, &status) == 0 else { throw privateFileError("verify", fileURL: fileURL) }
   guard status.st_mode & S_IFMT == S_IFREG, status.st_mode & 0o777 == ownerOnlyFileMode else {
     throw CocoaError(.fileWriteNoPermission, userInfo: [
       NSFilePathErrorKey: fileURL.path,
