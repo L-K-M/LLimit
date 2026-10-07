@@ -263,7 +263,7 @@ final class AppModel: ObservableObject {
       guard configuration.provider == .venice else { return nil }
       guard let current = account(withID: configuration.accountID), current.isEnabled,
             current.credentials.resolvingEnvironmentReferences()[CredentialField.veniceAPIKey]
-              == configuration.credentials[CredentialField.veniceAPIKey] else {
+              == configuration.credentials.resolvingEnvironmentReferences()[CredentialField.veniceAPIKey] else {
         return configuration.accountID
       }
       return nil
