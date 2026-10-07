@@ -161,7 +161,7 @@ The other status options also work with the default and `--json` output:
   consumers that read a stream (i3blocks `interval=persist`, waybar without
   `interval`). Each distinct warning is printed to stderr only once.
 - A provider or account with nothing in the snapshot selects nothing and gets a
-  warning on stderr. An empty `--format` template is an error.
+  warning on stderr. A blank `--format` template is an error.
 
 Without these options, `llimit status` and `llimit status --json` print exactly
 what they always have.

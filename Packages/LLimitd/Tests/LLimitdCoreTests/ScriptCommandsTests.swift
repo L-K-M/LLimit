@@ -161,7 +161,7 @@ final class ScriptCommandsTests: XCTestCase {
     XCTAssertEqual(defaults.criteria.maxAge, 7_200)
     XCTAssertEqual(defaults.template, "{id}\t{name}")
 
-    for bad in [["--provider", "claude"], ["--provider", ","], ["--format", ""], ["--kind", "yearly"], ["--min", "101"], ["--min", "x"], ["--max-age", "0"], ["--max-age"], ["extra"]] {
+    for bad in [["--provider", "claude"], ["--provider", ","], ["--format", ""], ["--format", "  "], ["--format", "\t\n"], ["--kind", "yearly"], ["--min", "101"], ["--min", "x"], ["--max-age", "0"], ["--max-age"], ["extra"]] {
       XCTAssertThrowsError(try PickOptions.parse(bad), "\(bad)")
     }
   }
@@ -253,7 +253,7 @@ final class ScriptCommandsTests: XCTestCase {
     XCTAssertEqual(try StatusOptions.parse(["--watch", "2m"]).watchInterval, 120)
     XCTAssertEqual(try StatusOptions.parse(["--worst", "--kind", "daily"]).selection, .worst)
 
-    for bad in [["--json", "--format", "x"], ["--format", ""], ["--separator", "x"], ["--kind", "weekly"], ["--watch", "0.5"], ["--watch", "soon"], ["--format"], ["--bogus"], ["stray"]] {
+    for bad in [["--json", "--format", "x"], ["--format", ""], ["--format", "  "], ["--format", "\t\n"], ["--separator", "x"], ["--kind", "weekly"], ["--watch", "0.5"], ["--watch", "soon"], ["--format"], ["--bogus"], ["stray"]] {
       XCTAssertThrowsError(try StatusOptions.parse(bad), "\(bad)")
     }
   }

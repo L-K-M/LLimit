@@ -471,11 +471,11 @@ enum CommandLineValues {
     return args[index]
   }
 
-  /// An empty template would print blank lines that look like success.
+  /// A blank template would print blank lines that look like success.
   static func template(after option: String, in args: [String], at index: inout Int) throws -> String {
     let template = try value(after: option, in: args, at: &index)
-    guard !template.isEmpty else {
-      throw CommandLineError("\(option) needs a non-empty template")
+    guard template.contains(where: { !$0.isWhitespace }) else {
+      throw CommandLineError("\(option) needs a template that is not blank")
     }
     return template
   }

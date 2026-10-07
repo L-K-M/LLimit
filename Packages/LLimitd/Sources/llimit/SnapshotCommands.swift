@@ -48,7 +48,8 @@ func printStatus(_ options: StatusOptions, warnings: StatusWarnings) {
   }
 
   for target in rendering.unmatchedTargets {
-    warnings.warn("llimit: no data for account \"\(target)\"")
+    // A target may be a provider id, so the warning does not call it an account.
+    warnings.warn("llimit: no data for \"\(target)\"")
   }
   print(rendering.text)
   fflush(stdout)
