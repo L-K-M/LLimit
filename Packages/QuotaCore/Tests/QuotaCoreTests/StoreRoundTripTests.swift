@@ -264,6 +264,34 @@ final class StoreRoundTripTests: XCTestCase {
     XCTAssertNil(settings.providerTileAutoRank(forSlot: AppSettings.providerTileSlotCount))
   }
 
+  func testSaveTightensPreExistingLooseFiles() throws {
+    // Older versions wrote these files 0o644; save() must tighten
+    // pre-existing files too, not just create fresh ones as 0o600.
+    let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+
+    let snapshotURL = tempDir.appendingPathComponent("snapshot.json")
+    let historyURL = tempDir.appendingPathComponent("history.json")
+    let snapshot = QuotaSnapshot(generatedAt: Date(timeIntervalSince1970: 1_700_000_000), providers: [], failures: [])
+
+    FileManager.default.createFile(atPath: snapshotURL.path, contents: Data("{}".utf8),
+                                   attributes: [.posixPermissions: 0o644])
+    FileManager.default.createFile(atPath: historyURL.path, contents: Data("[]".utf8),
+                                   attributes: [.posixPermissions: 0o644])
+
+    try SnapshotStore(fileURL: snapshotURL).save(snapshot)
+    try QuotaHistoryStore(fileURL: historyURL).save([snapshot])
+
+    for url in [snapshotURL, historyURL] {
+      let mode = try XCTUnwrap(
+        FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber
+      ).intValue & 0o777
+      XCTAssertEqual(mode, 0o600,
+                     "\(url.lastPathComponent) must not expose account metadata to other local users")
+    }
+  }
+
   func testSnapshotAndHistoryFilesAreOwnerOnly() throws {
     let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: tempDir) }
