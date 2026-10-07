@@ -66,6 +66,9 @@ final class AppModel: ObservableObject {
   @Published var codexLogin: CodexLoginPresentation?
   @Published private(set) var codexAccountMessages: [String: String] = [:]
   @Published private var codexBusyAccounts: Set<String> = []
+  /// Accounts a refresh skipped while their OpenAI sign-in was open. Their usage
+  /// is stale until a catch-up refresh after the sign-in ends.
+  private var signInSkippedAccountIDs: Set<String> = []
   private var codexLoginHandles: [UUID: CodexLoginHandle] = [:]
   private var codexLoginIDs: [String: UUID] = [:]
   private var codexUsageReceipts: [String: (profile: UUID, fetchedAt: Date)] = [:]
@@ -184,8 +187,13 @@ final class AppModel: ObservableObject {
     }
   }
 
+  /// Whether Refresh can run now. Refresh controls show its reason when it cannot.
+  var refreshAvailability: RefreshAvailability {
+    RefreshAvailability(isRefreshing: isRefreshing, accounts: providerAccounts, signingInAccountIDs: codexBusyAccounts)
+  }
+
   func refreshNow() async {
-    guard !isRefreshing, codexBusyAccounts.isEmpty else {
+    guard !isRefreshing else {
       return
     }
 
@@ -196,18 +204,27 @@ final class AppModel: ObservableObject {
     let claudeFailures = await prepareClaudeAccounts()
     reloadAccountStatuses()
 
-    let enabledConfigs = runtimeConfigurations().filter { configuration in
-      configuration.isEnabled && configuration.provider.hasRequiredCredentials(configuration.credentials)
-        && !claudeFailures.contains(where: { $0.accountID == configuration.accountID })
-    }
+    // Accounts with an open OpenAI sign-in keep their last results; the rest refresh.
+    // Read the live set: a sign-in that ended during preparation is fetched now.
+    let selection = RefreshSelection(
+      configurations: runtimeConfigurations(),
+      failedPreparation: Set(claudeFailures.map(\.accountID)),
+      signingInAccountIDs: codexBusyAccounts
+    )
+    signInSkippedAccountIDs.formUnion(selection.skippedAccountIDs)
+    let enabledConfigs = selection.fetched
 
     guard !enabledConfigs.isEmpty || !claudeFailures.isEmpty else {
-      statusMessage = "No enabled provider accounts with complete credentials configured."
+      // Skipped accounts catch up when their sign-in ends.
+      if selection.skippedAccountIDs.isEmpty {
+        statusMessage = "No enabled provider accounts with complete credentials configured."
+      }
       return
     }
 
     do {
-      var refreshed = await refreshService.refresh(configurations: enabledConfigs, credentialFailures: claudeFailures)
+      var refreshed = await refreshService.refresh(configurations: enabledConfigs, credentialFailures: claudeFailures,
+                                                   skippedAccountIDs: selection.skippedAccountIDs)
       refreshed = removingChangedVeniceResults(from: refreshed, configurations: enabledConfigs)
       try refreshService.save(refreshed)
       let initiallySaved = refreshed
@@ -218,7 +235,7 @@ final class AppModel: ObservableObject {
       // revoked before its JWT exp, or a Codex rotation that landed mid-cycle), refresh
       // its token and retry — only the accounts we actually recovered, so healthy accounts
       // and the other providers aren't re-polled (Anthropic hard-rate-limits repeat pollers).
-      var recoveredIDs = await recoverFailedOpenAITokens(in: refreshed)
+      var recoveredIDs = await recoverFailedOpenAITokens(in: refreshed, skipping: selection.skippedAccountIDs)
       let blockedClaudeIDs = Set(claudeFailures.map(\.accountID))
       for failure in refreshed.failures where failure.provider == .anthropic && failure.kind == .auth
         && !blockedClaudeIDs.contains(failure.accountID) {
@@ -640,7 +657,12 @@ final class AppModel: ObservableObject {
   private func refreshExpiringChatGPTTokens() async {
     // Only enabled accounts: refreshing a disabled account would keep rotating the shared
     // Codex refresh token and log the user's Codex CLI out of an account they turned off.
-    let openAIAccountIDs = providerAccounts.filter { $0.provider == .openAI && $0.isEnabled && !CodexAccountProfile.isManaged($0.credentials) }.map(\.id)
+    // An account with an open sign-in is skipped too: changing its credentials would
+    // make the sign-in discard its completed login.
+    let openAIAccountIDs = providerAccounts.filter {
+      $0.provider == .openAI && $0.isEnabled && !CodexAccountProfile.isManaged($0.credentials)
+        && !codexBusyAccounts.contains($0.id)
+    }.map(\.id)
     guard !openAIAccountIDs.isEmpty else { return }
 
     var didChange = false
@@ -726,10 +748,10 @@ final class AppModel: ObservableObject {
   /// enabled OpenAI account that failed auth this cycle, first adopt a fresher live token;
   /// only if nothing fresher is on disk do we force a refresh (which rotates the grant).
   /// Returns the set of account ids whose credentials changed, so the caller can retry
-  /// exactly those accounts.
-  private func recoverFailedOpenAITokens(in snapshot: QuotaSnapshot) async -> Set<String> {
+  /// exactly those accounts. Skipped accounts were not fetched: their failures are old.
+  private func recoverFailedOpenAITokens(in snapshot: QuotaSnapshot, skipping skippedIDs: Set<String>) async -> Set<String> {
     let failedIDs = snapshot.failures
-      .filter { $0.provider == .openAI && $0.kind == .auth }
+      .filter { $0.provider == .openAI && $0.kind == .auth && !skippedIDs.contains($0.accountID) }
       .map(\.accountID)
     guard !failedIDs.isEmpty else { return [] }
 
@@ -821,6 +843,8 @@ final class AppModel: ObservableObject {
         codexLoginIDs[accountID] = nil
         codexLoginHandles[profile.id] = nil
         codexBusyAccounts.remove(accountID)
+        // The new login's own refresh below also catches up cycles that skipped it.
+        signInSkippedAccountIDs.remove(accountID)
         if codexLogin?.id == profile.id { codexLogin = nil }
         reloadAccountStatuses()
         await refreshCodexAccountAfterCurrentCycle(accountID, profileID: profile.id, requestedAt: Date())
@@ -838,6 +862,7 @@ final class AppModel: ObservableObject {
           codexLogin?.isBusy = false
         }
         reloadAccountStatuses()
+        catchUpAfterSignIn(accountID)
       }
     }
   }
@@ -870,6 +895,31 @@ final class AppModel: ObservableObject {
         : "Sign-in canceled. Your previous connection is unchanged. Local login cleanup is pending."
       if codexLogin?.id == login.id { codexLogin = nil }
       reloadAccountStatuses()
+      catchUpAfterSignIn(login.accountID)
+    }
+  }
+
+  /// Cycles during a sign-in skip its account, leaving that account's usage stale.
+  /// After a cancel or failure the account keeps its earlier credentials, so fetch
+  /// it once the current cycle finishes.
+  private func catchUpAfterSignIn(_ accountID: String) {
+    guard signInSkippedAccountIDs.remove(accountID) != nil else { return }
+    let endedAt = Date()
+    Task {
+      if let profile = account(withID: accountID).flatMap({ CodexAccountProfile.profile(from: $0.credentials) }) {
+        // Skips the fetch if a cycle already fetched this profile after the sign-in ended.
+        await refreshCodexAccountAfterCurrentCycle(accountID, profileID: profile.id, requestedAt: endedAt)
+        return
+      }
+
+      // Imported tokens need the full cycle's adoption and recovery steps.
+      while isRefreshing {
+        do { try await Task.sleep(for: .seconds(1)) } catch { return }
+      }
+      guard let current = account(withID: accountID), current.isEnabled, current.hasRequiredCredentials else { return }
+      if let fetchedAt = snapshot?.providers.first(where: { $0.accountID == accountID })?.fetchedAt,
+         fetchedAt >= endedAt { return }
+      await refreshNow()
     }
   }
 
@@ -905,7 +955,8 @@ final class AppModel: ObservableObject {
   }
 
   private func refreshCodexAccountAfterCurrentCycle(_ id: String, profileID: UUID, requestedAt: Date) async {
-    while isRefreshing || !codexBusyAccounts.isEmpty {
+    // Another account's open sign-in does not block this one, as in `refreshNow`.
+    while isRefreshing || codexAccountIsBusy(id) {
       do { try await Task.sleep(for: .seconds(1)) } catch { return }
     }
     guard let account = account(withID: id), account.isEnabled,
