@@ -160,6 +160,8 @@ public struct QuotaEventDetection: Hashable, Sendable {
   /// The state to persist and pass to the next `detect` call.
   public var state: QuotaEventState
   fileprivate let inputState: QuotaEventState
+  enum SourceStatus: Hashable, Sendable { case current, stale }
+  let sourceStatus: SourceStatus
 
   /// Native delivery latches only accepted events. Restore each unaccepted
   /// event's marks so retries use the same detector, including after partial delivery.
@@ -211,7 +213,7 @@ public enum QuotaEvents {
     // Reject replayed snapshots before pruning or interpreting their failures.
     guard current.generatedAt <= now,
           previous.map({ current.generatedAt >= $0.generatedAt }) ?? true else {
-      return QuotaEventDetection(events: [], state: state, inputState: state)
+      return QuotaEventDetection(events: [], state: state, inputState: state, sourceStatus: .stale)
     }
 
     var next = state
@@ -263,7 +265,7 @@ public enum QuotaEvents {
       }
     }
 
-    return QuotaEventDetection(events: events, state: next, inputState: state)
+    return QuotaEventDetection(events: events, state: next, inputState: state, sourceStatus: .current)
   }
 
   private struct Reading {

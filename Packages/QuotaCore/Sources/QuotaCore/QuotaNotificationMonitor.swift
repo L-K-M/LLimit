@@ -122,7 +122,8 @@ public final class QuotaNotificationMonitor {
         }
       }
       persist(detection.acknowledging(accepted))
-      if accepted.count == detection.events.count { previous = current }
+      // Rejected sources must not rewind or advance the comparison cursor.
+      if detection.sourceStatus == .current, accepted.count == detection.events.count { previous = current }
     }
   }
 

@@ -181,6 +181,36 @@ final class QuotaNotificationMonitorTests: XCTestCase {
   }
 
   @MainActor
+  func testRejectedSnapshotCannotRewindTheComparisonCursor() async {
+    let transport = Transport()
+    let monitor = Store().monitor(transport)
+    monitor.updateSettings(QuotaAlertSettings(enabled: true))
+    monitor.submit(previous: nil, current: reading(90, at: t0 + 900), now: t0 + 900)
+    await monitor.waitUntilIdle()
+    monitor.submit(previous: nil, current: QuotaSnapshot(generatedAt: t0, providers: [], failures: []), now: t0 + 900)
+    await monitor.waitUntilIdle()
+    let oldFailure = QuotaSnapshot(generatedAt: t0 + 60, providers: [], failures: [ProviderFailure(
+      accountID: "a", provider: .anthropic, kind: .auth, message: "replayed failure")])
+    monitor.submit(previous: nil, current: oldFailure, now: t0 + 900)
+    await monitor.waitUntilIdle()
+    XCTAssertTrue(transport.delivered.isEmpty)
+  }
+
+  @MainActor
+  func testFutureSnapshotCannotBlockTheNextFreshObservation() async {
+    let transport = Transport()
+    let monitor = Store().monitor(transport)
+    monitor.updateSettings(QuotaAlertSettings(enabled: true))
+    monitor.submit(previous: nil, current: reading(90, at: t0), now: t0)
+    await monitor.waitUntilIdle()
+    monitor.submit(previous: nil, current: reading(90, at: t0 + 3_600), now: t0 + 900)
+    await monitor.waitUntilIdle()
+    monitor.submit(previous: nil, current: reading(3, at: t0 + 1_800), now: t0 + 1_800)
+    await monitor.waitUntilIdle()
+    XCTAssertEqual(transport.delivered.map(\.kind), [.threshold])
+  }
+
+  @MainActor
   private final class Store {
     var state = QuotaEventState()
     var issues: [QuotaNotificationIssue] = []
