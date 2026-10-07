@@ -433,17 +433,21 @@ public struct QuotaSnapshot: Codable, Hashable, Sendable {
   public var generatedAt: Date
   public var providers: [ProviderUsage]
   public var failures: [ProviderFailure]
+  /// Credential-free polling cadence for display consumers; nil in legacy snapshots.
+  public var refreshIntervalMinutes: Int?
 
   public init(
     version: Int = 1,
     generatedAt: Date,
     providers: [ProviderUsage],
-    failures: [ProviderFailure]
+    failures: [ProviderFailure],
+    refreshIntervalMinutes: Int? = nil
   ) {
     self.version = version
     self.generatedAt = generatedAt
     self.providers = providers
     self.failures = failures
+    self.refreshIntervalMinutes = refreshIntervalMinutes
   }
 
   public var isPartial: Bool { !failures.isEmpty }

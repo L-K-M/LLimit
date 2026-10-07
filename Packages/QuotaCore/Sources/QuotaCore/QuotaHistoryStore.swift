@@ -116,8 +116,10 @@ public final class QuotaHistoryStore: @unchecked Sendable {
 
     // Dedupe before pruning: expired copies must never resurrect observations.
     if !observations.isEmpty || !failures.isEmpty {
-      history.append(QuotaSnapshot(version: snapshot.version, generatedAt: snapshot.generatedAt,
-        providers: observations, failures: failures))
+      var entry = snapshot
+      entry.providers = observations
+      entry.failures = failures
+      history.append(entry)
     }
 
     history = Self.cappedSnapshots(history.filter { Self.effectiveActivityDate(for: $0) >= cutoffDate }, maxEntries: maxEntries)
@@ -172,12 +174,10 @@ public final class QuotaHistoryStore: @unchecked Sendable {
   private func removeLocked(accountIDs: Set<String>) throws {
     let history = try loadLocked(policy: .recover)
     let filtered = history.map { snapshot in
-      QuotaSnapshot(
-        version: snapshot.version,
-        generatedAt: snapshot.generatedAt,
-        providers: snapshot.providers.filter { !accountIDs.contains($0.accountID) },
-        failures: snapshot.failures.filter { !accountIDs.contains($0.accountID) }
-      )
+      var copy = snapshot
+      copy.providers = snapshot.providers.filter { !accountIDs.contains($0.accountID) }
+      copy.failures = snapshot.failures.filter { !accountIDs.contains($0.accountID) }
+      return copy
     }
     guard filtered != history else { return }
     try saveLocked(filtered)

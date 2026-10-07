@@ -234,6 +234,47 @@ final class QuotaHistoryStoreTests: XCTestCase {
     XCTAssertEqual(archive.snapshots.first, original)
     XCTAssertTrue(try JSONSerialization.jsonObject(with: Data(contentsOf: url)) is [Any])
   }
+
+  func testSparseAppendAndMirrorPreserveSnapshotCadence() throws {
+    let (store, dir) = makeStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let first = QuotaSnapshot(version: 7, generatedAt: base,
+      providers: [reading("a", at: base), reading("b", at: base)], failures: [], refreshIntervalMinutes: 30)
+    try store.append(first)
+
+    let fetchedAt = base.addingTimeInterval(900)
+    let refreshed = QuotaSnapshot(version: 8, generatedAt: fetchedAt,
+      providers: [reading("a", at: fetchedAt), first.providers[1]], failures: [], refreshIntervalMinutes: 60)
+    let archive = try store.append(refreshed)
+    var expected = refreshed
+    expected.providers = [refreshed.providers[0]]
+
+    XCTAssertEqual(archive.snapshots, [first, expected])
+    XCTAssertEqual(try store.load(), [first, expected])
+    let mirror = QuotaHistoryStore(fileURL: dir.appendingPathComponent("mirror.json"))
+    try mirror.save(archive)
+    XCTAssertEqual(try mirror.load(), [first, expected])
+  }
+
+  func testRemovalPreservesCadenceOnEveryEntry() throws {
+    let (store, dir) = makeStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let original = [30, 60].enumerated().map { index, cadence in
+      let date = base.addingTimeInterval(Double(index) * 900)
+      return QuotaSnapshot(version: 7 + index, generatedAt: date,
+        providers: [reading("remove", at: date), reading("keep", at: date)],
+        failures: [failure("remove")], refreshIntervalMinutes: cadence)
+    }
+    try store.save(original)
+    try store.remove(accountIDs: ["remove"])
+    let expected = original.map { snapshot -> QuotaSnapshot in
+      var copy = snapshot
+      copy.providers = [snapshot.providers[1]]
+      copy.failures = []
+      return copy
+    }
+    XCTAssertEqual(try store.load(), expected)
+  }
 }
 
 private final class HistoryCountingDecoder: JSONDecoder, @unchecked Sendable {
