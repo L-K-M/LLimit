@@ -150,7 +150,8 @@ public struct QuotaCoordinator: Sendable {
 
     let onlyCancelled = !ordered.isEmpty && ordered.allSatisfy(\.isCancelled)
     let generatedAt = onlyCancelled ? previousSnapshot?.generatedAt ?? now : now
-    return QuotaSnapshot(generatedAt: generatedAt, providers: usages, failures: failures)
+    return QuotaSnapshot(generatedAt: generatedAt, providers: usages, failures: failures,
+                         refreshIntervalMinutes: previousSnapshot?.refreshIntervalMinutes)
   }
 }
 
