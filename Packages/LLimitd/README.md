@@ -53,8 +53,9 @@ read-only and safe to indirection.
 
 On macOS the menu-bar app resolves references against its launch environment
 (e.g. `launchctl setenv`), not your shell — a variable set in `.zshrc` will not
-be visible to it. The environment-file flow above is the supported setup on
-Linux.
+be visible to it, and `launchctl setenv` does not survive a reboot; a
+LaunchAgent `EnvironmentVariables` dictionary is the persistent equivalent.
+The environment-file flow above is the supported setup on Linux.
 
 ## Usage
 
