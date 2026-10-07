@@ -24,6 +24,8 @@ import subprocess
 import sys
 import threading
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from enum import Enum
 from typing import Any
 
 DEFAULT_POLL_SECONDS = 60
@@ -40,6 +42,15 @@ ICON_FOR_CLASS = {
     "empty": "llimit-empty",
 }
 FALLBACK_ICON = "llimit-empty"
+RESET_DUE = "reset due"
+MAXIMUM_ERROR_LABEL_LENGTH = 120
+STATUS_SENTENCES = {
+    "ok": "LLimit: quota OK.",
+    "warning": "LLimit: needs attention.",
+    "critical": "LLimit: a quota is nearly used up.",
+    "error": "LLimit: refresh failed.",
+    "empty": "LLimit: no quota data yet.",
+}
 
 
 @dataclass
@@ -59,6 +70,10 @@ class MenuRow:
     action: str = ""
     tooltip: str = ""
 
+    @property
+    def selectable(self) -> bool:
+        return self.kind != "separator"
+
 
 @dataclass
 class TrayModel:
@@ -66,11 +81,60 @@ class TrayModel:
     icon: str
     tooltip: str
     rows: list[MenuRow] = field(default_factory=list)
+    description: str = ""
 
 
-def format_metric(metric: dict[str, Any]) -> str:
+class MenuUpdate(Enum):
+    UNCHANGED = "unchanged"
+    RELABEL = "relabel"
+    REBUILD = "rebuild"
+
+
+def plan_menu_update(previous: TrayModel | None, current: TrayModel) -> MenuUpdate:
+    """Relabel countdowns in place, preserving an open menu's keyboard focus."""
+    if previous is None:
+        return MenuUpdate.REBUILD
+    if previous.rows == current.rows:
+        return MenuUpdate.UNCHANGED
+    if [(row.kind, row.action) for row in previous.rows] == [(row.kind, row.action) for row in current.rows]:
+        return MenuUpdate.RELABEL
+    return MenuUpdate.REBUILD
+
+
+def format_duration(seconds: int) -> str:
+    seconds = max(0, seconds)
+    days, hours, minutes = seconds // 86_400, (seconds % 86_400) // 3_600, (seconds % 3_600) // 60
+    parts = [f"{value}{unit}" for value, unit in ((days, "d"), (hours, "h")) if value]
+    if minutes or not parts:
+        parts.append(f"{minutes}m")
+    return " ".join(parts)
+
+
+def reset_clause(metric: dict[str, Any], now: datetime) -> str:
+    """Prefer the absolute date, then live seconds, then legacy fetch-time text."""
+    value = metric.get("resetAt")
+    if isinstance(value, str):
+        try:
+            reset = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if reset.tzinfo is not None:
+                seconds = (reset - now).total_seconds()
+                return f"resets in {format_duration(int(seconds))}" if seconds > 0 else RESET_DUE
+        except ValueError:
+            pass
+    seconds = metric.get("resetSeconds")
+    if isinstance(seconds, int) and not isinstance(seconds, bool):
+        return f"resets in {format_duration(seconds)}" if seconds > 0 else RESET_DUE
+    value = metric.get("resetIn")
+    return f"resets in {value.strip()}" if isinstance(value, str) and value.strip() else ""
+
+
+def format_metric(metric: dict[str, Any], now: datetime | None = None) -> str:
     """One limit as a single line, e.g. 'Session — 62% left · resets in 3h 12m'."""
     label = metric.get("label") or metric.get("id") or "Limit"
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.astimezone()
+    reset = "" if metric.get("unlimited") else reset_clause(metric, now)
 
     if metric.get("unlimited"):
         body = "unlimited"
@@ -80,12 +144,15 @@ def format_metric(metric: dict[str, Any]) -> str:
         body = f"{prefix}{metric['remainingPercent']}% left{suffix}"
     elif metric.get("usageLine"):
         body = str(metric["usageLine"])
+    elif isinstance(metric.get("remainingAmount"), (int, float)):
+        body = str(metric["remainingAmount"])
+    elif reset == RESET_DUE:
+        return f"{label} — reset since the last successful refresh"
     else:
         body = "no data"
 
-    reset = metric.get("resetIn")
-    if reset and not metric.get("unlimited"):
-        body = f"{body} · resets in {reset}"
+    if reset:
+        body = f"{body} · {reset}"
 
     return f"{label} — {body}"
 
@@ -103,13 +170,21 @@ def format_account_header(account: dict[str, Any]) -> str:
     elif all(m.get("unlimited") for m in account.get("metrics") or [{}]):
         parts.append("unlimited")
 
-    if account.get("stale"):
+    if account.get("failed"):
+        parts.append("failed")
+    elif account.get("stale"):
         parts.append("stale")
 
     return parts[0] if len(parts) == 1 else f"{parts[0]} — {' · '.join(parts[1:])}"
 
 
-def build_menu_model(status: dict[str, Any] | None) -> TrayModel:
+def failure_note(failed: int, total: int) -> str:
+    if failed and failed >= total:
+        return "Every account failed to refresh"
+    return f"{failed} of {total} accounts failed to refresh"
+
+
+def build_menu_model(status: dict[str, Any] | None, now: datetime | None = None) -> TrayModel:
     """Turn one `llimit status --json` payload into the tray's label, icon and rows.
 
     Pure and total: a missing, malformed or empty payload still yields a usable
@@ -120,6 +195,7 @@ def build_menu_model(status: dict[str, Any] | None) -> TrayModel:
             label="LLimit",
             icon=FALLBACK_ICON,
             tooltip="Could not read llimit status.",
+            description="LLimit: could not read llimit status.",
             rows=[
                 MenuRow("note", "Could not read llimit status"),
                 MenuRow("note", "Is llimit installed and on PATH?"),
@@ -132,6 +208,7 @@ def build_menu_model(status: dict[str, Any] | None) -> TrayModel:
     status_class = status.get("class") or "empty"
     accounts = status.get("accounts") or []
     tooltip = status.get("tooltip") or ""
+    failed = sum(1 for account in accounts if account.get("failed"))
 
     rows: list[MenuRow] = []
 
@@ -140,6 +217,9 @@ def build_menu_model(status: dict[str, Any] | None) -> TrayModel:
     updated = tooltip.split("\n", 1)[0].strip() if tooltip else ""
     if updated:
         rows.append(MenuRow("note", updated))
+    if failed:
+        rows.append(MenuRow("note", failure_note(failed, len(accounts))))
+    if updated or failed:
         rows.append(MenuRow("separator"))
 
     if accounts:
@@ -147,9 +227,13 @@ def build_menu_model(status: dict[str, Any] | None) -> TrayModel:
             if index:
                 rows.append(MenuRow("separator"))
             rows.append(MenuRow("header", format_account_header(account)))
+            if account.get("failed"):
+                error = account.get("error") or account.get("errorKind") or "refresh failed"
+                shown = error if len(error) <= MAXIMUM_ERROR_LABEL_LENGTH else error[:MAXIMUM_ERROR_LABEL_LENGTH - 1] + "…"
+                rows.append(MenuRow("error", f"Error: {shown}", tooltip=error))
             for metric in account.get("metrics") or []:
-                rows.append(MenuRow("metric", format_metric(metric), tooltip=metric.get("detail") or ""))
-            if not (account.get("metrics") or []):
+                rows.append(MenuRow("metric", format_metric(metric, now), tooltip=metric.get("detail") or ""))
+            if not (account.get("metrics") or []) and not account.get("failed"):
                 rows.append(MenuRow("metric", "No limits reported"))
     elif status_class == "error":
         rows.append(MenuRow("note", "Every account failed to refresh"))
@@ -165,11 +249,17 @@ def build_menu_model(status: dict[str, Any] | None) -> TrayModel:
     rows.append(MenuRow("action", "Refresh now", action="refresh"))
     rows.append(MenuRow("action", "Quit", action="quit"))
 
+    label = status.get("text") or "LLimit"
+    description = [STATUS_SENTENCES.get(status_class, "LLimit.")]
+    if failed:
+        description.append(f"{failure_note(failed, len(accounts))}.")
+    description.append(label)
     return TrayModel(
-        label=status.get("text") or "LLimit",
+        label=label,
         icon=ICON_FOR_CLASS.get(status_class, FALLBACK_ICON),
         tooltip=tooltip,
         rows=rows,
+        description=" ".join(description),
     )
 
 
@@ -272,33 +362,45 @@ def _run_tray(args: argparse.Namespace) -> int:
         Gtk.main_quit()
 
     handlers = {"refresh": on_refresh, "quit": on_quit}
+    items: list[Any] = []
+    shown: TrayModel | None = None
+
+    def set_row_text(item: Any, row: MenuRow) -> None:
+        if row.kind == "header":
+            child = item.get_child()
+            if child is not None:
+                child.set_markup(f"<b>{GLib.markup_escape_text(row.text)}</b>")
+        else:
+            item.set_label(row.text)
+        item.set_tooltip_text(row.tooltip or None)
 
     def rebuild(model: TrayModel) -> None:
-        for child in menu.get_children():
-            menu.remove(child)
+        nonlocal shown
+        update = plan_menu_update(shown, model)
+        if update is MenuUpdate.REBUILD:
+            for child in menu.get_children():
+                menu.remove(child)
+            items.clear()
+            for row in model.rows:
+                if row.kind == "separator":
+                    item = Gtk.SeparatorMenuItem()
+                else:
+                    # Enabled content rows remain reachable to keyboard and screen readers.
+                    item = Gtk.MenuItem(label=row.text)
+                    set_row_text(item, row)
+                    handler = handlers.get(row.action) if row.kind == "action" else None
+                    if handler is not None:
+                        item.connect("activate", handler)
+                item.show()
+                menu.append(item)
+                items.append(item)
+        elif update is MenuUpdate.RELABEL:
+            for item, row in zip(items, model.rows):
+                if row.selectable:
+                    set_row_text(item, row)
+        shown = model
 
-        for row in model.rows:
-            if row.kind == "separator":
-                item = Gtk.SeparatorMenuItem()
-            elif row.kind == "action":
-                item = Gtk.MenuItem(label=row.text)
-                handler = handlers.get(row.action)
-                if handler is not None:
-                    item.connect("activate", handler)
-            else:
-                item = Gtk.MenuItem(label=row.text)
-                item.set_sensitive(False)
-                if row.kind == "header":
-                    # Bold the account name so limits read as its children.
-                    child = item.get_child()
-                    if child is not None:
-                        child.set_markup(f"<b>{GLib.markup_escape_text(row.text)}</b>")
-                if row.tooltip:
-                    item.set_tooltip_text(row.tooltip)
-            item.show()
-            menu.append(item)
-
-        indicator.set_icon_full(model.icon, model.label or "LLimit")
+        indicator.set_icon_full(model.icon, model.description or model.label or "LLimit")
         indicator.set_title(model.label or "LLimit")
         if args.show_label:
             indicator.set_label(model.label or "", "LLimit")

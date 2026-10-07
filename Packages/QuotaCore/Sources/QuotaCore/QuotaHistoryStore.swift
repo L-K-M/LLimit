@@ -109,12 +109,10 @@ public final class QuotaHistoryStore: @unchecked Sendable {
 
   private func removeLocked(accountIDs: Set<String>) throws {
     let filtered = try loadLocked(policy: .recover).map { snapshot in
-      QuotaSnapshot(
-        version: snapshot.version,
-        generatedAt: snapshot.generatedAt,
-        providers: snapshot.providers.filter { !accountIDs.contains($0.accountID) },
-        failures: snapshot.failures.filter { !accountIDs.contains($0.accountID) }
-      )
+      var filtered = snapshot
+      filtered.providers.removeAll { accountIDs.contains($0.accountID) }
+      filtered.failures.removeAll { accountIDs.contains($0.accountID) }
+      return filtered
     }
     try saveLocked(filtered)
   }

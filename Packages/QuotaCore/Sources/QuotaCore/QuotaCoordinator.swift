@@ -89,6 +89,7 @@ public struct QuotaCoordinator: Sendable {
                 provider: configuration.provider,
                 kind: error.kind,
                 message: failureMessages.redacted(error.message),
+                title: configuration.displayName,
                 retryAt: error.kind == .rateLimit
                   ? RetryAfterPolicy.boundedDelay(error.retryAfter).map { now.addingTimeInterval($0) } : nil
               ))
@@ -101,7 +102,8 @@ public struct QuotaCoordinator: Sendable {
                 accountID: configuration.accountID,
                 provider: configuration.provider,
                 kind: .unknown,
-                message: "Could not read usage. Try again later."
+                message: "Could not read usage. Try again later.",
+                title: configuration.displayName
               ))
             )
           }
@@ -148,7 +150,8 @@ public struct QuotaCoordinator: Sendable {
 
     let onlyCancelled = !ordered.isEmpty && ordered.allSatisfy(\.isCancelled)
     let generatedAt = onlyCancelled ? previousSnapshot?.generatedAt ?? now : now
-    return QuotaSnapshot(generatedAt: generatedAt, providers: usages, failures: failures)
+    return QuotaSnapshot(generatedAt: generatedAt, providers: usages, failures: failures,
+                         refreshIntervalMinutes: previousSnapshot?.refreshIntervalMinutes)
   }
 }
 

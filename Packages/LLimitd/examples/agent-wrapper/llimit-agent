@@ -1,0 +1,20 @@
+#!/bin/sh
+# Map the selected LLimit account ID to the CLI login it describes.
+# Replace the sample IDs and profile paths before use. LLimit account selection
+# alone cannot switch Claude/Codex's login; launching the global CLI would risk
+# using another subscription. Arguments pass through to the selected tool.
+set -eu
+
+choice=$(llimit pick --provider anthropic,openai --min 5 --format '{id}') || exit "$?"
+case "$choice" in
+  YOUR_CLAUDE_ACCOUNT_ID)
+    export CLAUDE_CONFIG_DIR="$HOME/.claude-work"
+    exec claude "$@"
+    ;;
+  YOUR_OPENAI_ACCOUNT_ID)
+    export CODEX_HOME="$HOME/.codex-work"
+    exec codex "$@"
+    ;;
+esac
+printf 'llimit-agent: configure a login mapping for account %s\n' "$choice" >&2
+exit 64

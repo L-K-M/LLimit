@@ -20,7 +20,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="${1:-0.0.0~dev}"
+VERSION="${1:-}"
 BINARY="${2:-$ROOT/.build/x86_64-swift-linux-musl/release/llimit}"
 OUT_DIR="${3:-$ROOT/.build}"
 
@@ -28,6 +28,22 @@ if [[ ! -x "$BINARY" ]]; then
   echo "llimit binary not found or not executable: $BINARY" >&2
   echo "Build it first:" >&2
   echo "  swift build -c release --swift-sdk x86_64-swift-linux-musl --package-path Packages/LLimitd" >&2
+  exit 1
+fi
+
+# A tag or package label must match the binary users actually run.
+if ! REPORTED_VERSION="$("$BINARY" --version)"; then
+  echo "cannot read llimit binary version" >&2
+  exit 1
+fi
+if [[ ! "$REPORTED_VERSION" =~ ^llimit[[:space:]]([^[:space:]]+) ]]; then
+  echo "unrecognized llimit binary version" >&2
+  exit 1
+fi
+BINARY_VERSION="${BASH_REMATCH[1]}"
+VERSION="${VERSION:-$BINARY_VERSION}"
+if [[ "$VERSION" != "$BINARY_VERSION" ]]; then
+  echo "package version $VERSION does not match llimit $BINARY_VERSION; stamp and rebuild first" >&2
   exit 1
 fi
 
