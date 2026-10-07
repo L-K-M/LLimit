@@ -537,6 +537,8 @@ final class AppModel: ObservableObject {
   /// Fills an existing account's credentials from a login detected on this Mac (the
   /// per-account "Auto-fill" action). Running this on demand also triggers the macOS
   /// Keychain prompt for Claude, which a background scan can't surface clearly.
+  /// Returns true only when the detected login replaced the account's whole credential
+  /// set (every field, never a merge); false leaves the credentials unchanged.
   @discardableResult
   func autofillCredentials(forAccountID accountID: String) -> Bool {
     guard let index = providerAccounts.firstIndex(where: { $0.id == accountID }) else { return false }
@@ -553,7 +555,9 @@ final class AppModel: ObservableObject {
     claudeAccountMessages[accountID] = nil
     claudeCredentialFailures.remove(accountID)
     if provider == .venice {
-      updateAccount(accountID: accountID) { $0.credentials = match.credentials }
+      let outcome = updateAccount(accountID: accountID) { $0.credentials = match.credentials }
+      // Auto-fill has no field to show a rejection under, so report it here.
+      if case .rejected(let rejection) = outcome { statusMessage = rejection.message }
       guard account(withID: accountID)?.credentials == match.credentials else { return false }
     } else {
       providerAccounts[index].credentials = match.credentials
@@ -1176,15 +1180,36 @@ final class AppModel: ObservableObject {
     status(for: accountID)?.available ?? false
   }
 
-  func accountDisplayNameBinding(for accountID: String) -> Binding<String> {
-    Binding(
-      get: { self.account(withID: accountID)?.displayName ?? "" },
-      set: { newValue in
-        self.updateAccount(accountID: accountID) { account in
-          account.displayName = newValue
-        }
+  /// Saves one committed Settings text field. Settings keeps keystrokes in a draft and
+  /// commits once (Return, focus loss, navigation, window close or quit), so a key
+  /// replacement and its Venice history purge run only when the value really changed.
+  /// A rejection leaves the account unchanged; Settings keeps the draft and its reason.
+  func commitAccountEdit(_ draft: String, to field: EditableAccountField, accountID: String) -> AccountEditOutcome {
+    guard let savedAccount = account(withID: accountID) else { return .accountMissing }
+    guard let value = savedAccount.committedText(draft, for: field) else { return .unchanged }
+
+    switch field {
+    case .displayName:
+      return updateAccount(accountID: accountID) { account in
+        account.displayName = value
       }
-    )
+    case .credential(let fieldKey):
+      if codexAccountIsBusy(accountID) { return .rejected(.signInInProgress) }
+      // A connection owns every credential of its account, and Settings hides all
+      // manual fields while connected. A draft committed now was typed before the
+      // connection finished and must not undo it. Anthropic has only the token field.
+      if codexAccountIsManaged(accountID) || ClaudeCodeProfile.profile(from: savedAccount.credentials) != nil {
+        return .rejected(.managedConnection)
+      }
+      claudeAccountMessages[accountID] = nil
+      claudeCredentialFailures.remove(accountID)
+      return updateAccount(accountID: accountID) { account in
+        if account.provider == .anthropic && fieldKey == CredentialField.anthropicAccessToken {
+          account.credentials = ClaudeCodeProfile.clearManagedMetadata(from: account.credentials)
+        }
+        account.credentials[fieldKey] = value
+      }
+    }
   }
 
   func accountEnabledBinding(for accountID: String) -> Binding<Bool> {
@@ -1193,23 +1218,6 @@ final class AppModel: ObservableObject {
       set: { newValue in
         self.updateAccount(accountID: accountID) { account in
           account.isEnabled = newValue
-        }
-      }
-    )
-  }
-
-  func credentialBinding(for accountID: String, fieldKey: String) -> Binding<String> {
-    Binding(
-      get: { self.account(withID: accountID)?.credentials[fieldKey] ?? "" },
-      set: { newValue in
-        guard !self.codexAccountIsManaged(accountID), !self.codexAccountIsBusy(accountID) else { return }
-        self.claudeAccountMessages[accountID] = nil
-        self.claudeCredentialFailures.remove(accountID)
-        self.updateAccount(accountID: accountID) { account in
-          if account.provider == .anthropic && fieldKey == CredentialField.anthropicAccessToken {
-            account.credentials = ClaudeCodeProfile.clearManagedMetadata(from: account.credentials)
-          }
-          account.credentials[fieldKey] = newValue
         }
       }
     )
@@ -1582,12 +1590,16 @@ final class AppModel: ObservableObject {
     )
   }
 
+  /// Returns `.applied` once the mutation is accepted, whether or not it changed
+  /// anything, or why it was refused. Callers report a rejection on their own
+  /// surface: Settings fields show it inline, Auto-fill uses the status message.
+  @discardableResult
   private func updateAccount(
     accountID: String,
     mutate: (inout ProviderAccount) -> Void
-  ) {
+  ) -> AccountEditOutcome {
     guard let index = providerAccounts.firstIndex(where: { $0.id == accountID }) else {
-      return
+      return .accountMissing
     }
 
     let previousAccount = providerAccounts[index]
@@ -1597,16 +1609,14 @@ final class AppModel: ObservableObject {
     if previousAccount.provider == .venice,
        previousAccount.credentials[CredentialField.veniceAPIKey] != updatedAccount.credentials[CredentialField.veniceAPIKey] {
       guard !configurationLoadFailed else {
-        statusMessage = "Could not change this key because the settings file could not be read."
-        return
+        return .rejected(.settingsUnreadable)
       }
       do {
         // The observed DIEM denominator belongs to this key. Clear it durably
         // before accepting a replacement key, including Auto-fill replacements.
         try invalidateVeniceUsage(for: previousAccount)
       } catch {
-        statusMessage = "Could not clear this account's previous usage. Check LLimit's storage permissions and try again."
-        return
+        return .rejected(.previousUsageNotCleared)
       }
     }
     providerAccounts[index] = updatedAccount
@@ -1618,6 +1628,7 @@ final class AppModel: ObservableObject {
     }
     reloadAccountStatuses()
     saveConfiguration()
+    return .applied
   }
 
   private func invalidateVeniceUsage(for account: ProviderAccount) throws {
@@ -1630,7 +1641,8 @@ final class AppModel: ObservableObject {
     snapshot = cleared
     reloadRecentHistory()
     if syncSnapshotToWidgetStore(cleared) { reloadWidgetTimelines() }
-    purgeHistory(for: account)
+    // The local archive is already cleared above; only the widget's copy remains.
+    purgeWidgetHistory(accountIDs: [account.id])
   }
 
   private func updateProviderStyle(
@@ -1753,7 +1765,10 @@ final class AppModel: ObservableObject {
       print("[LLimit] Local history purge failed: \(error.localizedDescription)")
     }
     reloadRecentHistory()
+    purgeWidgetHistory(accountIDs: accountIDs)
+  }
 
+  private func purgeWidgetHistory(accountIDs: Set<String>) {
     do {
       guard let widgetHistoryStore = appGroupHistoryStore() else {
         print("[LLimit] Widget history purge failed: no App Group history store available")
@@ -2036,9 +2051,9 @@ final class AppModel: ObservableObject {
     return false
   }
 
-  /// Coalesces widget reloads. `saveConfiguration()` runs on every keystroke in Settings
-  /// (each edit to a name/credential field), and WidgetKit budgets `reloadAllTimelines()`
-  /// aggressively — hammering it during typing gets later, meaningful reloads dropped and
+  /// Coalesces widget reloads. `saveConfiguration()` runs on every Settings change
+  /// (including each step of a color-well drag), and WidgetKit budgets `reloadAllTimelines()`
+  /// aggressively — hammering it gets later, meaningful reloads dropped and
   /// leaves the widgets stuck on stale data. Debouncing means a burst of edits triggers a
   /// single reload once the user pauses.
   private func reloadWidgetTimelines() {
