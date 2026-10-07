@@ -578,6 +578,22 @@ final class StatusRendererTests: XCTestCase {
     XCTAssertEqual(StatusRenderer.sanitizedErrorText("Blocked <script>var a = 1;\nvar b = 2;"), "Blocked")
   }
 
+  func testScanCutInsideATagLeavesNoFragment() {
+    let head = "HTTP 502 "
+    let filler = String(repeating: "<br>", count: 1_000)
+    // Pad so the scan cut lands eight characters into the div tag: "<div cla".
+    let padding = String(repeating: " ", count: StatusRenderer.maximumScannedErrorLength - 8 - head.count - filler.count)
+    let message = head + filler + padding + #"<div class="wrapper">Body</div>"#
+
+    XCTAssertEqual(StatusRenderer.sanitizedErrorText(message), "HTTP 502")
+  }
+
+  func testLengthCutInsideATagLeavesNoFragment() {
+    // "<bold < 5" is not a complete tag, so it survives until the length cut splits it.
+    let words = String(repeating: "x", count: 155)
+    XCTAssertEqual(StatusRenderer.sanitizedErrorText(words + " <bold < 5 ok"), words + "…")
+  }
+
   func testErrorTextKeepsComparisonsThatAreNotMarkup() {
     XCTAssertEqual(StatusRenderer.sanitizedErrorText("limit < 5 and > 2"), "limit < 5 and > 2")
   }

@@ -43,6 +43,8 @@ public enum StatusRenderer {
     // ANSI CSI sequences (colors, cursor movement) a terminal would obey.
     #"\x{1B}\[[0-?]*[ -/]*[@-~]"#
   ].map { try! NSRegularExpression(pattern: $0) }
+  /// A tag split by a cut, such as "<div cla", which no later `>` can close.
+  private static let trailingTagFragment = try! NSRegularExpression(pattern: #"<[A-Za-z!/][^<>]*$"#)
   /// Polybar parses "%{…}" in script output as formatting, including click-to-run
   /// "%{A1:command:}" regions; a space makes it plain text.
   private static let polybarTagOpener = "%{"
@@ -202,7 +204,11 @@ public enum StatusRenderer {
   /// Reduces provider error text to one plain line that is safe on every surface: a bar
   /// may parse it as markup (waybar's default) and a terminal obeys escape sequences.
   static func sanitizedErrorText(_ message: String) -> String {
-    var text = String(message.prefix(maximumScannedErrorLength))
+    let scanned = message.prefix(maximumScannedErrorLength)
+    var text = String(scanned)
+    if scanned.endIndex != message.endIndex {
+      text = droppingTrailingTagFragment(text)
+    }
     for pattern in errorTextNoise {
       let range = NSRange(text.startIndex..., in: text)
       text = pattern.stringByReplacingMatches(in: text, range: range, withTemplate: " ")
@@ -215,7 +221,14 @@ public enum StatusRenderer {
       .joined(separator: " ")
     guard oneLine.count > maximumErrorLength else { return oneLine }
 
-    return oneLine.prefix(maximumErrorLength - 1).trimmingCharacters(in: .whitespaces) + "…"
+    let kept = droppingTrailingTagFragment(String(oneLine.prefix(maximumErrorLength - 1)))
+    return kept.trimmingCharacters(in: .whitespaces) + "…"
+  }
+
+  /// Applied only after a cut: at the end of uncut text, "<x" is the provider's own text.
+  private static func droppingTrailingTagFragment(_ text: String) -> String {
+    let range = NSRange(text.startIndex..., in: text)
+    return trailingTagFragment.stringByReplacingMatches(in: text, range: range, withTemplate: "")
   }
 
   /// Every account in the snapshot, ordered by provider and name: those with usage
