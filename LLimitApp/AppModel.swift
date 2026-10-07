@@ -321,26 +321,34 @@ final class AppModel: ObservableObject {
     var dedup = alertDedupKeys
     let alerts = QuotaAlertEvaluator.alerts(
       in: snapshot, settings: alertSettings, dedupedKeys: &dedup)
-    alertDedupKeys = dedup
-    guard !alerts.isEmpty else { return }
+    guard !alerts.isEmpty else {
+      // Still persist — re-arm pruning must survive even when nothing fired.
+      alertDedupKeys = dedup
+      return
+    }
 
     // Escaping notification callbacks run off-main; the async API keeps the
     // whole path on the main actor where AppModel is isolated.
     Task { @MainActor in
       let center = UNUserNotificationCenter.current()
       let settings = await center.notificationSettings()
+      let authorized: Bool
       switch settings.authorizationStatus {
       case .authorized, .provisional, .ephemeral:
-        await post(alerts, to: center)
+        authorized = true
       case .notDetermined:
         // The foreground toggle normally requests permission up front; this
         // covers a refresh landing before the user answered or after reset.
-        if (try? await center.requestAuthorization(options: [.alert, .sound])) == true {
-          await post(alerts, to: center)
-        }
+        authorized = (try? await center.requestAuthorization(options: [.alert, .sound])) == true
       default:
-        break
+        authorized = false
       }
+      guard authorized else { return }
+      await post(alerts, to: center)
+      // Persist suppression only after delivery is possible, so a refresh
+      // landing while permission is pending doesn't silently consume alerts —
+      // they re-fire once authorization is granted.
+      alertDedupKeys = dedup
     }
   }
 
