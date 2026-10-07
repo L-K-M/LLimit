@@ -112,6 +112,10 @@ public struct QuotaCoordinator: Sendable {
       return previousSnapshot
     }
 
+    // A cancelled *first* refresh (no previous snapshot, no fresh results)
+    // intentionally falls through and returns an empty, failure-free
+    // snapshot — callers already treat an empty provider list as "no data
+    // yet", which accurately describes a cancelled launch-time refresh.
     let previousByID = Dictionary(
       (previousSnapshot?.providers ?? []).filter { $0.provider == .venice }.map { ($0.accountID, $0) },
       uniquingKeysWith: { $0.fetchedAt >= $1.fetchedAt ? $0 : $1 }
