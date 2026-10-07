@@ -373,7 +373,9 @@ func runStatus(_ args: [String]) async {
     if json {
       // One clean JSON document per tick for stream parsers — no ANSI.
       print(output)
-    } else if previousLineCount == 0 {
+    } else if previousLineCount == 0 || isatty(STDOUT_FILENO) != 1 {
+      // First frame — or piped output, where ANSI cursor moves would pollute
+      // whatever consumes the stream.
       print(output)
     } else {
       // Redraw in place: cursor up over the previous frame, erase to end of
