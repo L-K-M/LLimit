@@ -29,6 +29,14 @@ public final class SnapshotStore: @unchecked Sendable {
   #endif
 
   public func load(policy: StoreReadPolicy = .preserve) throws -> QuotaSnapshot? {
+    guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
+    if case .recover = policy {
+      return try withStoreFileLock(at: fileURL) { try loadLocked(policy: policy) }
+    }
+    return try loadLocked(policy: policy)
+  }
+
+  private func loadLocked(policy: StoreReadPolicy) throws -> QuotaSnapshot? {
     guard FileManager.default.fileExists(atPath: fileURL.path) else {
       return nil
     }

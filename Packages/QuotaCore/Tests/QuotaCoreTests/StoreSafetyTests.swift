@@ -189,7 +189,8 @@ final class StoreSafetyTests: XCTestCase {
       while !Task.isCancelled {
         let urls = (try? FileManager.default.contentsOfDirectory(
           at: directory, includingPropertiesForKeys: nil)) ?? []
-        for url in urls where url.lastPathComponent != "settings.json" {
+        for url in urls where url.lastPathComponent != "settings.json"
+          && !url.lastPathComponent.hasSuffix(".access.lock") {
           if let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
              let mode = attributes[.posixPermissions] as? NSNumber {
             await sampler.record(mode.intValue & 0o777)
@@ -219,6 +220,7 @@ final class StoreSafetyTests: XCTestCase {
 
   private func artifacts() throws -> [URL] {
     try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+      .filter { !$0.lastPathComponent.hasSuffix(".access.lock") }
   }
 
   private func modeBits(_ url: URL) throws -> Int {

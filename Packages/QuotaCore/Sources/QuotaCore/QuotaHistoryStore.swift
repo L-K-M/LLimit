@@ -14,10 +14,14 @@ public final class QuotaHistoryStore: @unchecked Sendable {
   private let decoder: JSONDecoder
 
   public convenience init(fileURL: URL) {
-    self.init(fileURL: fileURL, encoder: JSONEncoder(), decoder: JSONDecoder())
+    self.init(fileURL: fileURL, decoder: JSONDecoder())
   }
 
-  init(fileURL: URL, encoder: JSONEncoder = JSONEncoder(), decoder: JSONDecoder) {
+  convenience init(fileURL: URL, decoder: JSONDecoder) {
+    self.init(fileURL: fileURL, encoder: JSONEncoder(), decoder: decoder)
+  }
+
+  init(fileURL: URL, encoder: JSONEncoder, decoder: JSONDecoder) {
     self.fileURL = fileURL
     self.encoder = encoder
     self.decoder = decoder
@@ -29,6 +33,14 @@ public final class QuotaHistoryStore: @unchecked Sendable {
   }
 
   public func load(policy: StoreReadPolicy = .preserve) throws -> [QuotaSnapshot] {
+    guard FileManager.default.fileExists(atPath: fileURL.path) else { return [] }
+    if case .recover = policy {
+      return try withStoreFileLock(at: fileURL) { try loadLocked(policy: policy) }
+    }
+    return try loadLocked(policy: policy)
+  }
+
+  private func loadLocked(policy: StoreReadPolicy) throws -> [QuotaSnapshot] {
     guard FileManager.default.fileExists(atPath: fileURL.path) else {
       return []
     }
@@ -57,21 +69,25 @@ public final class QuotaHistoryStore: @unchecked Sendable {
   }
 
   public func save(_ snapshots: [QuotaSnapshot]) throws {
+    try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try withStoreFileLock(at: fileURL) { try saveLocked(snapshots) }
+  }
+
+  private func saveLocked(_ snapshots: [QuotaSnapshot]) throws {
     let normalized = snapshots.sorted { $0.generatedAt < $1.generatedAt }
-    try write(encoder.encode(normalized))
+    try writeOwnerOnlyAtomicallyLocked(encoder.encode(normalized), to: fileURL)
   }
 
   public func save(_ archive: Archive) throws {
-    try write(archive.encoded)
-  }
-
-  private func write(_ data: Data) throws {
     try FileManager.default.createDirectory(
       at: fileURL.deletingLastPathComponent(),
       withIntermediateDirectories: true
     )
 
-    try writeOwnerOnlyAtomically(data, to: fileURL)
+    // Mirrors reuse encoded bytes, but serialize against owner recovery too.
+    try withStoreFileLock(at: fileURL) {
+      try writeOwnerOnlyAtomicallyLocked(archive.encoded, to: fileURL)
+    }
   }
 
   /// Archives new fetches and changed failure states. Equal fresh values survive.
@@ -81,7 +97,14 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     keepDays: Int = 45,
     maxEntries: Int = 3_000
   ) throws -> Archive {
-    let original = try load(policy: .recover)
+    try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    return try withStoreFileLock(at: fileURL) {
+      try appendLocked(snapshot, keepDays: keepDays, maxEntries: maxEntries)
+    }
+  }
+
+  private func appendLocked(_ snapshot: QuotaSnapshot, keepDays: Int, maxEntries: Int) throws -> Archive {
+    let original = try loadLocked(policy: .recover)
     var history = original
 
     let cutoffDays = max(1, keepDays)
@@ -99,7 +122,7 @@ public final class QuotaHistoryStore: @unchecked Sendable {
 
     history = Self.cappedSnapshots(history.filter { Self.effectiveActivityDate(for: $0) >= cutoffDate }, maxEntries: maxEntries)
     let encoded = try encoder.encode(history)
-    if history != original { try write(encoded) }
+    if history != original { try writeOwnerOnlyAtomicallyLocked(encoded, to: fileURL) }
     return Archive(snapshots: history, encoded: encoded)
   }
 
@@ -142,9 +165,12 @@ public final class QuotaHistoryStore: @unchecked Sendable {
   }
 
   public func remove(accountIDs: Set<String>) throws {
-    guard !accountIDs.isEmpty else { return }
+    guard !accountIDs.isEmpty, FileManager.default.fileExists(atPath: fileURL.path) else { return }
+    try withStoreFileLock(at: fileURL) { try removeLocked(accountIDs: accountIDs) }
+  }
 
-    let history = try load(policy: .recover)
+  private func removeLocked(accountIDs: Set<String>) throws {
+    let history = try loadLocked(policy: .recover)
     let filtered = history.map { snapshot in
       QuotaSnapshot(
         version: snapshot.version,
@@ -154,6 +180,6 @@ public final class QuotaHistoryStore: @unchecked Sendable {
       )
     }
     guard filtered != history else { return }
-    try save(filtered)
+    try saveLocked(filtered)
   }
 }
