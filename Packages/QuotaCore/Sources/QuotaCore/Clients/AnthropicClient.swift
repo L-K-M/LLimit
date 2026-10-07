@@ -84,12 +84,14 @@ public struct AnthropicClient: QuotaProviderClient {
       )
     }
 
-    if metrics.isEmpty {
+    // Extra usage is real data, so it stands in for the no-data placeholder.
+    let extraUsage = Self.extraUsageMetric(from: payload)
+    if metrics.isEmpty && extraUsage == nil {
       metrics.append(UsageMetric(id: "empty", label: "No usage data available"))
     }
 
     // Appended after every window, so it never shifts a window's color slot.
-    if let extraUsage = Self.extraUsageMetric(from: payload) {
+    if let extraUsage {
       metrics.append(extraUsage)
     }
 

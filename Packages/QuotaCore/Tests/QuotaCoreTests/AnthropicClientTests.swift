@@ -191,6 +191,27 @@ final class AnthropicClientTests: XCTestCase {
     XCTAssertEqual(enabledAtCap?.detail, "Monthly spending cap reached.")
   }
 
+  func testExtraUsageWithoutIsEnabledShowsOnlyAtCap() async throws {
+    let belowCap = try await extraUsage(#"{"monthly_limit": 100000, "used_credits": 1234}"#)
+    XCTAssertNil(belowCap)
+
+    let atCap = try await extraUsage(#"{"monthly_limit": 5000, "used_credits": 5000}"#)
+    XCTAssertEqual(atCap?.usageLine, "$50.00 / $50.00")
+    XCTAssertEqual(atCap?.detail, "Monthly spending cap reached.")
+  }
+
+  func testExtraUsageReplacesNoDataPlaceholderWhenNoWindowIsReported() async throws {
+    let nullWindows = #""five_hour": null, "seven_day": {"utilization": null, "resets_at": null}"#
+
+    let withExtra = try await fetch(#"""
+    {\#(nullWindows), "extra_usage": {"is_enabled": true, "monthly_limit": 100000, "used_credits": 1234}}
+    """#)
+    XCTAssertEqual(withExtra.metrics.map(\.id), ["extra_usage"])
+
+    let withoutExtra = try await fetch("{\(nullWindows)}")
+    XCTAssertEqual(withoutExtra.metrics.map(\.id), ["empty"])
+  }
+
   func testExtraUsageInOtherCurrencyFallsBackToText() async throws {
     let enabled = try await extraUsage(#"{"is_enabled": true, "monthly_limit": 100000, "used_credits": 1234, "currency": "EUR"}"#)
     XCTAssertEqual(enabled?.usageLine, "On")
