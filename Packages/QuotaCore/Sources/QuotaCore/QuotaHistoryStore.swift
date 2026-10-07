@@ -5,6 +5,13 @@ public final class QuotaHistoryStore: @unchecked Sendable {
   /// functions may only reference public or `@usableFromInline` declarations.
   @usableFromInline static let defaultMaxEntries = 3_000
 
+  /// An archive as written to disk, kept with its encoding so a mirror store can
+  /// write the same bytes without encoding or decoding it again.
+  public struct Archive: Sendable {
+    public let snapshots: [QuotaSnapshot]
+    fileprivate let encoded: Data
+  }
+
   private let fileURL: URL
   private let encoder: JSONEncoder
   private let decoder: JSONDecoder
@@ -62,25 +69,24 @@ public final class QuotaHistoryStore: @unchecked Sendable {
   }
 
   public func save(_ snapshots: [QuotaSnapshot]) throws {
-    try FileManager.default.createDirectory(
-      at: fileURL.deletingLastPathComponent(),
-      withIntermediateDirectories: true
-    )
-
     let normalized = snapshots.sorted { $0.generatedAt < $1.generatedAt }
-    let data = try encoder.encode(normalized)
-    try data.write(to: fileURL, options: .atomic)
-    try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: fileURL.path)
+    try write(encoder.encode(normalized))
+  }
+
+  /// Replaces this store's file with an archive another store wrote. Every store
+  /// encodes identically, so this is the file its own `save` would produce.
+  public func save(_ archive: Archive) throws {
+    try write(archive.encoded)
   }
 
   /// Returns the trimmed archive it wrote, so callers can derive views from it
-  /// without decoding the file again.
+  /// or mirror it without decoding the file again.
   @discardableResult
   public func append(
     _ snapshot: QuotaSnapshot,
     keepDays: Int = 45,
     maxEntries: Int = defaultMaxEntries
-  ) throws -> [QuotaSnapshot] {
+  ) throws -> Archive {
     var history = try load()
     history.append(snapshot)
 
@@ -94,8 +100,9 @@ public final class QuotaHistoryStore: @unchecked Sendable {
       history = Array(history.suffix(limit))
     }
 
-    try save(history)
-    return history
+    let encoded = try encoder.encode(history)
+    try write(encoded)
+    return Archive(snapshots: history, encoded: encoded)
   }
 
   /// Rewrites the archive only when some entry belongs to `accountIDs`.
@@ -118,5 +125,15 @@ public final class QuotaHistoryStore: @unchecked Sendable {
       )
     }
     try save(filtered)
+  }
+
+  private func write(_ data: Data) throws {
+    try FileManager.default.createDirectory(
+      at: fileURL.deletingLastPathComponent(),
+      withIntermediateDirectories: true
+    )
+
+    try data.write(to: fileURL, options: .atomic)
+    try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: fileURL.path)
   }
 }

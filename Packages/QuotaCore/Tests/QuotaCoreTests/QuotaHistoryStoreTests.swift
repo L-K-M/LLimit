@@ -111,24 +111,37 @@ final class QuotaHistoryStoreTests: XCTestCase {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: dir) }
     let decoder = CountingDecoder()
-    let store = QuotaHistoryStore(fileURL: dir.appendingPathComponent("history.json"), decoder: decoder)
+    let localURL = dir.appendingPathComponent("local/history.json")
+    let mirrorURL = dir.appendingPathComponent("group/history.json")
+    let store = QuotaHistoryStore(fileURL: localURL, decoder: decoder)
+    let mirror = QuotaHistoryStore(fileURL: mirrorURL, decoder: decoder)
 
     // A full archive: 3,000 refreshes 15 minutes apart, the shortest interval.
     let now = Date(timeIntervalSince1970: 1_700_000_000)
     let interval: TimeInterval = 15 * 60
     try store.save((1...3_000).map { snapshot(at: now.addingTimeInterval(-Double($0) * interval), accountIDs: ["a", "b"]) })
+    // An unreadable widget copy with a private mode, both repaired by the mirror.
+    try FileManager.default.createDirectory(at: mirrorURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data("not json".utf8).write(to: mirrorURL)
+    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: mirrorURL.path)
     decoder.archiveDecodes = 0
 
-    // The app's publish: append the refresh, then derive the dashboard's recent slice.
+    // The app's publish: append the refresh, derive the dashboard's recent slice,
+    // then mirror the archive into the widget copy.
     let archive = try store.append(snapshot(at: now, accountIDs: ["a", "b"]))
-    let recent = QuotaHistoryStore.recent(archive, days: 2, now: now)
+    let recent = QuotaHistoryStore.recent(archive.snapshots, days: 2, now: now)
+    try mirror.save(archive)
 
     XCTAssertEqual(decoder.archiveDecodes, 1)
-    XCTAssertEqual(archive.count, 3_000)
-    XCTAssertEqual(archive.first?.generatedAt, now.addingTimeInterval(-2_999 * interval))
+    XCTAssertEqual(archive.snapshots.count, 3_000)
+    XCTAssertEqual(archive.snapshots.first?.generatedAt, now.addingTimeInterval(-2_999 * interval))
     // 48 hours of 15-minute refreshes plus the new one.
     XCTAssertEqual(recent.count, 193)
     XCTAssertEqual(recent.last?.generatedAt, now)
+
+    XCTAssertEqual(try Data(contentsOf: mirrorURL), try Data(contentsOf: localURL))
+    let mode = try FileManager.default.attributesOfItem(atPath: mirrorURL.path)[.posixPermissions] as? NSNumber
+    XCTAssertEqual(mode?.intValue, 0o644)
   }
 
   func testAppendReturnsTheArchiveItWrote() throws {
@@ -142,10 +155,10 @@ final class QuotaHistoryStoreTests: XCTestCase {
 
     let archive = try store.append(snapshot(at: now, accountIDs: ["a"]), keepDays: 5, maxEntries: 4)
 
-    XCTAssertEqual(archive, try store.load())
-    XCTAssertEqual(archive.map(\.generatedAt), [2, 1, 0.5, 0].map { now.addingTimeInterval(-$0 * 86_400) })
+    XCTAssertEqual(archive.snapshots, try store.load())
+    XCTAssertEqual(archive.snapshots.map(\.generatedAt), [2, 1, 0.5, 0].map { now.addingTimeInterval(-$0 * 86_400) })
     XCTAssertEqual(
-      QuotaHistoryStore.recent(archive, days: 2, now: now),
+      QuotaHistoryStore.recent(archive.snapshots, days: 2, now: now),
       try store.loadRecent(days: 2, now: now)
     )
   }

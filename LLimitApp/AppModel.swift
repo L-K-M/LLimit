@@ -276,15 +276,19 @@ final class AppModel: ObservableObject {
   private func publishSnapshot(_ refreshed: QuotaSnapshot) {
     // A failed append writes nothing, so keep the slice already shown rather
     // than decoding the file again.
+    let archive: QuotaHistoryStore.Archive?
     do {
-      let history = try historyStore.append(refreshed)
-      recentHistory = QuotaHistoryStore.recent(history, days: Self.recentHistoryDays, now: Date())
+      archive = try historyStore.append(refreshed)
     } catch {
       print("[LLimit] Local history append failed: \(error.localizedDescription)")
+      archive = nil
+    }
+    if let archive {
+      recentHistory = QuotaHistoryStore.recent(archive.snapshots, days: Self.recentHistoryDays, now: Date())
     }
 
     let widgetSyncReady = syncSnapshotToWidgetStore(refreshed)
-    let historySyncReady = syncHistoryToWidgetStore(refreshed)
+    let historySyncReady = syncHistoryToWidgetStore(refreshed, archive: archive)
 
     if widgetSyncReady || historySyncReady {
       reloadWidgetTimelines()
@@ -2000,8 +2004,11 @@ final class AppModel: ObservableObject {
     cachedAppGroupHistoryStore = nil
   }
 
+  /// Mirrors the local archive, which receives the same snapshots and purges, so
+  /// a publish never decodes the widget copy and a diverged or unreadable copy is
+  /// replaced. Without a local archive (its append failed), appends directly.
   @discardableResult
-  private func syncHistoryToWidgetStore(_ snapshot: QuotaSnapshot) -> Bool {
+  private func syncHistoryToWidgetStore(_ snapshot: QuotaSnapshot, archive: QuotaHistoryStore.Archive?) -> Bool {
     for attempt in 1...2 {
       guard let appGroupStore = appGroupHistoryStore() else {
         print("[LLimit] History sync failed: no App Group history store available")
@@ -2010,7 +2017,11 @@ final class AppModel: ObservableObject {
       }
 
       do {
-        try appGroupStore.append(snapshot)
+        if let archive {
+          try appGroupStore.save(archive)
+        } else {
+          try appGroupStore.append(snapshot)
+        }
         return true
       } catch {
         print("[LLimit] History sync attempt \(attempt) failed: \(error.localizedDescription)")
