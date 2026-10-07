@@ -5,10 +5,14 @@ public final class QuotaHistoryStore: @unchecked Sendable {
   private let encoder: JSONEncoder
   private let decoder: JSONDecoder
 
-  public init(fileURL: URL) {
+  public convenience init(fileURL: URL) {
+    self.init(fileURL: fileURL, decoder: JSONDecoder())
+  }
+
+  init(fileURL: URL, decoder: JSONDecoder) {
     self.fileURL = fileURL
     self.encoder = JSONEncoder()
-    self.decoder = JSONDecoder()
+    self.decoder = decoder
     encoder.dateEncodingStrategy = .iso8601
     decoder.dateDecodingStrategy = .iso8601
     // Compact (not pretty-printed): the widget extension reads this file on every
@@ -16,13 +20,28 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     encoder.outputFormatting = []
   }
 
-  public func load() throws -> [QuotaSnapshot] {
+  public func load(policy: StoreReadPolicy = .preserve) throws -> [QuotaSnapshot] {
+    guard FileManager.default.fileExists(atPath: fileURL.path) else { return [] }
+    if case .recover = policy {
+      return try withStoreFileLock(at: fileURL) { try loadLocked(policy: policy) }
+    }
+    return try loadLocked(policy: policy)
+  }
+
+  private func loadLocked(policy: StoreReadPolicy) throws -> [QuotaSnapshot] {
     guard FileManager.default.fileExists(atPath: fileURL.path) else {
       return []
     }
 
     let data = try Data(contentsOf: fileURL)
-    return try decoder.decode([QuotaSnapshot].self, from: data)
+    do {
+      return try decoder.decode([QuotaSnapshot].self, from: data)
+    } catch {
+      guard case .recover = policy else { throw error }
+      guard quarantineCorruptFile(at: fileURL) else { throw error }
+      reportPersistenceIssue("Quarantined undecodable \(fileURL.lastPathComponent).")
+      return []
+    }
   }
 
   /// Loads only the snapshots within the last `days`, capped to the newest `maxEntries`.
@@ -46,10 +65,13 @@ public final class QuotaHistoryStore: @unchecked Sendable {
       withIntermediateDirectories: true
     )
 
+    try withStoreFileLock(at: fileURL) { try saveLocked(snapshots) }
+  }
+
+  private func saveLocked(_ snapshots: [QuotaSnapshot]) throws {
     let normalized = snapshots.sorted { $0.generatedAt < $1.generatedAt }
     let data = try encoder.encode(normalized)
-    try data.write(to: fileURL, options: .atomic)
-    try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: fileURL.path)
+    try writeOwnerOnlyAtomicallyLocked(data, to: fileURL)
   }
 
   public func append(
@@ -57,7 +79,14 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     keepDays: Int = 45,
     maxEntries: Int = 3_000
   ) throws {
-    var history = try load()
+    try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try withStoreFileLock(at: fileURL) {
+      try appendLocked(snapshot, keepDays: keepDays, maxEntries: maxEntries)
+    }
+  }
+
+  private func appendLocked(_ snapshot: QuotaSnapshot, keepDays: Int, maxEntries: Int) throws {
+    var history = try loadLocked(policy: .recover)
     history.append(snapshot)
 
     let cutoffDays = max(1, keepDays)
@@ -70,13 +99,16 @@ public final class QuotaHistoryStore: @unchecked Sendable {
       history = Array(history.suffix(limit))
     }
 
-    try save(history)
+    try saveLocked(history)
   }
 
   public func remove(accountIDs: Set<String>) throws {
-    guard !accountIDs.isEmpty else { return }
+    guard !accountIDs.isEmpty, FileManager.default.fileExists(atPath: fileURL.path) else { return }
+    try withStoreFileLock(at: fileURL) { try removeLocked(accountIDs: accountIDs) }
+  }
 
-    let filtered = try load().map { snapshot in
+  private func removeLocked(accountIDs: Set<String>) throws {
+    let filtered = try loadLocked(policy: .recover).map { snapshot in
       QuotaSnapshot(
         version: snapshot.version,
         generatedAt: snapshot.generatedAt,
@@ -84,6 +116,6 @@ public final class QuotaHistoryStore: @unchecked Sendable {
         failures: snapshot.failures.filter { !accountIDs.contains($0.accountID) }
       )
     }
-    try save(filtered)
+    try saveLocked(filtered)
   }
 }

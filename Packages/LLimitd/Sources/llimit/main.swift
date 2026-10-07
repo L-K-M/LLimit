@@ -43,9 +43,9 @@ func printUsage() {
   )
 }
 
-func makeDaemon() -> QuotaDaemon {
+func makeDaemon(access: QuotaDaemon.ConfigurationAccess = .owner) -> QuotaDaemon {
   let daemon = QuotaDaemon(paths: LinuxPaths())
-  daemon.loadConfiguration()
+  daemon.loadConfiguration(access: access)
   return daemon
 }
 
@@ -80,7 +80,7 @@ func runAccounts(_ args: [String]) {
 }
 
 func accountsList() {
-  let daemon = makeDaemon()
+  let daemon = makeDaemon(access: .inspect)
 
   if daemon.settings.accounts.isEmpty {
     print("No accounts. Add one with `llimit accounts add --provider <id>` or import a")
@@ -331,11 +331,11 @@ func runRefresh() async {
 }
 
 func runStatus(_ args: [String]) {
-  let daemon = makeDaemon()
+  let snapshot = try? StatusReader.loadSnapshot(paths: LinuxPaths())
   if args.contains("--json") {
-    print(StatusRenderer.waybarJSON(snapshot: daemon.snapshot))
+    print(StatusRenderer.waybarJSON(snapshot: snapshot))
   } else {
-    print(StatusRenderer.humanReadable(snapshot: daemon.snapshot))
+    print(StatusRenderer.humanReadable(snapshot: snapshot))
   }
 }
 

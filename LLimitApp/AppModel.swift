@@ -211,6 +211,9 @@ final class AppModel: ObservableObject {
 
     do {
       var refreshed = await refreshService.refresh(configurations: enabledConfigs, credentialFailures: claudeFailures)
+      // A cancelled launch-time refresh has nothing to publish. Completed
+      // usage and genuine failures still survive a late cancellation.
+      if Task.isCancelled, refreshed.providers.isEmpty, refreshed.failures.isEmpty { return }
       refreshed = removingChangedVeniceResults(from: refreshed, configurations: enabledConfigs)
       try refreshService.save(refreshed)
       let initiallySaved = refreshed
@@ -1654,7 +1657,7 @@ final class AppModel: ObservableObject {
   }
 
   private func invalidateVeniceUsage(for account: ProviderAccount) throws {
-    let current = try snapshotStore.load() ?? snapshot
+    let current = try snapshotStore.load(policy: .recover) ?? snapshot
       ?? QuotaSnapshot(generatedAt: Date(), providers: [], failures: [])
     let empty = QuotaSnapshot(generatedAt: current.generatedAt, providers: [], failures: [])
     let cleared = current.replacingResults(forAccountIDs: [account.id], from: empty)
@@ -1734,7 +1737,7 @@ final class AppModel: ObservableObject {
   }
 
   private func loadSnapshotFromPreferredStore() throws -> QuotaSnapshot? {
-    return try snapshotStore.load()
+    return try snapshotStore.load(policy: .recover)
   }
 
   private func currentSettings() -> AppSettings {

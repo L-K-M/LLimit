@@ -266,6 +266,8 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
   public var totalDisplay: String?
   public var resetAt: Date?
   public var resetIn: String?
+  /// Provider-reported duration, never inferred from a display label.
+  public var windowSeconds: Int?
   public var isUnlimited: Bool
   public var detail: String?
 
@@ -279,6 +281,7 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
     totalDisplay: String? = nil,
     resetAt: Date? = nil,
     resetIn: String? = nil,
+    windowSeconds: Int? = nil,
     isUnlimited: Bool = false,
     detail: String? = nil
   ) {
@@ -291,6 +294,7 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
     self.totalDisplay = totalDisplay
     self.resetAt = resetAt
     self.resetIn = resetIn
+    self.windowSeconds = windowSeconds
     self.isUnlimited = isUnlimited
     self.detail = detail
   }
@@ -388,12 +392,16 @@ public struct ProviderFailure: Codable, Hashable, Identifiable, Sendable {
   public var provider: QuotaProvider
   public var kind: QuotaErrorKind
   public var message: String
+  /// Optional server cooldown, compatible with older snapshots.
+  public var retryAt: Date?
 
-  public init(accountID: String? = nil, provider: QuotaProvider, kind: QuotaErrorKind, message: String) {
+  public init(accountID: String? = nil, provider: QuotaProvider, kind: QuotaErrorKind, message: String,
+              retryAt: Date? = nil) {
     self.accountID = accountID ?? provider.rawValue
     self.provider = provider
     self.kind = kind
     self.message = message
+    self.retryAt = retryAt
   }
 
   private enum CodingKeys: String, CodingKey {
@@ -401,6 +409,7 @@ public struct ProviderFailure: Codable, Hashable, Identifiable, Sendable {
     case provider
     case kind
     case message
+    case retryAt
   }
 
   public init(from decoder: Decoder) throws {
@@ -409,6 +418,7 @@ public struct ProviderFailure: Codable, Hashable, Identifiable, Sendable {
     accountID = (try? container.decodeIfPresent(String.self, forKey: .accountID)) ?? provider.rawValue
     kind = try container.decode(QuotaErrorKind.self, forKey: .kind)
     message = try container.decode(String.self, forKey: .message)
+    retryAt = try? container.decodeIfPresent(Date.self, forKey: .retryAt)
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -417,6 +427,7 @@ public struct ProviderFailure: Codable, Hashable, Identifiable, Sendable {
     try container.encode(provider, forKey: .provider)
     try container.encode(kind, forKey: .kind)
     try container.encode(message, forKey: .message)
+    try container.encodeIfPresent(retryAt, forKey: .retryAt)
   }
 }
 
@@ -819,6 +830,10 @@ public enum QuotaWindowKind: String, Codable, CaseIterable, Sendable {
 
     if let minutes = leadingCount(beforeUnit: "minute", in: tokens) {
       return minutes >= 1_200 ? .daily : .session
+    }
+
+    if leadingCount(beforeUnit: "second", in: tokens) != nil {
+      return .session
     }
 
     if let days = leadingCount(beforeUnit: "day", in: tokens) {

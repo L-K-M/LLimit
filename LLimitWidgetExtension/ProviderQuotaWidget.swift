@@ -432,7 +432,8 @@ private struct ProviderQuotaTileView: View {
         ProviderConcentricRings(
           metrics: metrics,
           name: account.displayName,
-          tints: tints
+          tints: tints,
+          paces: metrics.map { pace(for: $0, in: usage) }
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -607,6 +608,10 @@ private struct ProviderQuotaTileView: View {
     }
   }
 
+  private func pace(for metric: UsageMetric, in usage: ProviderUsage) -> QuotaPace? {
+    QuotaPace(metric: metric, provider: usage.provider, fetchedAt: usage.fetchedAt, now: entry.date)
+  }
+
   private func isStale(_ usage: ProviderUsage) -> Bool {
     if entry.failure != nil { return true }
     let rings = defaultRingMetrics(for: usage)
@@ -663,9 +668,10 @@ private struct ProviderQuotaTileView: View {
       } else {
         quota = metric.usageLine ?? "remaining quota unknown"
       }
+      let paceSummary = pace(for: metric, in: usage).map { ", \($0.phrase)" } ?? ""
       let reset = metric.resetAt != nil || metric.resetIn != nil
         ? ", \(resetSummary(for: metric, expanded: true))" : ""
-      return "\(metric.label), \(quota)\(reset)"
+      return "\(metric.label), \(quota)\(paceSummary)\(reset)"
     }.joined(separator: ". ")
 
     let freshness = isStale(usage) ? "Data is stale." : "Data is current."
@@ -706,6 +712,7 @@ private struct ProviderConcentricRings: View {
   let metrics: [UsageMetric]
   let name: String
   let tints: [Color]
+  let paces: [QuotaPace?]
 
   var body: some View {
     GeometryReader { proxy in
@@ -718,7 +725,8 @@ private struct ProviderConcentricRings: View {
           ProviderTileRing(
             metric: outer,
             color: tints.first ?? .white,
-            lineWidth: max(9, side * 0.095)
+            lineWidth: max(9, side * 0.095),
+            pace: paces.first ?? nil
           )
           .frame(width: side, height: side)
         }
@@ -727,7 +735,8 @@ private struct ProviderConcentricRings: View {
           ProviderTileRing(
             metric: inner,
             color: tints.dropFirst().first ?? .white,
-            lineWidth: max(7, side * 0.08)
+            lineWidth: max(7, side * 0.08),
+            pace: paces.dropFirst().first ?? nil
           )
           .frame(width: side * 0.62, height: side * 0.62)
         }
@@ -751,6 +760,7 @@ private struct ProviderTileRing: View {
   let metric: UsageMetric
   let color: Color
   let lineWidth: CGFloat
+  let pace: QuotaPace?
 
   var body: some View {
     ZStack {
@@ -772,12 +782,43 @@ private struct ProviderTileRing: View {
           .shadow(color: color.opacity(0.45), radius: 2.5)
           .padding(lineWidth / 2)
       }
+      if let pace {
+        ProviderTileRingPaceTick(remainingFraction: pace.evenPaceRemainingFraction, lineWidth: lineWidth)
+      }
     }
   }
 
   private var progress: CGFloat {
     if metric.isUnlimited { return 1 }
     return CGFloat(max(0, min(100, metric.remainingPercent ?? 0))) / 100
+  }
+}
+
+/// A neutral notch marks even remaining quota without repainting the arc.
+private struct ProviderTileRingPaceTick: View {
+  let remainingFraction: Double
+  let lineWidth: CGFloat
+
+  private static let color = Color.white.opacity(0.9)
+  private static let width: CGFloat = 2
+
+  var body: some View {
+    GeometryReader { proxy in
+      let center = CGPoint(x: proxy.size.width / 2, y: proxy.size.height / 2)
+      let outerRadius = min(proxy.size.width, proxy.size.height) / 2
+      let innerRadius = max(0, outerRadius - lineWidth)
+      let fraction = min(max(remainingFraction, 0), 1)
+      let angle = Angle.degrees(360 * fraction - 90).radians
+      let dx = CGFloat(cos(angle))
+      let dy = CGFloat(sin(angle))
+
+      Path { path in
+        path.move(to: CGPoint(x: center.x + dx * innerRadius, y: center.y + dy * innerRadius))
+        path.addLine(to: CGPoint(x: center.x + dx * outerRadius, y: center.y + dy * outerRadius))
+      }
+      .stroke(Self.color, style: StrokeStyle(lineWidth: Self.width, lineCap: .butt))
+      .shadow(color: .black.opacity(0.45), radius: 0.5)
+    }
   }
 }
 
