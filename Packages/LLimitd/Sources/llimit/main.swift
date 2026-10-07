@@ -357,7 +357,7 @@ func runCheck(_ args: [String]) {
       minPercent = value
     case "--stale-hours":
       i += 1
-      guard i < args.count, let value = Double(args[i]), value > 0 else {
+      guard i < args.count, let value = Double(args[i]), value > 0, value.isFinite else {
         fail("--stale-hours needs a positive number", exitCode: 2)
       }
       staleHours = value
