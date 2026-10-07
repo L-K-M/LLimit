@@ -16,13 +16,20 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     encoder.outputFormatting = []
   }
 
-  public func load() throws -> [QuotaSnapshot] {
+  public func load(policy: StoreReadPolicy = .preserve) throws -> [QuotaSnapshot] {
     guard FileManager.default.fileExists(atPath: fileURL.path) else {
       return []
     }
 
     let data = try Data(contentsOf: fileURL)
-    return try decoder.decode([QuotaSnapshot].self, from: data)
+    do {
+      return try decoder.decode([QuotaSnapshot].self, from: data)
+    } catch {
+      guard case .recover = policy else { throw error }
+      guard quarantineCorruptFile(at: fileURL) else { throw error }
+      reportPersistenceIssue("Quarantined undecodable \(fileURL.lastPathComponent).")
+      return []
+    }
   }
 
   /// Loads only the snapshots within the last `days`, capped to the newest `maxEntries`.
@@ -48,8 +55,7 @@ public final class QuotaHistoryStore: @unchecked Sendable {
 
     let normalized = snapshots.sorted { $0.generatedAt < $1.generatedAt }
     let data = try encoder.encode(normalized)
-    try data.write(to: fileURL, options: .atomic)
-    try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: fileURL.path)
+    try writeOwnerOnlyAtomically(data, to: fileURL)
   }
 
   public func append(
@@ -57,7 +63,7 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     keepDays: Int = 45,
     maxEntries: Int = 3_000
   ) throws {
-    var history = try load()
+    var history = try load(policy: .recover)
     history.append(snapshot)
 
     let cutoffDays = max(1, keepDays)
@@ -76,7 +82,7 @@ public final class QuotaHistoryStore: @unchecked Sendable {
   public func remove(accountIDs: Set<String>) throws {
     guard !accountIDs.isEmpty else { return }
 
-    let filtered = try load().map { snapshot in
+    let filtered = try load(policy: .recover).map { snapshot in
       var filtered = snapshot
       filtered.providers.removeAll { accountIDs.contains($0.accountID) }
       filtered.failures.removeAll { accountIDs.contains($0.accountID) }

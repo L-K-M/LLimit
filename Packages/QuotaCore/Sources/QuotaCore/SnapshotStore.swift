@@ -17,20 +17,30 @@ public final class SnapshotStore: @unchecked Sendable {
   }
 
   #if canImport(Darwin)
-  public convenience init(appGroupIdentifier: String, fileName: String) {
-    let url = FileManager.default.containerURL(
+  public convenience init?(appGroupIdentifier: String, fileName: String) {
+    guard let container = FileManager.default.containerURL(
       forSecurityApplicationGroupIdentifier: appGroupIdentifier
-    )!.appendingPathComponent(fileName)
-    self.init(fileURL: url, appGroupIdentifier: appGroupIdentifier)
+    ) else {
+      reportPersistenceIssue("The snapshot App Group container is unavailable.")
+      return nil
+    }
+    self.init(fileURL: container.appendingPathComponent(fileName), appGroupIdentifier: appGroupIdentifier)
   }
   #endif
 
-  public func load() throws -> QuotaSnapshot? {
+  public func load(policy: StoreReadPolicy = .preserve) throws -> QuotaSnapshot? {
     guard FileManager.default.fileExists(atPath: fileURL.path) else {
       return nil
     }
     let data = try Data(contentsOf: fileURL)
-    return try decoder.decode(QuotaSnapshot.self, from: data)
+    do {
+      return try decoder.decode(QuotaSnapshot.self, from: data)
+    } catch {
+      guard case .recover = policy else { throw error }
+      guard quarantineCorruptFile(at: fileURL) else { throw error }
+      reportPersistenceIssue("Quarantined undecodable \(fileURL.lastPathComponent).")
+      return nil
+    }
   }
 
   public func save(_ snapshot: QuotaSnapshot) throws {
@@ -39,8 +49,7 @@ public final class SnapshotStore: @unchecked Sendable {
       withIntermediateDirectories: true
     )
     let data = try encoder.encode(snapshot)
-    try data.write(to: fileURL, options: .atomic)
-    try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: fileURL.path)
+    try writeOwnerOnlyAtomically(data, to: fileURL)
   }
 
   public func debugInfo() -> String {
