@@ -1594,7 +1594,9 @@ private struct MetricQuotaRow: View {
           }
           Spacer(minLength: 4)
           if let resetCountdown {
+            // Ideal size: the secondary text truncates first, never the countdown.
             ResetChip(countdown: resetCountdown)
+              .fixedSize()
           }
         }
       }
@@ -1639,8 +1641,8 @@ private struct MetricQuotaRow: View {
     return metric.usageLine
   }
 
-  /// The usage line and the pace phrase share one truncating line, so a long
-  /// amount never pushes the reset chip out of the row.
+  /// The usage line and the pace phrase share one line, which truncates
+  /// before the fixed-size reset chip gives up any width.
   private var secondaryText: String? {
     let parts = [secondaryUsageLine, pace?.phrase].compactMap { $0 }
     return parts.isEmpty ? nil : parts.joined(separator: " · ")

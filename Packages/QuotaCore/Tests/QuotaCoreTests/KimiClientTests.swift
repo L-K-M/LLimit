@@ -157,7 +157,9 @@ final class KimiClientTests: XCTestCase {
 
   // The reported duration becomes the pace length. The plan quota states no
   // length, a month has none, and an unknown unit or an absurd count yields
-  // none rather than a guess or a trap.
+  // none rather than a guess or a trap. 9e18 minutes still names a window
+  // (1.5e17 hours fits in an Int) but its seconds overflow, so it deliberately
+  // gets no pace length.
   func testReportedWindowDurationsAreKeptForPace() async throws {
     let json = #"""
     {

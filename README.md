@@ -165,10 +165,11 @@ import or a replacement key.
   default window color. Other limits keep their existing colors.
 - Dashboard bars and provider tile rings carry a thin white tick at *even pace*:
   where the remaining share would be if you spent the window evenly until its
-  reset. The dashboard row also says how far ahead of or behind that pace you
-  were at the last refresh. Pace appears only for windows whose length the
-  provider reports or its API names (such as Claude's five-hour and weekly
-  windows); monthly and rolling windows have none.
+  reset. The dashboard row also says how far over or under that pace you were
+  at the last refresh. Over pace means you are using quota faster than even
+  spending and would run out before the reset. Pace appears only for windows
+  whose length the provider reports or its API names (such as Claude's
+  five-hour and weekly windows); monthly and rolling windows have none.
 
 ## Requirements
 

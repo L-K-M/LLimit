@@ -35,21 +35,21 @@ final class QuotaPaceTests: XCTestCase {
     XCTAssertEqual(start.elapsedFraction, 0)
     XCTAssertEqual(start.evenPaceRemainingFraction, 1)
     XCTAssertEqual(start.delta, 10)
-    XCTAssertEqual(start.phrase, "10% ahead of pace")
+    XCTAssertEqual(start.phrase, "10% over pace")
   }
 
   func testMiddleOfWeeklyWindowComparesUsedWithElapsed() throws {
     let halfway = TimeInterval(week / 2)
     let even = try XCTUnwrap(pace(metric(remaining: 50, resetIn: halfway, windowSeconds: week)))
-    let ahead = try XCTUnwrap(pace(metric(remaining: 38, resetIn: halfway, windowSeconds: week)))
-    let behind = try XCTUnwrap(pace(metric(remaining: 58, resetIn: halfway, windowSeconds: week)))
+    let over = try XCTUnwrap(pace(metric(remaining: 38, resetIn: halfway, windowSeconds: week)))
+    let under = try XCTUnwrap(pace(metric(remaining: 58, resetIn: halfway, windowSeconds: week)))
 
     XCTAssertEqual(even.elapsedFraction, 0.5, accuracy: 1e-9)
     XCTAssertEqual(even.evenPaceRemainingFraction, 0.5, accuracy: 1e-9)
     XCTAssertEqual(even.delta, 0, accuracy: 1e-9)
     XCTAssertEqual(even.phrase, "on pace")
-    XCTAssertEqual(ahead.phrase, "12% ahead of pace")
-    XCTAssertEqual(behind.phrase, "8% behind pace")
+    XCTAssertEqual(over.phrase, "12% over pace")
+    XCTAssertEqual(under.phrase, "8% under pace")
   }
 
   // "40% left" on day 2 and day 6 of a weekly window are opposite stories.
@@ -59,8 +59,8 @@ final class QuotaPaceTests: XCTestCase {
 
     XCTAssertGreaterThan(dayTwo.delta, 0)
     XCTAssertLessThan(daySix.delta, 0)
-    XCTAssertEqual(dayTwo.phrase, "31% ahead of pace")
-    XCTAssertEqual(daySix.phrase, "26% behind pace")
+    XCTAssertEqual(dayTwo.phrase, "31% over pace")
+    XCTAssertEqual(daySix.phrase, "26% under pace")
   }
 
   func testWindowEndExpectsTheQuotaSpent() throws {
@@ -76,8 +76,8 @@ final class QuotaPaceTests: XCTestCase {
 
     XCTAssertEqual(pace(metric(remaining: 48, resetIn: halfway))?.phrase, "on pace")
     XCTAssertEqual(pace(metric(remaining: 52, resetIn: halfway))?.phrase, "on pace")
-    XCTAssertEqual(pace(metric(remaining: 47, resetIn: halfway))?.phrase, "3% ahead of pace")
-    XCTAssertEqual(pace(metric(remaining: 53, resetIn: halfway))?.phrase, "3% behind pace")
+    XCTAssertEqual(pace(metric(remaining: 47, resetIn: halfway))?.phrase, "3% over pace")
+    XCTAssertEqual(pace(metric(remaining: 53, resetIn: halfway))?.phrase, "3% under pace")
   }
 
   // MARK: - Missing and out-of-range data

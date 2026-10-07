@@ -33,7 +33,7 @@ public struct QuotaPace: Equatable, Sendable {
   /// - Parameters:
   ///   - fetchedAt: when `metric` was read. Elapsed time is measured at this
   ///     instant so used and elapsed describe the same moment; measuring at
-  ///     display time would drift a stale reading toward "behind pace".
+  ///     display time would drift a stale reading toward "under pace".
   ///   - now: the display time. A window that has reset since the reading has
   ///     no pace, because its used share belongs to the window that ended.
   public init?(metric: UsageMetric, provider: QuotaProvider, fetchedAt: Date, now: Date) {
@@ -56,11 +56,13 @@ public struct QuotaPace: Equatable, Sendable {
     1 - elapsedFraction
   }
 
-  /// "12% ahead of pace", "on pace" or "8% behind pace".
+  /// "12% over pace", "on pace" or "8% under pace". "Over" means more of the
+  /// window is used than has elapsed, so it would run out before its reset;
+  /// "ahead of pace" would read as good news for the same reading.
   public var phrase: String {
     let points = Int(abs(delta).rounded())
     guard points >= Self.onPacePoints else { return "on pace" }
-    return delta > 0 ? "\(points)% ahead of pace" : "\(points)% behind pace"
+    return delta > 0 ? "\(points)% over pace" : "\(points)% under pace"
   }
 
   /// The window's length: the provider's reported length, else the length a
