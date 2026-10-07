@@ -11,16 +11,26 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from llimit_tray import (  # noqa: E402
     FALLBACK_ICON,
+    MenuRow,
+    MenuUpdate,
+    TrayModel,
     build_menu_model,
+    describe_status,
+    failure_note,
     format_account_header,
+    format_duration,
     format_metric,
     main,
+    plan_menu_update,
 )
+
+NOW = datetime(2026, 10, 7, 12, 0, tzinfo=timezone.utc)
 
 
 def rows_of_kind(model, kind):
@@ -59,6 +69,42 @@ class FormatMetricTests(unittest.TestCase):
     def test_missing_label_falls_back_to_id(self):
         self.assertEqual(format_metric({"id": "weekly", "remainingPercent": 5}), "weekly — 5% left")
 
+    def test_reset_is_counted_down_from_reset_at_rather_than_fetch_time_text(self):
+        metric = {"label": "Session", "remainingPercent": 62, "resetIn": "3h 12m",
+                  "resetAt": "2026-10-07T13:30:00Z"}
+        self.assertEqual(format_metric(metric, NOW), "Session — 62% left · resets in 1h 30m")
+
+    def test_long_countdowns_use_days(self):
+        metric = {"label": "Weekly", "remainingPercent": 8, "resetAt": "2026-10-11T14:05:00Z"}
+        self.assertEqual(format_metric(metric, NOW), "Weekly — 8% left · resets in 4d 2h 5m")
+
+    def test_passed_reset_reads_as_due_instead_of_a_frozen_countdown(self):
+        metric = {"label": "Session", "remainingPercent": 62, "resetIn": "10m",
+                  "resetAt": "2026-10-07T11:59:00Z"}
+        self.assertEqual(format_metric(metric, NOW), "Session — 62% left · reset due")
+
+    def test_cleared_window_of_a_failed_account_says_it_reset(self):
+        metric = {"label": "Session", "resetAt": "2026-10-07T11:00:00Z",
+                  "detail": "Provider detail that must not be echoed"}
+        self.assertEqual(format_metric(metric, NOW), "Session — reset since the last successful refresh")
+
+    def test_naive_now_is_taken_as_local_time(self):
+        metric = {"label": "Session", "remainingPercent": 62, "resetAt": "2026-10-07T13:30:00Z"}
+        naive_local = NOW.astimezone().replace(tzinfo=None)
+        self.assertEqual(format_metric(metric, naive_local), format_metric(metric, NOW))
+
+    def test_durations_match_quotacore(self):
+        # Same cases as QuotaCore's formatShortDuration.
+        cases = {-5: "0m", 0: "0m", 59: "0m", 60: "1m", 3_600: "1h", 3_701: "1h 1m",
+                 86_400: "1d", 90_061: "1d 1h 1m", 86_460: "1d 1m"}
+        for seconds, expected in cases.items():
+            with self.subTest(seconds=seconds):
+                self.assertEqual(format_duration(seconds), expected)
+
+    def test_invalid_reset_at_falls_back_to_reset_in(self):
+        metric = {"label": "Session", "remainingPercent": 62, "resetIn": "3h", "resetAt": "soon"}
+        self.assertEqual(format_metric(metric, NOW), "Session — 62% left · resets in 3h")
+
 
 class FormatAccountHeaderTests(unittest.TestCase):
     def test_headline_percent_is_shown(self):
@@ -72,6 +118,15 @@ class FormatAccountHeaderTests(unittest.TestCase):
         text = format_account_header({"name": "Venice", "remainingPercent": 50,
                                       "estimated": True, "stale": True})
         self.assertEqual(text, "Venice — ≈50% left (estimated) · stale")
+
+    def test_failed_accounts_are_marked_failed_rather_than_stale(self):
+        text = format_account_header({"name": "Claude Work", "remainingPercent": 8, "stale": True, "failed": True})
+        self.assertEqual(text, "Claude Work — 8% left · failed")
+
+    def test_failure_only_account_reads_as_failed(self):
+        text = format_account_header({"name": "Claude Work", "remainingPercent": None, "metrics": [],
+                                      "failed": True})
+        self.assertEqual(text, "Claude Work — failed")
 
     def test_all_unlimited_account_reads_as_unlimited(self):
         text = format_account_header({"name": "Zhipu AI", "remainingPercent": None, "metrics": [{"unlimited": True}]})
@@ -165,12 +220,103 @@ class BuildMenuModelTests(unittest.TestCase):
         )
         self.assertIn("No limits reported", rows_of_kind(model, "metric"))
 
+    def mixed(self):
+        payload = self.sample()
+        payload["class"] = "warning"
+        payload["accounts"][0].update(failed=True, lastKnown=True, errorKind="auth", error="token expired")
+        payload["accounts"].append({
+            "id": "a3", "provider": "kimi", "name": "Kimi Work", "remainingPercent": None,
+            "stale": False, "failed": True, "lastKnown": False, "errorKind": "network",
+            "error": "offline", "metrics": [],
+        })
+        return payload
+
+    def test_failed_account_with_data_shows_its_error_under_the_header(self):
+        model = build_menu_model(self.mixed(), NOW)
+        texts = [row.text for row in model.rows]
+        header = texts.index("Claude — 8% left · failed")
+        self.assertEqual(model.rows[header + 1].kind, "error")
+        self.assertEqual(model.rows[header + 1].text, "Error: token expired")
+
+    def test_failure_only_account_gets_a_header_and_error_but_no_empty_limits_row(self):
+        model = build_menu_model(self.mixed(), NOW)
+        self.assertIn("Kimi Work — failed", rows_of_kind(model, "header"))
+        self.assertIn("Error: offline", rows_of_kind(model, "error"))
+        self.assertNotIn("No limits reported", rows_of_kind(model, "metric"))
+
+    def test_failure_count_follows_the_freshness_stamp(self):
+        model = build_menu_model(self.mixed(), NOW)
+        self.assertEqual([row.text for row in model.rows[:2]],
+                         ["Updated just now", "2 of 3 accounts failed to refresh"])
+        self.assertEqual(model.rows[2].kind, "separator")
+
+    def test_every_account_failed_is_said_once(self):
+        payload = self.mixed()
+        payload["class"] = "error"
+        payload["accounts"][1]["failed"] = True
+        model = build_menu_model(payload, NOW)
+        self.assertEqual(rows_of_kind(model, "note").count("Every account failed to refresh"), 1)
+        self.assertEqual(model.icon, "llimit-error")
+
+    def test_error_falls_back_to_its_kind(self):
+        payload = self.sample()
+        payload["accounts"][0].update(failed=True, errorKind="auth")
+        self.assertIn("Error: auth", rows_of_kind(build_menu_model(payload, NOW), "error"))
+
+    def test_failure_note_without_accounts_does_not_claim_every_account_failed(self):
+        self.assertEqual(failure_note(0, 0), "0 of 0 accounts failed to refresh")
+
+    def test_description_names_every_failure_when_all_accounts_failed(self):
+        self.assertEqual(describe_status("error", "Claude Work! · Kimi!", 2, 2),
+                         "LLimit: refresh failed. Every account failed to refresh. Claude Work! · Kimi!")
+
+    def test_icon_description_is_a_sentence_with_the_failure_count(self):
+        model = build_menu_model(self.mixed(), NOW)
+        self.assertEqual(model.description,
+                         "LLimit: needs attention. 2 of 3 accounts failed to refresh. Claude 8% · Zhipu AI")
+
+    def test_content_rows_are_selectable(self):
+        model = build_menu_model(self.mixed(), NOW)
+        for row in model.rows:
+            self.assertEqual(row.selectable, row.kind != "separator", row)
+
     def test_accounts_are_separated_but_not_leading(self):
         model = build_menu_model(self.sample())
         self.assertNotEqual(model.rows[0].kind, "separator")
         # One divider between the two accounts, one before the action block.
         header_indexes = [i for i, row in enumerate(model.rows) if row.kind == "header"]
         self.assertEqual(model.rows[header_indexes[1] - 1].kind, "separator")
+
+
+class PlanMenuUpdateTests(unittest.TestCase):
+    """Rebuilding the whole menu can close it or reset keyboard focus, so polls
+    that change nothing, or only text, must not rebuild."""
+
+    def model(self, *rows):
+        return TrayModel(label="LLimit", icon="llimit-ok", tooltip="", rows=list(rows))
+
+    def test_first_model_builds_the_menu(self):
+        self.assertIs(plan_menu_update(None, self.model(MenuRow("note", "a"))), MenuUpdate.REBUILD)
+
+    def test_equal_models_change_nothing(self):
+        rows = (MenuRow("header", "Claude — 8% left"), MenuRow("action", "Quit", action="quit"))
+        self.assertIs(plan_menu_update(self.model(*rows), self.model(*rows)), MenuUpdate.UNCHANGED)
+
+    def test_text_only_changes_relabel_in_place(self):
+        before = self.model(MenuRow("metric", "Session — resets in 3h 12m"), MenuRow("separator"))
+        after = self.model(MenuRow("metric", "Session — resets in 3h 11m"), MenuRow("separator"))
+        self.assertIs(plan_menu_update(before, after), MenuUpdate.RELABEL)
+
+    def test_icon_only_change_leaves_the_menu_alone(self):
+        rows = [MenuRow("header", "Claude — 8% left")]
+        before = TrayModel(label="LLimit", icon="llimit-ok", tooltip="", rows=list(rows), description="a")
+        after = TrayModel(label="LLimit!", icon="llimit-warning", tooltip="", rows=list(rows), description="b")
+        self.assertIs(plan_menu_update(before, after), MenuUpdate.UNCHANGED)
+
+    def test_layout_changes_rebuild(self):
+        before = self.model(MenuRow("header", "Claude"), MenuRow("metric", "Session"))
+        after = self.model(MenuRow("header", "Claude"), MenuRow("error", "Error: offline"), MenuRow("metric", "Session"))
+        self.assertIs(plan_menu_update(before, after), MenuUpdate.REBUILD)
 
 
 class IntervalValidationTests(unittest.TestCase):

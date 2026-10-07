@@ -13,6 +13,9 @@
   "return-type": "json",
   "interval": 300,
   "format": "{}",
+  // waybar parses `text` and `tooltip` as Pango markup by default. Error text and
+  // account names are plain text, and a stray "&" or "<" would blank the module.
+  "escape": true,
   // Optional: force an out-of-cycle refresh when clicking the module. The bar
   // updates on the next interval tick.
   "on-click": "llimit refresh"

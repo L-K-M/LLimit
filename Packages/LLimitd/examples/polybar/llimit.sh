@@ -10,16 +10,20 @@
 json=$(llimit status --json 2>/dev/null) || exit 0
 [ -n "$json" ] || exit 0
 
-text=$(printf '%s' "$json" | jq -r '.text // "LLimit"')
+# polybar parses "%{...}" in script output as formatting, including click-to-run
+# "%{A1:command:}" regions. Account names and limit labels are plain text, so
+# break every "%{" before printing.
+text=$(printf '%s' "$json" | jq -r '.text // "LLimit"' | sed 's/%{/% {/g')
 class=$(printf '%s' "$json" | jq -r '.class // "empty"')
 
 # Keep these in sync with the waybar/eww example palettes.
 case "$class" in
   ok)       color='#a6e3a1' ;;  # green: every account ≥ 40% remaining
-  warning)  color='#f9e2af' ;;  # yellow: some account below 40%
+  warning)  color='#f9e2af' ;;  # yellow: some account below 40%, failed or stale
   critical) color='#f38ba8' ;;  # red: some account below 15%
   error)    color='#f38ba8' ;;  # red: every account failed to refresh
   *)        color='#6c7086' ;;  # grey: empty / no snapshot yet
 esac
 
-echo "%{F$color}$text%{F-}"
+# printf rather than echo: dash's echo would interpret backslashes in the text.
+printf '%%{F%s}%s%%{F-}\n' "$color" "$text"

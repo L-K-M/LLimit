@@ -214,7 +214,7 @@ final class StatusRendererTests: XCTestCase {
   func testEstimateWithoutPercentageDoesNotClaimEstimatedPercentage() {
     let metric = UsageMetric(id: "daily-diem", label: "Daily DIEM remaining",
                              estimatedTotal: 40, usedDisplay: "0.00 DIEM")
-    let object = StatusRenderer.metricObject(metric)
+    let object = StatusRenderer.metricObject(metric, now: now)
 
     XCTAssertNil(object["remainingPercent"])
     XCTAssertNil(object["estimated"])
@@ -332,5 +332,294 @@ final class StatusRendererTests: XCTestCase {
 
   func testHumanReadableWithoutSnapshotExplainsNextStep() {
     XCTAssertTrue(StatusRenderer.humanReadable(snapshot: nil, now: now).contains("llimit refresh"))
+  }
+
+  // MARK: - Failing and stale accounts
+
+  private func accounts(_ object: [String: Any]) throws -> [[String: Any]] {
+    try XCTUnwrap(object["accounts"] as? [[String: Any]])
+  }
+
+  func testFailedAccountWithCarriedDataIsFlaggedAndRaisesClass() throws {
+    let snapshot = snapshot(
+      remaining: [80, 90],
+      failures: [ProviderFailure(accountID: "account-1", provider: .anthropic, kind: .auth, message: "token expired")]
+    )
+    let object = try decodedWaybar(snapshot)
+    let rows = try accounts(object)
+
+    XCTAssertEqual(object["class"] as? String, "warning")
+    XCTAssertEqual(object["text"] as? String, "Claude 1 80% · Claude 2 90%!")
+    XCTAssertEqual(rows[0]["failed"] as? Bool, false)
+    XCTAssertEqual(rows[0]["lastKnown"] as? Bool, false)
+    XCTAssertNil(rows[0]["error"])
+    XCTAssertEqual(rows[1]["failed"] as? Bool, true)
+    XCTAssertEqual(rows[1]["lastKnown"] as? Bool, true)
+    XCTAssertEqual(rows[1]["errorKind"] as? String, "auth")
+    XCTAssertEqual(rows[1]["error"] as? String, "token expired")
+    XCTAssertEqual(rows[1]["remainingPercent"] as? Int, 90)
+    XCTAssertEqual(rows[1]["fetchedAt"] as? String, "2023-11-14T22:08:20Z")
+
+    let failures = try XCTUnwrap(object["failures"] as? [[String: Any]])
+    XCTAssertEqual(failures.count, 1)
+    XCTAssertEqual(failures[0]["id"] as? String, "account-1")
+    XCTAssertEqual(failures[0]["provider"] as? String, "anthropic")
+    XCTAssertEqual(failures[0]["name"] as? String, "Claude 2")
+    XCTAssertEqual(failures[0]["errorKind"] as? String, "auth")
+    // The summary names and classifies; the message stays on the account.
+    XCTAssertNil(failures[0]["error"])
+  }
+
+  func testHealthySnapshotHasAnEmptyFailureSummary() throws {
+    let object = try decodedWaybar(snapshot(remaining: [80]))
+    XCTAssertEqual((object["failures"] as? [Any])?.count, 0)
+    XCTAssertEqual(try accounts(object)[0]["failed"] as? Bool, false)
+  }
+
+  func testEveryAccountFailedWithCarriedDataIsError() throws {
+    let snapshot = snapshot(
+      remaining: [80, 90],
+      failures: [
+        ProviderFailure(accountID: "account-0", provider: .anthropic, kind: .network, message: "offline"),
+        ProviderFailure(accountID: "account-1", provider: .anthropic, kind: .network, message: "offline")
+      ]
+    )
+    XCTAssertEqual(try decodedWaybar(snapshot)["class"] as? String, "error")
+  }
+
+  func testFailingAccountsCarriedValueNeverRaisesClassAboveWarning() throws {
+    let snapshot = snapshot(
+      remaining: [80, 5],
+      failures: [ProviderFailure(accountID: "account-1", provider: .anthropic, kind: .auth, message: "expired")]
+    )
+    let object = try decodedWaybar(snapshot)
+
+    XCTAssertEqual(object["class"] as? String, "warning")
+    // The headline number still shows the last-known value, flagged by the class and `failed`.
+    XCTAssertEqual(object["percentage"] as? Int, 5)
+  }
+
+  func testStaleAccountsLastKnownValueNeverRaisesClassAboveWarning() throws {
+    var snapshot = snapshot(remaining: [80, 5])
+    snapshot.providers[1].fetchedAt = now.addingTimeInterval(-7 * 3_600)
+    var object = try decodedWaybar(snapshot)
+
+    XCTAssertEqual(object["class"] as? String, "warning")
+    XCTAssertEqual(object["percentage"] as? Int, 5)
+
+    snapshot.providers.removeFirst()
+    object = try decodedWaybar(snapshot)
+    XCTAssertEqual(object["class"] as? String, "warning")
+  }
+
+  func testCarriedReadingTakenAfterItsResetIsKeptAtRenderTime() throws {
+    var snapshot = snapshot(
+      remaining: [80, 30],
+      failures: [ProviderFailure(accountID: "account-1", provider: .anthropic, kind: .auth, message: "expired")]
+    )
+    // Fetched 5 min ago, after the provider's reported reset 10 min ago.
+    snapshot.providers[1].metrics[0].resetAt = now.addingTimeInterval(-600)
+    let rows = try accounts(decodedWaybar(snapshot))
+
+    XCTAssertEqual(rows[1]["remainingPercent"] as? Int, 30)
+  }
+
+  func testCarriedValuePastItsResetIsNotPresentedAsCurrent() throws {
+    var snapshot = snapshot(
+      remaining: [80, 8],
+      failures: [ProviderFailure(accountID: "account-1", provider: .anthropic, kind: .auth, message: "expired")]
+    )
+    // Reset passed after the daemon's last merge but before this render.
+    snapshot.providers[1].metrics[0].resetAt = now.addingTimeInterval(-60)
+    snapshot.providers[1].metrics[0].resetIn = "4m"
+    let object = try decodedWaybar(snapshot)
+    let rows = try accounts(object)
+
+    XCTAssertEqual(object["class"] as? String, "warning")
+    XCTAssertEqual(object["percentage"] as? Int, 80)
+    XCTAssertTrue(rows[1]["remainingPercent"] is NSNull)
+    let metric = try XCTUnwrap((rows[1]["metrics"] as? [[String: Any]])?.first)
+    XCTAssertNil(metric["remainingPercent"])
+    XCTAssertNil(metric["resetIn"])
+    XCTAssertEqual(object["text"] as? String, "Claude 1 80% · Claude 2!")
+    let human = StatusRenderer.humanReadable(snapshot: snapshot, now: now)
+    XCTAssertFalse(human.contains("8% left"))
+    XCTAssertTrue(human.contains("5-hour limit reset since the last successful refresh"))
+  }
+
+  func testFailureOnlyAccountIsListedWithoutData() throws {
+    let snapshot = snapshot(
+      remaining: [80],
+      failures: [ProviderFailure(accountID: "5F2C9A71-0000", provider: .kimi, kind: .auth, message: "bad key")]
+    )
+    let object = try decodedWaybar(snapshot)
+    let rows = try accounts(object)
+
+    XCTAssertEqual(rows.count, 2)
+    let kimi = try XCTUnwrap(rows.first { $0["provider"] as? String == "kimi" })
+    XCTAssertEqual(kimi["name"] as? String, "Kimi (5F2C9A71)")
+    XCTAssertTrue(kimi["remainingPercent"] is NSNull)
+    XCTAssertEqual((kimi["metrics"] as? [Any])?.count, 0)
+    XCTAssertEqual(kimi["failed"] as? Bool, true)
+    XCTAssertEqual(kimi["lastKnown"] as? Bool, false)
+    XCTAssertNil(kimi["fetchedAt"])
+    XCTAssertEqual(object["text"] as? String, "Claude 1 80% · Kimi (5F2C9A71)!")
+    XCTAssertEqual(object["class"] as? String, "warning")
+    XCTAssertTrue(StatusRenderer.humanReadable(snapshot: snapshot, now: now)
+      .contains("Kimi (5F2C9A71): ERROR bad key"))
+  }
+
+  func testSameProviderFailuresAreNamedByAccount() throws {
+    var snapshot = snapshot(
+      remaining: [80, 90],
+      failures: [
+        ProviderFailure(accountID: "account-0", provider: .anthropic, kind: .auth, message: "expired"),
+        ProviderFailure(accountID: "account-1", provider: .anthropic, kind: .network, message: "offline")
+      ]
+    )
+    snapshot.providers[0].title = "Claude Work"
+    snapshot.providers[1].title = "Claude Personal"
+    let text = StatusRenderer.humanReadable(snapshot: snapshot, now: now)
+
+    XCTAssertTrue(text.contains("Claude Work: ERROR expired"))
+    XCTAssertTrue(text.contains("Claude Personal: ERROR offline"))
+    XCTAssertFalse(text.contains("Claude: ERROR"))
+    // Accounts (and their ERROR lines) are listed by name.
+    let personal = try XCTUnwrap(text.range(of: "Claude Personal: ERROR"))
+    let work = try XCTUnwrap(text.range(of: "Claude Work: ERROR"))
+    XCTAssertLessThan(personal.lowerBound, work.lowerBound)
+    XCTAssertTrue(text.contains("Claude Work (last known, 5 min ago): 5-hour limit 80% left"))
+  }
+
+  func testStaleThresholdDoesNotFlagHealthyAccountsBetweenSlowCycles() throws {
+    // At the longest (180-minute) interval a healthy account is up to 3 h old.
+    var snapshot = snapshot(remaining: [80])
+    snapshot.providers[0].fetchedAt = now.addingTimeInterval(-3 * 3_600)
+    var object = try decodedWaybar(snapshot)
+    XCTAssertEqual(try accounts(object)[0]["stale"] as? Bool, false)
+    XCTAssertEqual(object["class"] as? String, "ok")
+
+    snapshot.providers[0].fetchedAt = now.addingTimeInterval(-7 * 3_600)
+    object = try decodedWaybar(snapshot)
+    XCTAssertEqual(try accounts(object)[0]["stale"] as? Bool, true)
+    XCTAssertEqual(object["class"] as? String, "warning")
+    XCTAssertEqual(object["text"] as? String, "Claude 1 80%!")
+    XCTAssertTrue(StatusRenderer.humanReadable(snapshot: snapshot, now: now)
+      .contains("Claude 1 (stale, 7 h ago): 5-hour limit 80% left"))
+  }
+
+  func testResetCountdownIsComputedAtRenderTime() throws {
+    let fetchedAt = now.addingTimeInterval(-1_800)
+    let usage = ProviderUsage(
+      accountID: "acct", provider: .anthropic, title: "Claude",
+      metrics: [UsageMetric(id: "five-hour", label: "5-hour limit", remainingPercent: 40,
+                            resetAt: fetchedAt.addingTimeInterval(3_600), resetIn: "1h")],
+      fetchedAt: fetchedAt
+    )
+    let snapshot = QuotaSnapshot(generatedAt: fetchedAt, providers: [usage], failures: [])
+
+    // 30 minutes after the fetch the frozen "1h" would be wrong.
+    XCTAssertTrue(StatusRenderer.humanReadable(snapshot: snapshot, now: now)
+      .contains("5-hour limit 40% left (resets in 30m)"))
+    var metric = try XCTUnwrap((try accounts(decodedWaybar(snapshot))[0]["metrics"] as? [[String: Any]])?.first)
+    XCTAssertEqual(metric["resetIn"] as? String, "30m")
+    XCTAssertEqual(metric["resetAt"] as? String, "2023-11-14T22:43:20Z")
+
+    // Past the reset: no countdown, and the human line says the reset is due.
+    let later = now.addingTimeInterval(7_200)
+    XCTAssertTrue(StatusRenderer.humanReadable(snapshot: snapshot, now: later)
+      .contains("5-hour limit 40% left (reset due)"))
+    let json = StatusRenderer.waybarJSON(snapshot: snapshot, now: later)
+    let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+    metric = try XCTUnwrap((try accounts(object)[0]["metrics"] as? [[String: Any]])?.first)
+    XCTAssertNil(metric["resetIn"])
+    XCTAssertEqual(metric["resetAt"] as? String, "2023-11-14T22:43:20Z")
+  }
+
+  func testResetAtIsAbsentWithoutAResetTime() throws {
+    let metric = try XCTUnwrap((try accounts(decodedWaybar(snapshot(remaining: [50])))[0]["metrics"]
+      as? [[String: Any]])?.first)
+    XCTAssertNil(metric["resetAt"])
+    XCTAssertNil(metric["resetIn"])
+  }
+
+  func testErrorTextIsOneBoundedLineWithoutMarkupOrControls() throws {
+    let body = "HTTP 502: <!DOCTYPE html>\n<html><head><style>body { color: red }</style>"
+      + "<title>502 Bad Gateway</title></head>\r\n<body>\u{1B}[31mnginx\u{7}%{A1:rm -rf ~:}"
+      + String(repeating: " filler", count: 60) + "</body></html>"
+    let snapshot = QuotaSnapshot(
+      generatedAt: now,
+      providers: [],
+      failures: [ProviderFailure(accountID: "openai", provider: .openAI, kind: .api, message: body)]
+    )
+    let human = StatusRenderer.humanReadable(snapshot: snapshot, now: now)
+    let errorLine = try XCTUnwrap(human.split(separator: "\n").first { $0.contains("ERROR") })
+    let object = try decodedWaybar(snapshot)
+    let error = try XCTUnwrap(try accounts(object)[0]["error"] as? String)
+
+    XCTAssertEqual(error, String(errorLine.dropFirst("OpenAI: ERROR ".count)))
+    // Polybar would parse "%{A1:…:}" as a click-to-run region.
+    XCTAssertTrue(error.hasPrefix("HTTP 502: 502 Bad Gateway nginx % {A1:rm -rf ~:} filler"))
+    XCTAssertTrue(error.hasSuffix("…"))
+    XCTAssertLessThanOrEqual(error.count, 160)
+    for forbidden in ["<", ">", "color", "\u{1B}", "\u{7}", "\r", "\n", "  ", "%{"] {
+      XCTAssertFalse(error.contains(forbidden), "error text contains \(forbidden.debugDescription)")
+    }
+    XCTAssertTrue((object["tooltip"] as? String)?.contains("OpenAI: ERROR \(error)") == true)
+  }
+
+  func testErrorTextScanIsBounded() {
+    // Text past the scan limit is never read, so a huge unterminated page stays cheap.
+    let padding = String(repeating: " ", count: StatusRenderer.maximumScannedErrorLength)
+    XCTAssertEqual(StatusRenderer.sanitizedErrorText(padding + "late detail"), "")
+
+    let unterminated = String(repeating: "<style>", count: 20_000)
+    XCTAssertEqual(StatusRenderer.sanitizedErrorText("HTTP 503 " + unterminated), "HTTP 503")
+    XCTAssertEqual(StatusRenderer.sanitizedErrorText("Blocked <script>var a = 1;\nvar b = 2;"), "Blocked")
+  }
+
+  func testScanCutInsideATagLeavesNoFragment() {
+    let head = "HTTP 502 "
+    let filler = String(repeating: "<br>", count: 1_000)
+    // Pad so the scan cut lands eight characters into the div tag: "<div cla".
+    let padding = String(repeating: " ", count: StatusRenderer.maximumScannedErrorLength - 8 - head.count - filler.count)
+    let message = head + filler + padding + #"<div class="wrapper">Body</div>"#
+
+    XCTAssertEqual(StatusRenderer.sanitizedErrorText(message), "HTTP 502")
+  }
+
+  func testLengthCutInsideATagLeavesNoFragment() {
+    // "<bold < 5" is not a complete tag, so it survives until the length cut splits it.
+    let words = String(repeating: "x", count: 155)
+    XCTAssertEqual(StatusRenderer.sanitizedErrorText(words + " <bold < 5 ok"), words + "…")
+  }
+
+  func testErrorTextKeepsComparisonsThatAreNotMarkup() {
+    XCTAssertEqual(StatusRenderer.sanitizedErrorText("limit < 5 and > 2"), "limit < 5 and > 2")
+  }
+
+  func testMarkupOnlyErrorFallsBackToItsKind() throws {
+    let snapshot = QuotaSnapshot(
+      generatedAt: now,
+      providers: [],
+      failures: [ProviderFailure(accountID: "kimi", provider: .kimi, kind: .api, message: "<html>\n</html>")]
+    )
+    XCTAssertEqual(try accounts(decodedWaybar(snapshot))[0]["error"] as? String, "Refresh failed (api)")
+  }
+
+  func testFailureOnlyAccountIsNamedByItsRecordedTitle() throws {
+    let snapshot = QuotaSnapshot(
+      generatedAt: now,
+      providers: [],
+      failures: [ProviderFailure(accountID: "5F2C9A71-0000", provider: .anthropic, kind: .auth,
+                                 message: "expired", title: "Claude Work")]
+    )
+    let object = try decodedWaybar(snapshot)
+
+    XCTAssertEqual(try accounts(object)[0]["name"] as? String, "Claude Work")
+    XCTAssertEqual(object["text"] as? String, "Claude Work!")
+    XCTAssertEqual(object["class"] as? String, "error")
+    XCTAssertNil(object["percentage"])
+    XCTAssertTrue(StatusRenderer.humanReadable(snapshot: snapshot, now: now).contains("Claude Work: ERROR expired"))
   }
 }

@@ -135,8 +135,9 @@ the timer pair is an alternative for people who prefer no long-running process.
 ## Status bars
 
 `llimit status --json` prints one JSON object (`text`, `tooltip`, `class`,
-`percentage`, plus an `accounts` array) built only from the snapshot — no
-credentials, ever. Ready-made modules:
+`percentage`, plus `accounts` and `failures` arrays) built only from the snapshot —
+no credentials, ever. A failed or stale account is flagged per account, marked with
+`!` in `text`, and raises the class to `warning`. Ready-made modules:
 
 - `examples/waybar/` — `custom` module config + CSS for the `ok` / `warning` /
   `critical` / `error` / `empty` classes.
@@ -241,7 +242,9 @@ $ llimit-tray                 # or: systemctl --user enable --now llimit-tray.se
 It is a display surface only: it shells out to `llimit status --json` and never
 reads the settings file, so it never touches credentials. Account management
 stays in the CLI. The tray icon colour follows the same
-`ok`/`warning`/`critical`/`error`/`empty` classes the bar modules use.
+`ok`/`warning`/`critical`/`error`/`empty` classes the bar modules use. An account
+whose latest refresh failed shows "failed" in its header and an `Error:` row, and
+reset countdowns tick between snapshot reads.
 
 The popup, dumped straight off the D-Bus menu a panel would render:
 
