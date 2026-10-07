@@ -141,7 +141,9 @@ Run `scripts/test-panel-geometry.sh`. It compiles the panel resize geometry
 standalone, without building the app, and checks that a corner drag keeps the
 top edge under the menu bar and the opposite edge in place, stops at the
 minimum size and the visible screen edge, never yanks a panel that already
-overflows, and fits a remembered size to a smaller screen.
+overflows, and fits a remembered size to a smaller screen. It also checks that
+the dashboard's Overview gauges spread across one row when they fit, and wrap
+into balanced rows of at most six at the default 420pt width.
 
 Dragging the grips in the running app is a manual check: open the dropdown,
 drag each bottom corner, close and reopen it, and confirm the size persists.

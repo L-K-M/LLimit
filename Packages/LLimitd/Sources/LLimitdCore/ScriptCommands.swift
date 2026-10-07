@@ -453,7 +453,7 @@ public enum QuotaCheck {
     case .failing(let kind):
       return "\(account) failed to refresh (\(kind.rawValue))"
     case .stale(let fetchedAt):
-      return "\(account) was last updated \(StatusRenderer.relativeAge(fetchedAt, now: now))"
+      return "\(account) was last updated \(QuotaDisplayText.relativeAge(fetchedAt, now: now))"
     case .noQuotaData:
       return nil
     }

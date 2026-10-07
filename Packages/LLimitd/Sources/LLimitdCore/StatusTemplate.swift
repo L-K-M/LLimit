@@ -172,7 +172,7 @@ public enum StatusTemplate {
     case .statusClass:
       return statusClass(for: row).rawValue
     case .age:
-      return row.usage.map { StatusRenderer.relativeAge($0.fetchedAt, now: now) } ?? ""
+      return row.usage.map { QuotaDisplayText.relativeAge($0.fetchedAt, now: now) } ?? ""
     case .stale:
       guard let usage = row.usage, now.timeIntervalSince(usage.fetchedAt) > HeadroomRanking.defaultMaxAge else {
         return ""

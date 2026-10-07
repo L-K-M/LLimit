@@ -79,7 +79,7 @@ public enum StatusRenderer {
     }
 
     var lines: [String] = []
-    lines.append("Updated \(relativeAge(snapshot.generatedAt, now: now))")
+    lines.append("Updated \(QuotaDisplayText.relativeAge(snapshot.generatedAt, now: now))")
 
     for status in accountStatuses(in: snapshot, now: now) {
       if let usage = status.usage {
@@ -159,7 +159,7 @@ public enum StatusRenderer {
     let statuses = accountStatuses(in: snapshot, now: now)
     let text = statuses.isEmpty ? "LLimit" : statuses.map(textSegment).joined(separator: " · ")
 
-    var tooltipLines = ["Updated \(relativeAge(snapshot.generatedAt, now: now))"]
+    var tooltipLines = ["Updated \(QuotaDisplayText.relativeAge(snapshot.generatedAt, now: now))"]
     tooltipLines.append(humanReadable(snapshot: snapshot, now: now)
       .split(separator: "\n")
       .dropFirst()
@@ -183,22 +183,6 @@ public enum StatusRenderer {
       }
     }
     return object
-  }
-
-  public static func relativeAge(_ date: Date, now: Date) -> String {
-    let seconds = Int(now.timeIntervalSince(date))
-    if seconds < 60 {
-      return "just now"
-    }
-    let minutes = seconds / 60
-    if minutes < 60 {
-      return "\(minutes) min ago"
-    }
-    let hours = minutes / 60
-    if hours < 48 {
-      return "\(hours) h ago"
-    }
-    return "\(hours / 24) d ago"
   }
 
   /// Reduces provider error text to one plain line that is safe on every surface: a bar
@@ -408,7 +392,7 @@ public enum StatusRenderer {
   private static func freshnessNote(for status: AccountStatus, now: Date) -> String {
     guard let usage = status.usage else { return "" }
 
-    let age = relativeAge(usage.fetchedAt, now: now)
+    let age = QuotaDisplayText.relativeAge(usage.fetchedAt, now: now)
     if status.isLastKnown {
       return " (last known, \(age))"
     }

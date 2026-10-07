@@ -93,3 +93,40 @@ enum MenuBarPanelSize {
     )
   }
 }
+
+/// Rows of account gauges on the dashboard's Overview card.
+///
+/// Columns are capped at the gauge count, so a few accounts spread across the
+/// card instead of packing into the leading cells of a fixed grid. Wrapped rows
+/// differ by at most one gauge: seven gauges that fit six per row become 4 + 3,
+/// not 6 + 1. Every cell has the same width, and shorter rows are centered.
+enum OverviewGaugeLayout {
+  static let minimumCellWidth: CGFloat = 54
+  static let columnSpacing: CGFloat = 6
+  // The gauges span the panel width less both paddings on each side.
+  static let dashboardPadding: CGFloat = 12
+  static let cardPadding: CGFloat = 13
+
+  /// Number of gauges in each row, longest first, for `count` gauges across
+  /// `width` points. An unbounded width, as in an ideal-size query, fits every
+  /// gauge in one row; no room at all still gives each gauge its own row.
+  static func rows(count: Int, width: CGFloat) -> [Int] {
+    guard count > 0 else { return [] }
+
+    let fitting = ((width + columnSpacing) / (minimumCellWidth + columnSpacing)).rounded(.down)
+    let columnLimit = fitting.isNaN ? 1 : Int(max(1, min(fitting, CGFloat(count))))
+    let rowCount = (count + columnLimit - 1) / columnLimit
+    let shortRowLength = count / rowCount
+    let longRowCount = count % rowCount
+
+    return (0..<rowCount).map { $0 < longRowCount ? shortRowLength + 1 : shortRowLength }
+  }
+
+  /// Width of each gauge cell when `columns` cells and their gaps share `width` points.
+  static func cellWidth(columns: Int, width: CGFloat) -> CGFloat {
+    guard columns > 0 else { return 0 }
+    guard width.isFinite else { return minimumCellWidth }
+
+    return max(0, (width - columnSpacing * CGFloat(columns - 1)) / CGFloat(columns))
+  }
+}
