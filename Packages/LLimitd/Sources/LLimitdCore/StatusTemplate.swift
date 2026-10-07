@@ -101,9 +101,15 @@ public enum StatusTemplate {
     let candidate: HeadroomRanking.Candidate?
   }
 
+  /// Usage and failures pair up on provider and account id, as in `HeadroomRanking`.
+  private struct AccountKey: Hashable {
+    let provider: QuotaProvider
+    let accountID: String
+  }
+
   private static func rows(in snapshot: QuotaSnapshot, kind: QuotaWindowKind?) -> [Row] {
-    let failingIDs = Set(snapshot.failures.map(\.accountID))
-    let reportedIDs = Set(snapshot.providers.map(\.accountID))
+    let failingKeys = Set(snapshot.failures.map { AccountKey(provider: $0.provider, accountID: $0.accountID) })
+    let reportedKeys = Set(snapshot.providers.map { AccountKey(provider: $0.provider, accountID: $0.accountID) })
 
     let reported = snapshot.providers.sorted(by: displayOrder).map { usage in
       Row(
@@ -111,12 +117,12 @@ public enum StatusTemplate {
         provider: usage.provider,
         name: usage.title,
         usage: usage,
-        isFailing: failingIDs.contains(usage.accountID),
+        isFailing: failingKeys.contains(AccountKey(provider: usage.provider, accountID: usage.accountID)),
         candidate: HeadroomRanking.Candidate(usage: usage, kind: kind)
       )
     }
     let failedOnly = snapshot.failures
-      .filter { !reportedIDs.contains($0.accountID) }
+      .filter { !reportedKeys.contains(AccountKey(provider: $0.provider, accountID: $0.accountID)) }
       .sorted { $0.accountID < $1.accountID }
       .map { failure in
         Row(

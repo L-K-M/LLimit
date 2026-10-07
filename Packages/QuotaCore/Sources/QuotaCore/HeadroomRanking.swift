@@ -146,9 +146,17 @@ public enum HeadroomRanking {
     public var worst: Candidate? { candidates.last }
   }
 
+  /// Usage and failures belong to the same account only when both provider and
+  /// account id match. Legacy single-account entries decode with the provider's
+  /// raw value as their id, so they pair up the same way.
+  private struct AccountKey: Hashable {
+    let provider: QuotaProvider
+    let accountID: String
+  }
+
   public static func rank(snapshot: QuotaSnapshot, filter: Filter, now: Date) -> Ranking {
     let failures = Dictionary(
-      snapshot.failures.map { ($0.accountID, $0) },
+      snapshot.failures.map { (AccountKey(provider: $0.provider, accountID: $0.accountID), $0) },
       uniquingKeysWith: { first, _ in first }
     )
     var candidates: [Candidate] = []
@@ -161,7 +169,8 @@ public enum HeadroomRanking {
         )
       }
 
-      if case .current = filter.eligibility, let failure = failures[usage.accountID] {
+      if case .current = filter.eligibility,
+         let failure = failures[AccountKey(provider: usage.provider, accountID: usage.accountID)] {
         exclude(.failing(failure.kind))
         continue
       }
@@ -180,9 +189,9 @@ public enum HeadroomRanking {
     }
 
     // An account that failed before it ever reported usage exists only as a failure.
-    let reportedIDs = Set(snapshot.providers.map(\.accountID))
+    let reported = Set(snapshot.providers.map { AccountKey(provider: $0.provider, accountID: $0.accountID) })
     for failure in snapshot.failures
-    where !reportedIDs.contains(failure.accountID)
+    where !reported.contains(AccountKey(provider: failure.provider, accountID: failure.accountID))
       && filter.includes(accountID: failure.accountID, provider: failure.provider) {
       exclusions.append(
         Exclusion(

@@ -109,6 +109,17 @@ final class StatusTemplateTests: XCTestCase {
     )
   }
 
+  func testAFailureMarksOnlyTheAccountWithTheSameProviderAndID() {
+    let claude = usage("work", title: "Claude", metrics: [UsageMetric(id: "weekly", label: "Weekly", remainingPercent: 90)])
+    let openAI = usage("work", provider: .openAI, title: "OpenAI", metrics: [UsageMetric(id: "weekly", label: "Weekly", remainingPercent: 90)])
+    let failures = [ProviderFailure(accountID: "work", provider: .kimi, kind: .auth, message: "401")]
+
+    XCTAssertEqual(
+      render("{name} {class}", [claude, openAI], failures: failures, separator: "; "),
+      "Claude ok; OpenAI ok; Kimi error"
+    )
+  }
+
   func testStaleDataAndProviderWarningsAreMarked() {
     let old = usage("old", title: "Old", metrics: [UsageMetric(id: "weekly", label: "Weekly", remainingPercent: 90)], age: 3 * 3_600)
     let limited = usage(

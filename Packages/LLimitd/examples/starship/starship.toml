@@ -3,7 +3,8 @@
 # snapshot, so it stays well inside starship's command_timeout.
 [custom.llimit]
 command = "llimit status --worst --format '{name} {remaining}'"
-when = true
+# Hidden when llimit is missing or nothing has reported quota yet.
+when = '[ -n "$(llimit status --worst --format x 2>/dev/null)" ]'
 shell = ["sh"]
 format = "[$output]($style) "
 style = "bold yellow"

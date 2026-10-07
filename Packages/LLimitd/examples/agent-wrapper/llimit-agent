@@ -14,7 +14,14 @@
 set -eu
 
 # --min 5: never choose a subscription that is all but exhausted.
-choice=$(llimit pick --provider anthropic,openai --min 5 --format '{provider} {name} ({remaining} left)') || exit $?
+# pick explains a failure on stderr; exit 2 or 3 usually means no current data.
+choice=$(llimit pick --provider anthropic,openai --min 5 --format '{provider} {name} ({remaining} left)') || {
+  status=$?
+  case $status in
+    2|3) echo "llimit-agent: is the llimit daemon or refresh timer running? (systemctl --user status llimit.service)" >&2 ;;
+  esac
+  exit "$status"
+}
 provider=${choice%% *}
 echo "llimit-agent: using ${choice#* }" >&2
 

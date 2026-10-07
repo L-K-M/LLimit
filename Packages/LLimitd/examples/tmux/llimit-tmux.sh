@@ -2,11 +2,15 @@
 # tmux renderer for LLimit: the most constrained account, colored by the same
 # `class` the bar modules use. tmux applies the #[fg=…] styles in #() output.
 
-line=$(llimit status --worst --format '{class} {name} {remaining} {kind}' 2>/dev/null) || exit 0
+line=$(llimit status --worst --format '{class}|{stale}|{name} {remaining} {kind}' 2>/dev/null) || exit 0
 [ -n "$line" ] || exit 0
 
-class=${line%% *}
-text=${line#* }
+class=${line%%|*}
+rest=${line#*|}
+stale=${rest%%|*}
+text=${rest#*|}
+# The class reflects the last known figures; say when they are over two hours old.
+[ -z "$stale" ] || text="$text (stale)"
 
 # Keep these in sync with the waybar/polybar/eww example palettes.
 case "$class" in
