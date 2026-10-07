@@ -462,7 +462,8 @@ struct SettingsView: View {
 
     var body: some View {
       VStack(alignment: .leading, spacing: 6) {
-        Picker("", selection: Binding(get: { hotkeys.shortcut }, set: { hotkeys.select($0) })) {
+        // Hidden visually; VoiceOver still reads the title.
+        Picker("Dashboard shortcut", selection: Binding(get: { hotkeys.shortcut }, set: { hotkeys.select($0) })) {
           ForEach(DashboardHotkey.allCases, id: \.self) { hotkey in
             Text(hotkey.displayName).tag(hotkey)
           }

@@ -21,6 +21,12 @@ public enum DashboardHotkey: String, CaseIterable, Sendable {
   /// Key every preset combines with its modifiers (L for LLimit).
   public static let keySymbol = "L"
 
+  /// macOS virtual key code of `keySymbol`: `kVK_ANSI_L` in HIToolbox's
+  /// Events.h, which QuotaCore cannot import. Change it with `keySymbol`.
+  /// Carbon matches the key's position, so on layouts such as Dvorak the
+  /// shortcut uses the key where L sits on a US keyboard.
+  public static let keyCode: UInt32 = 0x25
+
   /// Modifier keys, declared in the order macOS menus display them.
   public enum Modifier: CaseIterable, Sendable {
     case control

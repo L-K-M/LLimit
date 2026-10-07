@@ -32,6 +32,12 @@ final class DashboardHotkeyTests: XCTestCase {
     XCTAssertEqual(DashboardHotkey.controlOptionShiftCommandL.displayName, "⌃⌥⇧⌘L")
   }
 
+  func testKeyCodeMatchesKeySymbol() {
+    // 0x25 is kVK_ANSI_L in HIToolbox's Events.h. Change both together.
+    XCTAssertEqual(DashboardHotkey.keySymbol, "L")
+    XCTAssertEqual(DashboardHotkey.keyCode, 0x25)
+  }
+
   func testOnlyOffHasNoCombination() {
     XCTAssertNil(DashboardHotkey.off.modifiers)
 

@@ -4,7 +4,9 @@ import QuotaCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
   func applicationDidFinishLaunching(_ notification: Notification) {
-    GlobalHotkeyService.shared.start()
+    GlobalHotkeyService.shared.start {
+      DashboardWindowController.shared.toggleFromShortcut(model: AppModel.shared)
+    }
   }
 
   func applicationWillTerminate(_ notification: Notification) {
@@ -23,17 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct LLimitApp: App {
   @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-  @StateObject private var model: AppModel
-
-  init() {
-    // Created here so the dashboard shortcut, which can fire before any view
-    // exists, opens the dashboard on the same model as the menu bar.
-    let model = AppModel()
-    _model = StateObject(wrappedValue: model)
-    GlobalHotkeyService.shared.onPress = {
-      DashboardWindowController.shared.toggleFromShortcut(model: model)
-    }
-  }
+  @StateObject private var model = AppModel.shared
 
   var body: some Scene {
     // Menu-bar-only app. The settings window is a normal, freely resizable AppKit
@@ -109,13 +101,21 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
   }
 }
 
+extension AppModel {
+  /// The app's only model, created on first use and never again. The menu bar
+  /// and the dashboard shortcut both reach it here, so neither depends on how
+  /// often SwiftUI initializes `LLimitApp`, and no second model can start its
+  /// own refresh loop.
+  @MainActor static let shared = AppModel()
+}
+
 /// Owns the optional always-on-top quota dashboard detached from the menu bar.
 @MainActor
 final class DashboardWindowController {
   static let shared = DashboardWindowController()
   private var window: NSPanel?
-  /// App that was frontmost when the dashboard shortcut brought the dashboard
-  /// forward. The press that puts the dashboard away hands focus back to it.
+  /// App that was frontmost when the dashboard came forward while LLimit was
+  /// inactive. A shortcut press that puts the dashboard away hands focus back.
   private var appToRestore: NSRunningApplication?
 
   private func makeWindowIfNeeded(model: AppModel) {
@@ -145,7 +145,9 @@ final class DashboardWindowController {
 
   func show(model: AppModel, near screenPoint: NSPoint? = nil, activate: Bool = true) {
     makeWindowIfNeeded(model: model)
-    appToRestore = nil
+    // Read before activating, which makes LLimit the frontmost app. Nothing is
+    // restored when LLimit was already active, such as from Settings.
+    appToRestore = NSApp.isActive ? nil : NSWorkspace.shared.frontmostApplication
 
     if let screenPoint {
       positionWindow(near: screenPoint)
@@ -180,19 +182,16 @@ final class DashboardWindowController {
       return
     }
 
-    // Read before activating, which makes LLimit the frontmost app.
-    let previousApp = NSApp.isActive ? nil : NSWorkspace.shared.frontmostApplication
     makeWindowIfNeeded(model: model)
     moveOntoScreen(containing: NSEvent.mouseLocation)
     show(model: model)
-    appToRestore = previousApp
   }
 
   private func dismissFromShortcut(_ window: NSPanel) {
     window.orderOut(nil)
 
     // Ordering the panel out leaves LLimit active with nothing to type into,
-    // so hand focus back to the app the shortcut was pressed in.
+    // so hand focus back to the app you were in when the dashboard came forward.
     if let appToRestore, !appToRestore.isTerminated {
       appToRestore.activate(options: [])
     }

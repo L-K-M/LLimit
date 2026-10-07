@@ -3,6 +3,7 @@ import Combine
 // Kept out of the SwiftUI view files: HIToolbox also exports a global
 // `Button()` function that would compete with SwiftUI's `Button`.
 import Carbon.HIToolbox
+import os
 import QuotaCore
 
 /// Registers the optional global shortcut that shows or hides the floating
@@ -12,13 +13,18 @@ import QuotaCore
 @MainActor
 final class GlobalHotkeyService: ObservableObject {
   static let shared = GlobalHotkeyService()
+  // Failures also go to the unified log, so a shortcut that stopped working
+  // can be diagnosed without opening Settings. Nothing logged is sensitive.
+  private static let logger = Logger(
+    subsystem: Bundle.main.bundleIdentifier ?? "LLimit",
+    category: "DashboardShortcut"
+  )
 
   @Published private(set) var shortcut: DashboardHotkey
   /// Why the chosen shortcut is not active, shown next to the picker.
   @Published private(set) var registrationError: String?
-  /// Runs for every press of the registered shortcut.
-  var onPress: (@MainActor () -> Void)?
 
+  private var onPress: (@MainActor () -> Void)?
   private var hotKey: EventHotKeyRef?
   private var eventHandler: EventHandlerRef?
   private var isStarted = false
@@ -27,7 +33,9 @@ final class GlobalHotkeyService: ObservableObject {
     shortcut = DashboardHotkey(storedValue: UserDefaults.standard.string(forKey: DashboardHotkey.defaultsKey))
   }
 
-  func start() {
+  /// Registers the stored shortcut. `onPress` runs for every press.
+  func start(onPress: @escaping @MainActor () -> Void) {
+    self.onPress = onPress
     isStarted = true
     register(shortcut)
   }
@@ -65,7 +73,7 @@ final class GlobalHotkeyService: ObservableObject {
     // Exclusive, so presses reach only LLimit and a combination another app
     // already holds exclusively fails here, where Settings can report it.
     let status = RegisterEventHotKey(
-      UInt32(kVK_ANSI_L), // DashboardHotkey.keySymbol
+      DashboardHotkey.keyCode,
       modifiers.reduce(UInt32(0)) { $0 | $1.carbonFlag },
       EventHotKeyID(signature: dashboardHotkeySignature, id: 1),
       GetApplicationEventTarget(),
@@ -76,6 +84,9 @@ final class GlobalHotkeyService: ObservableObject {
       registrationError = status == OSStatus(eventHotKeyExistsErr)
         ? "Another app already uses \(shortcut.displayName). Choose a different shortcut."
         : "Could not register \(shortcut.displayName) (error \(status))."
+      Self.logger.error(
+        "Could not register dashboard shortcut \(shortcut.rawValue, privacy: .public): OSStatus \(status, privacy: .public)"
+      )
       return
     }
 
@@ -106,6 +117,7 @@ final class GlobalHotkeyService: ObservableObject {
     )
     guard status == noErr, let handler else {
       registrationError = "Could not listen for the shortcut (error \(status))."
+      Self.logger.error("Could not install the dashboard shortcut handler: OSStatus \(status, privacy: .public)")
       return false
     }
 
