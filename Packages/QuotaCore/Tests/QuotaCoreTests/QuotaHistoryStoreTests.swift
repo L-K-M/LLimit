@@ -163,6 +163,24 @@ final class QuotaHistoryStoreTests: XCTestCase {
     )
   }
 
+  func testBackdatedAppendIsWrittenOldestFirstAndTrimsTheOldest() throws {
+    let (store, dir) = makeStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let hoursAgo = { (hours: Double) in now.addingTimeInterval(-hours * 3_600) }
+    try store.save([4, 3, 2, 1].map { snapshot(at: hoursAgo($0), accountIDs: ["a"]) })
+
+    // Older than the newest stored entry, as after the clock steps back.
+    let archive = try store.append(snapshot(at: hoursAgo(2.5), accountIDs: ["a"]), maxEntries: 4)
+
+    // An unsorted trim would keep 3, 2, 1, 2.5 hours ago.
+    let expected = [3, 2.5, 2, 1].map(hoursAgo)
+    XCTAssertEqual(archive.snapshots.map(\.generatedAt), expected)
+    // `load` returns the file's order without sorting.
+    XCTAssertEqual(try store.load().map(\.generatedAt), expected)
+  }
+
   func testAppendReplacesAnUnreadableFileOnlyWhenAsked() throws {
     let (store, dir) = makeStore()
     defer { try? FileManager.default.removeItem(at: dir) }
