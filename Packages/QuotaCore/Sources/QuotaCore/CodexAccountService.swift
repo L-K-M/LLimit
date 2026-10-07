@@ -151,7 +151,9 @@ public actor CodexAccountService: ManagedOpenAIUsageSource {
     catch {
       // A child that could not launch, or went away before its handshake,
       // points at the executable or its runtime. Probe again so the next
-      // attempt reports why; other startup failures keep the verified executable.
+      // attempt reports why. Startup's other errors (timeout, cancellation, a
+      // rejected or malformed reply) leave a verified executable that a new
+      // probe would accept again, so they keep it.
       if let error = error as? CodexRPCError, [.launchFailed, .sessionClosed, .writeFailed].contains(error) {
         verifiedExecutable = nil
       }

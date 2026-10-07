@@ -29,8 +29,10 @@ public enum ManagedCLI: Sendable {
   }
 
   /// Possible executables in search order: the known install locations, then
-  /// the parent PATH, as before, then version-manager locations that a GUI
-  /// launch's PATH lacks. The caller checks which candidates exist.
+  /// the parent PATH, then version-manager directories that a GUI launch's
+  /// PATH lacks. Earlier releases searched only the first two, so adding the
+  /// last cannot change which existing install wins. The caller checks which
+  /// candidates exist.
   public func candidates(environment: [String: String]) -> [URL] {
     let home = Self.absolute(environment["HOME"])
     var directories: [String]
@@ -115,7 +117,9 @@ public enum ManagedCLI: Sendable {
   }
 
   /// Follows nvm's alias files from `alias/default`, for example through
-  /// `lts/*` and `lts/jod` to a version. Nil when no default is set.
+  /// `lts/*` and `lts/jod` to a version. Nil when no default is set or it is
+  /// empty. An alias that names no file, or a cycle cut off after
+  /// `maximumAliasHops`, is returned as is and matches no installed version.
   private static func nvmDefaultAlias(root: String) -> String? {
     let aliases = URL(fileURLWithPath: root + "/alias", isDirectory: true)
     var value = "default"
@@ -125,7 +129,7 @@ public enum ManagedCLI: Sendable {
             let next = try? String(contentsOf: aliases.appendingPathComponent(value), encoding: .utf8) else { break }
       value = next.trimmingCharacters(in: .whitespacesAndNewlines)
     }
-    return value == "default" ? nil : value
+    return value.isEmpty || value == "default" ? nil : value
   }
 
   private static func nodeVersion(_ name: String) -> [Int]? {

@@ -11,7 +11,7 @@ enum CodexCLIProbe {
   /// Compared by SemVer precedence, so a prerelease of a later version passes
   /// and a prerelease of this version does not.
   static let minimumVersion = CodexCLIVersion(major: 0, minor: 144, patch: 4)
-  private static let outputLimit = 4096
+  static let outputLimit = 4096
   private static let maximumTimeout: TimeInterval = 10
 
   /// Returns the first candidate that reports a supported version. Otherwise
@@ -129,6 +129,9 @@ private final class VersionRun: @unchecked Sendable {
   }
 
   /// Records the process group before the child can exit and be reaped.
+  /// Foundation starts the child as a group leader on Linux and macOS today.
+  /// If it does not, or the child was already reaped, `group` stays nil and
+  /// `stop` can kill only the direct child.
   func launched() {
     lock.lock()
     defer { lock.unlock() }
@@ -181,7 +184,8 @@ private final class VersionRun: @unchecked Sendable {
   /// deadline. Authentication app-server processes are never killed this way.
   private func stop(_ failure: CodexCLIFailure) {
     guard result == nil else { return }
-    // Descendants holding the output pipe keep the group alive after the child exits.
+    // Descendants holding the output pipe keep the group alive after the child
+    // exits. Without a recorded group, only a still-running child is killed.
     if let group {
       _ = killpg(group, SIGKILL)
     } else if exit == nil, let process, process.isRunning {

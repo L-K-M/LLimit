@@ -262,7 +262,7 @@ final class CodexAccountServiceTests: XCTestCase {
   }
 
   func testVersionProbeStopsExcessiveOutput() async throws {
-    let chatty = try versionFixture("chatty", body: "yes | head -c 5000")
+    let chatty = try versionFixture("chatty", body: "yes | head -c \(CodexCLIProbe.outputLimit + 1)")
     await assertProbeError([chatty], .cliFailed(path: chatty.path, .excessiveOutput))
   }
 
@@ -318,7 +318,7 @@ final class CodexAccountServiceTests: XCTestCase {
     _ = try await service.fetchUsage(configuration: configuration(profile), now: Date())
     try "reject-initialize".write(to: mode, atomically: true, encoding: .utf8)
     do { _ = try await service.fetchUsage(configuration: configuration(profile), now: Date()); XCTFail("Rejected startup must fail") }
-    catch { XCTAssertTrue(error is ProviderClientError) }
+    catch { XCTAssertTrue(error is ProviderClientError, "Unexpected error: \(error)") }
     try await waitUntil { !self.store.hasPendingOperation(profile) }
     try "normal".write(to: mode, atomically: true, encoding: .utf8)
     _ = try await service.fetchUsage(configuration: configuration(profile), now: Date())
@@ -326,7 +326,7 @@ final class CodexAccountServiceTests: XCTestCase {
 
     try "exit-on-start".write(to: mode, atomically: true, encoding: .utf8)
     do { _ = try await service.fetchUsage(configuration: configuration(profile), now: Date()); XCTFail("Exited child must fail") }
-    catch { XCTAssertTrue(error is ProviderClientError) }
+    catch { XCTAssertTrue(error is ProviderClientError, "Unexpected error: \(error)") }
     try await waitUntil { !self.store.hasPendingOperation(profile) }
     try "normal".write(to: mode, atomically: true, encoding: .utf8)
     _ = try await service.fetchUsage(configuration: configuration(profile), now: Date())

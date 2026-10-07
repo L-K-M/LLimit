@@ -49,7 +49,8 @@ final class ManagedCLITests: XCTestCase {
 
     let nvm = paths.filter { $0.hasPrefix(root.path) }
     XCTAssertEqual(nvm, ["v20.11.1", "v22.3.0", "v18.20.4", "v9.11.2"].map { root.path + "/versions/node/" + $0 + "/bin/codex" })
-    XCTAssertEqual(paths.last, nvm.last, "nvm locations come after every earlier search location")
+    let firstNvm = try XCTUnwrap(paths.firstIndex { $0.hasPrefix(root.path) })
+    XCTAssertEqual(Array(paths[firstNvm...]), nvm, "nvm locations come after every earlier search location")
   }
 
   func testNvmDefaultAliasFollowsLtsAliasChain() throws {
@@ -60,6 +61,18 @@ final class ManagedCLITests: XCTestCase {
     let first = ManagedCLI.claude.candidates(environment: ["NVM_DIR": root.path]).first { $0.path.hasPrefix(root.path) }
 
     XCTAssertEqual(first?.path, root.path + "/versions/node/v18.20.4/bin/claude")
+  }
+
+  func testEmptyOrCyclicNvmDefaultAliasPrefersNewestVersion() throws {
+    let newest = "/versions/node/v22.3.0/bin/codex"
+    for aliases in [["default": ""], ["default": "lts/a", "lts/a": "lts/b", "lts/b": "lts/a"]] {
+      let root = try nvmTree(versions: ["v18.20.4", "v22.3.0"], aliases: aliases)
+      defer { try? FileManager.default.removeItem(at: root) }
+
+      let first = ManagedCLI.codex.candidates(environment: ["NVM_DIR": root.path]).first { $0.path.hasPrefix(root.path) }
+
+      XCTAssertEqual(first?.path, root.path + newest, "\(aliases)")
+    }
   }
 
   func testNodeVersionOrderIgnoresAliasesThatMatchNothing() {
