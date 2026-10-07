@@ -7,6 +7,7 @@ import Foundation
 ///   settings -> $XDG_CONFIG_HOME/LLimit/quota-settings.json   (mode 0600, holds credentials)
 ///   snapshot -> $XDG_DATA_HOME/LLimit/quota-snapshot.json     (credential-free, read by bars)
 ///   history  -> $XDG_DATA_HOME/LLimit/quota-history.json
+///   alerts   -> $XDG_DATA_HOME/LLimit/alerts-state.json      (mode 0600, credential-free)
 ///
 /// File names match the macOS ones so the snapshot contract stays identical.
 public struct LinuxPaths: Sendable, Equatable {
@@ -64,6 +65,12 @@ public struct LinuxPaths: Sendable, Equatable {
 
   public var historyFileURL: URL {
     dataDirectory.appendingPathComponent("quota-history.json")
+  }
+
+  /// Which alerts `llimit daemon --notify`/`--on-event` already delivered, so a
+  /// restart does not repeat them. Written only when alerts are enabled.
+  public var alertsStateFileURL: URL {
+    dataDirectory.appendingPathComponent("alerts-state.json")
   }
 
   static func xdgBaseDirectory(_ value: String?, fallback: URL) -> URL {
