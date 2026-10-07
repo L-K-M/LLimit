@@ -61,7 +61,7 @@ public enum AccountEditRejection: Equatable, Sendable {
   case managedConnection
   /// The settings file could not be read at launch, so a key change cannot be saved.
   case settingsUnreadable
-  /// Replacing a Venice key could not first clear the previous key's usage.
+  /// Replacing credentials could not first clear the previous login's usage.
   case previousUsageNotCleared
 
   public var message: String {

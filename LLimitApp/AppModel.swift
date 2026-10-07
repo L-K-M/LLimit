@@ -258,7 +258,8 @@ final class AppModel: ObservableObject {
     defer { isRefreshing = false }
 
     await refreshExpiringChatGPTTokens()
-    let claudeFailures = await prepareClaudeAccounts()
+    let preparation = await prepareClaudeAccounts()
+    let claudeFailures = preparation.failures
     reloadAccountStatuses()
 
     // A sign-in owns only its account; siblings refresh and retain their own timestamps.
@@ -267,7 +268,9 @@ final class AppModel: ObservableObject {
       signingInAccountIDs: codexBusyAccounts)
     signInSkippedAccountIDs.formUnion(selection.skippedAccountIDs)
     let enabledConfigs = selection.fetched
-    let credentialRevisions = credentialEditRevisions
+    var provenance = RefreshProvenance(configurations: enabledConfigs, carriedConfigurations: selection.skipped,
+                                       credentialRevisions: credentialEditRevisions)
+    provenance.recordQueries(preparation.configurations, credentialRevisions: preparation.credentialRevisions)
 
     guard !enabledConfigs.isEmpty || !claudeFailures.isEmpty else {
       if selection.skippedAccountIDs.isEmpty {
@@ -281,8 +284,7 @@ final class AppModel: ObservableObject {
         configurations: enabledConfigs, credentialFailures: claudeFailures, skippedAccountIDs: selection.skippedAccountIDs)
       // Preserve completed usage and real failures when cancellation arrives late.
       if Task.isCancelled, refreshed.providers.isEmpty, refreshed.failures.isEmpty { return }
-      refreshed = removingChangedVeniceResults(
-        from: refreshed, configurations: enabledConfigs, credentialRevisions: credentialRevisions)
+      refreshed = validatedRefreshResults(refreshed, provenance: provenance)
       try refreshService.save(refreshed)
       let initiallySaved = refreshed
       recordClaudeUsage(in: refreshed, configurations: enabledConfigs)
@@ -292,38 +294,49 @@ final class AppModel: ObservableObject {
       // revoked before its JWT exp, or a Codex rotation that landed mid-cycle), refresh
       // its token and retry — only the accounts we actually recovered, so healthy accounts
       // and the other providers aren't re-polled (Anthropic hard-rate-limits repeat pollers).
-      var recoveredIDs = await recoverFailedOpenAITokens(in: refreshed, skipping: selection.skippedAccountIDs)
+      let recovered = await recoverFailedOpenAITokens(in: refreshed, skipping: selection.skippedAccountIDs,
+                                                     provenance: provenance)
+      var retryConfigurations = recovered.configurations
+      var retryRevisions = recovered.credentialRevisions
       let blockedClaudeIDs = Set(claudeFailures.map(\.accountID))
       for failure in refreshed.failures where failure.provider == .anthropic && failure.kind == .auth
         && !blockedClaudeIDs.contains(failure.accountID) {
+        guard let current = account(withID: failure.accountID),
+              provenance.matchesQuery(current, credentialRevisions: credentialEditRevisions) else { continue }
+        let revision = credentialEditRevisions[current.id]
+        let profile = ClaudeCodeProfile.profile(from: current.credentials)
         if await prepareClaudeAccount(id: failure.accountID, force: true) == nil,
            let account = account(withID: failure.accountID),
+           account.provider == .anthropic, credentialEditRevisions[account.id] == revision,
            account.credentials[CredentialField.anthropicAccessToken]?.isEnvironmentReference != true,
-           ClaudeCodeProfile.profile(from: account.credentials) != nil {
-          recoveredIDs.insert(failure.accountID)
+           let preparedProfile = ClaudeCodeProfile.profile(from: account.credentials), preparedProfile == profile {
+          retryConfigurations.append(account.runtimeConfiguration())
+          retryRevisions[account.id] = revision
         }
       }
-      if !recoveredIDs.isEmpty {
-        let retryConfigs = runtimeConfigurations().filter { configuration in
-          recoveredIDs.contains(configuration.accountID)
-            && configuration.isEnabled
+      if !retryConfigurations.isEmpty {
+        let retryConfigs = retryConfigurations.filter { configuration in
+          guard let current = account(withID: configuration.accountID), !codexAccountIsBusy(current.id) else { return false }
+          return configuration.matchesCurrentAccount(current, expectedCredentialRevision: retryRevisions[current.id],
+                                                      currentCredentialRevision: credentialEditRevisions[current.id])
             && configuration.provider.hasRequiredCredentials(configuration.credentials)
         }
         if !retryConfigs.isEmpty {
           let retriedIDs = Set(retryConfigs.map(\.accountID))
+          provenance.recordQueries(retryConfigs, credentialRevisions: retryRevisions)
           // Merge stale-on-failure against the current snapshot so a still-failing retry
           // keeps the last-known usage, then splice only these accounts' results back in.
-          let retrySnapshot = await refreshService.fetch(configurations: retryConfigs)
-            .mergingStaleUsage(from: refreshed)
+          let retrySnapshot = validatedRefreshResults(
+            await refreshService.fetch(configurations: retryConfigs).mergingStaleUsage(from: refreshed), provenance: provenance)
           recordClaudeUsage(in: retrySnapshot, configurations: retryConfigs)
+          recordCodexUsage(in: retrySnapshot, configurations: retryConfigs)
           refreshed = refreshed.replacingResults(forAccountIDs: retriedIDs, from: retrySnapshot)
         }
       }
 
-      // Other providers' recovery can suspend this cycle while a Venice key is
-      // edited. Validate again before its result reaches history and widgets.
-      refreshed = removingChangedVeniceResults(
-        from: refreshed, configurations: enabledConfigs, credentialRevisions: credentialRevisions)
+      // Recovery suspends the cycle. Recheck every result and skipped carry
+      // against its original ownership before snapshot, history and widgets.
+      refreshed = validatedRefreshResults(refreshed, provenance: provenance)
       if refreshed != initiallySaved { try refreshService.save(refreshed) }
       publishSnapshot(refreshed)
     } catch {
@@ -331,22 +344,8 @@ final class AppModel: ObservableObject {
     }
   }
 
-  private func removingChangedVeniceResults(
-    from result: QuotaSnapshot,
-    configurations: [ProviderRuntimeConfiguration], credentialRevisions: [String: UUID]
-  ) -> QuotaSnapshot {
-    let changedIDs = Set(configurations.compactMap { configuration -> String? in
-      guard configuration.provider == .venice else { return nil }
-      guard let current = account(withID: configuration.accountID),
-            configuration.matchesCurrentAccount(
-              current, expectedCredentialRevision: credentialRevisions[current.id],
-              currentCredentialRevision: credentialEditRevisions[current.id]) else {
-        return configuration.accountID
-      }
-      return nil
-    })
-    let empty = QuotaSnapshot(generatedAt: result.generatedAt, providers: [], failures: [])
-    return result.replacingResults(forAccountIDs: changedIDs, from: empty)
+  private func validatedRefreshResults(_ result: QuotaSnapshot, provenance: RefreshProvenance) -> QuotaSnapshot {
+    provenance.validated(result, accounts: providerAccounts, credentialRevisions: credentialEditRevisions)
   }
 
   private func publishSnapshot(_ refreshed: QuotaSnapshot) {
@@ -415,7 +414,7 @@ final class AppModel: ObservableObject {
       catch { return }
     }
     guard !Task.isCancelled else { return }
-    guard let account = account(withID: id), account.isEnabled,
+    guard let account = account(withID: id), account.provider == .anthropic, account.isEnabled,
           let profile = ClaudeCodeProfile.profile(from: account.credentials) else { return }
     if snapshot?.failures.contains(where: { $0.accountID == id }) == false,
        claudeUsageReceipts[id]?.satisfies(profileID: profile.id, since: requestedAt) == true {
@@ -423,16 +422,27 @@ final class AppModel: ObservableObject {
     }
     isRefreshing = true
     defer { isRefreshing = false }
+    let preparationRevision = credentialEditRevisions[id]
     let failure = await prepareClaudeAccount(id: id)
     var partial: QuotaSnapshot
+    let configurations: [ProviderRuntimeConfiguration]
+    let provenance: RefreshProvenance
     if let failure {
+      configurations = [configurationAfterClaudePreparation(account, credentialRevision: preparationRevision)]
+      var revisions: [String: UUID] = [:]
+      revisions[id] = preparationRevision
+      provenance = RefreshProvenance(configurations: configurations, credentialRevisions: revisions)
       partial = QuotaSnapshot(generatedAt: Date(), providers: [], failures: [failure])
     } else {
-      let configurations = runtimeConfigurations().filter { $0.accountID == id && $0.isEnabled }
+      guard let current = self.account(withID: id), current.isEnabled, current.provider == .anthropic,
+            ClaudeCodeProfile.profile(from: current.credentials)?.id == profile.id,
+            credentialEditRevisions[id] == preparationRevision else { return }
+      configurations = [current.runtimeConfiguration()]
+      provenance = RefreshProvenance(configurations: configurations, credentialRevisions: credentialEditRevisions)
       partial = await refreshService.fetch(configurations: configurations)
-      recordClaudeUsage(in: partial, configurations: configurations)
     }
-    partial = partial.mergingStaleUsage(from: snapshot)
+    partial = validatedRefreshResults(partial.mergingStaleUsage(from: snapshot), provenance: provenance)
+    recordClaudeUsage(in: partial, configurations: configurations)
     var refreshed = snapshot?.replacingResults(forAccountIDs: [id], from: partial) ?? partial
     refreshed.generatedAt = partial.generatedAt
     var saveFailed = false
@@ -644,16 +654,10 @@ final class AppModel: ObservableObject {
 
     claudeAccountMessages[accountID] = nil
     claudeCredentialFailures.remove(accountID)
-    if provider == .venice {
-      let outcome = updateAccount(accountID: accountID) { $0.credentials = match.credentials }
-      // Auto-fill has no field to show a rejection under, so report it here.
-      if case .rejected(let rejection) = outcome { statusMessage = rejection.message }
-      guard account(withID: accountID)?.credentials == match.credentials else { return false }
-    } else {
-      providerAccounts[index].credentials = match.credentials
-      reloadAccountStatuses()
-      saveConfiguration()
-    }
+    let outcome = updateAccount(accountID: accountID) { $0.credentials = match.credentials }
+    // Auto-fill uses the same committed replacement and revision boundary as typing.
+    if case .rejected(let rejection) = outcome { statusMessage = rejection.message }
+    guard account(withID: accountID)?.credentials == match.credentials else { return false }
     statusMessage = "Filled “\(providerAccounts[index].resolvedDisplayName)” from \(match.sourceLabel)."
     return true
   }
@@ -811,11 +815,13 @@ final class AppModel: ObservableObject {
           !CodexAccountProfile.isManaged(previous), !codexAccountIsBusy(accountID),
           !refreshToken.isEnvironmentReference,
           previous[CredentialField.openAIAccessToken]?.isEnvironmentReference != true else { return false }
+    let revision = credentialEditRevisions[accountID]
     do {
       let result = try await ChatGPTOAuth.refresh(refreshToken: refreshToken)
       // A reconnect or credential edit must not be replaced by an older refresh.
       guard let index = providerAccounts.firstIndex(where: { $0.id == accountID }),
-            providerAccounts[index].credentials == previous else { return false }
+            providerAccounts[index].credentials == previous,
+            credentialEditRevisions[accountID] == revision else { return false }
       providerAccounts[index].credentials[CredentialField.openAIAccessToken] = result.accessToken
       if let newRefresh = result.refreshToken,
          previous[CredentialField.openAIRefreshToken]?.isEnvironmentReference != true {
@@ -829,6 +835,8 @@ final class AppModel: ObservableObject {
     } catch {
       print("[LLimit] ChatGPT token refresh failed: \(error.localizedDescription)")
       // Codex may have rotated the grant; re-read the live file and adopt if it changed.
+      guard account(withID: accountID)?.credentials == previous,
+            credentialEditRevisions[accountID] == revision else { return false }
       return adoptLiveOpenAITokens(forAccountIDs: [accountID])
     }
   }
@@ -838,20 +846,24 @@ final class AppModel: ObservableObject {
   /// pass skips a not-yet-expired token, so such an account 401s every cycle. For each
   /// enabled OpenAI account that failed auth this cycle, first adopt a fresher live token;
   /// only if nothing fresher is on disk do we force a refresh (which rotates the grant).
-  /// Returns the set of account ids whose credentials changed, so the caller can retry
-  /// exactly those accounts. Skipped accounts' failures belong to an earlier fetch.
-  private func recoverFailedOpenAITokens(in snapshot: QuotaSnapshot, skipping skippedIDs: Set<String>) async -> Set<String> {
+  /// Capture each recovered login immediately: another recovery can suspend while
+  /// the user changes it. Skipped failures belong to an earlier fetch.
+  private func recoverFailedOpenAITokens(in snapshot: QuotaSnapshot, skipping skippedIDs: Set<String>,
+                                        provenance: RefreshProvenance) async -> (configurations: [ProviderRuntimeConfiguration],
+                                                                                credentialRevisions: [String: UUID]) {
     let failedIDs = snapshot.failures
       .filter { $0.provider == .openAI && $0.kind == .auth && !skippedIDs.contains($0.accountID) }
       .map(\.accountID)
-    guard !failedIDs.isEmpty else { return [] }
+    guard !failedIDs.isEmpty else { return ([], [:]) }
 
-    var recovered: Set<String> = []
+    var recovered: [ProviderRuntimeConfiguration] = []
+    var revisions: [String: UUID] = [:]
     for accountID in failedIDs {
       guard
         let index = providerAccounts.firstIndex(where: { $0.id == accountID }),
         providerAccounts[index].provider == .openAI,
         providerAccounts[index].isEnabled,
+        provenance.matchesQuery(providerAccounts[index], credentialRevisions: credentialEditRevisions),
         !codexAccountIsBusy(accountID),
         !CodexAccountProfile.isManaged(providerAccounts[index].credentials)
       else { continue }
@@ -859,7 +871,8 @@ final class AppModel: ObservableObject {
       // Prefer adopting Codex's own fresher token — that recovers the account without
       // rotating the shared grant (which would log the Codex CLI out).
       if adoptLiveOpenAITokens(forAccountIDs: [accountID]) {
-        recovered.insert(accountID)
+        recovered.append(providerAccounts[index].runtimeConfiguration())
+        revisions[accountID] = credentialEditRevisions[accountID]
         continue
       }
 
@@ -868,14 +881,17 @@ final class AppModel: ObservableObject {
       if !refreshToken.isEmpty, !refreshToken.isEnvironmentReference,
          providerAccounts[index].credentials[CredentialField.openAIAccessToken]?.isEnvironmentReference != true,
          await refreshOpenAIAccount(id: accountID, refreshToken: refreshToken) {
-        recovered.insert(accountID)
+        if let current = account(withID: accountID) {
+          recovered.append(current.runtimeConfiguration())
+          revisions[accountID] = credentialEditRevisions[accountID]
+        }
       }
     }
 
     if !recovered.isEmpty {
       saveConfiguration()
     }
-    return recovered
+    return (recovered, revisions)
   }
 
   // MARK: - Independent Codex accounts
@@ -1016,9 +1032,14 @@ final class AppModel: ObservableObject {
       throw CodexConnectionError.storage
     }
     let previous = providerAccounts[index].credentials
+    if previous != credentials {
+      do { try invalidateAccountSnapshot(for: accountID) }
+      catch { throw CodexConnectionError.storage }
+    }
     providerAccounts[index].credentials = credentials
     do { try settingsStore.save(currentSettings()) }
     catch { providerAccounts[index].credentials = previous; throw CodexConnectionError.storage }
+    if previous != credentials { credentialEditRevisions[accountID] = UUID() }
     codexUsageReceipts[accountID] = nil
     if syncSettingsToWidgetStore(currentSettings().redactedCredentials()) { reloadWidgetTimelines() }
   }
@@ -1046,16 +1067,17 @@ final class AppModel: ObservableObject {
     while isRefreshing || codexAccountIsBusy(id) {
       do { try await Task.sleep(for: .seconds(1)) } catch { return }
     }
-    guard let account = account(withID: id), account.isEnabled,
+    guard let account = account(withID: id), account.provider == .openAI, account.isEnabled,
           CodexAccountProfile.profile(from: account.credentials)?.id == profileID else { return }
     if let receipt = codexUsageReceipts[id], receipt.profile == profileID, receipt.fetchedAt >= requestedAt,
        snapshot?.failures.contains(where: { $0.accountID == id }) == false { return }
     isRefreshing = true
     defer { isRefreshing = false }
     let configurations = runtimeConfigurations().filter { $0.accountID == id && $0.isEnabled }
+    let provenance = RefreshProvenance(configurations: configurations, credentialRevisions: credentialEditRevisions)
     var partial = await refreshService.fetch(configurations: configurations)
+    partial = validatedRefreshResults(partial.mergingStaleUsage(from: snapshot), provenance: provenance)
     recordCodexUsage(in: partial, configurations: configurations)
-    partial = partial.mergingStaleUsage(from: snapshot)
     var refreshed = snapshot?.replacingResults(forAccountIDs: [id], from: partial) ?? partial
     refreshed.generatedAt = partial.generatedAt
     var saveFailed = false
@@ -1181,25 +1203,52 @@ final class AppModel: ObservableObject {
       throw ClaudeProfileService.Failure.settingsUnavailable
     }
     let previous = providerAccounts[index].credentials
+    if expectedProfile == nil, previous != credentials {
+      do { try invalidateAccountSnapshot(for: accountID) }
+      catch { throw ClaudeProfileService.Failure.settingsUnavailable }
+    }
     providerAccounts[index].credentials = credentials
     do { try settingsStore.save(currentSettings()) }
     catch {
       providerAccounts[index].credentials = previous
       throw ClaudeProfileService.Failure.settingsUnavailable
     }
+    if expectedProfile == nil, previous != credentials { credentialEditRevisions[accountID] = UUID() }
     if syncSettingsToWidgetStore(currentSettings().redactedCredentials()) { reloadWidgetTimelines() }
     reloadAccountStatuses()
   }
 
-  private func prepareClaudeAccounts() async -> [ProviderFailure] {
+  private func prepareClaudeAccounts() async -> (failures: [ProviderFailure], configurations: [ProviderRuntimeConfiguration],
+                                               credentialRevisions: [String: UUID]) {
     let ids = providerAccounts.filter {
       $0.provider == .anthropic && $0.isEnabled && ClaudeCodeProfile.profile(from: $0.credentials) != nil
     }.map(\.id)
     var failures: [ProviderFailure] = []
+    var configurations: [ProviderRuntimeConfiguration] = []
+    var revisions: [String: UUID] = [:]
     for id in ids {
-      if let failure = await prepareClaudeAccount(id: id) { failures.append(failure) }
+      guard let before = account(withID: id) else { continue }
+      let revision = credentialEditRevisions[id]
+      if let failure = await prepareClaudeAccount(id: id) {
+        failures.append(failure)
+        configurations.append(configurationAfterClaudePreparation(before, credentialRevision: revision))
+        revisions[id] = revision
+      }
     }
-    return failures
+    return (failures, configurations, revisions)
+  }
+
+  /// Pending markers and token caches may change during preparation. Only the
+  /// same verified profile and edit revision may own its resulting failure.
+  private func configurationAfterClaudePreparation(_ before: ProviderAccount, credentialRevision: UUID?) -> ProviderRuntimeConfiguration {
+    guard let current = account(withID: before.id), current.provider == before.provider,
+          credentialEditRevisions[before.id] == credentialRevision,
+          ClaudeCodeProfile.profile(from: current.credentials) == ClaudeCodeProfile.profile(from: before.credentials),
+          ClaudeCodeProfile.identity(from: current.credentials)?.accountID == ClaudeCodeProfile.identity(from: before.credentials)?.accountID,
+          ClaudeCodeProfile.identity(from: current.credentials)?.organizationID == ClaudeCodeProfile.identity(from: before.credentials)?.organizationID else {
+      return before.runtimeConfiguration()
+    }
+    return current.runtimeConfiguration()
   }
 
   private func prepareClaudeAccount(id: String, force: Bool = false) async -> ProviderFailure? {
@@ -1777,15 +1826,18 @@ final class AppModel: ObservableObject {
     var updatedAccount = previousAccount
     mutate(&updatedAccount)
 
-    if previousAccount.provider == .venice,
-       previousAccount.credentials[CredentialField.veniceAPIKey] != updatedAccount.credentials[CredentialField.veniceAPIKey] {
+    if previousAccount.credentials != updatedAccount.credentials {
       guard !configurationLoadFailed else {
         return .rejected(.settingsUnreadable)
       }
       do {
-        // The observed DIEM denominator belongs to this key. Clear it durably
-        // before accepting a replacement key, including Auto-fill replacements.
-        try invalidateVeniceUsage(for: previousAccount)
+        // Old cache entries must not become stale-on-failure carries for the replacement login.
+        if previousAccount.provider == .venice,
+           previousAccount.credentials[CredentialField.veniceAPIKey] != updatedAccount.credentials[CredentialField.veniceAPIKey] {
+          try invalidateVeniceUsage(for: previousAccount)
+        } else {
+          try invalidateAccountSnapshot(for: accountID)
+        }
       } catch {
         return .rejected(.previousUsageNotCleared)
       }
@@ -1807,17 +1859,20 @@ final class AppModel: ObservableObject {
   }
 
   private func invalidateVeniceUsage(for account: ProviderAccount) throws {
+    try invalidateAccountSnapshot(for: account.id)
+    try historyStore.remove(accountIDs: [account.id])
+    reloadRecentHistory()
+    purgeWidgetHistory(accountIDs: [account.id])
+  }
+
+  private func invalidateAccountSnapshot(for accountID: String) throws {
     let current = try snapshotStore.load(policy: .recover) ?? snapshot
       ?? QuotaSnapshot(generatedAt: Date(), providers: [], failures: [])
     let empty = QuotaSnapshot(generatedAt: current.generatedAt, providers: [], failures: [])
-    let cleared = current.replacingResults(forAccountIDs: [account.id], from: empty)
+    let cleared = current.replacingResults(forAccountIDs: [accountID], from: empty)
     try snapshotStore.save(cleared)
-    try historyStore.remove(accountIDs: [account.id])
     snapshot = cleared
-    reloadRecentHistory()
     if syncSnapshotToWidgetStore(cleared) { reloadWidgetTimelines() }
-    // The local archive is already cleared above; only the widget's copy remains.
-    purgeWidgetHistory(accountIDs: [account.id])
   }
 
   private func updateProviderStyle(

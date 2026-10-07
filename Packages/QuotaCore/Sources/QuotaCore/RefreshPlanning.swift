@@ -79,8 +79,9 @@ public enum RefreshAvailability: Equatable, Sendable {
 /// last results through `QuotaSnapshot.carryingResults(forSkippedAccountIDs:from:)`.
 public struct RefreshSelection: Sendable {
   public private(set) var fetched: [ProviderRuntimeConfiguration] = []
+  public private(set) var skipped: [ProviderRuntimeConfiguration] = []
   /// Accounts this cycle would have fetched if they were not signing in.
-  public private(set) var skippedAccountIDs: Set<String> = []
+  public var skippedAccountIDs: Set<String> { Set(skipped.map(\.accountID)) }
 
   /// `failedPreparation` lists accounts whose credentials could not be prepared;
   /// the caller reports those failures itself.
@@ -90,7 +91,7 @@ public struct RefreshSelection: Sendable {
       && configuration.provider.hasRequiredCredentials(configuration.credentials)
       && !failedPreparation.contains(configuration.accountID) {
       if signingInAccountIDs.contains(configuration.accountID) {
-        skippedAccountIDs.insert(configuration.accountID)
+        skipped.append(configuration)
       } else {
         fetched.append(configuration)
       }
