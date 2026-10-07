@@ -150,14 +150,18 @@ public struct TrendChartAccountFilter: Sendable {
   }
 
   public func includes(_ usage: ProviderUsage) -> Bool {
-    if enabledAccountIDs.contains(usage.accountID) {
-      return !hiddenAccountIDs.contains(usage.accountID)
+    includes(accountID: usage.accountID, provider: usage.provider)
+  }
+
+  public func includes(accountID: String, provider: QuotaProvider) -> Bool {
+    if enabledAccountIDs.contains(accountID) {
+      return !hiddenAccountIDs.contains(accountID)
     }
 
     // Legacy snapshots name a sole account by the provider's raw value. That
     // resolves only while the provider has exactly one enabled account.
-    guard usage.accountID == usage.provider.rawValue,
-          let ownerID = soleEnabledAccountIDByProvider[usage.provider] else { return false }
+    guard accountID == provider.rawValue,
+          let ownerID = soleEnabledAccountIDByProvider[provider] else { return false }
     return !hiddenAccountIDs.contains(ownerID)
   }
 
