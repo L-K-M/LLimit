@@ -13,6 +13,7 @@
 		2D98F2F1CE89C1FB3DFE15BF /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = EE6A1797238B5E85DDF52167 /* SwiftTerm */; };
 		6DB81FD14DEEF4F20D7D09DA /* ClaudeTerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F28142772B4697E21774DC0 /* ClaudeTerminalView.swift */; };
 		77317877EF8EEB273F9978B7 /* ClaudeTerminalSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = C70211A98D88A5AEA8688233 /* ClaudeTerminalSession.swift */; };
+		A67D55CF988CC78F9B61EE3C /* GlobalHotkeyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B7352862DDAF2A1582CFBB1 /* GlobalHotkeyService.swift */; };
 		0076043CC71CC09BFF9DE74A /* LLimitQuotaWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B4155FC0F0418AB20A7F600 /* LLimitQuotaWidget.swift */; };
 		386963A9990480361B221F1C /* SharedConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CA36F027D77628AAB911B4F /* SharedConstants.swift */; };
 		3A11C01DE4B02FBA9D01AA02 /* LimitKindColorScheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A11C01DE4B02FBA9D01AA01 /* LimitKindColorScheme.swift */; };
@@ -63,6 +64,7 @@
 		6B3F60D8AF12A17811395014 /* ClaudeProfileService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeProfileService.swift; sourceTree = "<group>"; };
 		0F28142772B4697E21774DC0 /* ClaudeTerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeTerminalView.swift; sourceTree = "<group>"; };
 		C70211A98D88A5AEA8688233 /* ClaudeTerminalSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeTerminalSession.swift; sourceTree = "<group>"; };
+		8B7352862DDAF2A1582CFBB1 /* GlobalHotkeyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalHotkeyService.swift; sourceTree = "<group>"; };
 		0F5E31A2797200183F69625A /* RefreshService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RefreshService.swift; sourceTree = "<group>"; };
 		1D80DFE1041003A3DBEC1B17 /* LLimitApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LLimitApp.entitlements; sourceTree = "<group>"; };
 		2CA36F027D77628AAB911B4F /* SharedConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedConstants.swift; sourceTree = "<group>"; };
@@ -191,6 +193,7 @@
 			children = (
 				6B3F60D8AF12A17811395014 /* ClaudeProfileService.swift */,
 				C70211A98D88A5AEA8688233 /* ClaudeTerminalSession.swift */,
+				8B7352862DDAF2A1582CFBB1 /* GlobalHotkeyService.swift */,
 				0F5E31A2797200183F69625A /* RefreshService.swift */,
 				97AF8D326AAA45F2B15B66F2 /* QuotaNotifications.swift */,
 			);
@@ -322,6 +325,7 @@
 				CDACCF16212E46E899C75F01 /* CodexLoginView.swift in Sources */,
 				90D9D53D985F3F47F8B0E80E /* ClaudeProfileService.swift in Sources */,
 				77317877EF8EEB273F9978B7 /* ClaudeTerminalSession.swift in Sources */,
+				A67D55CF988CC78F9B61EE3C /* GlobalHotkeyService.swift in Sources */,
 				7B4652AC8FCA0CBC5B22B5B9 /* SettingsView.swift in Sources */,
 				386963A9990480361B221F1C /* SharedConstants.swift in Sources */,
 				EA5557D6A936ABC4284A9B90 /* WidgetStylePreset.swift in Sources */,

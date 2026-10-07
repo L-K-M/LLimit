@@ -140,10 +140,15 @@ struct SettingsView: View {
   }
 
   private func accountSidebarRow(_ account: ProviderAccount) -> some View {
-    HStack(spacing: 8) {
+    let status = accountStatus(for: account)
+    let canMoveUp = model.providerAccounts.first?.id != account.id
+    let canMoveDown = model.providerAccounts.last?.id != account.id
+
+    return HStack(spacing: 8) {
       Circle()
-        .fill(accountStatusColor(for: account.id))
+        .fill(status.color)
         .frame(width: 8, height: 8)
+        .accessibilityHidden(true)
 
       VStack(alignment: .leading, spacing: 1) {
         Text(account.resolvedDisplayName)
@@ -160,7 +165,46 @@ struct SettingsView: View {
         .accessibilityHidden(true)
     }
     .padding(.vertical, 2)
+    .accessibilityElement(children: .combine)
+    .accessibilityLabel("\(account.resolvedDisplayName), \(account.provider.displayName)")
+    .accessibilityValue(status.label)
+    .accessibilityActions {
+      if canMoveUp { Button("Move Up") { model.moveProviderAccount(account.id, direction: .up) } }
+      if canMoveDown { Button("Move Down") { model.moveProviderAccount(account.id, direction: .down) } }
+    }
     .help("Drag to reorder accounts and their menu bar bars, or use Move Up and Move Down in the context menu.")
+  }
+
+  /// Dot and spoken status share one state machine.
+  private enum AccountStatus {
+    case disabled
+    case refreshFailed
+    case needsAttention
+    case ready
+
+    var color: Color {
+      switch self {
+      case .disabled: return .secondary
+      case .refreshFailed: return .orange
+      case .needsAttention: return .red
+      case .ready: return .green
+      }
+    }
+
+    var label: String {
+      switch self {
+      case .disabled: return "Disabled"
+      case .refreshFailed: return "Refresh failed"
+      case .needsAttention: return "Needs attention"
+      case .ready: return "Ready"
+      }
+    }
+  }
+
+  private func accountStatus(for account: ProviderAccount) -> AccountStatus {
+    guard account.isEnabled else { return .disabled }
+    if accountFailure(for: account.id) != nil { return .refreshFailed }
+    return model.isAccountAvailable(account.id) ? .ready : .needsAttention
   }
 
   // MARK: - Detail router
@@ -205,6 +249,7 @@ struct SettingsView: View {
           } label: {
             if model.isRefreshing {
               ProgressView().controlSize(.small)
+                .accessibilityLabel("Refreshing")
             } else {
               Label("Refresh Now", systemImage: "arrow.clockwise")
             }
@@ -409,6 +454,7 @@ struct SettingsView: View {
           .labelsHidden()
           .pickerStyle(.menu)
           .frame(minWidth: 160, maxWidth: 220, alignment: .leading)
+          .accessibilityLabel("Refresh interval")
         }
 
         Divider()
@@ -417,6 +463,13 @@ struct SettingsView: View {
           Toggle("", isOn: model.launchAtLoginBinding())
             .labelsHidden()
             .toggleStyle(.switch)
+            .accessibilityLabel("Launch at login")
+        }
+
+        Divider()
+
+        settingsRow(title: "Dashboard shortcut") {
+          DashboardShortcutPicker(hotkeys: .shared)
         }
 
         Divider()
@@ -521,6 +574,33 @@ struct SettingsView: View {
     }
   }
 
+  private struct DashboardShortcutPicker: View {
+    @ObservedObject var hotkeys: GlobalHotkeyService
+
+    var body: some View {
+      VStack(alignment: .leading, spacing: 6) {
+        Picker("Dashboard shortcut", selection: Binding(get: { hotkeys.shortcut }, set: { hotkeys.select($0) })) {
+          ForEach(DashboardHotkey.allCases, id: \.self) { shortcut in
+            Text(shortcut.displayName).tag(shortcut)
+          }
+        }
+        .labelsHidden()
+        .pickerStyle(.menu)
+        .frame(minWidth: 160, maxWidth: 220, alignment: .leading)
+
+        if let error = hotkeys.registrationError {
+          Label(error, systemImage: "exclamationmark.triangle.fill")
+            .font(.caption)
+            .foregroundStyle(.orange)
+        } else {
+          Text("Shows or hides the floating dashboard from any app.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+      }
+    }
+  }
+
   /// One switch per enabled account, so a crowded chart can drop the lines
   /// you don't need. New accounts start charted. Disabled accounts never
   /// chart, so they get no switch; their choice returns when re-enabled.
@@ -578,6 +658,7 @@ struct SettingsView: View {
             .labelsHidden()
             .pickerStyle(.menu)
             .frame(minWidth: 220, maxWidth: 320, alignment: .leading)
+            .accessibilityLabel("Provider Tile \(index + 1) account")
           }
         }
       }
@@ -641,6 +722,7 @@ struct SettingsView: View {
             }
             .labelsHidden()
             .pickerStyle(.menu)
+            .accessibilityLabel("Style preset")
 
             Text("Adjust any color below and the style becomes Custom.")
               .font(.caption)
@@ -656,6 +738,7 @@ struct SettingsView: View {
           Toggle("", isOn: model.widgetTransparentBackgroundBinding())
             .labelsHidden()
             .toggleStyle(.switch)
+            .accessibilityLabel("Transparent background")
         }
 
         Divider()
@@ -665,6 +748,7 @@ struct SettingsView: View {
             .labelsHidden()
             .frame(width: 48)
             .disabled(model.widgetStyle.useTransparentBackground)
+            .accessibilityLabel("Background color")
         }
 
         Divider()
@@ -677,11 +761,13 @@ struct SettingsView: View {
               HStack(spacing: 10) {
                 Toggle("Transparent", isOn: model.widgetTransparentBackgroundBinding(for: .dashboard))
                   .toggleStyle(.switch)
+                  .accessibilityLabel("Dashboard background transparent")
                 Spacer()
                 ColorPicker("", selection: model.widgetBackgroundColorBinding(for: .dashboard), supportsOpacity: true)
                   .labelsHidden()
                   .frame(width: 48)
                   .disabled(model.widgetBackgroundOverride(for: .dashboard).useTransparentBackground)
+                  .accessibilityLabel("Dashboard background color")
               }
             }
           }
@@ -698,15 +784,38 @@ struct SettingsView: View {
               HStack(spacing: 10) {
                 Toggle("Transparent", isOn: model.widgetTransparentBackgroundBinding(for: .trend))
                   .toggleStyle(.switch)
+                  .accessibilityLabel("Trend background transparent")
                 Spacer()
                 ColorPicker("", selection: model.widgetBackgroundColorBinding(for: .trend), supportsOpacity: true)
                   .labelsHidden()
                   .frame(width: 48)
                   .disabled(model.widgetBackgroundOverride(for: .trend).useTransparentBackground)
+                  .accessibilityLabel("Trend background color")
               }
             }
           }
           .toggleStyle(.switch)
+        }
+
+        Divider()
+
+        settingsRow(title: "Limit color palette") {
+          VStack(alignment: .leading, spacing: 6) {
+            Picker("Limit color palette", selection: model.limitKindPaletteBinding()) {
+              Text("Custom").tag("").selectionDisabled(true)
+              ForEach(LimitKindPalette.allCases, id: \.self) { palette in
+                Text(palette.displayName).tag(palette.rawValue)
+              }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+
+            Text("Themes the default limit-window colors everywhere: rings, bars, sparklines, the menu bar, widgets and the trend chart. Adjust a color below and the palette becomes Custom.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          }
+          .frame(minWidth: 180, maxWidth: 300, alignment: .leading)
         }
 
         Divider()
@@ -956,7 +1065,8 @@ struct SettingsView: View {
             committingDraft(
               TextField("Account name", text: draftBinding(for: nameKey))
                 .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: 340),
+                .frame(maxWidth: 340)
+                .accessibilityLabel("Display name"),
               key: nameKey
             )
           }
@@ -974,6 +1084,7 @@ struct SettingsView: View {
             Toggle("", isOn: model.accountEnabledBinding(for: accountID))
               .labelsHidden()
               .toggleStyle(.switch)
+              .accessibilityLabel("Enabled")
           }
 
           Divider()
@@ -1012,6 +1123,7 @@ struct SettingsView: View {
                 ColorPicker("Primary color", selection: model.providerPrimaryColorBinding(for: accountID), supportsOpacity: false)
                   .labelsHidden()
                   .frame(width: 48)
+                  .accessibilityLabel("Primary color")
                 Button("Reset to automatic") {
                   model.resetProviderPrimaryColor(for: accountID)
                 }
@@ -1031,6 +1143,7 @@ struct SettingsView: View {
             Toggle("", isOn: model.providerOverrideEnabledBinding(for: accountID))
               .labelsHidden()
               .toggleStyle(.switch)
+              .accessibilityLabel("Override global styling")
           }
 
           if providerStyle.useCustomStyle {
@@ -1047,6 +1160,7 @@ struct SettingsView: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
+                .accessibilityLabel("Style preset")
 
                 Text("Choose a preset or set a background below. Unmatched combinations show as Custom. Your primary color is kept when you change presets.")
                   .font(.caption)
@@ -1062,6 +1176,7 @@ struct SettingsView: View {
               Toggle("", isOn: model.providerTransparentBackgroundBinding(for: accountID))
                 .labelsHidden()
                 .toggleStyle(.switch)
+                .accessibilityLabel("Transparent background")
             }
 
             Divider()
@@ -1071,6 +1186,7 @@ struct SettingsView: View {
                 .labelsHidden()
                 .frame(width: 48)
                 .disabled(providerStyle.style.useTransparentBackground)
+                .accessibilityLabel("Background color")
             }
 
           }
@@ -1086,6 +1202,7 @@ struct SettingsView: View {
                 if model.isRefreshing {
                   ProgressView()
                     .controlSize(.small)
+                    .accessibilityLabel("Refreshing")
                 } else {
                   Text("Refresh Now")
                 }
@@ -1220,6 +1337,7 @@ struct SettingsView: View {
         Circle()
           .fill(isPositive ? Color.green : Color.red)
           .frame(width: 8, height: 8)
+          .accessibilityHidden(true)
         Text(message)
           .font(.subheadline)
           .fixedSize(horizontal: false, vertical: true)
@@ -1272,6 +1390,7 @@ struct SettingsView: View {
 
       Stepper("", value: value, in: range)
         .labelsHidden()
+        .accessibilityLabel(title)
 
       Text("\(displayedValue)")
         .font(.subheadline.weight(.semibold))
@@ -1290,6 +1409,7 @@ struct SettingsView: View {
       ColorPicker("", selection: binding, supportsOpacity: false)
         .labelsHidden()
         .frame(width: 48)
+        .accessibilityLabel(title)
     }
   }
 
@@ -1307,16 +1427,6 @@ struct SettingsView: View {
   }
 
   // MARK: - Status helpers
-
-  private func accountStatusColor(for accountID: String) -> Color {
-    guard let account = model.account(withID: accountID), account.isEnabled else {
-      return .secondary
-    }
-    if accountFailure(for: accountID) != nil {
-      return .orange
-    }
-    return model.isAccountAvailable(accountID) ? .green : .red
-  }
 
   private func shortName(for usage: ProviderUsage) -> String {
     if !usage.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

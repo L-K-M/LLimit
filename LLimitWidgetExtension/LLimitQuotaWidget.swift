@@ -331,22 +331,15 @@ private struct OverviewSmallQuotaView: View {
   let entry: QuotaEntry
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 5) {
-      HStack {
-        Text("LLM Quota")
-          .font(.caption.weight(.semibold))
-        Spacer()
-        if entry.settings.widgetVisibility.showTimestamp, let snapshot = entry.snapshot {
-          Text(snapshot.generatedAt, style: .time)
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-        }
-      }
+    let dashboard = entry.dashboard
 
-      if let snapshot = entry.snapshot, !snapshot.providers.isEmpty {
+    VStack(alignment: .leading, spacing: 5) {
+      DashboardHeader(entry: entry)
+
+      if dashboard.state == .ready {
         let providerLimit = max(1, min(entry.settings.widgetVisibility.smallDashboardProviderLimit, 4))
 
-        ForEach(sortedProviders(snapshot.providers).prefix(providerLimit)) { usage in
+        ForEach(dashboard.providers.prefix(providerLimit)) { usage in
           CompactProviderUsageRow(
             usage: usage,
             kindColors: entry.settings.widgetStyle.limitKindColors,
@@ -354,125 +347,169 @@ private struct OverviewSmallQuotaView: View {
             primaryHexColor: entry.settings.primaryHexColor(for: usage.accountID),
             showProgressBar: true,
             showPercentages: entry.settings.widgetVisibility.showPercentageValues,
-            showDualLimitPercentages: entry.settings.widgetVisibility.showDualLimitPercentagesInDashboard
+            showDualLimitPercentages: entry.settings.widgetVisibility.showDualLimitPercentagesInDashboard,
+            freshness: entry.freshness(for: usage)
           )
         }
 
         if entry.settings.widgetVisibility.showOverviewMetricSummary {
-          Text(overviewSummary(for: snapshot.providers))
+          Text(dashboard.overviewSummary)
             .font(.caption2)
             .foregroundStyle(.secondary)
             .lineLimit(1)
         }
 
-        if entry.settings.widgetVisibility.showFailureCount, !snapshot.failures.isEmpty {
-          Text("\(snapshot.failures.count) unavailable")
-            .font(.caption2)
-            .foregroundStyle(.orange)
+        if entry.settings.widgetVisibility.showFailureCount, !dashboard.failures.isEmpty {
+          DashboardUnavailableSummary(failures: dashboard.failures, capacity: 1, layout: .compact)
         }
       } else {
         Spacer(minLength: 0)
-        Text("No accounts configured")
-          .font(.caption.weight(.semibold))
-        Text("Add accounts in LLimit")
-          .font(.caption2)
-          .foregroundStyle(.secondary)
+        DashboardEmptyStateView(dashboard: dashboard, nameCapacity: 2)
         Spacer(minLength: 0)
       }
     }
     .padding(8)
   }
 
-  private func sortedProviders(_ providers: [ProviderUsage]) -> [ProviderUsage] {
-    providers.sorted { lhs, rhs in
-      let lhsRemaining = providerRemainingPercent(for: lhs) ?? Int.max
-      let rhsRemaining = providerRemainingPercent(for: rhs) ?? Int.max
-
-      if lhsRemaining != rhsRemaining {
-        return lhsRemaining < rhsRemaining
-      }
-
-      return lhs.title < rhs.title
-    }
-  }
-
-  private func overviewSummary(for providers: [ProviderUsage]) -> String {
-    guard !providers.isEmpty else {
-      return "No accounts"
-    }
-
-    if let worstRemaining = providers.compactMap({ providerRemainingPercent(for: $0) }).min() {
-      return "\(providers.count) accounts, lowest \(worstRemaining)% left"
-    }
-
-    return "\(providers.count) accounts tracked"
-  }
 }
 
 private struct MediumCompactQuotaView: View {
+  private static let maximumSingleColumnRows = 6
   let entry: QuotaEntry
 
   var body: some View {
+    let dashboard = entry.dashboard
+
     VStack(alignment: .leading, spacing: 6) {
-      HStack {
-        Text("LLM Quota")
-          .font(.caption.weight(.semibold))
-        Spacer()
-        if entry.settings.widgetVisibility.showTimestamp, let snapshot = entry.snapshot {
-          Text(snapshot.generatedAt, style: .time)
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-        }
-      }
+      DashboardHeader(entry: entry)
 
-      if let snapshot = entry.snapshot, !snapshot.providers.isEmpty {
+      if dashboard.state == .ready {
         let providerLimit = max(1, min(entry.settings.widgetVisibility.mediumProviderLimit, 12))
+        let rows = Array(dashboard.providers.prefix(providerLimit))
 
-        ForEach(sortedProviders(snapshot.providers).prefix(providerLimit)) { usage in
-          CompactProviderUsageRow(
-            usage: usage,
-            kindColors: entry.settings.widgetStyle.limitKindColors,
-            colorStep: accountColorStep(forAccountID: usage.accountID, in: entry.settings.accounts),
-            primaryHexColor: entry.settings.primaryHexColor(for: usage.accountID),
-            showProgressBar: entry.settings.widgetVisibility.showMediumProgressBars,
-            showPercentages: entry.settings.widgetVisibility.showPercentageValues,
-            showDualLimitPercentages: entry.settings.widgetVisibility.showDualLimitPercentagesInDashboard
-          )
+        if rows.count > Self.maximumSingleColumnRows {
+          LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 4) {
+            ForEach(rows) { usage in row(for: usage) }
+          }
+        } else {
+          ForEach(rows) { usage in row(for: usage) }
         }
 
-        if entry.settings.widgetVisibility.showFailureCount, !snapshot.failures.isEmpty {
-          Text("\(snapshot.failures.count) unavailable")
-            .font(.caption2)
-            .foregroundStyle(.orange)
+        if entry.settings.widgetVisibility.showFailureCount, !dashboard.failures.isEmpty {
+          DashboardUnavailableSummary(failures: dashboard.failures, capacity: 2, layout: .compact)
         }
       } else {
         Spacer(minLength: 0)
-        Text("No accounts configured")
-          .font(.caption.weight(.semibold))
-        Text("Add accounts in LLimit")
-          .font(.caption2)
-          .foregroundStyle(.secondary)
+        DashboardEmptyStateView(dashboard: dashboard, nameCapacity: 4)
         Spacer(minLength: 0)
       }
     }
     .padding(10)
   }
 
-  private func sortedProviders(_ providers: [ProviderUsage]) -> [ProviderUsage] {
-    providers.sorted { lhs, rhs in
-      let lhsRemaining = providerRemainingPercent(for: lhs) ?? Int.max
-      let rhsRemaining = providerRemainingPercent(for: rhs) ?? Int.max
+  private func row(for usage: ProviderUsage) -> some View {
+    CompactProviderUsageRow(usage: usage, kindColors: entry.settings.widgetStyle.limitKindColors,
+      colorStep: accountColorStep(forAccountID: usage.accountID, in: entry.settings.accounts),
+      primaryHexColor: entry.settings.primaryHexColor(for: usage.accountID),
+      showProgressBar: entry.settings.widgetVisibility.showMediumProgressBars,
+      showPercentages: entry.settings.widgetVisibility.showPercentageValues,
+      showDualLimitPercentages: entry.settings.widgetVisibility.showDualLimitPercentagesInDashboard,
+      freshness: entry.freshness(for: usage))
+  }
+}
 
-      if lhsRemaining != rhsRemaining {
-        return lhsRemaining < rhsRemaining
+private struct DashboardHeader: View {
+  let entry: QuotaEntry
+
+  var body: some View {
+    HStack {
+      Text("LLM Quota").font(.caption.weight(.semibold))
+      Spacer(minLength: 3)
+      if let snapshot = entry.snapshot, !entry.dashboard.providers.isEmpty || !entry.dashboard.failures.isEmpty {
+        let stale = DashboardTimeline.isStale(snapshot: snapshot, accounts: entry.settings.accounts,
+          now: entry.date, refreshIntervalMinutes: entry.refreshIntervalMinutes)
+        HStack(spacing: 3) {
+          if stale {
+            Image(systemName: "clock.arrow.circlepath").accessibilityHidden(true)
+            Text("Stale")
+          }
+          if entry.settings.widgetVisibility.showTimestamp || stale {
+            Text(snapshot.generatedAt, style: .time)
+          }
+        }
+        .font(.caption2)
+        .foregroundStyle(stale ? Color.orange : Color.secondary)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(stale ? "Data is stale. Last updated" : "Updated") \(snapshot.generatedAt.formatted(date: .abbreviated, time: .shortened))")
       }
-
-      return lhs.title < rhs.title
     }
   }
 }
 
+private struct DashboardEmptyStateView: View {
+  let dashboard: DashboardPresentation
+  let nameCapacity: Int
+
+  var body: some View {
+    if let message {
+      Text(message.title).font(.caption.weight(.semibold))
+      if !dashboard.failures.isEmpty {
+        DashboardUnavailableSummary(failures: dashboard.failures, capacity: nameCapacity, layout: .expanded)
+      }
+      Text(message.detail).font(.caption2).foregroundStyle(.secondary)
+    }
+  }
+
+  private var message: (title: String, detail: String)? {
+    switch dashboard.state {
+    case .noAccounts: return ("No accounts configured", "Add accounts in LLimit")
+    case .noEnabledAccounts: return ("No enabled accounts", "Enable accounts in LLimit")
+    case .awaitingData: return ("Awaiting quota data", "Waiting for automatic refresh")
+    case .allFailed: return (dashboard.failureCount == 1 ? "Account unavailable" : "All accounts unavailable", "Check accounts in LLimit")
+    case .storageUnavailable: return ("Storage unavailable", "Open LLimit to check shared data")
+    case .ready: return nil
+    }
+  }
+}
+
+private struct DashboardUnavailableSummary: View {
+  enum Layout { case compact, expanded }
+  let failures: [ProviderFailure]
+  let capacity: Int
+  let layout: Layout
+
+  private var names: [String] { failures.map { $0.title ?? $0.provider.displayName } }
+  private var remaining: Int { max(0, failures.count - capacity) }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 2) {
+      if layout == .compact {
+        Text("\(names.prefix(capacity).joined(separator: ", ")) unavailable\(remaining > 0 ? " +\(remaining) more" : "")")
+          .lineLimit(1)
+      } else {
+        ForEach(Array(names.prefix(capacity).enumerated()), id: \.offset) { _, name in
+          Text(name).lineLimit(1)
+        }
+        if remaining > 0 { Text("+\(remaining) more") }
+      }
+    }
+    .font(.caption2)
+    .foregroundStyle(.orange)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel("Unavailable accounts: " + names.joined(separator: ", "))
+  }
+}
+
+private extension QuotaEntry {
+  func freshness(for usage: ProviderUsage) -> MenuBarGraph.Freshness {
+    MenuBarGraph.bars(snapshot: snapshot, accounts: settings.accounts, now: date,
+      staleAfter: QuotaFreshness.maxAge(refreshIntervalMinutes: refreshIntervalMinutes))
+      .first { $0.usage?.accountKey == usage.accountKey }?.freshness ?? .current
+  }
+}
+
 private struct CompactProviderUsageRow: View {
+  @Environment(\.widgetFamily) private var family
   let usage: ProviderUsage
   let kindColors: LimitKindColors
   let colorStep: Int
@@ -480,55 +517,85 @@ private struct CompactProviderUsageRow: View {
   let showProgressBar: Bool
   let showPercentages: Bool
   let showDualLimitPercentages: Bool
+  let freshness: MenuBarGraph.Freshness
+
+  private var metric: UsageMetric? { dashboardPrimaryMetric(for: usage) }
+  private var dualPercent: String? { showDualLimitPercentages ? dualLimitPercentText(for: usage) : nil }
+  private var basePercent: Int? { dashboardRemainingPercent(for: usage) }
+  private var unlimited: Bool { metric?.isUnlimited == true }
 
   var body: some View {
-    let metric = dashboardPrimaryMetric(for: usage)
-    let dualPercent = showDualLimitPercentages ? dualLimitPercentText(for: usage) : nil
-    let basePercent = metric?.remainingPercent ?? providerRemainingPercent(for: usage)
-    let unlimited = metric?.isUnlimited ?? usage.metrics.contains(where: \.isUnlimited)
+    Group {
+      if family == .systemSmall {
+        // Values keep their intrinsic width; the bar gets the full second line.
+        VStack(spacing: 2) {
+          HStack(spacing: 4) { nameAndStatus; valueText }
+          bar
+        }
+      } else {
+        HStack(spacing: 6) {
+          nameAndStatus
+          bar.frame(minWidth: 18, idealWidth: 40, maxWidth: 90)
+          valueText
+        }
+      }
+    }
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel("\(shortName). \(showDualLimitPercentages && dualPercent != nil ? dualLimitAccessibilityText(for: usage) : percentageAccessibilityText(for: metric)). \(freshnessDescription)")
+  }
 
-    HStack(spacing: 6) {
+  private var nameAndStatus: some View {
+    HStack(spacing: 3) {
       Text(shortName + (!showPercentages && metric?.isPercentageEstimated == true ? " ≈" : ""))
         .font(.caption2.weight(.semibold))
         .lineLimit(1)
-        .frame(width: 58, alignment: .leading)
-
-      if showProgressBar, basePercent != nil || unlimited {
-        MiniProgressBar(
-          percent: basePercent,
-          unlimited: unlimited,
-          tint: LimitKindColorScheme.accountAccent(for: usage.metrics, colors: kindColors, step: colorStep, primaryHexColor: primaryHexColor),
-          stops: dashboardBarStops(for: usage, kindColors: kindColors, step: colorStep, primaryHexColor: primaryHexColor),
-          showDualStops: showDualLimitPercentages
-        )
-          .frame(height: 5)
-      } else {
-        Spacer(minLength: 0)
-      }
-
-      if showPercentages || (basePercent == nil && metric?.usageLine != nil) {
-        // Single mode labels the SAME metric the bar fills with
-        // (dashboardPrimaryMetric), so the number can never contradict the bar.
-        Text(dualPercent ?? percentText(for: metric))
-          .font(.caption2.weight(.semibold))
-          .monospacedDigit()
-          .lineLimit(1)
-          .minimumScaleFactor(0.8)
-          .frame(width: basePercent == nil && !unlimited ? nil : (dualPercent == nil ? 40 : 72), alignment: .trailing)
-          .accessibilityLabel(dualPercent == nil
-            ? percentageAccessibilityText(for: metric)
-            : dualLimitAccessibilityText(for: usage))
+        .minimumScaleFactor(0.6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+      if freshness != .current {
+        Image(systemName: freshness.isFailing ? "exclamationmark.triangle.fill" : "clock.arrow.circlepath")
+          .foregroundStyle(.orange)
+          .accessibilityHidden(true)
       }
     }
-    .accessibilityElement(children: .combine)
+  }
+
+  @ViewBuilder private var bar: some View {
+    if showProgressBar, basePercent != nil || unlimited {
+      MiniProgressBar(percent: basePercent, unlimited: unlimited,
+        tint: LimitKindColorScheme.accountAccent(for: usage.metrics, colors: kindColors, step: colorStep, primaryHexColor: primaryHexColor),
+        stops: dashboardBarStops(for: usage, kindColors: kindColors, step: colorStep, primaryHexColor: primaryHexColor),
+        showDualStops: showDualLimitPercentages)
+        .frame(height: 5)
+    }
+  }
+
+  @ViewBuilder private var valueText: some View {
+    if showPercentages || basePercent == nil {
+      Text(dualPercent ?? percentText(for: metric))
+        .font(.caption2.weight(.semibold))
+        .monospacedDigit()
+        .lineLimit(1)
+        .minimumScaleFactor(0.7)
+        .fixedSize(horizontal: basePercent != nil || unlimited, vertical: false)
+        .layoutPriority(1)
+    }
   }
 
   private var shortName: String {
     compactProviderName(for: usage)
   }
+
+  private var freshnessDescription: String {
+    switch freshness {
+    case .current: return "Data is current."
+    case .stale: return "Data is stale."
+    case .failing: return "Refresh failed. Last known values."
+    }
+  }
 }
 
 private struct MiniProgressBar: View {
+  private static let backing = Color(red: 29 / 255, green: 31 / 255, blue: 39 / 255)
   let percent: Int?
   let unlimited: Bool
   let tint: Color
@@ -543,22 +610,18 @@ private struct MiniProgressBar: View {
 
       ZStack(alignment: .leading) {
         Capsule()
-          .fill(Color.white.opacity(0.16))
+          .fill(Self.backing)
 
         if unlimited {
           Capsule().fill(tint)
         } else if showDualStops, twoStops.count >= 2 {
-          // Longer fill first so the shorter one stays visible on top; each
-          // fill wears its own metric's identity color, the underlying longer
-          // one dimmed so the overlap reads as two limits. Dim by position in
-          // the draw order, not by percent — equal percents must still yield
-          // one strong fill.
-          let ordered = twoStops.sorted { $0.percent > $1.percent }
-
-          ForEach(ordered) { stop in
+          // Two lanes preserve both identity hues without opacity destroying
+          // their validated contrast against the graphite backing.
+          ForEach(Array(twoStops.enumerated()), id: \.element.id) { index, stop in
             Capsule()
-              .fill(stop.color.opacity(stop.id == ordered.first?.id ? 0.55 : 0.85))
-              .frame(width: width * CGFloat(stop.percent) / 100.0)
+              .fill(stop.color)
+              .frame(width: width * CGFloat(stop.percent) / 100.0, height: proxy.size.height / 2)
+              .offset(y: index == 0 ? -proxy.size.height / 4 : proxy.size.height / 4)
           }
 
           ForEach(twoStops) { stop in
@@ -576,6 +639,8 @@ private struct MiniProgressBar: View {
             .frame(width: width * CGFloat(clampedPercent) / 100.0)
         }
       }
+      .clipShape(Capsule())
+      .overlay(Capsule().strokeBorder(Self.backing, lineWidth: 0.75))
     }
   }
 
@@ -600,58 +665,6 @@ private struct DashboardBarStop: Identifiable {
   }
 }
 
-private func dashboardPrimaryMetric(for usage: ProviderUsage) -> UsageMetric? {
-  let boundedMetrics = usage.metrics
-    .filter { !$0.isUnlimited }
-    .compactMap { metric -> UsageMetric? in
-      guard metric.remainingPercent != nil else {
-        return nil
-      }
-      return metric
-    }
-
-  if let mostConstrained = boundedMetrics.min(by: { ($0.remainingPercent ?? Int.max) < ($1.remainingPercent ?? Int.max) }) {
-    return mostConstrained
-  }
-
-  if let unlimitedMetric = usage.metrics.first(where: \.isUnlimited) {
-    return unlimitedMetric
-  }
-
-  return usage.metrics.first(where: { $0.remainingPercent != nil }) ?? usage.metrics.first
-}
-
-private func providerRemainingPercent(for usage: ProviderUsage) -> Int? {
-  let boundedRemaining = usage.metrics
-    .filter { !$0.isUnlimited }
-    .compactMap(\.remainingPercent)
-
-  if let minimumRemaining = boundedRemaining.min() {
-    return max(0, min(100, minimumRemaining))
-  }
-
-  if usage.metrics.contains(where: \.isUnlimited) {
-    return 100
-  }
-
-  if let maxUsagePercent = usage.maxUsagePercent {
-    return max(0, min(100, 100 - maxUsagePercent))
-  }
-
-  return nil
-}
-
-// The dashboard bar shows the same provider-preferred metric pair as the tile
-// rings (defaultRingMetrics) so both surfaces show the same two limits in the
-// same identity colors.
-private func dashboardBarMetrics(for usage: ProviderUsage) -> [UsageMetric] {
-  Array(
-    defaultRingMetrics(for: usage)
-      .filter { !$0.isUnlimited && $0.remainingPercent != nil }
-      .prefix(2)
-  )
-}
-
 private func dashboardBarStops(for usage: ProviderUsage, kindColors: LimitKindColors, step: Int, primaryHexColor: String?) -> [DashboardBarStop] {
   let metricColors = LimitKindColorScheme.colors(for: usage.metrics, colors: kindColors, step: step, primaryHexColor: primaryHexColor)
 
@@ -665,12 +678,6 @@ private func dashboardBarStops(for usage: ProviderUsage, kindColors: LimitKindCo
       color: metricColors[index]
     )
   }
-}
-
-private func dashboardBarPercents(for usage: ProviderUsage) -> [Int] {
-  dashboardBarMetrics(for: usage)
-    .map { max(0, min(100, $0.remainingPercent ?? 0)) }
-    .sorted()
 }
 
 private func dualLimitPercentText(for usage: ProviderUsage) -> String? {
@@ -856,7 +863,7 @@ private func compactProviderName(for provider: QuotaProvider) -> String {
   case .metaMuse:
     return "Muse"
   case .openCodeGo:
-    return "Go"
+    return "OpenCode"
   case .venice:
     return "Venice"
   case .cline:
@@ -872,29 +879,22 @@ private func compactProviderName(for usage: ProviderUsage) -> String {
   return compactProviderName(for: usage.provider)
 }
 
-private func resetSummaries(for metrics: [UsageMetric], at date: Date) -> [String] {
-  metrics.compactMap { metric in
-    guard let summary = metric.resetCountdown(at: date) else { return nil }
-    return summary == "reset" ? "<1m" : summary
-  }
-}
-
 private func percentText(for metric: UsageMetric?) -> String {
   guard let metric else { return "--" }
   if metric.isUnlimited {
     return "INF"
   }
   if let remaining = metric.remainingPercent {
-    return "\(metric.isPercentageEstimated ? "≈" : "")\(remaining)%"
+    return "\(metric.isPercentageEstimated ? "≈" : "")\(max(0, min(100, remaining)))%"
   }
   return metric.usageLine ?? "--"
 }
 
 private func percentageAccessibilityText(for metric: UsageMetric?) -> String {
-  guard let metric, let remaining = metric.remainingPercent, !metric.isUnlimited else {
-    return percentText(for: metric)
-  }
-  return "\(metric.isPercentageEstimated ? "Estimated " : "")\(remaining) percent remaining"
+  guard let metric else { return "Unknown" }
+  if metric.isUnlimited { return "Unlimited" }
+  guard let remaining = metric.remainingPercent else { return metric.usageLine ?? "Unknown" }
+  return "\(metric.isPercentageEstimated ? "Estimated " : "")\(max(0, min(100, remaining))) percent remaining"
 }
 
 private func backgroundBaseColor(from hexColor: String?) -> Color? {

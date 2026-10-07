@@ -1684,6 +1684,18 @@ final class AppModel: ObservableObject {
     saveConfiguration()
   }
 
+  /// Replace the default window hues together; unmatched manual edits are Custom.
+  func limitKindPaletteBinding() -> Binding<String> {
+    Binding(
+      get: { self.widgetStyle.limitKindColors.palette?.rawValue ?? "" },
+      set: { newValue in
+        guard let palette = LimitKindPalette(rawValue: newValue) else { return }
+        self.widgetStyle.limitKindColors = palette.colors
+        self.saveConfiguration()
+      }
+    )
+  }
+
   var primaryColorsByAccountID: [String: String] {
     let settings = currentSettings()
     let identifiers = providerAccounts.map(\.id) + QuotaProvider.allCases.map(\.rawValue)

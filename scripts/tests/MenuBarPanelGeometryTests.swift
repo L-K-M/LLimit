@@ -26,6 +26,7 @@ private struct MenuBarPanelGeometryTests {
     try growingStopsAtTheVisibleScreenEdge()
     try overflowingPanelIsNotYankedOnTheFirstMove()
     try rememberedSizeFitsTheVisibleScreen()
+    try overviewRowsLeaveCaptionWidth()
     print("Menu bar panel geometry checks passed: \(checksPassed)")
   }
 
@@ -113,6 +114,22 @@ private struct MenuBarPanelGeometryTests {
       pointerDelta: pointerDelta,
       visibleFrame: visibleFrame
     )
+  }
+
+  private static func overviewRowsLeaveCaptionWidth() throws {
+    for panelWidth in [360, 390, 420, 700, 970] as [CGFloat] {
+      let width = panelWidth - 2 * (OverviewGaugeLayout.dashboardPadding + OverviewGaugeLayout.cardPadding)
+      for count in 1...13 {
+        let rows = OverviewGaugeLayout.rows(count: count, width: width)
+        let cellWidth = OverviewGaugeLayout.cellWidth(columns: rows[0], width: width)
+        try expect(rows.reduce(0, +), equals: count, "Every gauge appears")
+        try expect((rows.max() ?? 0) - (rows.min() ?? 0) <= 1, equals: true, "Balanced rows")
+        try expect(cellWidth >= 104, equals: true, "Caption width at \(panelWidth)pt for \(count) accounts")
+      }
+    }
+    try expect(OverviewGaugeLayout.rows(count: 0, width: 370), equals: [], "Empty board")
+    try expect(OverviewGaugeLayout.rows(count: 13, width: .infinity), equals: [13], "Ideal width")
+    try expect(OverviewGaugeLayout.rows(count: 3, width: 0), equals: [1, 1, 1], "Zero width")
   }
 
   private static func expect<Value: Equatable>(_ actual: Value, equals expected: Value, _ message: String) throws {

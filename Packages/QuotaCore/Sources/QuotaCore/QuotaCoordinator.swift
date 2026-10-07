@@ -89,9 +89,9 @@ public struct QuotaCoordinator: Sendable {
                 provider: configuration.provider,
                 kind: error.kind,
                 message: failureMessages.redacted(error.message),
-                title: configuration.displayName,
                 retryAt: error.kind == .rateLimit
-                  ? RetryAfterPolicy.boundedDelay(error.retryAfter).map { now.addingTimeInterval($0) } : nil
+                  ? RetryAfterPolicy.boundedDelay(error.retryAfter).map { now.addingTimeInterval($0) } : nil,
+                title: configuration.displayName
               ))
             )
           } catch {

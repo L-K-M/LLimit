@@ -149,6 +149,9 @@ Also relaunch LLimit and confirm the size survives.
 
 # Limit color integration checks
 
+Dashboard consolidation sources, palette evidence and native verification:
+[DashboardIntegration.md](DashboardIntegration.md).
+
 On macOS, run `scripts/test-limit-colors.sh [DerivedData directory]`. The script
 builds the app, then links its QuotaCore object with the shared SwiftUI color
 resolver. To reuse a current Debug build, run
