@@ -23,10 +23,23 @@ import FoundationNetworking
 /// parseDateValue cover both. `availablePromptCredits` is -1 on quota-billed
 /// plans (the daily/weekly percents carry the signal) and a real count on
 /// credit-billed ones.
+///
+/// The percents, resets, `availablePromptCredits` and `overageBalanceMicros`
+/// are proto3 implicit-presence scalars (none is marked `optional` in the
+/// generated `PlanStatus` descriptor, can1357/oh-my-pi `devin-proto.ts`), so
+/// protobuf-JSON omits zeros: an exhausted window arrives as its reset epoch
+/// alone, and a spent credit plan sends no credit count.
 public struct DevinQuotaClient: QuotaProviderClient {
   public let provider: QuotaProvider = .devin
   public static let defaultServerURL = URL(string: "https://server.codeium.com")!
   private static let servicePath = "exa.seat_management_pb.SeatManagementService/GetUserStatus"
+
+  /// `planInfo.billingStrategy` of credit-billed plans
+  /// (`exa.codeium_common_pb.BillingStrategy`).
+  private static let creditBillingStrategy = "BILLING_STRATEGY_CREDITS"
+
+  /// `planStatus.overageBalanceMicros` is int64 micro-dollars.
+  private static let microsPerDollar = 1_000_000.0
 
   private let defaultEndpoint: URL
   private let httpClient: any HTTPClient
@@ -94,11 +107,27 @@ public struct DevinQuotaClient: QuotaProviderClient {
     let planInfo = (planStatus["planInfo"] as? [String: Any]) ?? [:]
     let devinInfo = (planInfo["devinInfo"] as? [String: Any]) ?? [:]
 
+    let isCreditBilled = nonEmptyString(planInfo["billingStrategy"]) == Self.creditBillingStrategy
     var metrics: [UsageMetric] = []
 
-    func quotaWindow(id: String, label: String, percentKey: String, resetKey: String) {
-      guard let percent = parseNumeric(planStatus[percentKey]) else { return }
-      let resetAt = parseDateValue(planStatus[resetKey])
+    func quotaWindow(id: String, label: String, percentKey: String, resetKey: String, hiddenKey: String) {
+      guard (planInfo[hiddenKey] as? Bool) != true else { return }
+
+      // A zero epoch is the proto default for "no reset", not 1970.
+      let resetAt = parseDateValue(planStatus[resetKey]).flatMap { $0.timeIntervalSince1970 > 0 ? $0 : nil }
+      let percent: Double
+      if let rawPercent = planStatus[percentKey] {
+        guard let parsed = parseNumeric(rawPercent) else { return }
+        percent = parsed
+      } else {
+        // An omitted percent is the implicit 0 of an exhausted window, but
+        // only a dated window exists; with no reset the plan has none. A
+        // credit plan's signal is its credit count, so a stray reset there
+        // must not invent an exhausted window.
+        guard resetAt != nil, !isCreditBilled else { return }
+        percent = 0
+      }
+
       metrics.append(
         UsageMetric(
           id: id,
@@ -110,11 +139,20 @@ public struct DevinQuotaClient: QuotaProviderClient {
       )
     }
 
-    quotaWindow(id: "quota-daily", label: "Daily quota", percentKey: "dailyQuotaRemainingPercent", resetKey: "dailyQuotaResetAtUnix")
-    quotaWindow(id: "quota-weekly", label: "Weekly quota", percentKey: "weeklyQuotaRemainingPercent", resetKey: "weeklyQuotaResetAtUnix")
+    quotaWindow(
+      id: "quota-daily", label: "Daily quota", percentKey: "dailyQuotaRemainingPercent",
+      resetKey: "dailyQuotaResetAtUnix", hiddenKey: "hideDailyQuota"
+    )
+    quotaWindow(
+      id: "quota-weekly", label: "Weekly quota", percentKey: "weeklyQuotaRemainingPercent",
+      resetKey: "weeklyQuotaResetAtUnix", hiddenKey: "hideWeeklyQuota"
+    )
 
-    // Credit-billed plans report a real count; quota-billed ones send -1.
-    if let credits = parseNumeric(planStatus["availablePromptCredits"]), credits >= 0 {
+    // Credit-billed plans report a real count; quota-billed ones send -1. An
+    // omitted count is the implicit 0, but only a credit plan has a count.
+    let rawCredits = planStatus["availablePromptCredits"]
+    let credits = rawCredits == nil && isCreditBilled ? 0 : parseNumeric(rawCredits)
+    if let credits, credits >= 0 {
       let resetAt = parseDateValue(planStatus["planEnd"])
       metrics.append(
         UsageMetric(
@@ -128,10 +166,15 @@ public struct DevinQuotaClient: QuotaProviderClient {
     }
 
     // Overage balance, when the account carries one (the CLI shows it as the
-    // "extra usage balance" line). The key spelling is not documented, so
-    // probe the plausible spots in both planStatus and userStatus.
+    // "extra usage balance" line). The proto names it `overageBalanceMicros`;
+    // the older probes for undocumented spellings in planStatus and
+    // userStatus remain a fallback.
     let balanceKeys = ["usageBalance", "extraUsageBalance", "usage_balance", "extra_usage_balance", "flexCredits"]
-    if let balance = firstNumeric(in: planStatus, keys: balanceKeys) ?? firstNumeric(in: userStatus, keys: balanceKeys) {
+    if let micros = parseNumeric(planStatus["overageBalanceMicros"]) {
+      metrics.append(
+        UsageMetric(id: "balance", label: "Extra usage balance", usedDisplay: Self.dollars(micros / Self.microsPerDollar))
+      )
+    } else if let balance = firstNumeric(in: planStatus, keys: balanceKeys) ?? firstNumeric(in: userStatus, keys: balanceKeys) {
       metrics.append(
         UsageMetric(id: "balance", label: "Extra usage balance", usedDisplay: formatIntLike(balance))
       )
@@ -168,5 +211,13 @@ public struct DevinQuotaClient: QuotaProviderClient {
       warning: warning,
       fetchedAt: now
     )
+  }
+
+  /// Keeps the sign, so a negative balance never reads as a positive amount.
+  /// The sign follows the rounded cents, so a sub-cent debit is "$0.00".
+  private static func dollars(_ value: Double) -> String {
+    let cents = (value * 100).rounded()
+    let sign = cents < 0 ? "-" : ""
+    return sign + "$" + String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), abs(cents) / 100)
   }
 }
