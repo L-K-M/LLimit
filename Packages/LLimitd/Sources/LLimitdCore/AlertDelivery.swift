@@ -147,16 +147,31 @@ final class ChildProcessRunner: @unchecked Sendable {
     }
 
     log("[llimitd] \(name) did not finish within \(Int(timeout))s, stopping it")
-    // The child leads its own process group, so this also reaches whatever it
-    // started. It has not been reaped yet, so the IDs cannot have been reused.
-    kill(-pid, SIGTERM)
-    if Self.waitForExit(pid, within: Self.killGracePeriod) == nil {
-      log("[llimitd] \(name) ignored SIGTERM, killing it")
-      kill(-pid, SIGKILL)
+    Self.signalChild(pid, SIGTERM)
+    guard Self.waitForExit(pid, within: Self.killGracePeriod) == nil else { return .timedOut }
+
+    log("[llimitd] \(name) ignored SIGTERM, killing it")
+    Self.signalChild(pid, SIGKILL)
+    guard Self.waitForExit(pid, within: Self.killGracePeriod) == nil else { return .timedOut }
+
+    // Only a process stuck in the kernel outlives SIGKILL this long. Reap it
+    // whenever it exits, without holding up later alerts.
+    log("[llimitd] \(name) has not exited after SIGKILL; reaping it in the background")
+    DispatchQueue.global().async {
       var status: Int32 = 0
       while waitpid(pid, &status, 0) == -1, errno == EINTR {}
     }
     return .timedOut
+  }
+
+  /// Signals the child's process group, which also reaches whatever it
+  /// started, and the child itself, in case it joined another group
+  /// (`setsid` keeps the group ID equal to its pid, `setpgid` into an
+  /// existing group does not). It has not been reaped, so neither ID can
+  /// have been reused.
+  private static func signalChild(_ pid: pid_t, _ signal: Int32) {
+    kill(-pid, signal)
+    kill(pid, signal)
   }
 
   private func outcome(of status: Int32, name: String) -> Outcome {

@@ -186,7 +186,10 @@ public enum QuotaEvents {
   ) -> QuotaEventDetection {
     var next = state
     let failingIDs = Set(current.failures.map(\.accountID))
-    next.keepAccounts(Set(current.providers.map(\.accountID)).union(failingIDs))
+    // Like metrics below: an account missing from one snapshot keeps its
+    // alerts; absent from both (removed or disabled), it is forgotten.
+    let previousAccountIDs = (previous?.providers.map(\.accountID) ?? []) + (previous?.failures.map(\.accountID) ?? [])
+    next.keepAccounts(Set(current.providers.map(\.accountID)).union(failingIDs).union(previousAccountIDs))
 
     var events = detectFailures(in: current, failingIDs: failingIDs, accountNames: accountNames, config: config, state: &next)
 
@@ -259,7 +262,11 @@ public enum QuotaEvents {
     var events: [QuotaEvent] = []
 
     for failure in current.failures where config.failureKinds.contains(failure.kind) {
-      guard !state.failureLatches.contains(where: { $0.accountID == failure.accountID }) else { continue }
+      if let index = state.failureLatches.firstIndex(where: { $0.accountID == failure.accountID }) {
+        // Still down: keep the latest reason, so `recovered` names what cleared.
+        state.failureLatches[index].kind = failure.kind
+        continue
+      }
 
       state.failureLatches.append(.init(accountID: failure.accountID, kind: failure.kind))
       events.append(QuotaEvent(
@@ -297,7 +304,8 @@ public enum QuotaEvents {
   /// quota came back: the previous reading's reset time has passed by the time
   /// of this fetch and remaining rose by at least the hysteresis. Fires once
   /// per ended window, and not again while the window the reset opened is
-  /// still running, even if a provider glitch makes it look like it ended.
+  /// still running (when the provider reports when it ends), even if a
+  /// provider glitch makes it look like it ended.
   private static func detectReset(
     _ reading: Reading,
     previous: UsageMetric?,

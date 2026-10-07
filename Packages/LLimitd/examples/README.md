@@ -48,7 +48,7 @@ Backward compatibility: keys are only ever **added**, never renamed or removed.
 - [`hooks/`](hooks/): not bar modules but `llimit daemon --on-event` hooks for alerts
   (notify-send, ntfy). See the "Alerts" section of the package README.
 
-Each directory has a `screenshot.png` captured from the module actually running
+Each bar-module directory has a `screenshot.png` captured from the module actually running
 (headless sway for waybar, Xvfb for polybar/eww) against a snapshot whose lowest
 remaining quota is 5% — hence the `critical` color.
 
