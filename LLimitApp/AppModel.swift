@@ -1320,14 +1320,24 @@ final class AppModel: ObservableObject {
       set: { newValue in
         self.alertSettings[keyPath: keyPath] = newValue
         // A critical at/above warning would swallow every warning alert —
-        // keep the bands strictly ordered regardless of stepper order.
+        // keep the bands strictly ordered regardless of stepper order. If the
+        // counterpart is pinned at its range bound it can't move — push the
+        // edited value instead so the bands can never end up equal.
         if self.alertSettings.criticalPercent >= self.alertSettings.warningPercent {
           if keyPath == \QuotaAlertSettings.criticalPercent {
-            self.alertSettings.warningPercent = min(
-              QuotaAlertSettings.warningRange.upperBound, newValue + 1)
+            let bumped = min(QuotaAlertSettings.warningRange.upperBound, newValue + 1)
+            self.alertSettings.warningPercent = bumped
+            if bumped <= newValue {
+              self.alertSettings.criticalPercent = max(
+                QuotaAlertSettings.criticalRange.lowerBound, bumped - 1)
+            }
           } else {
-            self.alertSettings.criticalPercent = max(
-              QuotaAlertSettings.criticalRange.lowerBound, newValue - 1)
+            let lowered = max(QuotaAlertSettings.criticalRange.lowerBound, newValue - 1)
+            self.alertSettings.criticalPercent = lowered
+            if lowered >= newValue {
+              self.alertSettings.warningPercent = min(
+                QuotaAlertSettings.warningRange.upperBound, lowered + 1)
+            }
           }
         }
         self.saveConfiguration()
