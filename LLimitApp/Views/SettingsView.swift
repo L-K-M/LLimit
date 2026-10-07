@@ -210,7 +210,8 @@ struct SettingsView: View {
             }
           }
           .buttonStyle(.borderedProminent)
-          .disabled(model.isRefreshing || model.providerAccounts.contains { model.codexAccountIsBusy($0.id) })
+          .disabled(!model.refreshAvailability.allowsRefresh)
+          .help(model.refreshAvailability.help)
         }
 
         if model.providerAccounts.isEmpty {
@@ -1059,7 +1060,10 @@ struct SettingsView: View {
                 }
               }
               .buttonStyle(.borderedProminent)
-              .disabled(model.isRefreshing || model.codexAccountIsBusy(accountID))
+              // A refresh would skip this account until its own sign-in ends.
+              .disabled(!model.refreshAvailability.allowsRefresh || model.codexAccountIsBusy(accountID))
+              .help(model.codexAccountIsBusy(accountID)
+                ? "Waiting for this account’s OpenAI sign-in" : model.refreshAvailability.help)
 
               Button("Remove Account", role: .destructive) {
                 model.removeProviderAccount(accountID: accountID)
