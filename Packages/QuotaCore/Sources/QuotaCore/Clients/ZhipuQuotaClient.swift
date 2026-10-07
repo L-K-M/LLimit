@@ -35,16 +35,17 @@ public struct ZhipuQuotaClient: QuotaProviderClient {
 
     let (data, response) = try await httpClient.data(for: request)
     guard (200..<300).contains(response.statusCode) else {
-      let kind: QuotaErrorKind = response.statusCode == 401 || response.statusCode == 403 ? .auth : .api
-      throw ProviderClientError(kind: kind, message: "\(provider.displayName) usage API failed (HTTP \(response.statusCode)). Try again later.", statusCode: response.statusCode)
+      let kind = errorKind(forStatusCode: response.statusCode)
+      let retryAfter = kind == .rateLimit ? parseRetryAfter(response.value(forHTTPHeaderField: "Retry-After"), now: now) : nil
+      throw ProviderClientError(kind: kind, message: "\(provider.displayName) usage API failed (HTTP \(response.statusCode)). Try again later.",
+                                statusCode: response.statusCode, retryAfter: retryAfter)
     }
 
     let payload = try parseJSONObject(from: data)
-    guard
-      (payload["success"] as? Bool) == true,
-      let responseCode = parseNumeric(payload["code"]),
-      responseCode == 200
-    else {
+    // Explicit success/failure wins; code-only deployments remain supported.
+    let successFlag = payload["success"] as? Bool
+    let codeOK = parseNumeric(payload["code"]).map { $0 == Double(HTTPStatusCode.ok) }
+    guard successFlag ?? codeOK ?? false else {
       throw ProviderClientError(kind: .api, message: "\(provider.displayName) rejected the usage request. Check the API key or try again later.")
     }
 
@@ -60,13 +61,16 @@ public struct ZhipuQuotaClient: QuotaProviderClient {
     var metrics: [UsageMetric] = []
     var maxUsagePercent = 0
 
-    if let tokenLimit = limits.first(where: { ($0["type"] as? String) == "TOKENS_LIMIT" }) {
+    for tokenLimit in limits where (tokenLimit["type"] as? String) == "TOKENS_LIMIT" {
+      let window = try TokenWindow(entry: tokenLimit)
       guard
         let percentage = parseNumeric(tokenLimit["percentage"]),
         let remaining = percentRemaining(fromUsedPercent: percentage)
       else {
         throw ProviderClientError(kind: .decoding, message: "\(provider.displayName) token limit has an invalid percentage")
       }
+      // Validate duplicates too, then retain the first reading for each id.
+      guard !metrics.contains(where: { $0.id == window.metricID }) else { continue }
       maxUsagePercent = max(maxUsagePercent, 100 - remaining)
 
       let used = firstNumeric(
@@ -96,8 +100,8 @@ public struct ZhipuQuotaClient: QuotaProviderClient {
 
       metrics.append(
         UsageMetric(
-          id: "tokens",
-          label: provider == .zhipu ? "5-hour token limit" : "Token limit",
+          id: window.metricID,
+          label: window.label(for: provider),
           remainingPercent: remaining,
           usedDisplay: usedDisplay,
           totalDisplay: totalDisplay,
@@ -161,6 +165,71 @@ public struct ZhipuQuotaClient: QuotaProviderClient {
       warning: maxUsagePercent >= 80 ? "High usage" : nil,
       fetchedAt: now
     )
+  }
+
+  /// Observed GLM Coding Plan pairs: (hours, 5) and (weeks, 1). Unknown
+  /// codes get neutral identities; the legacy session keeps its `tokens` id.
+  private enum TokenWindow {
+    private enum ReportedUnit: Int {
+      case hours = 3
+      case weeks = 6
+    }
+
+    case unannotated
+    case fiveHour
+    case weekly
+    case unrecognized(unit: Int, number: Int?)
+
+    init(entry: [String: Any]) throws {
+      guard let rawUnit = entry["unit"], !(rawUnit is NSNull) else {
+        self = .unannotated
+        return
+      }
+      guard let unit = try Self.descriptorInteger(rawUnit) else { throw Self.invalidDescriptor }
+      let number = try Self.descriptorInteger(entry["number"])
+      switch (unit, number) {
+      case (ReportedUnit.hours.rawValue, 5?): self = .fiveHour
+      case (ReportedUnit.weeks.rawValue, 1?): self = .weekly
+      default: self = .unrecognized(unit: unit, number: number)
+      }
+    }
+
+    // Malformed descriptors cannot share a placeholder id or rounded count:
+    // failing preserves last-good quota instead of silently dropping a cap.
+    private static func descriptorInteger(_ value: Any?) throws -> Int? {
+      guard let value, !(value is NSNull) else { return nil }
+      if let text = value as? String {
+        guard let integer = Int(text.trimmingCharacters(in: .whitespacesAndNewlines)) else { throw invalidDescriptor }
+        return integer
+      }
+      guard let number = value as? NSNumber, let numeric = parseNumeric(number) else { throw invalidDescriptor }
+      if let integer = Int(number.stringValue) { return integer }
+      guard let integer = roundedInt(numeric), Double(integer) == numeric else { throw invalidDescriptor }
+      return integer
+    }
+
+    private static var invalidDescriptor: ProviderClientError {
+      ProviderClientError(kind: .decoding, message: "Token window has an invalid unit or number. Try again later.")
+    }
+
+    var metricID: String {
+      switch self {
+      case .unannotated, .fiveHour: return "tokens"
+      case .weekly: return "tokens-weekly"
+      case let .unrecognized(unit, number):
+        return "tokens-u\(unit)" + (number.map { "-n\($0)" } ?? "")
+      }
+    }
+
+    func label(for provider: QuotaProvider) -> String {
+      switch self {
+      case .unannotated: return provider == .zhipu ? "5-hour token limit" : "Token limit"
+      case .fiveHour: return "5-hour token limit"
+      case .weekly: return "Weekly token limit"
+      case let .unrecognized(unit, number):
+        return "Token limit (unit \(unit)" + (number.map { ", number \($0)" } ?? "") + ")"
+      }
+    }
   }
 
   /// Where the MCP quota's reset date came from. The menu dropdown prints the

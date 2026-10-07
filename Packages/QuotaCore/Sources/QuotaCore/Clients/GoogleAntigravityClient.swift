@@ -45,7 +45,7 @@ public struct GoogleAntigravityClient: QuotaProviderClient {
     }
 
     var metrics: [UsageMetric] = []
-    var maxUsage = 0
+    var maxUsagePercent: Int?
 
     for spec in modelSpecs {
       var modelInfo = modelsObject[spec.key] as? [String: Any]
@@ -56,10 +56,12 @@ public struct GoogleAntigravityClient: QuotaProviderClient {
       guard let modelInfo else { continue }
 
       let quotaInfo = modelInfo["quotaInfo"] as? [String: Any]
-      let remainingFraction = parseNumeric(quotaInfo?["remainingFraction"]) ?? 0
-      guard let remainingPercent = roundedPercent(remainingFraction * 100) else { continue }
-      let usagePercent = 100 - remainingPercent
-      maxUsage = max(maxUsage, usagePercent)
+      // Missing or out-of-range fractions are unknown, not exhausted or full.
+      let remainingPercent = parseNumeric(quotaInfo?["remainingFraction"])
+        .flatMap { (0.0...1.0).contains($0) ? roundedPercent($0 * 100) : nil }
+      if let remainingPercent {
+        maxUsagePercent = max(maxUsagePercent ?? 0, 100 - remainingPercent)
+      }
 
       let resetDate = parseISO8601(quotaInfo?["resetTime"] as? String)
 
@@ -84,8 +86,8 @@ public struct GoogleAntigravityClient: QuotaProviderClient {
       title: configuration.displayName,
       subtitle: email,
       metrics: metrics,
-      maxUsagePercent: maxUsage,
-      warning: maxUsage >= 80 ? "High usage" : nil,
+      maxUsagePercent: maxUsagePercent,
+      warning: (maxUsagePercent ?? 0) >= 80 ? "High usage" : nil,
       fetchedAt: now
     )
   }
