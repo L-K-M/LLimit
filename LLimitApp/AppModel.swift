@@ -1167,15 +1167,32 @@ final class AppModel: ObservableObject {
     status(for: accountID)?.available ?? false
   }
 
-  func accountDisplayNameBinding(for accountID: String) -> Binding<String> {
-    Binding(
-      get: { self.account(withID: accountID)?.displayName ?? "" },
-      set: { newValue in
-        self.updateAccount(accountID: accountID) { account in
-          account.displayName = newValue
-        }
+  /// Saves one committed Settings text field. Settings keeps keystrokes in a draft and
+  /// commits once (Return, focus loss, navigation, window close or quit), so a key
+  /// replacement and its Venice history purge run only when the value really changed.
+  func commitAccountEdit(_ draft: String, to field: EditableAccountField, accountID: String) {
+    guard let savedAccount = account(withID: accountID),
+          let value = savedAccount.committedText(draft, for: field) else { return }
+
+    switch field {
+    case .displayName:
+      updateAccount(accountID: accountID) { account in
+        account.displayName = value
       }
-    )
+    case .credential(let fieldKey):
+      guard !codexAccountIsManaged(accountID), !codexAccountIsBusy(accountID) else { return }
+      // Settings hides a managed Claude account's token fields. A draft committed
+      // now was typed before a connection finished and must not undo it.
+      guard ClaudeCodeProfile.profile(from: savedAccount.credentials) == nil else { return }
+      claudeAccountMessages[accountID] = nil
+      claudeCredentialFailures.remove(accountID)
+      updateAccount(accountID: accountID) { account in
+        if account.provider == .anthropic && fieldKey == CredentialField.anthropicAccessToken {
+          account.credentials = ClaudeCodeProfile.clearManagedMetadata(from: account.credentials)
+        }
+        account.credentials[fieldKey] = value
+      }
+    }
   }
 
   func accountEnabledBinding(for accountID: String) -> Binding<Bool> {
@@ -1184,23 +1201,6 @@ final class AppModel: ObservableObject {
       set: { newValue in
         self.updateAccount(accountID: accountID) { account in
           account.isEnabled = newValue
-        }
-      }
-    )
-  }
-
-  func credentialBinding(for accountID: String, fieldKey: String) -> Binding<String> {
-    Binding(
-      get: { self.account(withID: accountID)?.credentials[fieldKey] ?? "" },
-      set: { newValue in
-        guard !self.codexAccountIsManaged(accountID), !self.codexAccountIsBusy(accountID) else { return }
-        self.claudeAccountMessages[accountID] = nil
-        self.claudeCredentialFailures.remove(accountID)
-        self.updateAccount(accountID: accountID) { account in
-          if account.provider == .anthropic && fieldKey == CredentialField.anthropicAccessToken {
-            account.credentials = ClaudeCodeProfile.clearManagedMetadata(from: account.credentials)
-          }
-          account.credentials[fieldKey] = newValue
         }
       }
     )
@@ -1621,7 +1621,8 @@ final class AppModel: ObservableObject {
     snapshot = cleared
     reloadRecentHistory()
     if syncSnapshotToWidgetStore(cleared) { reloadWidgetTimelines() }
-    purgeHistory(for: account)
+    // The local archive is already cleared above; only the widget's copy remains.
+    purgeWidgetHistory(accountIDs: [account.id])
   }
 
   private func updateProviderStyle(
@@ -1742,7 +1743,10 @@ final class AppModel: ObservableObject {
       print("[LLimit] Local history purge failed: \(error.localizedDescription)")
     }
     reloadRecentHistory()
+    purgeWidgetHistory(accountIDs: accountIDs)
+  }
 
+  private func purgeWidgetHistory(accountIDs: Set<String>) {
     do {
       guard let widgetHistoryStore = appGroupHistoryStore() else {
         print("[LLimit] Widget history purge failed: no App Group history store available")
@@ -2017,9 +2021,9 @@ final class AppModel: ObservableObject {
     return false
   }
 
-  /// Coalesces widget reloads. `saveConfiguration()` runs on every keystroke in Settings
-  /// (each edit to a name/credential field), and WidgetKit budgets `reloadAllTimelines()`
-  /// aggressively — hammering it during typing gets later, meaningful reloads dropped and
+  /// Coalesces widget reloads. `saveConfiguration()` runs on every Settings change
+  /// (including each step of a color-well drag), and WidgetKit budgets `reloadAllTimelines()`
+  /// aggressively — hammering it gets later, meaningful reloads dropped and
   /// leaves the widgets stuck on stale data. Debouncing means a burst of edits triggers a
   /// single reload once the user pauses.
   private func reloadWidgetTimelines() {
