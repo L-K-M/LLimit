@@ -75,6 +75,69 @@ final class ZhipuQuotaClientTests: XCTestCase {
     )
   }
 
+  func testWeeklyTokenCapsHaveStableIDsAndTakeTheSecondRing() async throws {
+    let session = #"{"type":"TOKENS_LIMIT","unit":3,"number":5,"percentage":40,"nextResetTime":1700010000000}"#
+    let weekly = #"{"type":"TOKENS_LIMIT","unit":6,"number":1,"percentage":85,"nextResetTime":1700300000000}"#
+    for provider in [QuotaProvider.zai, .zhipu] {
+      for entries in [[session, weekly], [weekly, session]] {
+        let usage = try await fetch(tokenPayload(entries), provider: provider)
+        XCTAssertEqual(Set(usage.metrics.map(\.id)), ["tokens", "tokens-weekly", "mcp"])
+        XCTAssertEqual(defaultRingMetrics(for: usage).map(\.id), ["tokens", "tokens-weekly"])
+        let metric = try XCTUnwrap(usage.metrics.first { $0.id == "tokens-weekly" })
+        XCTAssertEqual(metric.label, "Weekly token limit")
+        XCTAssertEqual(metric.remainingPercent, 15)
+        XCTAssertEqual(metric.resetAt, Date(timeIntervalSince1970: 1_700_300_000))
+        XCTAssertEqual(QuotaWindowKind.classify(metricID: metric.id, label: metric.label), .weekly)
+        XCTAssertEqual(usage.maxUsagePercent, 85)
+        XCTAssertEqual(usage.warning, "High usage")
+      }
+    }
+  }
+
+  func testUnknownCodesRemainNeutralAndMalformedKnownWindowsFail() async throws {
+    for (unit, id) in [("5", "tokens-u5-n1"), (#""HOUR""#, "tokens-uunknown-n1")] {
+      let usage = try await fetch(tokenPayload([#"{"type":"TOKENS_LIMIT","unit":\#(unit),"number":1,"percentage":90}"#]))
+      let metric = try XCTUnwrap(usage.metrics.first)
+      XCTAssertEqual(metric.id, id)
+      XCTAssertEqual(QuotaWindowKind.classify(metricID: metric.id, label: metric.label), .other)
+    }
+    let valid = #"{"type":"TOKENS_LIMIT","unit":3,"number":5,"percentage":40}"#
+    let malformed = #"{"type":"TOKENS_LIMIT","unit":6,"number":1,"percentage":"n/a"}"#
+    let duplicateMalformed = #"{"type":"TOKENS_LIMIT","unit":3,"number":5,"percentage":"n/a"}"#
+    for entries in [[valid, malformed], [malformed, valid], [valid, duplicateMalformed]] {
+      do {
+        _ = try await fetch(tokenPayload(entries))
+        XCTFail("Malformed known windows must not disappear")
+      } catch let error as ProviderClientError { XCTAssertEqual(error.kind, .decoding) }
+    }
+  }
+
+  func testSuccessMarkersAreAuthoritativeAnd429IsRateLimit() async throws {
+    let noCode = payload(planReset: nil).replacingOccurrences(of: "\"code\": 200,", with: "")
+    let noCodeUsage = try await fetch(noCode)
+    XCTAssertEqual(noCodeUsage.metrics.first?.remainingPercent, 60)
+    let codeOnly = payload(planReset: nil).replacingOccurrences(of: "\"success\": true,", with: "")
+    let codeOnlyUsage = try await fetch(codeOnly)
+    XCTAssertEqual(codeOnlyUsage.metrics.first?.remainingPercent, 60)
+    do {
+      _ = try await fetch(payload(planReset: nil).replacingOccurrences(of: "\"success\": true", with: "\"success\": false"))
+      XCTFail("Explicit failure must override code 200")
+    } catch let error as ProviderClientError { XCTAssertEqual(error.kind, .api) }
+
+    let client = ZhipuQuotaClient(provider: .zai, endpoint: URL(string: "https://api.z.ai/api/monitor/usage/quota/limit")!, accountLabel: "Z.ai", httpClient: MockZhipuHTTP(status: 429, body: "secret response", expectedKey: Self.apiKey))
+    do {
+      _ = try await client.fetchUsage(configuration: ProviderRuntimeConfiguration(provider: .zai, isEnabled: true, credentials: [CredentialField.zaiAPIKey: Self.apiKey]), now: now)
+      XCTFail("Expected rate limit")
+    } catch let error as ProviderClientError {
+      XCTAssertEqual(error.kind, .rateLimit)
+      XCTAssertFalse(error.message.contains("secret response"))
+    }
+  }
+
+  private func tokenPayload(_ entries: [String]) -> String {
+    #"{"success":true,"code":200,"data":{"limits":[\#(entries.joined(separator: ",")),{"type":"TIME_LIMIT","percentage":25,"currentValue":50,"usage":200}]}}"#
+  }
+
   /// Both endpoints are the ones `QuotaCoordinator.live()` registers: same path
   /// on two hosts, which is why one client serves both providers.
   private func fetch(_ body: String, provider: QuotaProvider = .zai) async throws -> ProviderUsage {
