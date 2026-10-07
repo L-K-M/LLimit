@@ -327,7 +327,8 @@ private struct ClineUsageWindow: Decodable {
     type = (try container.decodeIfPresent(String.self, forKey: .type) ?? "")
       .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
-    let percentUsed = try container.decodeIfPresent(Double.self, forKey: .percentUsed) ?? 0
+    // Missing usage is not zero usage; fail so the last good window survives.
+    let percentUsed = try container.decode(Double.self, forKey: .percentUsed)
     // Foundation differs on whether a share like `1e1000` throws or decodes as
     // infinity, so reject it here to keep one behavior on every platform. A
     // share is never legitimately unbounded.
