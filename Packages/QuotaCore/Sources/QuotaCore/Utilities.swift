@@ -166,7 +166,10 @@ func quarantineCorruptFile(at fileURL: URL) -> Bool {
     return true
   } catch {
     // Best effort: leave the bytes in place rather than deleting data we
-    // failed to preserve.
+    // failed to preserve. Surface the reason — a permission error and a
+    // stuck .corrupt destination otherwise look identical downstream.
+    reportPersistenceIssue(
+      "Could not move \(fileURL.lastPathComponent) aside: \(error.localizedDescription)")
     return false
   }
 }
