@@ -132,6 +132,8 @@ final class GoogleAntigravityClientTests: XCTestCase {
       let client = GoogleAntigravityClient(httpClient: http)
       let usage = try await client.fetchUsage(configuration: configuration(), now: now)
 
+      XCTAssertEqual(usage.metrics.count, 1,
+                     "Malformed fraction \(fraction) must still produce a metric")
       XCTAssertNil(usage.metrics[0].remainingPercent,
                    "Out-of-range fraction \(fraction) is malformed, not a percentage")
       XCTAssertEqual(usage.maxUsagePercent, 0,
