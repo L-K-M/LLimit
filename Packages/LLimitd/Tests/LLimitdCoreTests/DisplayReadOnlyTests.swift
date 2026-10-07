@@ -38,8 +38,10 @@ final class DisplayReadOnlyTests: XCTestCase {
     let errors = String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
     XCTAssertEqual(process.terminationStatus, 0)
     XCTAssertEqual(output, StatusRenderer.waybarJSON(snapshot: nil) + "\n")
-    XCTAssertTrue(errors.isEmpty, errors)
+    // Decode warnings stay on stderr; stdout remains one no-data JSON object.
+    XCTAssertEqual(errors, "llimit: could not read the snapshot\n")
     XCTAssertFalse(output.contains("fixture-private-value"))
+    XCTAssertFalse(errors.contains("fixture-private-value"))
     XCTAssertEqual(try Data(contentsOf: paths.snapshotFileURL), original)
     let after = try FileManager.default.attributesOfItem(atPath: paths.snapshotFileURL.path)
     XCTAssertEqual(after[.modificationDate] as? Date, attributes[.modificationDate] as? Date)

@@ -40,9 +40,12 @@ source branches remain untouched.
 
 ## Cross-batch seams
 
-- Storage foundations f0c8546 are merged. Display/history export explicitly use
+- Storage foundations b37a06d are merged. Display/history export explicitly use
   `.preserve`; owned daemon bootstrap/refresh and history mutations use `.recover`.
-  Corrupt/missing and FIFO process tests cover bytes, permissions and filenames.
+  Private store sidecars serialize owner recovery and archive mutations; preserve
+  reads stay lock-free. Corrupt/missing and FIFO process tests cover bytes,
+  permissions and filenames. DisplayReadOnlyTests retains its process proof and
+  explicitly expects the CLI's bounded stderr warning on malformed snapshots.
 - Provider cancellation: skip publication only for a cancelled, empty result;
   preserve completed failures. Targeted retries pass the current snapshot back
   to the coordinator.
