@@ -308,18 +308,23 @@ public final class QuotaDaemon {
       }
     }
 
+    // Append once; forecast and display reuse that decoded archive.
+    let archive: QuotaHistoryStore.Archive?
+    do {
+      archive = try historyStore.append(refreshed)
+    } catch {
+      log("[llimitd] History append failed: \(error.localizedDescription)")
+      archive = nil
+    }
+    refreshed = refreshed.applyingPaceEstimates(from: archive?.snapshots ?? [],
+      accounts: settings.accounts, now: Date(), refreshInterval: TimeInterval(settings.refreshIntervalMinutes * 60))
+
     do {
       try snapshotStore.save(refreshed)
     } catch {
       statusMessage = "Snapshot save failed: \(error.localizedDescription)"
       log("[llimitd] \(statusMessage)")
       return
-    }
-
-    do {
-      try historyStore.append(refreshed)
-    } catch {
-      log("[llimitd] History append failed: \(error.localizedDescription)")
     }
 
     snapshot = refreshed

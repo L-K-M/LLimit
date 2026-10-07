@@ -247,7 +247,7 @@ final class QuotaDaemonTests: XCTestCase {
   }
 
   func testRefreshKeepsStaleUsageWhenFetchFails() async throws {
-    let date = Date(timeIntervalSince1970: 1_700_000_000)
+    let date = Date(timeIntervalSince1970: Date().timeIntervalSince1970.rounded(.down))
 
     let succeeding = EchoingClient(provider: .zhipu, remaining: 64, at: date)
     let daemon = makeDaemon(coordinator: QuotaCoordinator(clients: [succeeding]))
@@ -268,11 +268,17 @@ final class QuotaDaemonTests: XCTestCase {
     XCTAssertEqual(snapshot.providers.first?.metrics.first?.remainingPercent, 64)
     XCTAssertEqual(snapshot.failures.count, 1)
     XCTAssertEqual(snapshot.failures.first?.kind, .network)
+
+    await daemon2.refreshNow()
+    let history = try QuotaHistoryStore(fileURL: daemon2.paths.historyFileURL).load()
+    XCTAssertEqual(history.flatMap(\.providers).map(\.fetchedAt), [date])
+    XCTAssertEqual(history.flatMap(\.failures).count, 1)
   }
 
   func testVeniceDailyEstimateSurvivesRefreshAndRestart() async throws {
     let reset = Date().addingTimeInterval(3_600)
-    let client = VeniceBalanceClient(balances: [100, 75], reset: reset)
+    let firstFetch = Date().addingTimeInterval(-60)
+    let client = VeniceBalanceClient(balances: [100, 75], reset: reset, firstFetch: firstFetch)
     let daemon = makeDaemon(coordinator: QuotaCoordinator(clients: [client]))
     let key = "venice-daemon-test-key"
     let account = daemon.addAccount(provider: .venice, credentials: [CredentialField.veniceAPIKey: key])
@@ -285,7 +291,7 @@ final class QuotaDaemonTests: XCTestCase {
     XCTAssertEqual(daemon.snapshot?.providers.first?.metrics.first?.remainingPercent, 75)
 
     // A new process must recover the observed upper bound from its saved snapshot.
-    let nextClient = VeniceBalanceClient(balances: [50, 120, 60], reset: reset)
+    let nextClient = VeniceBalanceClient(balances: [50, 120, 60], reset: reset, firstFetch: firstFetch.addingTimeInterval(2))
     let restarted = makeDaemon(coordinator: QuotaCoordinator(clients: [nextClient]))
     XCTAssertEqual(restarted.snapshot?.providers.first?.accountID, account.id)
     await restarted.refreshNow()
@@ -340,27 +346,65 @@ final class QuotaDaemonTests: XCTestCase {
     XCTAssertNil(daemon.snapshot)
     XCTAssertTrue(daemon.statusMessage.contains("No enabled provider accounts"))
   }
+
+  func testRefreshDerivesPersistedPaceFromRawArchive() async throws {
+    let now = Date(timeIntervalSince1970: Date().timeIntervalSince1970.rounded(.down))
+    let reset = now.addingTimeInterval(3 * 3_600)
+    let daemon = makeDaemon(coordinator: QuotaCoordinator(clients: [ForecastFixtureClient(at: now, reset: reset)]))
+    let account = daemon.addAccount(provider: .anthropic, credentials: [CredentialField.anthropicAccessToken: "fixture-token"])
+    let history = (0..<4).map { index in
+      let date = now.addingTimeInterval(Double(index - 4) * 1_800)
+      return QuotaSnapshot(generatedAt: date, providers: [ProviderUsage(accountID: account.id, provider: .anthropic,
+        title: account.resolvedDisplayName, metrics: [UsageMetric(id: "five_hour", label: "5-hour limit",
+          remainingPercent: 100 - index * 15, resetAt: reset)], fetchedAt: date)], failures: [])
+    }
+    let store = QuotaHistoryStore(fileURL: daemon.paths.historyFileURL)
+    try store.save(history)
+    await daemon.refreshNow()
+    let pace = try XCTUnwrap(daemon.snapshot?.providers.first?.metrics.first?.paceEstimate)
+    XCTAssertEqual(pace.trend, .runsOut)
+    XCTAssertEqual(pace.burnRatePerHour, 30, accuracy: 0.001)
+    let persisted = try SnapshotStore(fileURL: daemon.paths.snapshotFileURL).load()
+    XCTAssertEqual(persisted?.providers.first?.metrics.first?.paceEstimate?.trend, .runsOut)
+    let archived = try store.load().flatMap(\.providers)
+    XCTAssertEqual(archived.count, 5)
+    XCTAssertTrue(archived.flatMap(\.metrics).allSatisfy { $0.paceEstimate == nil })
+  }
+}
+
+private struct ForecastFixtureClient: QuotaProviderClient {
+  let provider: QuotaProvider = .anthropic
+  let at: Date
+  let reset: Date
+  func fetchUsage(configuration: ProviderRuntimeConfiguration, now: Date) async throws -> ProviderUsage {
+    ProviderUsage(accountID: configuration.accountID, provider: provider, title: configuration.displayName,
+      metrics: [UsageMetric(id: "five_hour", label: "5-hour limit", remainingPercent: 40, resetAt: reset)], fetchedAt: at)
+  }
 }
 
 private actor VeniceBalanceClient: QuotaProviderClient {
   let provider: QuotaProvider = .venice
   private var balances: [Double]
   private let reset: Date
+  private var fetchedAt: Date
 
-  init(balances: [Double], reset: Date) {
+  init(balances: [Double], reset: Date, firstFetch: Date = Date()) {
     self.balances = balances
     self.reset = reset
+    self.fetchedAt = firstFetch
   }
 
   func fetchUsage(configuration: ProviderRuntimeConfiguration, now: Date) async throws -> ProviderUsage {
     let balance = balances.removeFirst()
+    // Distinct source seconds survive the archive's ISO-8601 precision.
+    defer { fetchedAt = fetchedAt.addingTimeInterval(1) }
     return ProviderUsage(
       accountID: configuration.accountID,
       provider: provider,
       title: configuration.displayName,
       metrics: [UsageMetric(id: "daily-diem", label: "Daily DIEM remaining", remainingAmount: balance,
                             usedDisplay: "\(balance) DIEM", resetAt: reset)],
-      fetchedAt: now
+      fetchedAt: fetchedAt
     )
   }
 }
@@ -398,7 +442,7 @@ private final class EchoingClient: QuotaProviderClient, @unchecked Sendable {
   let date: Date
   let error: ProviderClientError?
 
-  init(provider: QuotaProvider, remaining: Int?, at date: Date = Date(timeIntervalSince1970: 1_700_000_000), error: ProviderClientError? = nil) {
+  init(provider: QuotaProvider, remaining: Int?, at date: Date = Date(), error: ProviderClientError? = nil) {
     self.provider = provider
     self.remaining = remaining
     self.date = date

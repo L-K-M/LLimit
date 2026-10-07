@@ -33,6 +33,7 @@ func printUsage() {
       llimit accounts remove <account-id>
       llimit refresh
       llimit status [--json]
+      llimit trend [--days <n>] [--account <prefix>]
       llimit daemon
       llimit paths
 
@@ -329,6 +330,34 @@ func runRefresh() async {
   print(StatusRenderer.humanReadable(snapshot: daemon.snapshot))
 }
 
+func runTrend(_ args: [String]) {
+  var days = 7
+  var accountPrefix: String?
+  var index = 0
+  while index < args.count {
+    let option = args[index]
+    guard option == "--days" || option == "--account" else { fail("unknown trend option: \(option)") }
+    index += 1
+    guard index < args.count else { fail("\(option) needs a value") }
+    if option == "--days" {
+      guard let value = Int(args[index]), value > 0 else { fail("--days needs a positive integer") }
+      days = value
+    } else {
+      let value = args[index].trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !value.isEmpty, !value.hasPrefix("--") else { fail("--account needs an id or title prefix") }
+      accountPrefix = value
+    }
+    index += 1
+  }
+
+  do {
+    let history = try QuotaHistoryStore(fileURL: LinuxPaths().historyFileURL).loadRecent(days: days)
+    print(TrendRenderer.render(history: history, days: days, accountPrefix: accountPrefix))
+  } catch {
+    fail("couldn't read history: \(error.localizedDescription)")
+  }
+}
+
 func runStatus(_ args: [String]) {
   let daemon = makeDaemon()
   if args.contains("--json") {
@@ -406,6 +435,8 @@ case "refresh":
   await runRefresh()
 case "status":
   runStatus(Array(arguments.dropFirst()))
+case "trend":
+  runTrend(Array(arguments.dropFirst()))
 case "daemon":
   await runDaemon()
 case "paths":

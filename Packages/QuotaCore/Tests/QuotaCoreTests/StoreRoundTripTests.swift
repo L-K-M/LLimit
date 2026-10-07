@@ -271,7 +271,9 @@ final class StoreRoundTripTests: XCTestCase {
 
     let dayStart = Date(timeIntervalSince1970: 1_700_000_000)
     let oldSnapshot = QuotaSnapshot(generatedAt: dayStart, providers: [], failures: [])
-    let newSnapshot = QuotaSnapshot(generatedAt: dayStart.addingTimeInterval(3 * 86_400), providers: [], failures: [])
+    let fetchedAt = dayStart.addingTimeInterval(3 * 86_400)
+    let newSnapshot = QuotaSnapshot(generatedAt: fetchedAt,
+      providers: [ProviderUsage(accountID: "a", provider: .anthropic, title: "Claude", metrics: [], fetchedAt: fetchedAt)], failures: [])
 
     try store.save([oldSnapshot])
     try store.append(newSnapshot, keepDays: 2, maxEntries: 10)

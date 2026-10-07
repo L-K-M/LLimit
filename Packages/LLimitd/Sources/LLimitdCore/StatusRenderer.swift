@@ -28,6 +28,7 @@ public enum StatusRenderer {
     lines.append("Updated \(relativeAge(snapshot.generatedAt, now: now))")
 
     for usage in snapshot.providers.sorted(by: titleOrder) {
+      let failed = snapshot.failures.contains { $0.accountID == usage.accountID && $0.provider == usage.provider }
       let metrics = usage.metrics.compactMap { metric -> String? in
         if let remaining = metric.remainingPercent {
           let qualifier = metric.isPercentageEstimated ? "≈" : ""
@@ -37,6 +38,9 @@ public enum StatusRenderer {
           }
           if let reset = metric.resetIn {
             text += " (resets in \(reset))"
+          }
+          if !failed, let pace = metric.paceEstimate, pace.trend == .runsOut, pace.isValid(at: now) {
+            text += " · \(pace.displayText(at: now))"
           }
           return text
         }
@@ -77,7 +81,7 @@ public enum StatusRenderer {
   /// One limit as a JSON row for popup consumers (the tray). Optional fields are
   /// omitted rather than emitted as null, so a consumer can use plain key lookup
   /// without distinguishing "absent" from "present but null".
-  static func metricObject(_ metric: UsageMetric) -> [String: Any] {
+  static func metricObject(_ metric: UsageMetric, now: Date = Date()) -> [String: Any] {
     var object: [String: Any] = [
       "id": metric.id,
       "label": metric.label,
@@ -98,6 +102,15 @@ public enum StatusRenderer {
     if let detail = metric.detail {
       object["detail"] = detail
     }
+    if let pace = metric.paceEstimate, pace.isValid(at: now) {
+      object["pace"] = pace.displayText(at: now)
+      object["paceTrend"] = pace.trend.rawValue
+      object["burnRatePerHour"] = pace.burnRatePerHour
+      object["projectedPercentAtReset"] = pace.projectedPercentAtReset
+      if let exhaustionAt = pace.exhaustionAt {
+        object["exhaustionAt"] = ISO8601DateFormatter().string(from: exhaustionAt)
+      }
+    }
     return object
   }
 
@@ -116,6 +129,12 @@ public enum StatusRenderer {
     var remainingPercents: [Int] = []
 
     for usage in providers {
+      let failed = snapshot.failures.contains { $0.accountID == usage.accountID && $0.provider == usage.provider }
+      let displayMetrics = usage.metrics.map { metric -> UsageMetric in
+        var copy = metric
+        if failed { copy.paceEstimate = nil }
+        return copy
+      }
       // An account's headline number is its most-consumed metric, expressed as
       // remaining percent so "100" always means "full quota".
       let remaining = usage.metrics.compactMap(\.remainingPercent).min()
@@ -131,7 +150,7 @@ public enum StatusRenderer {
         // Per-limit breakdown. The headline `remainingPercent` above is only the
         // worst metric; a popup (the tray) needs every limit as its own row.
         // Additive: bars that read only the older keys are unaffected.
-        "metrics": usage.metrics.map(metricObject)
+        "metrics": displayMetrics.map { metricObject($0, now: now) }
       ]
       if let warning = warningText(for: usage) {
         account["warning"] = warning
