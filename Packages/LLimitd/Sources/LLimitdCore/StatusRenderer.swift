@@ -59,7 +59,7 @@ public enum StatusRenderer {
 
     for status in accountStatuses(in: snapshot, now: now) {
       if let usage = status.usage {
-        let metrics = usage.metrics.compactMap { metricLine($0, now: now, includePace: !status.isFailed) }
+        let metrics = usage.metrics.compactMap { metricLine($0, now: now, status: status) }
         let suffix = metrics.isEmpty ? "" : ": " + metrics.joined(separator: " · ")
         let age = relativeAge(usage.fetchedAt, now: now)
         let note = status.isFailed ? " (last known, \(age))" : status.isStale ? " (stale, \(age))" : ""
@@ -330,7 +330,7 @@ public enum StatusRenderer {
     return String(amount)
   }
 
-  private static func metricLine(_ metric: UsageMetric, now: Date, includePace: Bool) -> String? {
+  private static func metricLine(_ metric: UsageMetric, now: Date, status: AccountStatus) -> String? {
     let label = singleLine(metric.label)
     if metric.isUnlimited { return "\(label) unlimited" }
     var text: String
@@ -343,7 +343,7 @@ public enum StatusRenderer {
     if let reset = metric.resetCountdown(at: now) {
       text += reset == "reset" ? " (reset due)" : " (resets in \(reset))"
     }
-    if includePace, let pace = metric.paceEstimate, pace.trend == .runsOut, pace.isValid(at: now) {
+    if !status.isFailed, let pace = metric.paceEstimate, pace.trend == .runsOut, pace.isValid(at: now) {
       text += " · \(pace.displayText(at: now))"
     }
     return text
