@@ -50,36 +50,38 @@ public struct QuotaCoordinator: Sendable {
 
         group.addTask {
           do {
+            try Task.checkCancellation()
             let usage = try await client.fetchUsage(configuration: configuration, now: now)
             return RefreshResult(
               accountID: configuration.accountID,
               provider: configuration.provider,
-              usage: usage,
-              failure: nil
+              outcome: .usage(usage)
             )
+          } catch is CancellationError {
+            return RefreshResult(accountID: configuration.accountID, provider: configuration.provider, outcome: .cancelled)
+          } catch let error as URLError where error.code == .cancelled {
+            return RefreshResult(accountID: configuration.accountID, provider: configuration.provider, outcome: .cancelled)
           } catch let error as ProviderClientError {
             return RefreshResult(
               accountID: configuration.accountID,
               provider: configuration.provider,
-              usage: nil,
-              failure: ProviderFailure(
+              outcome: .failure(ProviderFailure(
                 accountID: configuration.accountID,
                 provider: configuration.provider,
                 kind: error.kind,
                 message: failureMessages.redacted(error.message)
-              )
+              ))
             )
           } catch {
             return RefreshResult(
               accountID: configuration.accountID,
               provider: configuration.provider,
-              usage: nil,
-              failure: ProviderFailure(
+              outcome: .failure(ProviderFailure(
                 accountID: configuration.accountID,
                 provider: configuration.provider,
                 kind: .unknown,
                 message: "Could not read usage. Try again later."
-              )
+              ))
             )
           }
         }
@@ -103,11 +105,26 @@ public struct QuotaCoordinator: Sendable {
       (previousSnapshot?.providers ?? []).filter { $0.provider == .venice }.map { ($0.accountID, $0) },
       uniquingKeysWith: { $0.fetchedAt >= $1.fetchedAt ? $0 : $1 }
     )
-    let usages = ordered.compactMap(\.usage).map {
+    var usages = ordered.compactMap(\.usage).map {
       VeniceQuotaEstimate.applying(to: $0, previous: previousByID[$0.accountID])
     }
-    let failures = ordered.compactMap(\.failure)
-    return QuotaSnapshot(generatedAt: now, providers: usages, failures: failures)
+    var failures = ordered.compactMap(\.failure)
+
+    // Cancellation has no failure to drive mergingStaleUsage. Carry only the
+    // cancelled targets, with their original timestamps and existing errors.
+    for result in ordered where result.isCancelled {
+      if let previous = previousSnapshot?.providers.filter({
+        $0.accountID == result.accountID && $0.provider == result.provider
+      }).max(by: { $0.fetchedAt < $1.fetchedAt }) {
+        usages.append(previous)
+      }
+      failures += (previousSnapshot?.failures ?? []).filter {
+        $0.accountID == result.accountID && $0.provider == result.provider
+      }
+    }
+
+    let generatedAt = ordered.allSatisfy(\.isCancelled) ? previousSnapshot?.generatedAt ?? now : now
+    return QuotaSnapshot(generatedAt: generatedAt, providers: usages, failures: failures)
   }
 }
 
@@ -139,8 +156,28 @@ private struct FailureMessagePolicy: Sendable {
 }
 
 private struct RefreshResult: Sendable {
-  var accountID: String
-  var provider: QuotaProvider
-  var usage: ProviderUsage?
-  var failure: ProviderFailure?
+  enum Outcome: Sendable {
+    case usage(ProviderUsage)
+    case failure(ProviderFailure)
+    case cancelled
+  }
+
+  let accountID: String
+  let provider: QuotaProvider
+  let outcome: Outcome
+
+  var usage: ProviderUsage? {
+    guard case let .usage(usage) = outcome else { return nil }
+    return usage
+  }
+
+  var failure: ProviderFailure? {
+    guard case let .failure(failure) = outcome else { return nil }
+    return failure
+  }
+
+  var isCancelled: Bool {
+    if case .cancelled = outcome { return true }
+    return false
+  }
 }
