@@ -88,7 +88,10 @@ public struct KimiQuotaClient: QuotaProviderClient {
         let detail = (item["detail"] as? [String: Any]) ?? item
         let window = (item["window"] as? [String: Any]) ?? [:]
         let descriptor = windowDescriptor(item: item, detail: detail, window: window, index: index)
-        if let metric = metric(from: detail, id: descriptor.id, label: descriptor.label, now: now) {
+        if let metric = metric(
+          from: detail, id: descriptor.id, label: descriptor.label,
+          windowSeconds: descriptor.windowSeconds, now: now
+        ) {
           metrics.append(metric)
         }
       }
@@ -112,7 +115,10 @@ public struct KimiQuotaClient: QuotaProviderClient {
     )
   }
 
-  private func metric(from data: [String: Any], id: String, label: String, now: Date) -> UsageMetric? {
+  private func metric(
+    from data: [String: Any], id: String, label: String,
+    windowSeconds: Int? = nil, now: Date
+  ) -> UsageMetric? {
     let limit = parseNumeric(data["limit"])
     var used = parseNumeric(data["used"])
     if used == nil, let limit, let remaining = parseNumeric(data["remaining"]) {
@@ -135,7 +141,8 @@ public struct KimiQuotaClient: QuotaProviderClient {
       usedDisplay: formatIntLike(used),
       totalDisplay: formatIntLike(limit),
       resetAt: resetAt,
-      resetIn: resetAt.map { formatResetCountdown(to: $0, now: now) }
+      resetIn: resetAt.map { formatResetCountdown(to: $0, now: now) },
+      windowSeconds: windowSeconds
     )
   }
 
@@ -149,7 +156,7 @@ public struct KimiQuotaClient: QuotaProviderClient {
     detail: [String: Any],
     window: [String: Any],
     index: Int
-  ) -> (id: String, label: String) {
+  ) -> (id: String, label: String, windowSeconds: Int?) {
     var override: String?
     for key in ["name", "title", "scope"] {
       if let label = nonEmptyString(item[key]) ?? nonEmptyString(detail[key]) {
@@ -167,35 +174,37 @@ public struct KimiQuotaClient: QuotaProviderClient {
       let duration, duration > 0, let rawCount = roundedInt(duration),
       let unit = windowUnit(count: rawCount, timeUnit: timeUnit)
     else {
-      return (id: "limit-\(index)", label: override ?? "Limit #\(index + 1)")
+      return (id: "limit-\(index)", label: override ?? "Limit #\(index + 1)", windowSeconds: nil)
     }
 
     let cadence = "\(unit.count)-\(unit.name)"
-    return (id: "window-\(cadence)", label: override ?? "\(cadence) limit")
+    // Scale the reported count, not its folded display unit (300 min = 5 h).
+    let windowSeconds = unit.secondsPerUnit.flatMap { reportedWindowSeconds(count: rawCount, unitSeconds: $0) }
+    return (id: "window-\(cadence)", label: override ?? "\(cadence) limit", windowSeconds: windowSeconds)
   }
 
   /// Normalizes a protobuf `TIME_UNIT_*` window to a classifier-friendly unit
   /// word, folding whole-hour minute counts (300 minutes → 5 hours) the way
   /// kimi-cli renders them. Unknown units return nil rather than fabricating
   /// a cadence the payload never stated.
-  private func windowUnit(count: Int, timeUnit: String) -> (count: Int, name: String)? {
+  private func windowUnit(count: Int, timeUnit: String) -> (count: Int, name: String, secondsPerUnit: Int?)? {
     if timeUnit.contains("MINUTE") {
       if count >= 60, count % 60 == 0 {
-        return (count / 60, "hour")
+        return (count / 60, "hour", 60)
       }
-      return (count, "minute")
+      return (count, "minute", 60)
     }
     if timeUnit.contains("HOUR") {
-      return (count, "hour")
+      return (count, "hour", 3_600)
     }
     if timeUnit.contains("DAY") {
-      return (count, "day")
+      return (count, "day", 86_400)
     }
     if timeUnit.contains("WEEK") {
-      return (count, "week")
+      return (count, "week", 604_800)
     }
     if timeUnit.contains("MONTH") {
-      return (count, "month")
+      return (count, "month", nil)
     }
     return nil
   }

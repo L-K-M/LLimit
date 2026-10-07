@@ -41,6 +41,14 @@ final class CodexRateLimitsTests: XCTestCase {
     XCTAssertNil(usage.warning)
   }
 
+  func testReportedWindowDurationsRemainAvailableForPace() throws {
+    let usage = try decode(#"{"rateLimits":{"primary":{"usedPercent":25,"windowDurationMins":300,"resetsAt":1700000600},"secondary":{"usedPercent":80,"resetsAt":1700007200}}}"#)
+    XCTAssertEqual(usage.metrics.map(\.windowSeconds), [18_000, nil])
+
+    let buckets = try decode(#"{"rateLimitsByLimitId":{"codex":{"primary":{"usedPercent":10,"windowDurationMins":10080}},"spark":{"primary":{"usedPercent":40,"windowDurationMins":90}}}}"#)
+    XCTAssertEqual(buckets.metrics.map(\.windowSeconds), [604_800, 5_400])
+  }
+
   func testMissingWindowsRemainExplicitlyUnavailable() throws {
     for input in [#"{"rateLimits":{"primary":null,"secondary":null}}"#, #"{"rateLimits":{"primary":{"usedPercent":100}},"rateLimitsByLimitId":{}}"#] {
       let usage = try decode(input)
