@@ -163,9 +163,9 @@ func quarantineCorruptFile(_ fileURL: URL, keep: Int = 5) {
     includingPropertiesForKeys: [.contentModificationDateKey])) ?? [])
     .filter { $0.lastPathComponent.hasPrefix("\(base).corrupt-") }
     .sorted {
-      let lhs = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-      let rhs = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-      return (lhs ?? .distantPast) > (rhs ?? .distantPast)
+      let lhsDate = ((try? $0.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate) ?? .distantPast
+      let rhsDate = ((try? $1.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate) ?? .distantPast
+      return lhsDate == rhsDate ? $0.lastPathComponent > $1.lastPathComponent : lhsDate > rhsDate
     }
   for stale in siblings.dropFirst(keep) {
     try? FileManager.default.removeItem(at: stale)
