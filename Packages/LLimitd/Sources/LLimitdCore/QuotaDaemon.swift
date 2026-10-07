@@ -420,17 +420,6 @@ public final class QuotaDaemon {
       }
     }
 
-    // Append once; forecast and display reuse that decoded archive.
-    let archive: QuotaHistoryStore.Archive?
-    do {
-      archive = try historyStore.append(refreshed)
-    } catch {
-      log("[llimitd] History append failed: \(error.localizedDescription)")
-      archive = nil
-    }
-    refreshed = refreshed.applyingPaceEstimates(from: archive?.snapshots ?? [],
-      accounts: settings.accounts, now: Date(), refreshInterval: TimeInterval(settings.refreshIntervalMinutes * 60))
-
     do {
       // The lock covers validation and publication, never the network fetch.
       // Otherwise an edit between validation and save could resurrect old data.
@@ -438,14 +427,21 @@ public final class QuotaDaemon {
         let latest = try loadLatestSettings()
         refreshed = validatedResults(refreshed, configurations: fetchedConfigurations, settings: latest)
         refreshed.refreshIntervalMinutes = latest.refreshIntervalMinutes
+
+        // Archive only finally validated observations, then reuse that evidence
+        // for pace. An earlier append could revive a login replaced during recovery.
+        let archive: QuotaHistoryStore.Archive?
+        do {
+          archive = try historyStore.append(refreshed)
+        } catch {
+          log("[llimitd] History append failed: \(error.localizedDescription)")
+          archive = nil
+        }
+        refreshed = refreshed.applyingPaceEstimates(from: archive?.snapshots ?? [],
+          accounts: latest.accounts, now: Date(), refreshInterval: TimeInterval(latest.refreshIntervalMinutes * 60))
         try snapshotStore.save(refreshed)
         settings = latest
         settingsBase = latest
-        do {
-          try historyStore.append(refreshed)
-        } catch {
-          log("[llimitd] History append failed: \(error.localizedDescription)")
-        }
       }
     } catch {
       statusMessage = "Snapshot save failed: \(error.localizedDescription)"

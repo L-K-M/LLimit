@@ -92,7 +92,7 @@ final class CLIStatusTests: XCTestCase {
     try FileManager.default.setAttributes([.modificationDate: modificationDate], ofItemAtPath: paths.snapshotFileURL.path)
     let before = try Data(contentsOf: paths.snapshotFileURL)
     for args in [["status"], ["status", "--json"], ["status", "--compact"], ["status", "--format", "{name}"],
-                 ["check"], ["check", "anthropic"], ["pick"], ["resets"], ["resets", "--json"]] {
+                 ["check"], ["check", "anthropic"], ["pick"], ["resets"], ["resets", "--json"], ["trend"]] {
       let result = try runCLI(args)
       XCTAssertEqual(result.code, 0, "\(args): \(result.stderr)")
       XCTAssertEqual(result.stderr, "", "\(args)")
@@ -132,7 +132,7 @@ final class CLIStatusTests: XCTestCase {
     let commands: [([String], Int32)] = [
       (["status"], 0), (["status", "--json"], 0), (["status", "--compact"], 0),
       (["status", "--format", "{name}"], 0), (["check"], 3), (["pick"], 3),
-      (["resets"], 0), (["resets", "--json"], 0), (["export", "--format", "csv"], 1)
+      (["resets"], 0), (["resets", "--json"], 0), (["export", "--format", "csv"], 1), (["trend"], 1)
     ]
     for (args, expectedCode) in commands {
       let result = try runCLI(args)
