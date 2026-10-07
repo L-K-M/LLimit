@@ -1,5 +1,10 @@
 import Foundation
 import CoreFoundation
+#if canImport(Darwin)
+import Darwin
+#else
+import Glibc
+#endif
 
 func clampPercent(_ value: Int) -> Int {
   max(0, min(100, value))
@@ -302,19 +307,37 @@ func startOfNextMonth(from date: Date) -> Date? {
 }
 
 /// Atomically writes `data` at `fileURL` with owner-only (`0600`)
-/// permissions. The payload is staged in a sibling temp file and chmodded
-/// before the swap, so the file never exists at its final path with wider
-/// permissions (an atomic write alone creates the visible file at umask
-/// defaults, leaving a readable window).
+/// permissions. The payload is staged in a sibling temp file created
+/// owner-only before any bytes hit disk, so the file never exists — at
+/// either path — with wider permissions (a bare atomic write creates the
+/// visible file at umask defaults, leaving a readable window).
 func writeOwnerOnlyFile(_ data: Data, to fileURL: URL) throws {
   let directory = fileURL.deletingLastPathComponent()
-  let tempURL = directory.appendingPathComponent(".\(fileURL.lastPathComponent).tmp")
-  try? FileManager.default.removeItem(at: tempURL)
+  // Unique staging name: overlapping writers can't clobber each other's
+  // temp file, and crash leftovers are cleaned up by the defer.
+  let tempURL = directory.appendingPathComponent(
+    ".\(fileURL.lastPathComponent).\(UUID().uuidString).tmp"
+  )
+  defer { try? FileManager.default.removeItem(at: tempURL) }
+  guard FileManager.default.createFile(
+    atPath: tempURL.path,
+    contents: nil,
+    attributes: [.posixPermissions: 0o600]
+  ) else {
+    throw CocoaError(.fileWriteUnknown)
+  }
+  // Non-atomic write truncates the pre-created 0600 file in place.
   try data.write(to: tempURL)
-  try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tempURL.path)
-  // FileManager.replaceItemAt is unreliable on Linux corelibs, so swap via
-  // remove + move: the destination is briefly absent rather than briefly
-  // world-readable, and a missing file regenerates on the next save.
-  try? FileManager.default.removeItem(at: fileURL)
-  try FileManager.default.moveItem(at: tempURL, to: fileURL)
+  // rename(2) atomically replaces the destination: readers always see the
+  // old or the new file, and a failed swap leaves the old file intact.
+  // (replaceItemAt is unreliable on Linux corelibs and moveItem refuses to
+  // clobber an existing destination.)
+  guard rename(tempURL.path, fileURL.path) == 0 else {
+    throw NSError(
+      domain: NSPOSIXErrorDomain,
+      code: Int(errno),
+      userInfo: [NSLocalizedDescriptionKey:
+        "rename to \(fileURL.lastPathComponent) failed: \(String(cString: strerror(errno)))"]
+    )
+  }
 }

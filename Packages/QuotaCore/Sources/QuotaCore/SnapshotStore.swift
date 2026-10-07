@@ -37,9 +37,13 @@ public final class SnapshotStore: @unchecked Sendable {
     do {
       data = try Data(contentsOf: fileURL)
     } catch {
+      // A permanently unreadable snapshot is indistinguishable from a
+      // corrupt one for callers — quarantine so the failure surfaces once
+      // and a later save can recreate the file cleanly.
       FileHandle.standardError.write(Data(
-        "LLimit: snapshot read failed; ignoring \(fileURL.lastPathComponent): \(error)\n".utf8
+        "LLimit: snapshot read failed; quarantined \(fileURL.lastPathComponent): \(error)\n".utf8
       ))
+      quarantineCorruptFile(fileURL)
       return nil
     }
     let snapshot: QuotaSnapshot

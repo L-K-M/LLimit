@@ -4,6 +4,7 @@ import XCTest
 final class StoreRoundTripTests: XCTestCase {
   func testSnapshotStoreRoundTrip() throws {
     let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: tempDir) }
     let fileURL = tempDir.appendingPathComponent("snapshot.json")
     let store = SnapshotStore(fileURL: fileURL)
 
@@ -38,7 +39,6 @@ final class StoreRoundTripTests: XCTestCase {
     let siblings = try FileManager.default.contentsOfDirectory(atPath: tempDir.path)
     XCTAssertEqual(siblings, ["snapshot.json"],
                    "No staged temp files may remain after save")
-    defer { try? FileManager.default.removeItem(at: tempDir) }
   }
 
   func testSnapshotStoreQuarantinesCorruptFile() throws {
