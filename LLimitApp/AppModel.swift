@@ -280,7 +280,7 @@ final class AppModel: ObservableObject {
     do {
       archive = try historyStore.append(refreshed)
     } catch {
-      print("[LLimit] Local history append failed: \(error.localizedDescription)")
+      print("[LLimit] Local history append failed: \(error)")
       archive = nil
     }
     if let archive {
@@ -2006,7 +2006,8 @@ final class AppModel: ObservableObject {
 
   /// Mirrors the local archive, which receives the same snapshots and purges, so
   /// a publish never decodes the widget copy and a diverged or unreadable copy is
-  /// replaced. Without a local archive (its append failed), appends directly.
+  /// replaced. Without a local archive (its append failed), appends directly and
+  /// starts the widget copy over if it is unreadable.
   @discardableResult
   private func syncHistoryToWidgetStore(_ snapshot: QuotaSnapshot, archive: QuotaHistoryStore.Archive?) -> Bool {
     for attempt in 1...2 {
@@ -2020,14 +2021,11 @@ final class AppModel: ObservableObject {
         if let archive {
           try appGroupStore.save(archive)
         } else {
-          try appGroupStore.append(snapshot)
+          try appGroupStore.append(snapshot, ifUnreadable: .replace)
         }
         return true
       } catch {
-        print("[LLimit] History sync attempt \(attempt) failed: \(error.localizedDescription)")
-        // An undecodable archive fails identically on every read; re-resolving
-        // the container cannot fix it, and a retry would decode it again.
-        if error is DecodingError { return false }
+        print("[LLimit] History sync attempt \(attempt) failed: \(error)")
         invalidateAppGroupStores()
       }
     }

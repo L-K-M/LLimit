@@ -163,6 +163,32 @@ final class QuotaHistoryStoreTests: XCTestCase {
     )
   }
 
+  func testAppendReplacesAnUnreadableFileOnlyWhenAsked() throws {
+    let (store, dir) = makeStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let url = dir.appendingPathComponent("history.json")
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let refresh = snapshot(at: now, accountIDs: ["a"])
+
+    let corrupt = Data("not json".utf8)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    try corrupt.write(to: url)
+
+    // A primary archive keeps its unreadable file for inspection or repair.
+    XCTAssertThrowsError(try store.append(refresh)) { XCTAssertTrue($0 is DecodingError) }
+    XCTAssertEqual(try Data(contentsOf: url), corrupt)
+
+    // A derived copy starts over from the refresh.
+    let archive = try store.append(refresh, ifUnreadable: .replace)
+    XCTAssertEqual(archive.snapshots, [refresh])
+    XCTAssertEqual(try store.load(), [refresh])
+
+    // Only decode failures are replaced; an unreadable path still throws.
+    try FileManager.default.removeItem(at: url)
+    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    XCTAssertThrowsError(try store.append(refresh, ifUnreadable: .replace)) { XCTAssertFalse($0 is DecodingError) }
+  }
+
   func testRecentHonorsCutoffAndCap() {
     let now = Date(timeIntervalSince1970: 1_700_000_000)
     let hours: [Double] = [5, 49, 1, 30, 47, 0]

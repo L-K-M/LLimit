@@ -12,6 +12,15 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     fileprivate let encoded: Data
   }
 
+  /// How `append` treats an existing file that cannot be decoded.
+  public enum UnreadableFile: Sendable {
+    /// Throw and leave the file untouched, as a primary archive needs.
+    case fail
+    /// Start a new archive. Only for a derived copy, such as the widget's,
+    /// which no reader can use while it is unreadable.
+    case replace
+  }
+
   private let fileURL: URL
   private let encoder: JSONEncoder
   private let decoder: JSONDecoder
@@ -85,9 +94,15 @@ public final class QuotaHistoryStore: @unchecked Sendable {
   public func append(
     _ snapshot: QuotaSnapshot,
     keepDays: Int = 45,
-    maxEntries: Int = defaultMaxEntries
+    maxEntries: Int = defaultMaxEntries,
+    ifUnreadable: UnreadableFile = .fail
   ) throws -> Archive {
-    var history = try load()
+    var history: [QuotaSnapshot]
+    do {
+      history = try load()
+    } catch is DecodingError where ifUnreadable == .replace {
+      history = []
+    }
     history.append(snapshot)
 
     let cutoffDays = max(1, keepDays)
@@ -110,12 +125,6 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     guard !accountIDs.isEmpty else { return }
 
     let history = try load()
-    let matches = history.contains { snapshot in
-      snapshot.providers.contains { accountIDs.contains($0.accountID) }
-        || snapshot.failures.contains { accountIDs.contains($0.accountID) }
-    }
-    guard matches else { return }
-
     let filtered = history.map { snapshot in
       QuotaSnapshot(
         version: snapshot.version,
@@ -124,6 +133,9 @@ public final class QuotaHistoryStore: @unchecked Sendable {
         failures: snapshot.failures.filter { !accountIDs.contains($0.accountID) }
       )
     }
+    // Comparing with the filter's own result keeps a single purge predicate.
+    guard filtered != history else { return }
+
     try save(filtered)
   }
 
