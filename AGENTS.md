@@ -336,7 +336,9 @@ Requires macOS 14+, Xcode 16+, [XcodeGen](https://github.com/yonaskolb/XcodeGen)
   `MenuBarGraph`). Reordering accounts must not change
   `stableAccountOrder`, automatic tile assignments, or color variants. Magnitude is
   geometry (arc, bar, line height); danger is the reserved status accents
-  (warning chips, low-value text). `WidgetRingColors` survives only for
+  (warning chips, low-value text). The even-pace tick on dashboard bars and
+  provider tile rings (`QuotaPace`) is neutral geometry, never an identity hue
+  or a status accent. `WidgetRingColors` survives only for
   stored-settings compatibility — nothing renders from it.
 - An account can set `ProviderStyleSettings.primaryHexColor` independently of
   its background override. `primaryLimitSlot` selects its longest bounded window
@@ -356,6 +358,9 @@ Requires macOS 14+, Xcode 16+, [XcodeGen](https://github.com/yonaskolb/XcodeGen)
   report window lengths as data; new provider metrics with a reset cadence
   should either use labels the classifier understands ("N-hour", "N-day",
   "weekly", "monthly") or get a special case next to Copilot's `premium`.
+  Where an API does report the length, also set `UsageMetric.windowSeconds`:
+  that, or a documented fixed-length id in `QuotaPace`, gives the window pace.
+  Never infer a length from a label.
 
 ```bash
 xcodegen generate

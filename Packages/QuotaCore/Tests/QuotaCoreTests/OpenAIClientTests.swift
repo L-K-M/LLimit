@@ -73,6 +73,15 @@ final class OpenAIClientTests: XCTestCase {
     XCTAssertEqual(requests[0].value(forHTTPHeaderField: "ChatGPT-Account-Id"), "workspace")
   }
 
+  func testReportedWindowLengthIsKeptForPace() async throws {
+    let usage = try await OpenAIClient(httpClient: RecordingOpenAIHTTP()).fetchUsage(configuration: config(credentials: [
+      CredentialField.openAIAccessToken: "manual-access"
+    ]), now: now)
+
+    XCTAssertEqual(usage.metrics.map(\.id), ["primary"])
+    XCTAssertEqual(usage.metrics[0].windowSeconds, 18_000)
+  }
+
   private func config(credentials: [String: String]) -> ProviderRuntimeConfiguration {
     ProviderRuntimeConfiguration(accountID: "llimit-account", provider: .openAI, displayName: "OpenAI Work", isEnabled: true, credentials: credentials)
   }

@@ -337,6 +337,16 @@ final class ClineQuotaClientTests: XCTestCase {
     }
   }
 
+  // Cline reports no window lengths; its documented window types fix them,
+  // except the monthly window, and the credit balance has no window at all.
+  func testDocumentedWindowTypesFixPaceLengthsExceptMonthly() async throws {
+    let usage = try await fetch()
+
+    XCTAssertEqual(usage.metrics.map(\.id), ["five_hour", "weekly", "monthly", "credit-balance"])
+    XCTAssertEqual(usage.metrics.map(\.windowSeconds), [nil, nil, nil, nil])
+    XCTAssertEqual(usage.metrics.map { QuotaPace.windowSeconds(for: $0, provider: .cline) }, [18_000, 604_800, nil, nil])
+  }
+
   private func fetch(balance: String? = nil, limits: String? = nil, limitsStatus: Int = 200) async throws -> ProviderUsage {
     try await ClineQuotaClient(httpClient: ClineHTTPStub(
       .response(200, profileBody), .response(200, balance ?? balanceBody), .response(limitsStatus, limits ?? limitsBody)

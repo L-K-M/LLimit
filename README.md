@@ -163,6 +163,13 @@ import or a replacement key.
   in the ring and matching chart line. You can change it without enabling the
   background styling override, or choose **Reset to automatic** to restore the
   default window color. Other limits keep their existing colors.
+- Dashboard bars and provider tile rings carry a thin white tick at *even pace*:
+  where the remaining share would be if you spent the window evenly until its
+  reset. The dashboard row also says how far over or under that pace you were
+  at the last refresh. Over pace means you are using quota faster than even
+  spending and would run out before the reset. Pace appears only for windows
+  whose length the provider reports or its API names (such as Claude's
+  five-hour and weekly windows); monthly and rolling windows have none.
 
 ## Requirements
 

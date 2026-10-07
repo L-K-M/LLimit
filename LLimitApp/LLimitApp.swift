@@ -524,6 +524,13 @@ private struct GlossRing: View {
 private struct GlossBar: View {
   let progress: Double
   let tint: Color
+  /// The remaining share at an even pace to the reset, drawn as a tick.
+  var evenPaceRemaining: Double?
+
+  /// Neutral geometry: identity hues belong to the fill and the status
+  /// accents to danger, so the pace tick wears neither.
+  private static let paceTickColor = Color.white.opacity(0.85)
+  private static let paceTickSize = CGSize(width: 2, height: 9)
 
   var body: some View {
     GeometryReader { geometry in
@@ -551,7 +558,26 @@ private struct GlossBar: View {
     }
     .frame(height: 5)
     .animation(.spring(response: 0.55, dampingFraction: 0.85), value: progress)
+    // Outside the spring: the tick only moves on refresh and adds no motion.
+    // The row's text states the pace, so the bar stays hidden from VoiceOver.
+    .overlay { paceTick }
     .accessibilityHidden(true)
+  }
+
+  @ViewBuilder
+  private var paceTick: some View {
+    if let evenPaceRemaining {
+      GeometryReader { geometry in
+        let halfWidth = Self.paceTickSize.width / 2
+        let x = min(max(geometry.size.width * CGFloat(evenPaceRemaining), halfWidth), geometry.size.width - halfWidth)
+
+        Capsule()
+          .fill(Self.paceTickColor)
+          .frame(width: Self.paceTickSize.width, height: Self.paceTickSize.height)
+          .shadow(color: .black.opacity(0.45), radius: 0.5)
+          .position(x: x, y: geometry.size.height / 2)
+      }
+    }
   }
 }
 
@@ -1628,7 +1654,8 @@ private struct ProviderQuotaCard: View {
             metric: metric,
             tint: metricColors[index],
             now: now,
-            sparkPoints: sparkPoints(for: metric)
+            sparkPoints: sparkPoints(for: metric),
+            pace: QuotaPace(metric: metric, provider: usage.provider, fetchedAt: usage.fetchedAt, now: now)
           )
         }
       }
@@ -1751,6 +1778,7 @@ private struct MetricQuotaRow: View {
   let tint: Color
   let now: Date
   let sparkPoints: [SparkPoint]
+  let pace: QuotaPace?
 
   private var remaining: Int? {
     metric.remainingPercent.map { max(0, min(100, $0)) }
@@ -1785,20 +1813,22 @@ private struct MetricQuotaRow: View {
       }
 
       if remaining != nil || metric.isUnlimited {
-        GlossBar(progress: barProgress, tint: tint)
+        GlossBar(progress: barProgress, tint: tint, evenPaceRemaining: pace?.evenPaceRemainingFraction)
       }
 
-      if secondaryUsageLine != nil || resetCountdown != nil {
+      if secondaryText != nil || resetCountdown != nil {
         HStack(spacing: 8) {
-          if let usageLine = secondaryUsageLine {
-            Text(usageLine)
+          if let secondaryText {
+            Text(secondaryText)
               .font(.system(size: 10))
               .foregroundStyle(DashboardPalette.tertiaryText)
               .lineLimit(1)
           }
           Spacer(minLength: 4)
           if let resetCountdown {
+            // Ideal size: the secondary text truncates first, never the countdown.
             ResetChip(countdown: resetCountdown)
+              .fixedSize()
           }
         }
       }
@@ -1841,6 +1871,13 @@ private struct MetricQuotaRow: View {
   private var secondaryUsageLine: String? {
     guard !metric.isUnlimited, remaining != nil else { return nil }
     return metric.usageLine
+  }
+
+  /// The usage line and the pace phrase share one line, which truncates
+  /// before the fixed-size reset chip gives up any width.
+  private var secondaryText: String? {
+    let parts = [secondaryUsageLine, pace?.phrase].compactMap { $0 }
+    return parts.isEmpty ? nil : parts.joined(separator: " · ")
   }
 
   private var barProgress: Double {

@@ -109,6 +109,18 @@ final class MetaMuseClientTests: XCTestCase {
     XCTAssertEqual(usage.metrics.first { $0.id == "weekly" }?.remainingPercent, 50)
   }
 
+  // Only the session window states its length; the weekly row reports none,
+  // and its length is never inferred from the "weekly" key.
+  func testReportedWindowDurationIsKeptForPace() async throws {
+    let body = sse("response.subscription_usage", #"{"type":"response.subscription_usage","window":{"used_percent":40,"window_duration_mins":300,"resets_at":"2026-09-15T02:00:00Z"},"weekly":{"used_percent":60,"resets_at":"2026-09-21T00:00:00Z"}}"#)
+    let client = MetaMuseQuotaClient(httpClient: MuseMockHTTP(status: 200, body: body))
+
+    let usage = try await client.fetchUsage(configuration: config(), now: now)
+
+    XCTAssertEqual(usage.metrics.map(\.id), ["window", "weekly"])
+    XCTAssertEqual(usage.metrics.map(\.windowSeconds), [18_000, nil])
+  }
+
   // A window without window_duration_mins falls back to a session label.
   func testWindowWithoutDurationUsesSessionLabel() async throws {
     let body = sse("response.subscription_usage", #"{"type":"response.subscription_usage","window":{"used_percent":10}}"#)

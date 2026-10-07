@@ -112,7 +112,8 @@ public struct OpenAIClient: QuotaProviderClient {
       label: formatWindowName(seconds: window.limit_window_seconds),
       remainingPercent: remainingPercent,
       resetAt: resetAt,
-      resetIn: formatShortDuration(seconds: resetSeconds)
+      resetIn: formatShortDuration(seconds: resetSeconds),
+      windowSeconds: reportedWindowSeconds(count: window.limit_window_seconds, unitSeconds: 1)
     )
   }
 
