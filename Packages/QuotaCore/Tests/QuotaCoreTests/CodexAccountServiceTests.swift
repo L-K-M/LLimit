@@ -245,18 +245,31 @@ final class CodexAccountServiceTests: XCTestCase {
     let failing = try versionFixture("failing", body: "exit 127")
     let old = try versionFixture("old", body: "printf 'codex-cli 0.140.0-beta.1\\n'")
     let unrelated = try versionFixture("unrelated", body: "printf 'usage: something else\\n'")
-    // The preferred, first install is the one the user needs to repair.
+    // Missing candidates are skipped; the first install that exists is the one
+    // LLimit would use, so its problem is the one the user needs to fix.
     await assertProbeError([missing, failing, old], .cliFailed(path: failing.path, .exit(127)))
     await assertProbeError([old, failing], .cliTooOld(path: old.path, version: "0.140.0-beta.1"))
     await assertProbeError([unrelated], .cliFailed(path: unrelated.path, .unrecognizedVersion))
 
     let message = CodexConnectionError.cliFailed(path: failing.path, .exit(127)).localizedDescription
-    XCTAssertTrue(message.contains(failing.path) && message.contains("exit 127"), message)
+    XCTAssertTrue(message.contains(failing.path), message)
+    XCTAssertTrue(message.contains("exit 127"), message)
+    XCTAssertTrue(message.contains("Reinstall"), message)
+    let timeout = CodexConnectionError.cliFailed(path: failing.path, .timeout).localizedDescription
+    XCTAssertTrue(timeout.contains("again in a moment"), timeout)
+    XCTAssertFalse(timeout.contains("Reinstall"), timeout)
     XCTAssertTrue(CodexConnectionError.cliTooOld(path: old.path, version: "0.140.0").localizedDescription.contains("0.144.4"))
   }
 
-  func testVersionProbeTimeoutKillsTheChild() async throws {
-    let stuck = try versionFixture("stuck", body: #"sleep 1; printf survived > "$(dirname "$0")/survived""#)
+  func testVersionProbeStopsExcessiveOutput() async throws {
+    let chatty = try versionFixture("chatty", body: "yes | head -c 5000")
+    await assertProbeError([chatty], .cliFailed(path: chatty.path, .excessiveOutput))
+  }
+
+  func testVersionProbeTimeoutKillsTheChildAndItsDescendants() async throws {
+    // The write happens in a background subshell, so killing only the direct
+    // child would leave it running.
+    let stuck = try versionFixture("stuck", body: #"( sleep 1; printf survived > "$(dirname "$0")/survived" ) & wait"#)
     await assertProbeError([stuck], .cliFailed(path: stuck.path, .timeout), timeout: 0.2)
     try await Task.sleep(nanoseconds: 1_500_000_000)
     XCTAssertFalse(FileManager.default.fileExists(atPath: temporary.appendingPathComponent("survived").path))
@@ -291,6 +304,33 @@ final class CodexAccountServiceTests: XCTestCase {
     try handle.close()
     _ = try await service.fetchUsage(configuration: configuration(profile), now: Date())
     XCTAssertEqual(try String(contentsOf: probes, encoding: .utf8).split(separator: "\n").count, 2)
+  }
+
+  func testOnlyStartupFailuresThatImplicateTheExecutableProbeAgain() async throws {
+    let shim = try discoverableFixture(in: temporary.appendingPathComponent("node-prefix/bin", isDirectory: true))
+    let profile = try prepare()
+    let mode = store.directory(for: profile).appendingPathComponent("work/mode")
+    let service = CodexAccountService(root: store.root, executable: nil, candidates: [shim],
+                                      environment: ["PATH": "/usr/bin:/bin", "HOME": temporary.path])
+    let probes = shim.deletingLastPathComponent().appendingPathComponent("version-probes")
+    func probeCount() throws -> Int { try String(contentsOf: probes, encoding: .utf8).split(separator: "\n").count }
+
+    _ = try await service.fetchUsage(configuration: configuration(profile), now: Date())
+    try "reject-initialize".write(to: mode, atomically: true, encoding: .utf8)
+    do { _ = try await service.fetchUsage(configuration: configuration(profile), now: Date()); XCTFail("Rejected startup must fail") }
+    catch { XCTAssertTrue(error is ProviderClientError) }
+    try await waitUntil { !self.store.hasPendingOperation(profile) }
+    try "normal".write(to: mode, atomically: true, encoding: .utf8)
+    _ = try await service.fetchUsage(configuration: configuration(profile), now: Date())
+    XCTAssertEqual(try probeCount(), 1)
+
+    try "exit-on-start".write(to: mode, atomically: true, encoding: .utf8)
+    do { _ = try await service.fetchUsage(configuration: configuration(profile), now: Date()); XCTFail("Exited child must fail") }
+    catch { XCTAssertTrue(error is ProviderClientError) }
+    try await waitUntil { !self.store.hasPendingOperation(profile) }
+    try "normal".write(to: mode, atomically: true, encoding: .utf8)
+    _ = try await service.fetchUsage(configuration: configuration(profile), now: Date())
+    XCTAssertEqual(try probeCount(), 2)
   }
 
   func testVersionProbeRunsNpmShimWhoseInterpreterIsBesideIt() async throws {
@@ -408,6 +448,8 @@ final class CodexAccountServiceTests: XCTestCase {
         sys.exit(0)
     root = pathlib.Path(os.environ['CODEX_HOME'])
     mode = pathlib.Path('mode').read_text()
+    if mode == 'exit-on-start':
+        sys.exit(3)
     pathlib.Path('environment.json').write_text(json.dumps(dict(os.environ)))
     pathlib.Path('arguments.json').write_text(json.dumps(sys.argv[1:]))
     def send(value):
@@ -425,6 +467,9 @@ final class CodexAccountServiceTests: XCTestCase {
             log.write(json.dumps(request) + '\n')
         method = request['method']
         if 'id' not in request:
+            continue
+        if mode == 'reject-initialize' and method == 'initialize':
+            send({'id': request['id'], 'error': {'code': -32000, 'message': 'rejected'}})
             continue
         result = {}
         if method == 'account/login/start':

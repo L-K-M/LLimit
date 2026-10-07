@@ -6,17 +6,20 @@ import Foundation
 public enum ManagedCLI: Sendable {
   case claude, codex
 
-  /// Proxy and certificate settings that both CLIs need on managed networks.
-  /// Claude Code reads the proxy variables and NODE_EXTRA_CA_CERTS; Codex reads
-  /// the proxy variables, including ALL_PROXY, and SSL_CERT_FILE. None of them
-  /// selects a provider account, endpoint or configuration directory.
-  public static let networkEnvironmentKeys: Set<String> = [
+  /// Parent settings that both CLIs need on top of their own allowlists. Claude
+  /// Code reads the proxy variables and NODE_EXTRA_CA_CERTS; Codex reads the
+  /// proxy variables, including ALL_PROXY, and SSL_CERT_FILE. Volta's shims
+  /// find a relocated toolchain through VOLTA_HOME. None of them selects a
+  /// provider account, endpoint or configuration directory.
+  public static let sharedEnvironmentKeys: Set<String> = [
     "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "NO_PROXY", "no_proxy",
-    "ALL_PROXY", "all_proxy", "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS"
+    "ALL_PROXY", "all_proxy", "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS", "VOLTA_HOME"
   ]
 
   /// The minimal PATH of a Finder or login-item launch, kept as the last resort.
   private static let systemDirectories = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+  /// Bounds a cyclic nvm alias chain.
+  private static let maximumAliasHops = 8
 
   private var executableName: String {
     switch self {
@@ -25,9 +28,9 @@ public enum ManagedCLI: Sendable {
     }
   }
 
-  /// Possible executables in search order: the known install locations first,
-  /// then version-manager locations, then the parent PATH. The caller checks
-  /// which candidates exist; a GUI launch has none of the shell's PATH setup.
+  /// Possible executables in search order: the known install locations, then
+  /// the parent PATH, as before, then version-manager locations that a GUI
+  /// launch's PATH lacks. The caller checks which candidates exist.
   public func candidates(environment: [String: String]) -> [URL] {
     let home = Self.absolute(environment["HOME"])
     var directories: [String]
@@ -39,14 +42,14 @@ public enum ManagedCLI: Sendable {
       // Homebrew takes priority over old npm shims earlier on PATH.
       directories = ["/opt/homebrew/bin", "/usr/local/bin", home.map { $0 + "/.local/bin" }].compactMap { $0 }
     }
-    directories += Self.versionManagerDirectories(home: home, environment: environment)
     directories += Self.pathEntries(environment["PATH"])
+    directories += Self.versionManagerDirectories(home: home, environment: environment)
     return Self.unique(directories).map { URL(fileURLWithPath: $0, isDirectory: true).appendingPathComponent(executableName) }
   }
 
-  /// The child's PATH. An npm, nvm, fnm or Volta install is a script starting
-  /// with `#!/usr/bin/env node`, so its interpreter must be found beside the
-  /// executable or beside its symlink target rather than on the parent's PATH.
+  /// The child's PATH. npm installs a CLI as a `#!/usr/bin/env node` script, and
+  /// a GUI launch's PATH has no Node.js. Homebrew, nvm and fnm keep node beside
+  /// the executable; a symlinked package can also find it beside its target.
   public static func searchPath(for executable: URL, environment: [String: String]) -> String {
     let launched = executable.standardizedFileURL
     var directories = [
@@ -60,10 +63,10 @@ public enum ManagedCLI: Sendable {
     return unique(directories).joined(separator: ":")
   }
 
-  /// Volta's shims locate their toolchain from HOME. A probe that runs with a
-  /// private HOME must point them back at the user's Volta directory.
+  /// Volta's shims locate their toolchain from VOLTA_HOME, or HOME/.volta when
+  /// it is unset. A probe that runs with a private HOME must name it explicitly.
   static func voltaHome(environment: [String: String]) -> String? {
-    absolute(environment["HOME"]).map { $0 + "/.volta" }
+    absolute(environment["VOLTA_HOME"]) ?? absolute(environment["HOME"]).map { $0 + "/.volta" }
   }
 
   private static func versionManagerDirectories(home: String?, environment: [String: String]) -> [String] {
@@ -79,7 +82,57 @@ public enum ManagedCLI: Sendable {
       fnmRoots += [home + "/.local/share/fnm", home + "/.fnm", home + "/Library/Application Support/fnm"]
     }
     directories += fnmRoots.compactMap { $0.map { $0 + "/aliases/default/bin" } }
-    return directories
+    return directories + nvmDirectories(home: home, environment: environment)
+  }
+
+  /// nvm installs each Node version, with the CLIs installed into it, under
+  /// versions/node/vX.Y.Z/bin. The version a new shell selects comes first,
+  /// then the others newest first.
+  private static func nvmDirectories(home: String?, environment: [String: String]) -> [String] {
+    guard let root = absolute(environment["NVM_DIR"]) ?? home.map({ $0 + "/.nvm" }) else { return [] }
+    let versionsDirectory = root + "/versions/node"
+    let names = (try? FileManager.default.contentsOfDirectory(atPath: versionsDirectory)) ?? []
+    return orderedNodeVersions(names, defaultAlias: nvmDefaultAlias(root: root)).map { versionsDirectory + "/" + $0 + "/bin" }
+  }
+
+  /// Orders installed `vX.Y.Z` names newest first, then moves the newest one
+  /// matching the default alias (`22`, `22.11` or `v22.11.0`) to the front.
+  /// Other names are not Node installs and are dropped.
+  static func orderedNodeVersions(_ names: [String], defaultAlias: String?) -> [String] {
+    let installed = names.compactMap { name in nodeVersion(name).map { (name: name, version: $0) } }
+      .sorted { $1.version.lexicographicallyPrecedes($0.version) }
+    let selector = defaultAlias.flatMap { alias -> [Int]? in
+      let parts = alias.drop { $0 == "v" }.split(separator: ".", omittingEmptySubsequences: false)
+      let numbers = parts.compactMap { part in part.allSatisfy { $0.isASCII && $0.isNumber } ? Int(part) : nil }
+      return (1...3).contains(parts.count) && numbers.count == parts.count ? numbers : nil
+    }
+    guard let selector, let preferred = installed.firstIndex(where: { $0.version.starts(with: selector) }) else {
+      return installed.map(\.name)
+    }
+    var ordered = installed.map(\.name)
+    ordered.insert(ordered.remove(at: preferred), at: 0)
+    return ordered
+  }
+
+  /// Follows nvm's alias files from `alias/default`, for example through
+  /// `lts/*` and `lts/jod` to a version. Nil when no default is set.
+  private static func nvmDefaultAlias(root: String) -> String? {
+    let aliases = URL(fileURLWithPath: root + "/alias", isDirectory: true)
+    var value = "default"
+    for _ in 0..<maximumAliasHops {
+      // Alias names are relative files inside alias/; never leave that directory.
+      guard !value.isEmpty, !value.hasPrefix("/"), !value.split(separator: "/").contains(".."),
+            let next = try? String(contentsOf: aliases.appendingPathComponent(value), encoding: .utf8) else { break }
+      value = next.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    return value == "default" ? nil : value
+  }
+
+  private static func nodeVersion(_ name: String) -> [Int]? {
+    guard name.hasPrefix("v") else { return nil }
+    let parts = name.dropFirst().split(separator: ".", omittingEmptySubsequences: false)
+    let numbers = parts.compactMap { part in part.allSatisfy { $0.isASCII && $0.isNumber } ? Int(part) : nil }
+    return parts.count == 3 && numbers.count == 3 ? numbers : nil
   }
 
   /// Relative entries would resolve against the child's working directory.

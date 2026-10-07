@@ -149,8 +149,12 @@ public actor CodexAccountService: ManagedOpenAIUsageSource {
     sessions[profile.id] = session
     do { try await session.start() }
     catch {
-      // The next attempt probes again, so a broken install reports its cause.
-      verifiedExecutable = nil
+      // A child that could not launch, or went away before its handshake,
+      // points at the executable or its runtime. Probe again so the next
+      // attempt reports why; other startup failures keep the verified executable.
+      if let error = error as? CodexRPCError, [.launchFailed, .sessionClosed, .writeFailed].contains(error) {
+        verifiedExecutable = nil
+      }
       // Startup can fail after a child has begun loading its credentials. Only
       // this owner may recover it; callers rejected by open own no session.
       await recoverSession(profile, session: session)
@@ -221,7 +225,7 @@ public actor CodexAccountService: ManagedOpenAIUsageSource {
     // API keys, auth overrides, remote servers, inherited config and debug/log
     // settings must not redirect a managed connection to the ordinary CLI login.
     let allowed: Set<String> = ["HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE", "CODEX_CA_CERTIFICATE"]
-    var result = parent.filter { allowed.contains($0.key) || ManagedCLI.networkEnvironmentKeys.contains($0.key) }
+    var result = parent.filter { allowed.contains($0.key) || ManagedCLI.sharedEnvironmentKeys.contains($0.key) }
     result["PATH"] = ManagedCLI.searchPath(for: executable, environment: parent)
     result["CODEX_HOME"] = directory.path
     return result

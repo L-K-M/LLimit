@@ -42,8 +42,8 @@ public actor ClaudeCodeProcess {
   /// Builds an isolated CLI environment without inheriting provider credentials,
   /// endpoint overrides, startup hooks or another Claude configuration directory.
   /// HOME stays the user's real home so the CLI can access the login Keychain.
-  /// Proxy and certificate settings pass through, and PATH starts beside the
-  /// executable so an npm-installed CLI finds its Node.js.
+  /// Proxy, certificate and Volta settings pass through, and PATH starts beside
+  /// the executable so an npm-installed CLI finds its Node.js.
   public static func environment(
     parent: [String: String],
     profileDirectory: URL,
@@ -52,7 +52,7 @@ public actor ClaudeCodeProcess {
   ) -> [String: String] {
     let allowedKeys: Set<String> = ["HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "TERM"]
     var environment = parent.filter {
-      allowedKeys.contains($0.key) || $0.key.hasPrefix("LC_") || ManagedCLI.networkEnvironmentKeys.contains($0.key)
+      allowedKeys.contains($0.key) || $0.key.hasPrefix("LC_") || ManagedCLI.sharedEnvironmentKeys.contains($0.key)
     }
     environment["PATH"] = ManagedCLI.searchPath(for: executable, environment: parent)
     environment["CLAUDE_CONFIG_DIR"] = profileDirectory.standardizedFileURL.path

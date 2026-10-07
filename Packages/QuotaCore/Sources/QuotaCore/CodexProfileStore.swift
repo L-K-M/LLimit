@@ -134,7 +134,7 @@ public enum CodexConnectionError: Error, LocalizedError, Equatable, Sendable {
     case .cliNotFound:
       return "Codex CLI was not found. Install Codex CLI \(CodexCLIProbe.minimumVersion) or later to connect this OpenAI account."
     case .cliFailed(let path, let failure):
-      return "Codex CLI at \(path) failed to run (\(failure.summary)). Reinstall it or check that its runtime, such as Node.js, is installed, then connect this OpenAI account."
+      return "Codex CLI at \(path) failed to run (\(failure.summary)). \(failure.advice)"
     case .cliTooOld(let path, let version):
       return "Codex CLI \(version) at \(path) is too old. Update it to \(CodexCLIProbe.minimumVersion) or later, then connect this OpenAI account."
     case .invalidProfile: return "This OpenAI login could not be verified. Reconnect the account."
@@ -154,6 +154,7 @@ public enum CodexCLIFailure: Error, Equatable, Sendable {
   case signal(Int32)
   case timeout
   case unrecognizedVersion
+  case excessiveOutput
 
   var summary: String {
     switch self {
@@ -162,6 +163,17 @@ public enum CodexCLIFailure: Error, Equatable, Sendable {
     case .signal(let signal): return "signal \(signal)"
     case .timeout: return "it did not answer in time"
     case .unrecognizedVersion: return "unrecognized version output"
+    case .excessiveOutput: return "too much output for a version"
+    }
+  }
+
+  /// A slow start is usually transient; anything else points at the install.
+  var advice: String {
+    switch self {
+    case .timeout:
+      return "Try connecting this OpenAI account again in a moment."
+    case .launch, .exit, .signal, .unrecognizedVersion, .excessiveOutput:
+      return "Reinstall it or check that its runtime, such as Node.js, is installed, then connect this OpenAI account."
     }
   }
 }

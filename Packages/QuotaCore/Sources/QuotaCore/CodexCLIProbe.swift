@@ -8,6 +8,8 @@ import Glibc
 /// Older Codex releases can treat an unknown subcommand as an agent prompt.
 /// Probe only --version, without any real home/config or authentication context.
 enum CodexCLIProbe {
+  /// Compared by SemVer precedence, so a prerelease of a later version passes
+  /// and a prerelease of this version does not.
   static let minimumVersion = CodexCLIVersion(major: 0, minor: 144, patch: 4)
   private static let outputLimit = 4096
   private static let maximumTimeout: TimeInterval = 10
@@ -32,7 +34,8 @@ enum CodexCLIProbe {
     throw firstProblem ?? CodexConnectionError.cliNotFound
   }
 
-  /// The probe sees no real home, Codex configuration or credential.
+  /// The probe sees no real home, Codex configuration or credential. Volta's
+  /// shims still need the user's Volta directory, which defaults under HOME.
   static func environment(for candidate: URL, parent: [String: String], home: URL) -> [String: String] {
     var environment = ["HOME": home.path, "CODEX_HOME": home.path,
                        "PATH": ManagedCLI.searchPath(for: candidate, environment: parent)]
@@ -82,6 +85,7 @@ enum CodexCLIProbe {
       process.terminationHandler = nil
       return .failure(.launch)
     }
+    run.launched()
     try? output.fileHandleForWriting.close()
     let result = await withCheckedContinuation { continuation in
       run.wait(continuation)
@@ -99,6 +103,8 @@ enum CodexCLIProbe {
 private final class VersionRun: @unchecked Sendable {
   /// Released on completion, which breaks the cycle through its termination handler.
   private var process: Process?
+  /// The child's own process group, when Foundation started it as a leader.
+  private var group: pid_t?
   private let limit: Int
   private let lock = NSLock()
   private var captured = Data()
@@ -122,6 +128,14 @@ private final class VersionRun: @unchecked Sendable {
     continuation.resume(returning: result)
   }
 
+  /// Records the process group before the child can exit and be reaped.
+  func launched() {
+    lock.lock()
+    defer { lock.unlock() }
+    guard let identifier = process?.processIdentifier, getpgid(identifier) == identifier else { return }
+    group = identifier
+  }
+
   func received(_ data: Data) {
     lock.lock()
     defer { lock.unlock() }
@@ -129,7 +143,7 @@ private final class VersionRun: @unchecked Sendable {
     if data.isEmpty {
       reachedEOF = true
     } else if captured.count + data.count > limit {
-      return finish(.failure(.unrecognizedVersion))
+      return stop(.excessiveOutput)
     } else {
       captured.append(data)
     }
@@ -146,7 +160,7 @@ private final class VersionRun: @unchecked Sendable {
   func timedOut() {
     lock.lock()
     defer { lock.unlock() }
-    finish(.failure(.timeout))
+    stop(.timeout)
   }
 
   /// Output is complete only once the pipe reaches its end after exit.
@@ -162,12 +176,23 @@ private final class VersionRun: @unchecked Sendable {
     }
   }
 
+  /// Ends a probe that did not finish by itself. A version-only process has no
+  /// grant to protect, so neither it nor anything it started may outlive the
+  /// deadline. Authentication app-server processes are never killed this way.
+  private func stop(_ failure: CodexCLIFailure) {
+    guard result == nil else { return }
+    // Descendants holding the output pipe keep the group alive after the child exits.
+    if let group {
+      _ = killpg(group, SIGKILL)
+    } else if exit == nil, let process, process.isRunning {
+      _ = kill(process.processIdentifier, SIGKILL)
+    }
+    finish(.failure(failure))
+  }
+
   private func finish(_ outcome: Result<String, CodexCLIFailure>) {
     guard result == nil else { return }
     result = outcome
-    // A version-only process has no grant to protect and must not outlive its
-    // deadline. Authentication app-server processes are never killed this way.
-    if exit == nil, let process, process.isRunning { _ = kill(process.processIdentifier, SIGKILL) }
     process = nil
     waiter?.resume(returning: outcome)
     waiter = nil
