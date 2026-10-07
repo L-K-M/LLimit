@@ -46,6 +46,28 @@ the .deb under `/usr/share/llimit/examples/`):
 
 Everything in depth: [`Packages/LLimitd/README.md`](Packages/LLimitd/README.md).
 
+## Quota alerts
+
+Alerts are opt-in. On macOS, enable **Settings → Notifications → Quota Alerts**
+and grant notification permission. Set ordered warning/critical bands there.
+On Linux, use `llimit daemon --notify` or `--on-event <executable>`;
+[`daemon options and hook payloads`](Packages/LLimitd/README.md#alerts) are documented separately.
+
+Both platforms use QuotaCore's `QuotaEvents`: low quota (default 20%/5%),
+observed resets after low windows, authentication/unreadable-usage failures,
+recovery, and mostly unused weekly/monthly windows nearing reset. Thresholds
+rearm after a five-point recovery or a fresh observation past the window end.
+Carried or failing usage cannot trigger quota transitions; a timer alone cannot
+confirm a reset. Notification copy excludes provider error messages and credentials.
+
+macOS serializes permission, evaluation and persistence. Only accepted notification
+requests latch; denied permission and failed delivery leave events retryable.
+Linux records attempts before queued delivery for restart dedupe. Its state is
+private (0600), atomically replaced and fsynced.
+
+Integrated from [#110](https://github.com/L-K-M/LLimit/pull/110) (events/Linux hooks)
+and [#100](https://github.com/L-K-M/LLimit/pull/100) (macOS settings/native notifications).
+
 ## Supported providers
 
 The same providers work on both platforms. Managed Claude Code and Codex connections,

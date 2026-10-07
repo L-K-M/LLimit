@@ -3,7 +3,6 @@ import SwiftUI
 import AppKit
 import WidgetKit
 import ServiceManagement
-import UserNotifications
 import QuotaCore
 #if canImport(Security)
 import Security
@@ -150,6 +149,7 @@ final class AppModel: ObservableObject {
 
     refreshIntervalMinutes = settings.refreshIntervalMinutes
     alertSettings = settings.alertSettings
+    quotaNotifications.updateSettings(alertSettings)
     widgetStyle = settings.widgetStyle
     widgetBackgroundSettings = settings.widgetBackgroundSettings
     widgetVisibility = settings.widgetVisibility
@@ -275,6 +275,7 @@ final class AppModel: ObservableObject {
   }
 
   private func publishSnapshot(_ refreshed: QuotaSnapshot) {
+    let previous = snapshot
     do {
       try historyStore.append(refreshed)
     } catch {
@@ -291,7 +292,10 @@ final class AppModel: ObservableObject {
 
     snapshot = refreshed
     reloadAccountStatuses()
-    deliverQuotaAlerts(for: refreshed)
+    let names = providerAccounts.map { ($0.id, $0.resolvedDisplayName) }
+    quotaNotifications.updateSettings(alertSettings)
+    quotaNotifications.submit(previous: previous, current: refreshed,
+                              accountNames: Dictionary(names) { first, _ in first })
 
     if widgetSyncReady && historySyncReady {
       statusMessage = "Refreshed \(refreshed.providers.count) account(s), \(refreshed.failures.count) failure(s)"
@@ -300,71 +304,7 @@ final class AppModel: ObservableObject {
     }
   }
 
-  /// Dedup keys for currently-suppressed alerts, persisted across relaunches
-  /// so a long low stretch notifies once rather than every refresh.
-  private var alertDedupKeys: Set<String> {
-    get { Set(UserDefaults.standard.stringArray(forKey: "LLimitAlertDedupKeys") ?? []) }
-    set { UserDefaults.standard.set(Array(newValue), forKey: "LLimitAlertDedupKeys") }
-  }
-
-  /// Posts one notification per metric that entered a threshold band or per
-  /// account that started failing. The evaluator owns band/dedup semantics;
-  /// this method owns authorization and delivery.
-  private func deliverQuotaAlerts(for snapshot: QuotaSnapshot) {
-    guard alertSettings.enabled else {
-      // Disabled mid-flight: drop suppression state so re-enabling starts
-      // fresh instead of carrying stale keys (or inherited empty state is
-      // indistinguishable from "nothing fired" — clearing is still correct).
-      alertDedupKeys = []
-      return
-    }
-    var dedup = alertDedupKeys
-    let alerts = QuotaAlertEvaluator.alerts(
-      in: snapshot, settings: alertSettings, dedupedKeys: &dedup)
-    guard !alerts.isEmpty else {
-      // Still persist — re-arm pruning must survive even when nothing fired.
-      alertDedupKeys = dedup
-      return
-    }
-
-    // Escaping notification callbacks run off-main; the async API keeps the
-    // whole path on the main actor where AppModel is isolated.
-    Task { @MainActor in
-      let center = UNUserNotificationCenter.current()
-      let settings = await center.notificationSettings()
-      let authorized: Bool
-      switch settings.authorizationStatus {
-      case .authorized, .provisional, .ephemeral:
-        authorized = true
-      case .notDetermined:
-        // The foreground toggle normally requests permission up front; this
-        // covers a refresh landing before the user answered or after reset.
-        authorized = (try? await center.requestAuthorization(options: [.alert, .sound])) == true
-      default:
-        authorized = false
-      }
-      guard authorized else { return }
-      await post(alerts, to: center)
-      // Persist suppression only after delivery is possible, so a refresh
-      // landing while permission is pending doesn't silently consume alerts —
-      // they re-fire once authorization is granted.
-      alertDedupKeys = dedup
-    }
-  }
-
-  private func post(_ alerts: [QuotaAlert],
-                    to center: UNUserNotificationCenter) async {
-    for alert in alerts {
-      let content = UNMutableNotificationContent()
-      content.title = alert.title
-      content.body = alert.body
-      content.sound = .default
-      // The dedupKey doubles as the request identifier, so re-delivery of
-      // the same alert replaces the banner instead of stacking.
-      try? await center.add(
-        UNNotificationRequest(identifier: alert.dedupKey, content: content, trigger: nil))
-    }
-  }
+  private lazy var quotaNotifications = QuotaNotifications.makeMonitor()
 
   /// Bind each successful result to the profile actually queried. A timestamp
   /// alone cannot distinguish an old imported login from its replacement.
@@ -1298,8 +1238,7 @@ final class AppModel: ObservableObject {
     launchAtLogin = SMAppService.mainApp.status == .enabled
   }
 
-  /// Generic binding into the persisted alert policy — toggles and both
-  /// threshold steppers save immediately like every other settings field.
+  /// Existing Bool bindings remain the settings UI's external API.
   func alertSettingsBinding(
     for keyPath: WritableKeyPath<QuotaAlertSettings, Bool>
   ) -> Binding<Bool> {
@@ -1308,13 +1247,10 @@ final class AppModel: ObservableObject {
       set: { newValue in
         self.alertSettings[keyPath: keyPath] = newValue
         self.saveConfiguration()
-        // Ask while the app is frontmost — macOS foreground requests are far
-        // likelier to present the prompt than a mid-refresh background ask.
+        self.quotaNotifications.updateSettings(self.alertSettings)
+        // Request permission from the foreground action before refresh delivery.
         if keyPath == \QuotaAlertSettings.enabled, newValue {
-          Task { @MainActor in
-            _ = try? await UNUserNotificationCenter.current()
-              .requestAuthorization(options: [.alert, .sound])
-          }
+          self.quotaNotifications.requestAuthorization()
         }
       }
     )
@@ -1326,29 +1262,10 @@ final class AppModel: ObservableObject {
     Binding(
       get: { self.alertSettings[keyPath: keyPath] },
       set: { newValue in
-        self.alertSettings[keyPath: keyPath] = newValue
-        // A critical at/above warning would swallow every warning alert —
-        // keep the bands strictly ordered regardless of stepper order. If the
-        // counterpart is pinned at its range bound it can't move — push the
-        // edited value instead so the bands can never end up equal.
-        if self.alertSettings.criticalPercent >= self.alertSettings.warningPercent {
-          if keyPath == \QuotaAlertSettings.criticalPercent {
-            let bumped = min(QuotaAlertSettings.warningRange.upperBound, newValue + 1)
-            self.alertSettings.warningPercent = bumped
-            if bumped <= newValue {
-              self.alertSettings.criticalPercent = max(
-                QuotaAlertSettings.criticalRange.lowerBound, bumped - 1)
-            }
-          } else {
-            let lowered = max(QuotaAlertSettings.criticalRange.lowerBound, newValue - 1)
-            self.alertSettings.criticalPercent = lowered
-            if lowered >= newValue {
-              self.alertSettings.warningPercent = min(
-                QuotaAlertSettings.warningRange.upperBound, lowered + 1)
-            }
-          }
-        }
+        let band: QuotaAlertSettings.ThresholdBand = keyPath == \QuotaAlertSettings.criticalPercent ? .critical : .warning
+        self.alertSettings.setThreshold(newValue, for: band)
         self.saveConfiguration()
+        self.quotaNotifications.updateSettings(self.alertSettings)
       }
     )
   }

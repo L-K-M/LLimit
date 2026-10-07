@@ -100,8 +100,8 @@ the timer pair is an alternative for people who prefer no long-running process.
 
 ## Alerts
 
-Alerts are off by default. With them on, the daemon tells you when quota runs
-low, when a window that ran low resets, when an account needs a new sign-in,
+Alerts share macOS's QuotaCore detector and are off by default. With them on,
+the daemon tells you when quota runs low, when a low window resets, when an account needs a new sign-in,
 and when a weekly or monthly window is about to reset mostly unused.
 
 ```
@@ -119,10 +119,13 @@ LLIMIT_NOTIFY=1 llimit daemon                   # same as --notify; meant for th
 | `recovered` | that account refreshes successfully again | `normal` |
 | `expiringUnused` | a weekly or monthly window resets within 24 hours with 50% or more left | `normal` |
 
-Each alert is sent once, including for conditions that already hold when you
-turn alerts on. A threshold fires again only after remaining climbs 5 points
-above it or its window ends, and `expiringUnused` fires once per window. What was sent is recorded in `alerts-state.json`, so restarting the
-daemon does not repeat alerts. Alerts need the daemon: `llimit refresh` and
+Each event is attempted once, including conditions already present when you
+enable alerts. A threshold rearms after remaining climbs more than 5 points
+above it or a fresh observation follows its window end. Failing/carried usage
+cannot rearm or announce a reset. `expiringUnused` fires once per window.
+Attempts are recorded before delivery in private, atomically replaced, fsynced
+`alerts-state.json`: a crash or failed hook can lose an alert, rather than
+repeat it after restart. Alerts need the daemon: `llimit refresh` and
 the timer units do not send them.
 
 `--notify` needs `notify-send` (`libnotify-bin` on Debian and Ubuntu). When it
@@ -151,9 +154,9 @@ unset when they do not apply:
 Provider error messages and credentials are never passed. Hooks run one at a
 time with stdin on `/dev/null`. One still running after 10 seconds is stopped
 (SIGTERM, then SIGKILL, along with anything it started), so a slow hook never
-delays a refresh. Examples: [`examples/hooks/notify-send.sh`](examples/hooks/notify-send.sh)
-for custom desktop notifications and [`examples/hooks/ntfy.sh`](examples/hooks/ntfy.sh)
-to push alerts to a phone through [ntfy](https://ntfy.sh).
+delays a refresh. [`examples/hooks/notify-send.sh`](examples/hooks/notify-send.sh)
+customizes local desktop notifications. The event contract and hook originate
+in [#110](https://github.com/L-K-M/LLimit/pull/110).
 
 ### With systemd
 
@@ -175,8 +178,7 @@ for the .deb):
 ```ini
 [Service]
 ExecStart=
-ExecStart=%h/.local/bin/llimit daemon --on-event %h/.config/LLimit/hooks/ntfy.sh
-Environment=NTFY_TOPIC=your-unguessable-topic
+ExecStart=%h/.local/bin/llimit daemon --on-event %h/.config/LLimit/hooks/notify-send.sh
 ```
 
 Then run `systemctl --user restart llimit.service`. Desktop notifications use

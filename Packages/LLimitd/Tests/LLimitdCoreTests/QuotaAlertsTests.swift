@@ -367,7 +367,7 @@ final class QuotaAlertsTests: XCTestCase {
       log: { _ in }
     )
     daemon.loadConfiguration()
-    daemon.addAccount(provider: .anthropic, displayName: "Claude Work", credentials: [CredentialField.anthropicAccessToken: secret])
+    try daemon.addAccount(provider: .anthropic, displayName: "Claude Work", credentials: [CredentialField.anthropicAccessToken: secret])
 
     func attachMonitor() -> ChildProcessRunner {
       let runner = ChildProcessRunner(log: log)
@@ -449,7 +449,7 @@ final class QuotaAlertsTests: XCTestCase {
       log: { _ in }
     )
     daemon.loadConfiguration()
-    daemon.addAccount(provider: .anthropic, credentials: [CredentialField.anthropicAccessToken: "test-token"])
+    try daemon.addAccount(provider: .anthropic, credentials: [CredentialField.anthropicAccessToken: "test-token"])
     daemon.onSnapshotSaved = { previous, current in monitor.process(previous: previous, current: current) }
 
     let start = Date()

@@ -446,7 +446,8 @@ final class QuotaEventsTests: XCTestCase {
     XCTAssertEqual(run.state, QuotaEventState())
 
     // Re-enabled while still broken: it alerts again.
-    XCTAssertEqual(run.step(failing, now: t0 + 2_700).map(\.kind), [.failure])
+    let reenabled = snapshot([], failures: failing.failures, at: t0 + 2_700)
+    XCTAssertEqual(run.step(reenabled, now: t0 + 2_700).map(\.kind), [.failure])
   }
 
   func testFailureLatchFollowsTheLatestKind() {
@@ -526,6 +527,45 @@ final class QuotaEventsTests: XCTestCase {
   }
 
   // MARK: - Persistence
+
+  func testRepeatedSourceCannotRearmWhenOnlyTheClockPassedReset() {
+    let current = reading(10, resetAt: t0 + hour, at: t0)
+    let first = QuotaEvents.detect(previous: nil, current: current, now: t0, state: QuotaEventState())
+    let later = QuotaEvents.detect(previous: current, current: current, now: t0 + 2 * hour, state: first.state)
+
+    XCTAssertTrue(later.events.isEmpty)
+    XCTAssertEqual(later.state, first.state, "a timer is not a fresh observation of a new window")
+  }
+
+  func testStaleSourceCannotAlertOrClearFailure() {
+    let stale = snapshot([usage([metric(remaining: 3)], at: t0)], at: t0 + 900)
+    let initial = QuotaEvents.detect(previous: nil, current: stale, now: t0 + 900, state: QuotaEventState())
+    XCTAssertTrue(initial.events.isEmpty)
+
+    let failing = snapshot([], failures: [ProviderFailure(
+      accountID: "acct-1", provider: .anthropic, kind: .auth, message: "private response")], at: t0)
+    let failure = QuotaEvents.detect(previous: nil, current: failing, now: t0, state: QuotaEventState())
+    let later = QuotaEvents.detect(previous: failing, current: stale, now: t0 + 900, state: failure.state)
+    XCTAssertTrue(later.events.isEmpty)
+    XCTAssertEqual(later.state, failure.state)
+  }
+
+  func testExpiredMetricWithCorrectedPercentIsNotAnObservedReset() {
+    var run = Run()
+    let endedAt = t0 + hour
+    _ = run.step(reading(3, resetAt: endedAt, at: t0), now: t0)
+    let later = endedAt + 60
+    XCTAssertTrue(run.step(reading(100, resetAt: endedAt, at: later), now: later).isEmpty)
+  }
+
+  func testOlderSnapshotCannotIntroduceAFailure() {
+    let previous = reading(80, at: t0 + 900)
+    let older = snapshot([], failures: [ProviderFailure(
+      accountID: "acct-1", provider: .anthropic, kind: .auth, message: "old response")], at: t0)
+    let detection = QuotaEvents.detect(previous: previous, current: older, now: t0 + 900, state: QuotaEventState())
+    XCTAssertTrue(detection.events.isEmpty)
+    XCTAssertEqual(detection.state, QuotaEventState())
+  }
 
   func testDedupeSurvivesAStateRoundTrip() throws {
     let encoder = JSONEncoder()

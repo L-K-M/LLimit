@@ -280,5 +280,15 @@ struct QuotaEventStateStore {
       throw WriteError(operation: "Replacing \(fileURL.path)", code: errno)
     }
     renamed = true
+
+    // Persist the renamed directory entry, not just the temporary file's bytes.
+    let directoryDescriptor = open(directory.path, O_RDONLY | O_CLOEXEC)
+    guard directoryDescriptor >= 0 else {
+      throw WriteError(operation: "Opening alert state directory", code: errno)
+    }
+    defer { close(directoryDescriptor) }
+    guard fsync(directoryDescriptor) == 0 else {
+      throw WriteError(operation: "Syncing alert state directory", code: errno)
+    }
   }
 }

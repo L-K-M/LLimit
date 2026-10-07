@@ -383,22 +383,22 @@ struct SettingsView: View {
           VStack(alignment: .leading, spacing: 10) {
             settingsGroupCard(title: "Quota Alerts") {
               Toggle(
-                "Alert when a limit runs low",
+                "Enable quota alerts",
                 isOn: model.alertSettingsBinding(for: \.enabled)
               )
               Toggle(
-                "Alert when a refresh fails",
+                "Alert on sign-in and unreadable usage",
                 isOn: model.alertSettingsBinding(for: \.notifyOnFailure)
               )
 
               visibilityStepperRow(
-                title: "Warn below %",
+                title: "Warn at or below %",
                 value: model.alertThresholdBinding(for: \.warningPercent),
                 range: QuotaAlertSettings.warningRange,
                 displayedValue: model.alertSettings.warningPercent
               )
               visibilityStepperRow(
-                title: "Critical below %",
+                title: "Critical at or below %",
                 value: model.alertThresholdBinding(for: \.criticalPercent),
                 range: QuotaAlertSettings.criticalRange,
                 displayedValue: model.alertSettings.criticalPercent
@@ -406,7 +406,7 @@ struct SettingsView: View {
             }
           }
         }
-        .help("macOS may ask for notification permission the first time an alert fires.")
+        .help("Enabling alerts requests macOS notification permission. Alerts include low quota, observed resets, recovery, and mostly unused weekly or monthly windows.")
 
         Divider()
 

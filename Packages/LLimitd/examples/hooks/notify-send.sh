@@ -6,6 +6,7 @@
 #
 # The daemon runs this without a shell and without arguments. The event
 # arrives in LLIMIT_* variables (see Packages/LLimitd/README.md, "Alerts").
+# Source: LLimit PR #110; copy comes from the shared QuotaCore event detector.
 set -eu
 
 case "${LLIMIT_EVENT:-}" in

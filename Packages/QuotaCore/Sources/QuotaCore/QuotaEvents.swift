@@ -159,6 +159,30 @@ public struct QuotaEventDetection: Hashable, Sendable {
   public var events: [QuotaEvent]
   /// The state to persist and pass to the next `detect` call.
   public var state: QuotaEventState
+  fileprivate let inputState: QuotaEventState
+
+  /// Native delivery latches only accepted events. Restore each unaccepted
+  /// event's marks so retries use the same detector, including after partial delivery.
+  public func acknowledging(_ accepted: Set<QuotaEvent>) -> QuotaEventState {
+    var result = state
+    for event in events where !accepted.contains(event) {
+      switch event.kind {
+      case .threshold:
+        result.thresholdLatches.removeAll { $0.accountID == event.accountID && $0.metricID == event.metricID }
+        result.thresholdLatches += inputState.thresholdLatches.filter { $0.accountID == event.accountID && $0.metricID == event.metricID }
+      case .reset:
+        result.resetMarks.removeAll { $0.accountID == event.accountID && $0.metricID == event.metricID }
+        result.resetMarks += inputState.resetMarks.filter { $0.accountID == event.accountID && $0.metricID == event.metricID }
+      case .expiringUnused:
+        result.expiringUnusedMarks.removeAll { $0.accountID == event.accountID && $0.metricID == event.metricID }
+        result.expiringUnusedMarks += inputState.expiringUnusedMarks.filter { $0.accountID == event.accountID && $0.metricID == event.metricID }
+      case .failure, .recovered:
+        result.failureLatches.removeAll { $0.accountID == event.accountID }
+        result.failureLatches += inputState.failureLatches.filter { $0.accountID == event.accountID }
+      }
+    }
+    return result
+  }
 }
 
 /// Turns consecutive snapshots into alert events. Pure: the caller owns the
@@ -184,6 +208,12 @@ public enum QuotaEvents {
     state: QuotaEventState,
     accountNames: [String: String] = [:]
   ) -> QuotaEventDetection {
+    // Reject replayed snapshots before pruning or interpreting their failures.
+    guard current.generatedAt <= now,
+          previous.map({ current.generatedAt >= $0.generatedAt }) ?? true else {
+      return QuotaEventDetection(events: [], state: state, inputState: state)
+    }
+
     var next = state
     let failingIDs = Set(current.failures.map(\.accountID))
     // Like metrics below: an account missing from one snapshot keeps its
@@ -191,15 +221,22 @@ public enum QuotaEvents {
     let previousAccountIDs = (previous?.providers.map(\.accountID) ?? []) + (previous?.failures.map(\.accountID) ?? [])
     next.keepAccounts(Set(current.providers.map(\.accountID)).union(failingIDs).union(previousAccountIDs))
 
-    var events = detectFailures(in: current, failingIDs: failingIDs, accountNames: accountNames, config: config, state: &next)
-
     let previousUsage = Dictionary(
       (previous?.providers ?? []).map { ($0.accountID, $0) },
       uniquingKeysWith: { first, _ in first }
     )
+    let freshUsage = current.providers.filter { usage in
+      !failingIDs.contains(usage.accountID)
+        && usage.fetchedAt >= current.generatedAt
+        && usage.fetchedAt <= now
+        && (previousUsage[usage.accountID].map { usage.fetchedAt > $0.fetchedAt } ?? true)
+    }
+    next.failureLatches.removeAll { !config.failureKinds.contains($0.kind) }
+    var events = detectFailures(in: current, freshUsage: freshUsage, accountNames: accountNames, config: config, state: &next)
+
     // A failing account's usage is carried over from an earlier refresh, so it
     // says nothing new: its alerts neither fire nor re-arm until it refreshes.
-    for usage in current.providers where !failingIDs.contains(usage.accountID) {
+    for usage in freshUsage {
       let previousMetrics = Dictionary(
         (previousUsage[usage.accountID]?.metrics ?? []).map { ($0.id, $0) },
         uniquingKeysWith: { first, _ in first }
@@ -210,6 +247,8 @@ public enum QuotaEvents {
 
       for metric in usage.metrics where !metric.isUnlimited {
         guard let remaining = metric.remainingPercent else { continue }
+        // An expired reading cannot prove either recovery or a new window.
+        if let resetAt = metric.resetAt, resetAt <= now { continue }
         let reading = Reading(usage: usage, metric: metric, remaining: remaining)
 
         if let event = detectReset(reading, previous: previousMetrics[metric.id], now: now, config: config, state: &next) {
@@ -224,7 +263,7 @@ public enum QuotaEvents {
       }
     }
 
-    return QuotaEventDetection(events: events, state: next)
+    return QuotaEventDetection(events: events, state: next, inputState: state)
   }
 
   private struct Reading {
@@ -254,7 +293,7 @@ public enum QuotaEvents {
 
   private static func detectFailures(
     in current: QuotaSnapshot,
-    failingIDs: Set<String>,
+    freshUsage: [ProviderUsage],
     accountNames: [String: String],
     config: QuotaEventConfig,
     state: inout QuotaEventState
@@ -283,7 +322,7 @@ public enum QuotaEvents {
 
     // Only a clean refresh clears a failure. An auth failure that turns into a
     // network error has not been fixed, so its latch stays.
-    for usage in current.providers where !failingIDs.contains(usage.accountID) {
+    for usage in freshUsage {
       guard let index = state.failureLatches.firstIndex(where: { $0.accountID == usage.accountID }) else { continue }
 
       let latch = state.failureLatches.remove(at: index)
@@ -354,7 +393,7 @@ public enum QuotaEvents {
     state.thresholdLatches.removeAll { latch in
       guard reading.isSame(accountID: latch.accountID, metricID: latch.metricID) else { return false }
       let recovered = reading.remaining > latch.threshold + config.hysteresis
-      let windowEnded = latch.resetAt.map { now >= $0 } ?? false
+      let windowEnded = latch.resetAt.map { reading.usage.fetchedAt >= $0 } ?? false
       return recovered || windowEnded
     }
 
