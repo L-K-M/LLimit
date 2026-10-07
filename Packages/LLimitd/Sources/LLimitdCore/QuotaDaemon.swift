@@ -73,9 +73,14 @@ public final class QuotaDaemon {
 
   // MARK: - Configuration
 
+  public enum ConfigurationAccess {
+    case inspect
+    case owner
+  }
+
   /// Loads settings and the last snapshot from disk. A missing settings file yields
   /// defaults; an unreadable one blocks saving (see `configurationLoadFailed`).
-  public func loadConfiguration() {
+  public func loadConfiguration(access: ConfigurationAccess = .owner) {
     do {
       settings = try settingsStore.load()
       settingsBase = settings
@@ -87,8 +92,9 @@ public final class QuotaDaemon {
     }
 
     do {
-      snapshot = try snapshotStore.load(policy: .recover)
-      reconcileSnapshotWithCurrentAccounts()
+      let policy: StoreReadPolicy = access == .owner ? .recover : .preserve
+      snapshot = try snapshotStore.load(policy: policy)
+      if access == .owner { reconcileSnapshotWithCurrentAccounts() }
     } catch {
       statusMessage = "Could not load snapshot: \(error.localizedDescription)"
     }
