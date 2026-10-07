@@ -32,6 +32,22 @@ public struct KimiQuotaClient: QuotaProviderClient {
   private let endpoint: URL
   private let httpClient: any HTTPClient
 
+  private enum ReportedTimeUnit: String {
+    case minute = "TIME_UNIT_MINUTE"
+    case hour = "TIME_UNIT_HOUR"
+    case day = "TIME_UNIT_DAY"
+    case week = "TIME_UNIT_WEEK"
+
+    var seconds: Int {
+      switch self {
+      case .minute: return 60
+      case .hour: return 3_600
+      case .day: return 86_400
+      case .week: return 604_800
+      }
+    }
+  }
+
   public init(
     endpoint: URL = URL(string: "https://api.kimi.com/coding/v1/usages")!,
     httpClient: any HTTPClient
@@ -81,8 +97,11 @@ public struct KimiQuotaClient: QuotaProviderClient {
       }
     }
 
-    if let windows = payload["limits"] as? [[String: Any]] {
-      for (index, item) in windows.enumerated() {
+    if let windows = payload["limits"] as? [Any] {
+      // One malformed element cannot hide every readable window. Preserve
+      // original positions for neutral fallback ids.
+      for (index, rawItem) in windows.enumerated() {
+        guard let item = rawItem as? [String: Any] else { continue }
         let detail = (item["detail"] as? [String: Any]) ?? item
         let window = (item["window"] as? [String: Any]) ?? [:]
         let descriptor = windowDescriptor(item: item, detail: detail, window: window, index: index)
@@ -177,7 +196,10 @@ public struct KimiQuotaClient: QuotaProviderClient {
 
     let cadence = "\(unit.count)-\(unit.name)"
     // Scale the reported count, not its folded display unit (300 min = 5 h).
-    let windowSeconds = unit.secondsPerUnit.flatMap { reportedWindowSeconds(count: rawCount, unitSeconds: $0) }
+    let rawDuration = window["duration"] ?? item["duration"] ?? detail["duration"]
+    let windowSeconds = ReportedTimeUnit(rawValue: timeUnit).flatMap {
+      reportedWindowSeconds(value: rawDuration, unitSeconds: $0.seconds)
+    }
     return (id: "window-\(cadence)", label: override ?? "\(cadence) limit", windowSeconds: windowSeconds)
   }
 
@@ -185,24 +207,24 @@ public struct KimiQuotaClient: QuotaProviderClient {
   /// word, folding whole-hour minute counts (300 minutes → 5 hours) the way
   /// kimi-cli renders them. Unknown units return nil rather than fabricating
   /// a cadence the payload never stated.
-  private func windowUnit(count: Int, timeUnit: String) -> (count: Int, name: String, secondsPerUnit: Int?)? {
+  private func windowUnit(count: Int, timeUnit: String) -> (count: Int, name: String)? {
     if timeUnit.contains("MINUTE") {
       if count >= 60, count % 60 == 0 {
-        return (count / 60, "hour", 60)
+        return (count / 60, "hour")
       }
-      return (count, "minute", 60)
+      return (count, "minute")
     }
     if timeUnit.contains("HOUR") {
-      return (count, "hour", 3_600)
+      return (count, "hour")
     }
     if timeUnit.contains("DAY") {
-      return (count, "day", 86_400)
+      return (count, "day")
     }
     if timeUnit.contains("WEEK") {
-      return (count, "week", 604_800)
+      return (count, "week")
     }
     if timeUnit.contains("MONTH") {
-      return (count, "month", nil)
+      return (count, "month")
     }
     return nil
   }

@@ -11,7 +11,8 @@ public func defaultRingMetrics(for usage: ProviderUsage) -> [UsageMetric] {
   case .openAI:
     preferredIDs = ["primary", "secondary"]
   case .zhipu, .zai:
-    preferredIDs = ["tokens", "mcp"]
+    // Both token caps bind requests; weekly precedes the separate MCP budget.
+    preferredIDs = ["tokens", "tokens-weekly", "mcp"]
   case .kimi:
     // 5-hour window first, weekly plan quota second — same short-then-long
     // ordering as Anthropic and Zhipu. Window ids are duration-based

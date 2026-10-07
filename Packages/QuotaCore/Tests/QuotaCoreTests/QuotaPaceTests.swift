@@ -64,6 +64,10 @@ final class QuotaPaceTests: XCTestCase {
     XCTAssertNil(reportedWindowSeconds(count: -5, unitSeconds: 60))
     XCTAssertNil(reportedWindowSeconds(count: Int.max, unitSeconds: 60))
     XCTAssertNil(reportedWindowSeconds(count: 5, unitSeconds: 0))
+    XCTAssertEqual(reportedWindowSeconds(value: "300", unitSeconds: 60), 18_000)
+    for value in ["300 minutes", "1.5", "1e300", true] as [Any] {
+      XCTAssertNil(reportedWindowSeconds(value: value, unitSeconds: 60))
+    }
   }
 
   func testSnapshotCompatibilityAndDurationRoundTrip() throws {
@@ -85,6 +89,20 @@ final class QuotaPaceTests: XCTestCase {
       provider: .metaMuse, isEnabled: true, credentials: [CredentialField.metaMuseAPIKey: "fixture-key"]
     ), now: now)
     XCTAssertEqual(muse.metrics.map(\.windowSeconds), [18_000, nil])
+  }
+
+  func testFractionalCountsAndUnrecognizedUnitsDoNotInventDurations() async throws {
+    let kimiBody = #"{"limits":[{"window":{"duration":1.5,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","used":"5"}},{"window":{"duration":1,"timeUnit":"TIME_UNIT_HOUR_FUTURE"},"detail":{"limit":"100","used":"5"}}]}"#
+    let kimi = try await KimiQuotaClient(httpClient: PaceFixtureHTTP(body: kimiBody)).fetchUsage(configuration: ProviderRuntimeConfiguration(
+      provider: .kimi, isEnabled: true, credentials: [CredentialField.kimiAPIKey: "fixture-key"]
+    ), now: now)
+    XCTAssertEqual(kimi.metrics.map(\.windowSeconds), [nil, nil])
+
+    let museBody = "event: response.subscription_usage\ndata: " + #"{"type":"response.subscription_usage","window":{"used_percent":40,"window_duration_mins":1.5}}"# + "\n\n"
+    let muse = try await MetaMuseQuotaClient(httpClient: PaceFixtureHTTP(body: museBody)).fetchUsage(configuration: ProviderRuntimeConfiguration(
+      provider: .metaMuse, isEnabled: true, credentials: [CredentialField.metaMuseAPIKey: "fixture-key"]
+    ), now: now)
+    XCTAssertNil(muse.metrics.first?.windowSeconds)
   }
 
   private func metric(id: String = "primary", remaining: Int? = 50, resetIn: TimeInterval? = 3_600,

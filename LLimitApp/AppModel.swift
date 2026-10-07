@@ -208,6 +208,9 @@ final class AppModel: ObservableObject {
 
     do {
       var refreshed = await refreshService.refresh(configurations: enabledConfigs, credentialFailures: claudeFailures)
+      // A cancelled launch-time refresh has nothing to publish. Completed
+      // usage and genuine failures still survive a late cancellation.
+      if Task.isCancelled, refreshed.providers.isEmpty, refreshed.failures.isEmpty { return }
       refreshed = removingChangedVeniceResults(from: refreshed, configurations: enabledConfigs)
       try refreshService.save(refreshed)
       let initiallySaved = refreshed

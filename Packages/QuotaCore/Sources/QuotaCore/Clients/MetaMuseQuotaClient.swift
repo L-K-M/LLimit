@@ -96,15 +96,14 @@ public struct MetaMuseQuotaClient: QuotaProviderClient {
 
     if let window = snapshot?.window {
       let resetAt = parseDateValue(window.fields["resets_at"])
-      let durationMins = parseNumeric(window.fields["window_duration_mins"]).flatMap(roundedInt)
       metrics.append(
         UsageMetric(
           id: "window",
-          label: windowLabel(durationMins: durationMins),
+          label: windowLabel(durationMins: parseNumeric(window.fields["window_duration_mins"]).flatMap(roundedInt)),
           remainingPercent: percentRemaining(fromUsedPercent: window.usedPercent),
           resetAt: resetAt,
           resetIn: resetAt.map { formatResetCountdown(to: $0, now: now) },
-          windowSeconds: durationMins.flatMap { reportedWindowSeconds(count: $0, unitSeconds: 60) }
+          windowSeconds: reportedWindowSeconds(value: window.fields["window_duration_mins"], unitSeconds: 60)
         )
       )
     }

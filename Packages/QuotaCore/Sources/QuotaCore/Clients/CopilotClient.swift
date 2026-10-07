@@ -74,7 +74,7 @@ public struct CopilotClient: QuotaProviderClient {
 
     let (data, response) = try await httpClient.data(for: request)
     guard (200..<300).contains(response.statusCode) else {
-      let kind: QuotaErrorKind = response.statusCode == 401 || response.statusCode == 403 ? .auth : .api
+      let kind = errorKind(forStatusCode: response.statusCode)
       throw ProviderClientError(kind: kind, message: "Copilot billing API failed (HTTP \(response.statusCode)). Check the account credentials or try again later.", statusCode: response.statusCode)
     }
 
@@ -214,13 +214,14 @@ public struct CopilotClient: QuotaProviderClient {
 
     let (data, response) = try await httpClient.data(for: request)
     guard (200..<300).contains(response.statusCode) else {
-      if response.statusCode == 429 {
+      if response.statusCode == HTTPStatusCode.tooManyRequests {
         throw ProviderClientError(kind: .rateLimit, message: "Copilot quota API is rate limiting requests. Try again later.", statusCode: response.statusCode)
       }
-      if [401, 403, 404].contains(response.statusCode) {
+      if [HTTPStatusCode.unauthorized, HTTPStatusCode.forbidden, HTTPStatusCode.notFound].contains(response.statusCode) {
         return nil
       }
-      return nil
+      // Only rejected auth modes fall through. An outage is not a bad token.
+      throw ProviderClientError(kind: .api, message: "Copilot quota API failed (HTTP \(response.statusCode)). Try again later.", statusCode: response.statusCode)
     }
 
     do {
@@ -271,8 +272,11 @@ public struct CopilotClient: QuotaProviderClient {
 
       let (data, response) = try await httpClient.data(for: request)
       guard (200..<300).contains(response.statusCode) else {
-        if response.statusCode == 429 {
+        if response.statusCode == HTTPStatusCode.tooManyRequests {
           throw ProviderClientError(kind: .rateLimit, message: "Copilot token exchange is rate limiting requests. Try again later.", statusCode: response.statusCode)
+        }
+        if HTTPStatusCode.serverErrors.contains(response.statusCode) {
+          throw ProviderClientError(kind: .api, message: "Copilot token exchange failed (HTTP \(response.statusCode)). Try again later.", statusCode: response.statusCode)
         }
         continue
       }

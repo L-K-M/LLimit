@@ -77,3 +77,15 @@ func reportedWindowSeconds(count: Int, unitSeconds: Int) -> Int? {
   let (seconds, overflow) = count.multipliedReportingOverflow(by: unitSeconds)
   return overflow ? nil : seconds
 }
+
+/// Wire durations must be whole numbers, not rounded or numeric prefixes.
+func reportedWindowSeconds(value: Any?, unitSeconds: Int) -> Int? {
+  let count: Double?
+  if let text = value as? String {
+    count = Double(text.trimmingCharacters(in: .whitespacesAndNewlines))
+  } else {
+    count = parseNumeric(value)
+  }
+  guard let count, let integer = roundedInt(count), Double(integer) == count else { return nil }
+  return reportedWindowSeconds(count: integer, unitSeconds: unitSeconds)
+}

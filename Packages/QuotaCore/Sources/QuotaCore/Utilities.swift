@@ -112,6 +112,48 @@ func nonEmptyString(_ value: Any?) -> String? {
   return trimmed.isEmpty ? nil : trimmed
 }
 
+enum RetryAfterPolicy {
+  static let maximumDelay: TimeInterval = 24 * 3_600
+
+  static func boundedDelay(_ delay: TimeInterval?) -> TimeInterval? {
+    guard let delay, delay.isFinite, delay > 0 else { return nil }
+    return min(delay, maximumDelay)
+  }
+}
+
+enum HTTPStatusCode {
+  static let ok = 200
+  static let unauthorized = 401
+  static let forbidden = 403
+  static let notFound = 404
+  static let tooManyRequests = 429
+  static let serverErrors = 500..<600
+}
+
+func errorKind(forStatusCode statusCode: Int) -> QuotaErrorKind {
+  switch statusCode {
+  case HTTPStatusCode.unauthorized, HTTPStatusCode.forbidden: return .auth
+  case HTTPStatusCode.tooManyRequests: return .rateLimit
+  default: return .api
+  }
+}
+
+/// RFC 9110 delta-seconds or IMF-fixdate. Malformed guidance has no cooldown.
+func parseRetryAfter(_ value: String?, now: Date) -> TimeInterval? {
+  guard let value = nonEmptyString(value) else { return nil }
+  if value.allSatisfy({ ("0"..."9").contains($0) }) {
+    return RetryAfterPolicy.boundedDelay(Double(value))
+  }
+
+  // Refreshes are concurrent; keep this cold-path formatter local.
+  let formatter = DateFormatter()
+  formatter.locale = Locale(identifier: "en_US_POSIX")
+  formatter.timeZone = TimeZone(secondsFromGMT: 0)
+  formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss 'GMT'"
+  guard let date = formatter.date(from: value), formatter.string(from: date) == value else { return nil }
+  return RetryAfterPolicy.boundedDelay(date.timeIntervalSince(now))
+}
+
 func formatIntLike(_ value: Double?) -> String? {
   guard let value, value.isFinite else { return nil }
   if let integer = roundedInt(value), Double(integer) == value {
