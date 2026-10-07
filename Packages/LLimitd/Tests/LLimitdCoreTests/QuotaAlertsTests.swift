@@ -245,6 +245,7 @@ final class QuotaAlertsTests: XCTestCase {
     runner.run(executable: tempDirectory.appendingPathComponent("missing"), arguments: [], environment: [:], completion: record)
     runner.waitUntilIdle()
 
+    // The runner is serial: one child at a time, completions in queue order.
     XCTAssertEqual(outcomes, [.exited(0), .exited(3), .failedToLaunch])
     XCTAssertTrue(loggedText.contains("fails exited with status 3"))
     XCTAssertTrue(loggedText.contains("Could not start missing"))
@@ -281,6 +282,31 @@ final class QuotaAlertsTests: XCTestCase {
       }
     }
     wait(for: [reaped], timeout: 10)
+  }
+
+  func testHookThatLeavesItsProcessGroupIsStillStopped() throws {
+    guard let python = ExecutableLocator.find("python3", environment: ProcessInfo.processInfo.environment) else {
+      throw XCTSkip("needs python3 to move a process into another group")
+    }
+    let pidFile = tempDirectory.appendingPathComponent("pid")
+    // Joins the test runner's process group (same session, so allowed) and
+    // ignores SIGTERM: only signals sent to its own pid can reach it.
+    let program = "import os, signal, time; os.setpgid(0, os.getpgid(os.getppid())); "
+      + "signal.signal(signal.SIGTERM, signal.SIG_IGN); open('\(pidFile.path)', 'w').write(str(os.getpid())); time.sleep(30)"
+    let escaping = try script("escaping", "exec \"\(python.path)\" -c \"\(program)\"")
+    let runner = ChildProcessRunner(timeout: 1.5, log: log)
+    let finished = expectation(description: "hook stopped")
+    var outcome: ChildProcessRunner.Outcome?
+
+    runner.run(executable: escaping, arguments: [], environment: [:]) {
+      outcome = $0
+      finished.fulfill()
+    }
+
+    wait(for: [finished], timeout: 10)
+    XCTAssertEqual(outcome, .timedOut)
+    let pid = try XCTUnwrap(Int32(String(decoding: try Data(contentsOf: pidFile), as: UTF8.self)))
+    XCTAssertNotEqual(getpgid(pid), getpgid(0), "the hook should have been reaped")
   }
 
   func testHookStopsOnSIGTERMEvenThoughTheDaemonIgnoresIt() throws {
