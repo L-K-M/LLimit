@@ -420,6 +420,17 @@ public final class QuotaDaemon {
       }
     }
 
+    // Append once; forecast and display reuse that decoded archive.
+    let archive: QuotaHistoryStore.Archive?
+    do {
+      archive = try historyStore.append(refreshed)
+    } catch {
+      log("[llimitd] History append failed: \(error.localizedDescription)")
+      archive = nil
+    }
+    refreshed = refreshed.applyingPaceEstimates(from: archive?.snapshots ?? [],
+      accounts: settings.accounts, now: Date(), refreshInterval: TimeInterval(settings.refreshIntervalMinutes * 60))
+
     do {
       // The lock covers validation and publication, never the network fetch.
       // Otherwise an edit between validation and save could resurrect old data.

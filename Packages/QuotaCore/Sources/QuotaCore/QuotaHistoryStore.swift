@@ -1,6 +1,14 @@
 import Foundation
 
 public final class QuotaHistoryStore: @unchecked Sendable {
+  private static let secondsPerDay: TimeInterval = 24 * 60 * 60
+
+  /// Reuse the decoded archive and its bytes for views and mirror stores.
+  public struct Archive: Sendable {
+    public let snapshots: [QuotaSnapshot]
+    fileprivate let encoded: Data
+  }
+
   private let fileURL: URL
   private let encoder: JSONEncoder
   private let decoder: JSONDecoder
@@ -9,9 +17,13 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     self.init(fileURL: fileURL, decoder: JSONDecoder())
   }
 
-  init(fileURL: URL, decoder: JSONDecoder) {
+  convenience init(fileURL: URL, decoder: JSONDecoder) {
+    self.init(fileURL: fileURL, encoder: JSONEncoder(), decoder: decoder)
+  }
+
+  init(fileURL: URL, encoder: JSONEncoder, decoder: JSONDecoder) {
     self.fileURL = fileURL
-    self.encoder = JSONEncoder()
+    self.encoder = encoder
     self.decoder = decoder
     encoder.dateEncodingStrategy = .iso8601
     decoder.dateDecodingStrategy = .iso8601
@@ -44,62 +56,114 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     }
   }
 
-  /// Loads only the snapshots within the last `days`, capped to the newest `maxEntries`.
-  /// The widget uses this so a large history file can't exhaust the extension's memory
-  /// budget while rendering the (at most 30-day) trend chart.
+  /// Decodes the archive, then selects recent source/publication activity.
   public func loadRecent(days: Int, maxEntries: Int = 3_000, now: Date = Date()) throws -> [QuotaSnapshot] {
-    let cutoff = now.addingTimeInterval(-Double(max(1, days)) * 86_400)
-    let recent = try load()
-      .filter { $0.generatedAt >= cutoff }
-      .sorted { $0.generatedAt < $1.generatedAt }
+    Self.recent(try load(), days: days, now: now, maxEntries: maxEntries)
+  }
 
-    if recent.count > max(1, maxEntries) {
-      return Array(recent.suffix(max(1, maxEntries)))
-    }
-    return recent
+  public static func recent(
+    _ history: [QuotaSnapshot], days: Int, now: Date, maxEntries: Int = 3_000
+  ) -> [QuotaSnapshot] {
+    let cutoff = now.addingTimeInterval(-Double(max(1, days)) * Self.secondsPerDay)
+    return cappedSnapshots(history.filter { effectiveActivityDate(for: $0) >= cutoff }, maxEntries: maxEntries)
   }
 
   public func save(_ snapshots: [QuotaSnapshot]) throws {
-    try FileManager.default.createDirectory(
-      at: fileURL.deletingLastPathComponent(),
-      withIntermediateDirectories: true
-    )
-
+    try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
     try withStoreFileLock(at: fileURL) { try saveLocked(snapshots) }
   }
 
   private func saveLocked(_ snapshots: [QuotaSnapshot]) throws {
     let normalized = snapshots.sorted { $0.generatedAt < $1.generatedAt }
-    let data = try encoder.encode(normalized)
-    try writeOwnerOnlyAtomicallyLocked(data, to: fileURL)
+    try writeOwnerOnlyAtomicallyLocked(encoder.encode(normalized), to: fileURL)
   }
 
+  public func save(_ archive: Archive) throws {
+    try FileManager.default.createDirectory(
+      at: fileURL.deletingLastPathComponent(),
+      withIntermediateDirectories: true
+    )
+
+    // Mirrors reuse encoded bytes, but serialize against owner recovery too.
+    try withStoreFileLock(at: fileURL) {
+      try writeOwnerOnlyAtomicallyLocked(archive.encoded, to: fileURL)
+    }
+  }
+
+  /// Archives new fetches and changed failure states. Equal fresh values survive.
+  @discardableResult
   public func append(
     _ snapshot: QuotaSnapshot,
     keepDays: Int = 45,
     maxEntries: Int = 3_000
-  ) throws {
+  ) throws -> Archive {
     try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-    try withStoreFileLock(at: fileURL) {
+    return try withStoreFileLock(at: fileURL) {
       try appendLocked(snapshot, keepDays: keepDays, maxEntries: maxEntries)
     }
   }
 
-  private func appendLocked(_ snapshot: QuotaSnapshot, keepDays: Int, maxEntries: Int) throws {
-    var history = try loadLocked(policy: .recover)
-    history.append(snapshot)
+  private func appendLocked(_ snapshot: QuotaSnapshot, keepDays: Int, maxEntries: Int) throws -> Archive {
+    let original = try loadLocked(policy: .recover)
+    var history = original
 
     let cutoffDays = max(1, keepDays)
-    let cutoffDate = snapshot.generatedAt.addingTimeInterval(-Double(cutoffDays) * 86_400)
-    history = history.filter { $0.generatedAt >= cutoffDate }
-    history.sort { $0.generatedAt < $1.generatedAt }
+    let activity = max(Self.effectiveActivityDate(for: snapshot), history.map(Self.effectiveActivityDate).max() ?? .distantPast)
+    let cutoffDate = activity.addingTimeInterval(-Double(cutoffDays) * Self.secondsPerDay)
+    let observations = QuotaObservations.newSuccessfulUsage(in: snapshot, excluding: history)
+      .filter { $0.fetchedAt >= cutoffDate }
+    let failures = Self.changedFailures(in: snapshot, history: history)
 
-    let limit = max(1, maxEntries)
-    if history.count > limit {
-      history = Array(history.suffix(limit))
+    // Dedupe before pruning: expired copies must never resurrect observations.
+    if !observations.isEmpty || !failures.isEmpty {
+      var entry = snapshot
+      entry.providers = observations
+      entry.failures = failures
+      history.append(entry)
     }
 
-    try saveLocked(history)
+    history = Self.cappedSnapshots(history.filter { Self.effectiveActivityDate(for: $0) >= cutoffDate }, maxEntries: maxEntries)
+    let encoded = try encoder.encode(history)
+    if history != original { try writeOwnerOnlyAtomicallyLocked(encoded, to: fileURL) }
+    return Archive(snapshots: history, encoded: encoded)
+  }
+
+  private static func effectiveActivityDate(for snapshot: QuotaSnapshot) -> Date {
+    snapshot.providers.reduce(snapshot.generatedAt) { max($0, $1.fetchedAt) }
+  }
+
+  private static func cappedSnapshots(_ snapshots: [QuotaSnapshot], maxEntries: Int) -> [QuotaSnapshot] {
+    snapshots.sorted { lhs, rhs in
+      let left = effectiveActivityDate(for: lhs)
+      let right = effectiveActivityDate(for: rhs)
+      if left != right { return left < right }
+      return lhs.generatedAt < rhs.generatedAt
+    }.suffix(max(1, maxEntries)).sorted { $0.generatedAt < $1.generatedAt }
+  }
+
+  private struct FailureKey: Hashable {
+    let provider: QuotaProvider
+    let accountID: String
+  }
+
+  private static func changedFailures(in snapshot: QuotaSnapshot, history: [QuotaSnapshot]) -> [ProviderFailure] {
+    var states: [FailureKey: ProviderFailure] = [:]
+    for entry in history.sorted(by: { effectiveActivityDate(for: $0) < effectiveActivityDate(for: $1) }) {
+      for usage in entry.providers {
+        states[FailureKey(provider: usage.provider, accountID: usage.accountID)] = nil
+      }
+      for failure in entry.failures {
+        states[FailureKey(provider: failure.provider, accountID: failure.accountID)] = failure
+      }
+    }
+
+    // Completion order and duplicate failures do not represent state changes.
+    return Set(snapshot.failures).filter {
+      states[FailureKey(provider: $0.provider, accountID: $0.accountID)] != $0
+    }.sorted {
+      ($0.provider.rawValue, $0.accountID, $0.kind.rawValue, $0.message)
+        < ($1.provider.rawValue, $1.accountID, $1.kind.rawValue, $1.message)
+    }
   }
 
   public func remove(accountIDs: Set<String>) throws {
@@ -108,12 +172,14 @@ public final class QuotaHistoryStore: @unchecked Sendable {
   }
 
   private func removeLocked(accountIDs: Set<String>) throws {
-    let filtered = try loadLocked(policy: .recover).map { snapshot in
+    let history = try loadLocked(policy: .recover)
+    let filtered = history.map { snapshot in
       var filtered = snapshot
       filtered.providers.removeAll { accountIDs.contains($0.accountID) }
       filtered.failures.removeAll { accountIDs.contains($0.accountID) }
       return filtered
     }
+    guard filtered != history else { return }
     try saveLocked(filtered)
   }
 }

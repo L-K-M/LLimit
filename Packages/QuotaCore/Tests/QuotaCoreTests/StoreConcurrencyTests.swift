@@ -91,9 +91,11 @@ final class StoreConcurrencyTests: XCTestCase {
     let secondAppend = Task.detached { try QuotaHistoryStore(fileURL: url).append(second) }
     try await Task.sleep(nanoseconds: 50_000_000)
     decoder.resume.signal()
-    try await firstAppend.value
-    try await secondAppend.value
+    let firstArchive = try await firstAppend.value
+    let secondArchive = try await secondAppend.value
 
+    XCTAssertEqual(firstArchive.snapshots, [first])
+    XCTAssertEqual(secondArchive.snapshots, [first, second])
     XCTAssertEqual(try QuotaHistoryStore(fileURL: url).load(), [first, second])
   }
 

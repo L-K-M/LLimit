@@ -42,6 +42,7 @@ func printUsage() {
                   [--kind <kind>] [--format <template>]
       llimit resets [--json] [--days N]
       llimit export [--format csv|json] [--days N]
+      llimit trend [--days <n>] [--account <prefix>]
       llimit daemon
       llimit paths
       llimit version
@@ -393,6 +394,34 @@ func runRefresh() async {
   print(StatusRenderer.humanReadable(snapshot: daemon.snapshot))
 }
 
+func runTrend(_ args: [String]) {
+  var days = 7
+  var accountPrefix: String?
+  var index = 0
+  while index < args.count {
+    let option = args[index]
+    guard option == "--days" || option == "--account" else { fail("unknown trend option: \(option)") }
+    index += 1
+    guard index < args.count else { fail("\(option) needs a value") }
+    if option == "--days" {
+      guard let value = Int(args[index]), value > 0 else { fail("--days needs a positive integer") }
+      days = value
+    } else {
+      let value = args[index].trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !value.isEmpty, !value.hasPrefix("--") else { fail("--account needs an id or title prefix") }
+      accountPrefix = value
+    }
+    index += 1
+  }
+
+  do {
+    let history = try QuotaHistoryStore(fileURL: LinuxPaths().historyFileURL).loadRecent(days: days)
+    print(TrendRenderer.render(history: history, days: days, accountPrefix: accountPrefix))
+  } catch {
+    fail("couldn't read history: \(error.localizedDescription)")
+  }
+}
+
 /// Retained so the signal sources stay alive for the process lifetime.
 var shutdownSignalSources: [DispatchSourceSignal] = []
 
@@ -470,6 +499,8 @@ case "resets":
   runResets(Array(arguments.dropFirst()))
 case "export":
   runExport(Array(arguments.dropFirst()))
+case "trend":
+  runTrend(Array(arguments.dropFirst()))
 case "daemon":
   await runDaemon()
 case "paths":
