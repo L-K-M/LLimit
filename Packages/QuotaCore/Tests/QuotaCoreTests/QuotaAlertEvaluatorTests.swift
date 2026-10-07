@@ -146,9 +146,10 @@ final class QuotaAlertEvaluatorTests: XCTestCase {
     XCTAssertEqual(decoded.warningPercent, 10)
     XCTAssertLessThan(decoded.criticalPercent, decoded.warningPercent)
     XCTAssertFalse(decoded.notifyOnFailure)
-    // Missing keys fall back to defaults (alerts stay opt-in).
+    // Missing keys fall back to the default settings exactly (alerts stay
+    // opt-in) — pinning the whole struct keeps defaults from drifting.
     let empty = try JSONDecoder().decode(QuotaAlertSettings.self, from: Data(#"{}"#.utf8))
-    XCTAssertFalse(empty.enabled)
+    XCTAssertEqual(empty, QuotaAlertSettings())
   }
 
   func testCriticalCanNeverMeetOrExceedWarning() {
