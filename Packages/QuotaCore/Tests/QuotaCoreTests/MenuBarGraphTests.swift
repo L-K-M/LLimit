@@ -46,6 +46,15 @@ final class MenuBarGraphTests: XCTestCase {
     XCTAssertTrue(MenuBarGraph.bars(snapshot: nil, accounts: accounts, now: now, staleAfter: staleAfter).isEmpty)
   }
 
+  func testSnapshotEntriesForUnknownAccountsAreIgnored() {
+    let deleted = ProviderAccount(id: "deleted", provider: .anthropic, displayName: "Ghost")
+    let result = bars(
+      providers: [usage(accounts[0], remaining: 90), usage(deleted, remaining: 50)],
+      failures: [failure(deleted, kind: .auth)]
+    )
+    XCTAssertEqual(result.map(\.accountID), ["zai"])
+  }
+
   // MARK: - Failures and staleness
 
   func testCarriedFailureKeepsLastKnownLevelButIsFailing() {
@@ -85,6 +94,23 @@ final class MenuBarGraphTests: XCTestCase {
     )
   }
 
+  func testFailureTakesPrecedenceOverStaleAndIsCountedOnce() {
+    let staleAndFailing = usage(accounts[1], remaining: 20, fetchedAt: now.addingTimeInterval(-2 * staleAfter))
+    let result = bars(
+      providers: [usage(accounts[0], remaining: 90), staleAndFailing],
+      failures: [failure(accounts[1], kind: .auth)]
+    )
+    XCTAssertEqual(result.map(\.freshness), [.current, .failing(.auth)])
+    XCTAssertEqual(
+      MenuBarGraph.tooltip(for: result),
+      """
+      LLimit: 2 accounts, 1 failing
+      Team: 90% remaining
+      Personal: authentication failed, last known 20% remaining
+      """
+    )
+  }
+
   func testOldUsageWithoutFailureIsStale() {
     let fresh = usage(accounts[0], remaining: 90, fetchedAt: now.addingTimeInterval(-staleAfter))
     let old = usage(accounts[1], remaining: 40, fetchedAt: now.addingTimeInterval(-staleAfter - 1))
@@ -94,11 +120,39 @@ final class MenuBarGraphTests: XCTestCase {
   }
 
   func testWindowResetSinceFetchMarksUsageStale() {
-    var reset = usage(accounts[0], remaining: 5)
+    // Fetched well inside the fresh window, so only the reset can make it stale.
+    let fetchedAt = now.addingTimeInterval(-1_800)
+    var reset = usage(accounts[0], remaining: 5, fetchedAt: fetchedAt)
     reset.metrics[0].resetAt = now
-    var pending = usage(accounts[1], remaining: 5)
+    var pending = usage(accounts[1], remaining: 5, fetchedAt: fetchedAt)
     pending.metrics[0].resetAt = now.addingTimeInterval(60)
     XCTAssertEqual(bars(providers: [reset, pending]).map(\.freshness), [.stale, .current])
+  }
+
+  func testResetAlreadyPastAtFetchDoesNotMarkFreshUsageStale() {
+    // Some providers report a period start or an already-passed rollover. That
+    // reset is reflected in the fetched value, so it must not flag every refresh.
+    var usage = usage(accounts[0], remaining: 40, fetchedAt: now.addingTimeInterval(-600))
+    usage.metrics[0].resetAt = now.addingTimeInterval(-1_200)
+    XCTAssertEqual(bars(providers: [usage]).map(\.freshness), [.current])
+
+    usage.metrics[0].resetAt = usage.fetchedAt
+    XCTAssertEqual(bars(providers: [usage]).map(\.freshness), [.current])
+  }
+
+  func testOnlyPercentageWindowsDriveResetStaleness() {
+    // An amount without a percentage does not set the drawn level.
+    var mixed = usage(accounts[0], remaining: 40, fetchedAt: now.addingTimeInterval(-600))
+    mixed.metrics.append(UsageMetric(id: "credits", label: "Credits", usedDisplay: "$3", resetAt: now.addingTimeInterval(-60)))
+    var amountOnly = ProviderUsage(
+      accountID: "claude", provider: .anthropic, title: "Personal",
+      metrics: [UsageMetric(id: "credits", label: "Credits", usedDisplay: "$3", resetAt: now.addingTimeInterval(-60))],
+      fetchedAt: now.addingTimeInterval(-600)
+    )
+    XCTAssertEqual(bars(providers: [mixed, amountOnly]).map(\.freshness), [.current, .current])
+
+    amountOnly.fetchedAt = now.addingTimeInterval(-staleAfter - 1)
+    XCTAssertEqual(bars(providers: [amountOnly]).map(\.freshness), [.stale])
   }
 
   func testLegacyProviderKeyedFailureBelongsOnlyToSoleAccount() {
@@ -125,6 +179,10 @@ final class MenuBarGraphTests: XCTestCase {
     XCTAssertEqual(MenuBarGraph.staleInterval(refreshIntervalMinutes: 180), 21_600)
     XCTAssertEqual(MenuBarGraph.staleInterval(refreshIntervalMinutes: 1), 3_600)
     XCTAssertEqual(MenuBarGraph.staleInterval(refreshIntervalMinutes: 999), 21_600)
+    XCTAssertEqual(MenuBarGraph.staleInterval(refreshIntervalMinutes: 45), 5_400)
+    // Out-of-range settings can never make the interval zero or negative.
+    XCTAssertEqual(MenuBarGraph.staleInterval(refreshIntervalMinutes: 0), 3_600)
+    XCTAssertEqual(MenuBarGraph.staleInterval(refreshIntervalMinutes: -30), 3_600)
   }
 
   // MARK: - Level

@@ -12,7 +12,8 @@ public enum MenuBarGraph {
   public enum Freshness: Equatable, Sendable {
     case current
     /// No current failure, but the usage is older than the stale interval or
-    /// one of its windows has reset since the fetch, so the level is outdated.
+    /// one of its percentage windows has reset since the fetch, so the level is
+    /// outdated.
     case stale
     /// The latest refresh failed. Any level is carried from an earlier success.
     case failing(QuotaErrorKind)
@@ -168,10 +169,14 @@ public enum MenuBarGraph {
       return true
     }
 
-    // A window that reset after the fetch makes the drawn level known-wrong.
+    // A percentage window that reset after the fetch makes the drawn level
+    // known-wrong. A reset at or before the fetch is already in the value, and
+    // amounts without a percentage never set the level.
     return usage.metrics.contains { metric in
-      guard !metric.isUnlimited, let resetAt = metric.resetAt else { return false }
-      return resetAt <= now
+      guard !metric.isUnlimited, metric.remainingPercent != nil, let resetAt = metric.resetAt else {
+        return false
+      }
+      return resetAt > usage.fetchedAt && resetAt <= now
     }
   }
 

@@ -168,28 +168,42 @@ private struct MenuBarIcon: View {
   let accounts: [ProviderAccount]
   let refreshIntervalMinutes: Int
 
+  /// Refreshes re-render the label, but they can stall (sleep, App Nap, a
+  /// broken schedule) exactly when data goes stale. This tick re-judges
+  /// staleness meanwhile and re-renders only when a bar's state changes.
+  private static let stalenessTicks = Timer.publish(every: 60, tolerance: 15, on: .main, in: .common).autoconnect()
+
+  /// The latest tick that changed a bar's state.
+  @State private var stalenessCheckDate = Date()
+
   var body: some View {
-    // Staleness is judged when the label renders. Every refresh re-renders it
-    // and the stale interval spans at least two refreshes, so no timer is needed.
-    let bars = MenuBarGraph.bars(
-      snapshot: snapshot,
-      accounts: accounts,
-      now: Date(),
-      staleAfter: MenuBarGraph.staleInterval(refreshIntervalMinutes: refreshIntervalMinutes)
-    )
+    let bars = projectedBars(at: max(stalenessCheckDate, Date()))
     let toolTip = MenuBarGraph.tooltip(for: bars)
     let accessibilityLabel = MenuBarGraph.accessibilityLabel(for: bars)
 
     return Image(nsImage: iconImage(for: bars, accessibilityLabel: accessibilityLabel))
       .accessibilityLabel(accessibilityLabel)
       .help(toolTip)
-      .onChange(of: toolTip, initial: true) {
-        // Deferred so the status item exists at launch and SwiftUI has finished
-        // updating its button before the summary is applied.
-        Task { @MainActor in
-          StatusItemButtonSummary.apply(toolTip: toolTip, accessibilityLabel: accessibilityLabel)
+      .onChange(of: [toolTip, accessibilityLabel], initial: true) {
+        StatusItemButtonSummary.apply(toolTip: toolTip, accessibilityLabel: accessibilityLabel)
+      }
+      .onReceive(Self.stalenessTicks) { date in
+        // For a given snapshot, time only moves bars from current to stale, so
+        // any difference since the last state-changing tick means the drawn
+        // state is out of date.
+        if projectedBars(at: date).map(\.freshness) != projectedBars(at: stalenessCheckDate).map(\.freshness) {
+          stalenessCheckDate = date
         }
       }
+  }
+
+  private func projectedBars(at date: Date) -> [MenuBarGraph.Bar] {
+    MenuBarGraph.bars(
+      snapshot: snapshot,
+      accounts: accounts,
+      now: date,
+      staleAfter: MenuBarGraph.staleInterval(refreshIntervalMinutes: refreshIntervalMinutes)
+    )
   }
 
   private func iconImage(for bars: [MenuBarGraph.Bar], accessibilityLabel: String) -> NSImage {
@@ -250,8 +264,10 @@ private enum MenuBarBarRenderer {
   /// guaranteed to reach its drawing, so the track is a fixed mid-gray that
   /// reads on light and dark menu bars instead of a dynamic label color.
   private static let trackColor = NSColor(white: 0.5, alpha: 0.35)
-  /// Reserved status accents: the dashboard's failure orange and low-value red.
-  private static let failingColor = NSColor.systemOrange
+  /// Reserved status accents, fixed in sRGB like the track: the dashboard's
+  /// failure orange (SwiftUI `.orange` under its forced dark scheme) and its
+  /// low-value red.
+  private static let failingColor = NSColor(srgbRed: 1.0, green: 159.0 / 255.0, blue: 10.0 / 255.0, alpha: 1)
   private static let exhaustedColor = NSColor(srgbRed: 1.0, green: 0.36, blue: 0.32, alpha: 1)
 
   static func imageSize(barCount: Int) -> NSSize {
@@ -292,7 +308,8 @@ private enum MenuBarBarRenderer {
       return
     }
 
-    // Inside a failing frame the stem sits clear of both dashed edges.
+    // Centered so it clears a failing frame's side edges; like a current fill,
+    // it rises from the bottom edge.
     let stem = NSRect(x: column.midX - stemWidth / 2, y: column.minY, width: stemWidth, height: CGFloat(height))
     fill(stem, color: accent)
   }
@@ -317,19 +334,42 @@ private enum MenuBarBarRenderer {
 
 /// MenuBarExtra exposes no NSStatusItem, and its label is turned into the
 /// status button's image, so `.help` and accessibility modifiers may not reach
-/// the button. LLimit owns a single status item, so every NSStatusBarButton in
-/// the process is its button (one per display). Uses public AppKit API only;
-/// when no button exists yet, nothing changes.
+/// the button. Uses public AppKit API only.
+/// Assumption: LLimit owns the only status item in this process, so every
+/// NSStatusBarButton (one per display) is its button. Revisit this scan if
+/// another status item, or a framework that creates one, is added.
 @MainActor
 private enum StatusItemButtonSummary {
+  /// The button can appear a few runloop turns after launch, so attempts follow
+  /// a short bounded schedule and stop at the first one that finds it.
+  private static let attemptDelays: [Duration] = [.zero, .milliseconds(250), .seconds(1), .seconds(3), .seconds(10)]
+  private static var pendingApply: Task<Void, Never>?
+
+  /// Applies the latest summary, replacing any attempt still waiting for the button.
   static func apply(toolTip: String, accessibilityLabel: String) {
+    pendingApply?.cancel()
+    pendingApply = Task {
+      for delay in attemptDelays {
+        try? await Task.sleep(for: delay)
+        guard !Task.isCancelled else { return }
+        if applyToButtons(toolTip: toolTip, accessibilityLabel: accessibilityLabel) {
+          return
+        }
+      }
+    }
+  }
+
+  private static func applyToButtons(toolTip: String, accessibilityLabel: String) -> Bool {
+    var applied = false
     for window in NSApp.windows {
       guard let contentView = window.contentView else { continue }
       for button in statusBarButtons(in: contentView) {
         button.toolTip = toolTip
         button.setAccessibilityLabel(accessibilityLabel)
+        applied = true
       }
     }
+    return applied
   }
 
   private static func statusBarButtons(in view: NSView) -> [NSStatusBarButton] {
