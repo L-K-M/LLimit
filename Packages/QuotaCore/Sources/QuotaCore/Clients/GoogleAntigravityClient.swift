@@ -56,8 +56,11 @@ public struct GoogleAntigravityClient: QuotaProviderClient {
       guard let modelInfo else { continue }
 
       let quotaInfo = modelInfo["quotaInfo"] as? [String: Any]
+      // A fraction outside 0...1 is malformed, not "empty" or "full" — report
+      // it as unknown rather than fabricating a 0% or 100% remaining.
       let remainingPercent = quotaInfo?["remainingFraction"]
         .flatMap { parseNumeric($0) }
+        .flatMap { (0.0...1.0).contains($0) ? $0 : nil }
         .flatMap { roundedPercent($0 * 100) }
       if let remainingPercent {
         maxUsage = max(maxUsage, 100 - remainingPercent)

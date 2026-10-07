@@ -112,6 +112,34 @@ final class GoogleAntigravityClientTests: XCTestCase {
     XCTAssertNil(usage.warning)
   }
 
+  func testOutOfRangeFractionYieldsNilRemainingPercent() async throws {
+    for fraction in ["-0.1", "1.5"] {
+      let tokenJSON = #"{"access_token": "token-abc", "expires_in": 3600}"#
+      let modelsJSON = """
+      {
+        "models": {
+          "gemini-3-pro-high": {
+            "quotaInfo": {
+              "remainingFraction": \(fraction),
+              "resetTime": "2023-11-15T00:00:00Z"
+            }
+          }
+        }
+      }
+      """
+
+      let http = MockGoogleHTTP(tokenResponse: tokenJSON, modelsResponse: modelsJSON)
+      let client = GoogleAntigravityClient(httpClient: http)
+      let usage = try await client.fetchUsage(configuration: configuration(), now: now)
+
+      XCTAssertNil(usage.metrics[0].remainingPercent,
+                   "Out-of-range fraction \(fraction) is malformed, not a percentage")
+      XCTAssertEqual(usage.maxUsagePercent, 0,
+                     "Malformed fraction must not fabricate usage for \(fraction)")
+      XCTAssertNil(usage.warning)
+    }
+  }
+
   func testMissingCredentialsThrowsNotConfigured() async {
     let client = GoogleAntigravityClient(httpClient: MockGoogleHTTP(tokenResponse: "{}", modelsResponse: "{}"))
     let unconfigured = ProviderRuntimeConfiguration(
