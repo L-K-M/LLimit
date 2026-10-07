@@ -69,6 +69,22 @@ final class AnthropicClientTests: XCTestCase {
     await assertThrows(kind: .rateLimit) { try await client.fetchUsage(configuration: self.config(), now: self.now) }
   }
 
+  func testRateLimitUsesBoundedSafeWaitGuidance() async {
+    for (header, delay) in [("120", 120.0), ("Tue, 14 Nov 2023 22:18:20 GMT", 300.0),
+                            ("99999999999999999999", 86_400.0)] {
+      let client = AnthropicClient(httpClient: MockHTTP(status: 429, body: "secret response", headers: ["Retry-After": header]))
+      do {
+        _ = try await client.fetchUsage(configuration: config(), now: now)
+        XCTFail("Expected rate limit")
+      } catch let error as ProviderClientError {
+        XCTAssertEqual(error.kind, .rateLimit)
+        XCTAssertEqual(error.retryAfter, delay)
+        XCTAssertTrue(error.message.contains("Next attempt"))
+        XCTAssertFalse(error.message.contains("secret response"))
+      } catch { XCTFail("Unexpected error: \(error)") }
+    }
+  }
+
   private func assertThrows(
     kind: QuotaErrorKind,
     _ block: @escaping () async throws -> ProviderUsage,
@@ -89,13 +105,14 @@ final class AnthropicClientTests: XCTestCase {
 private struct MockHTTP: HTTPClient {
   let status: Int
   let body: String
+  var headers: [String: String] = [:]
 
   func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
     let response = HTTPURLResponse(
       url: request.url!,
       statusCode: status,
       httpVersion: "HTTP/1.1",
-      headerFields: nil
+      headerFields: headers
     )!
     return (body.data(using: .utf8)!, response)
   }

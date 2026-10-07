@@ -48,10 +48,15 @@ public struct AnthropicClient: QuotaProviderClient {
         )
       }
       if response.statusCode == 429 {
+        let retryAfter = parseRetryAfter(response.value(forHTTPHeaderField: "Retry-After"), now: now)
+        let guidance = retryAfter.map {
+          "Next attempt in about \(formatShortDuration(seconds: Int($0.rounded(.up))))."
+        } ?? "Try again on the next refresh."
         throw ProviderClientError(
           kind: .rateLimit,
-          message: "Claude usage endpoint is rate limited. It will recover on the next refresh.",
-          statusCode: response.statusCode
+          message: "Claude usage endpoint is rate limited. \(guidance)",
+          statusCode: response.statusCode,
+          retryAfter: retryAfter
         )
       }
       throw ProviderClientError(kind: .api, message: "Claude usage API failed (HTTP \(response.statusCode)). Try again later.", statusCode: response.statusCode)

@@ -44,8 +44,26 @@ public struct QuotaCoordinator: Sendable {
       .filter { $0.isEnabled }
       .filter { clientsByProvider[$0.provider] != nil }
 
+    // Cooldowns belong to an enabled account and provider, not just an id.
+    // Bound persisted deadlines from their original cycle, never from each poll.
+    let cooldownFailures = (previousSnapshot?.failures ?? []).compactMap { failure -> ProviderFailure? in
+      guard failure.kind == .rateLimit,
+            targets.contains(where: { $0.accountID == failure.accountID && $0.provider == failure.provider }),
+            let retryAt = failure.retryAt,
+            retryAt.timeIntervalSince1970.isFinite,
+            let previousSnapshot else { return nil }
+      let deadline = min(retryAt, previousSnapshot.generatedAt.addingTimeInterval(RetryAfterPolicy.maximumDelay))
+      guard deadline > now else { return nil }
+      var bounded = failure
+      bounded.retryAt = deadline
+      return bounded
+    }
+    let fetchTargets = targets.filter { configuration in
+      !cooldownFailures.contains { $0.accountID == configuration.accountID && $0.provider == configuration.provider }
+    }
+
     let results = await withTaskGroup(of: RefreshResult.self) { group in
-      for configuration in targets {
+      for configuration in fetchTargets {
         guard let client = clientsByProvider[configuration.provider] else { continue }
 
         group.addTask {
@@ -69,7 +87,9 @@ public struct QuotaCoordinator: Sendable {
                 accountID: configuration.accountID,
                 provider: configuration.provider,
                 kind: error.kind,
-                message: failureMessages.redacted(error.message)
+                message: failureMessages.redacted(error.message),
+                retryAt: error.kind == .rateLimit
+                  ? RetryAfterPolicy.boundedDelay(error.retryAfter).map { now.addingTimeInterval($0) } : nil
               ))
             )
           } catch {
@@ -87,7 +107,9 @@ public struct QuotaCoordinator: Sendable {
         }
       }
 
-      var collected: [RefreshResult] = []
+      var collected = cooldownFailures.map {
+        RefreshResult(accountID: $0.accountID, provider: $0.provider, outcome: .failure($0))
+      }
       for await result in group {
         collected.append(result)
       }

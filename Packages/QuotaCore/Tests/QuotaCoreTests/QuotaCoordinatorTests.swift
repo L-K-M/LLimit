@@ -85,6 +85,77 @@ final class QuotaCoordinatorTests: XCTestCase {
                    "A completed auth failure must survive cancellation even without fresh usage")
   }
 
+  func testCooldownIsScopedToEnabledAccountAndProvider() async {
+    let client = RecordingClient(provider: .anthropic)
+    let other = RecordingClient(provider: .openAI)
+    let coordinator = QuotaCoordinator(clients: [client, other])
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let priorUsage = sampleUsage(provider: .anthropic, at: now.addingTimeInterval(-600))
+    let limited = ProviderFailure(accountID: "anthropic", provider: .anthropic, kind: .rateLimit,
+                                  message: "limited", retryAt: now.addingTimeInterval(600))
+    let previous = QuotaSnapshot(generatedAt: now.addingTimeInterval(-600), providers: [priorUsage], failures: [
+      limited,
+      ProviderFailure(accountID: "removed", provider: .anthropic, kind: .rateLimit, message: "limited", retryAt: now.addingTimeInterval(600)),
+      ProviderFailure(accountID: "disabled", provider: .anthropic, kind: .rateLimit, message: "limited", retryAt: now.addingTimeInterval(600)),
+      ProviderFailure(accountID: "shared-id", provider: .anthropic, kind: .rateLimit, message: "limited", retryAt: now.addingTimeInterval(600)),
+      ProviderFailure(accountID: "auth", provider: .anthropic, kind: .auth, message: "rejected", retryAt: now.addingTimeInterval(600))
+    ])
+    let configurations = [
+      configuration(provider: .anthropic),
+      ProviderRuntimeConfiguration(accountID: "auth", provider: .anthropic, isEnabled: true, credentials: [:]),
+      ProviderRuntimeConfiguration(accountID: "healthy", provider: .anthropic, isEnabled: true, credentials: [:]),
+      ProviderRuntimeConfiguration(accountID: "disabled", provider: .anthropic, isEnabled: false, credentials: [:]),
+      ProviderRuntimeConfiguration(accountID: "shared-id", provider: .openAI, isEnabled: true, credentials: [:])
+    ]
+    let snapshot = await coordinator.refresh(configurations: configurations, now: now, previousSnapshot: previous)
+    let fetched = await client.fetchedAccountIDs
+    let otherFetched = await other.fetchedAccountIDs
+    XCTAssertEqual(Set(fetched), ["auth", "healthy"])
+    XCTAssertEqual(otherFetched, ["shared-id"])
+    XCTAssertEqual(snapshot.failures, [limited])
+    XCTAssertEqual(snapshot.mergingStaleUsage(from: previous).providers.first { $0.accountID == "anthropic" }, priorUsage)
+
+    _ = await coordinator.refresh(configurations: [configuration(provider: .anthropic)], now: now.addingTimeInterval(600), previousSnapshot: snapshot)
+    let afterExpiry = await client.fetchedAccountIDs
+    XCTAssertTrue(afterExpiry.contains("anthropic"))
+  }
+
+  func testRateLimitDeadlineIsBoundedAtClientAndSnapshotBoundaries() async {
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    for delay in [90.0, 1e20, Double.infinity, -30] {
+      let client = SignalingClient(provider: .zhipu, signal: RefreshSignal(),
+                                   error: ProviderClientError(kind: .rateLimit, message: "limited", retryAfter: delay))
+      let snapshot = await QuotaCoordinator(clients: [client]).refresh(configurations: [configuration(provider: .zhipu)], now: now)
+      let expected = delay.isFinite && delay > 0 ? now.addingTimeInterval(min(delay, 86_400)) : nil
+      XCTAssertEqual(snapshot.failures.first?.retryAt, expected)
+    }
+
+    let client = RecordingClient(provider: .anthropic)
+    let previous = QuotaSnapshot(generatedAt: now, providers: [], failures: [
+      ProviderFailure(provider: .anthropic, kind: .rateLimit, message: "limited", retryAt: .distantFuture)
+    ])
+    let coordinator = QuotaCoordinator(clients: [client])
+    let capped = await coordinator.refresh(configurations: [configuration(provider: .anthropic)], now: now, previousSnapshot: previous)
+    XCTAssertEqual(capped.failures.first?.retryAt, now.addingTimeInterval(86_400))
+    _ = await coordinator.refresh(configurations: [configuration(provider: .anthropic)], now: now.addingTimeInterval(86_400), previousSnapshot: capped)
+    let fetched = await client.fetchedAccountIDs
+    XCTAssertEqual(fetched, ["anthropic"])
+  }
+
+  func testCancelledOnlyRefreshKeepsTimestampAndActiveScope() async {
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let coordinator = QuotaCoordinator(clients: [CancelledClient(provider: .anthropic)])
+    let previous = QuotaSnapshot(generatedAt: now, providers: [.anthropic, .openAI].map { sampleUsage(provider: $0, at: now) }, failures: [])
+    let snapshot = await coordinator.refresh(configurations: [configuration(provider: .anthropic)], now: now.addingTimeInterval(60), previousSnapshot: previous)
+    XCTAssertEqual(snapshot.generatedAt, now)
+    XCTAssertEqual(snapshot.providers.map(\.provider), [.anthropic])
+    XCTAssertTrue(snapshot.failures.isEmpty)
+
+    let first = await coordinator.refresh(configurations: [configuration(provider: .anthropic)], now: now)
+    XCTAssertTrue(first.providers.isEmpty)
+    XCTAssertTrue(first.failures.isEmpty)
+  }
+
   private func waitForClients(_ signal: RefreshSignal, count: Int) async {
     for _ in 0..<500 {
       if await signal.count == count { return }
@@ -158,5 +229,26 @@ private struct MockClient: QuotaProviderClient {
       maxUsagePercent: 50,
       fetchedAt: now
     )
+  }
+}
+
+private actor RecordingClient: QuotaProviderClient {
+  let provider: QuotaProvider
+  private(set) var fetchedAccountIDs: [String] = []
+
+  init(provider: QuotaProvider) { self.provider = provider }
+
+  func fetchUsage(configuration: ProviderRuntimeConfiguration, now: Date) async throws -> ProviderUsage {
+    fetchedAccountIDs.append(configuration.accountID)
+    return ProviderUsage(accountID: configuration.accountID, provider: provider, title: configuration.displayName,
+                         metrics: [], fetchedAt: now)
+  }
+}
+
+private struct CancelledClient: QuotaProviderClient {
+  let provider: QuotaProvider
+
+  func fetchUsage(configuration: ProviderRuntimeConfiguration, now: Date) async throws -> ProviderUsage {
+    throw CancellationError()
   }
 }
