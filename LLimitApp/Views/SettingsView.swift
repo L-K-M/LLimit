@@ -474,6 +474,37 @@ struct SettingsView: View {
 
         Divider()
 
+        settingsRow(title: "Notifications") {
+          VStack(alignment: .leading, spacing: 10) {
+            settingsGroupCard(title: "Quota Alerts") {
+              Toggle(
+                "Enable quota alerts",
+                isOn: model.alertSettingsBinding(for: \.enabled)
+              )
+              Toggle(
+                "Alert on sign-in and unreadable usage",
+                isOn: model.alertSettingsBinding(for: \.notifyOnFailure)
+              )
+
+              visibilityStepperRow(
+                title: "Warn at or below %",
+                value: model.alertThresholdBinding(for: \.warningPercent),
+                range: QuotaAlertSettings.warningRange,
+                displayedValue: model.alertSettings.warningPercent
+              )
+              visibilityStepperRow(
+                title: "Critical at or below %",
+                value: model.alertThresholdBinding(for: \.criticalPercent),
+                range: QuotaAlertSettings.criticalRange,
+                displayedValue: model.alertSettings.criticalPercent
+              )
+            }
+          }
+        }
+        .help("Enabling alerts requests macOS notification permission. Alerts include low quota, observed resets, recovery, and mostly unused weekly or monthly windows.")
+
+        Divider()
+
         settingsRow(title: "Visible information") {
           VStack(alignment: .leading, spacing: 10) {
             settingsGroupCard(title: "All Widgets") {

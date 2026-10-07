@@ -30,6 +30,7 @@ struct CodexLoginPresentation: Identifiable {
 @MainActor
 final class AppModel: ObservableObject {
   @Published var refreshIntervalMinutes: Int = 30
+  @Published var alertSettings: QuotaAlertSettings = QuotaAlertSettings()
   @Published var widgetStyle: WidgetStyleSettings = .default
   @Published var widgetBackgroundSettings: WidgetBackgroundSettings = .default
   @Published var widgetVisibility: WidgetVisibilitySettings = .default
@@ -174,6 +175,8 @@ final class AppModel: ObservableObject {
     }
 
     refreshIntervalMinutes = settings.refreshIntervalMinutes
+    alertSettings = settings.alertSettings
+    quotaNotifications.updateSettings(alertSettings)
     widgetStyle = settings.widgetStyle
     widgetBackgroundSettings = settings.widgetBackgroundSettings
     widgetVisibility = settings.widgetVisibility
@@ -347,6 +350,7 @@ final class AppModel: ObservableObject {
   }
 
   private func publishSnapshot(_ refreshed: QuotaSnapshot) {
+    let previous = snapshot
     let now = Date()
     let archive: QuotaHistoryStore.Archive?
     do {
@@ -374,6 +378,10 @@ final class AppModel: ObservableObject {
 
     snapshot = refreshed
     reloadAccountStatuses()
+    let names = providerAccounts.map { ($0.id, $0.resolvedDisplayName) }
+    quotaNotifications.updateSettings(alertSettings)
+    quotaNotifications.submit(previous: previous, current: refreshed,
+                              accountNames: Dictionary(names) { first, _ in first })
 
     if widgetSyncReady && historySyncReady {
       statusMessage = "Refreshed \(refreshed.providers.count) account(s), \(refreshed.failures.count) failure(s)"
@@ -381,6 +389,8 @@ final class AppModel: ObservableObject {
       statusMessage = "Refreshed \(refreshed.providers.count) account(s), \(refreshed.failures.count) failure(s). Widget sync partially unavailable."
     }
   }
+
+  private lazy var quotaNotifications = QuotaNotifications.makeMonitor()
 
   /// Bind each successful result to the profile actually queried. A timestamp
   /// alone cannot distinguish an old imported login from its replacement.
@@ -1362,6 +1372,38 @@ final class AppModel: ObservableObject {
     launchAtLogin = SMAppService.mainApp.status == .enabled
   }
 
+  /// Existing Bool bindings remain the settings UI's external API.
+  func alertSettingsBinding(
+    for keyPath: WritableKeyPath<QuotaAlertSettings, Bool>
+  ) -> Binding<Bool> {
+    Binding(
+      get: { self.alertSettings[keyPath: keyPath] },
+      set: { newValue in
+        self.alertSettings[keyPath: keyPath] = newValue
+        self.saveConfiguration()
+        self.quotaNotifications.updateSettings(self.alertSettings)
+        // Request permission from the foreground action before refresh delivery.
+        if keyPath == \QuotaAlertSettings.enabled, newValue {
+          self.quotaNotifications.requestAuthorization()
+        }
+      }
+    )
+  }
+
+  func alertThresholdBinding(
+    for keyPath: WritableKeyPath<QuotaAlertSettings, Int>
+  ) -> Binding<Int> {
+    Binding(
+      get: { self.alertSettings[keyPath: keyPath] },
+      set: { newValue in
+        let band: QuotaAlertSettings.ThresholdBand = keyPath == \QuotaAlertSettings.criticalPercent ? .critical : .warning
+        self.alertSettings.setThreshold(newValue, for: band)
+        self.saveConfiguration()
+        self.quotaNotifications.updateSettings(self.alertSettings)
+      }
+    )
+  }
+
   func refreshIntervalBinding() -> Binding<Int> {
     Binding(
       get: { self.refreshIntervalMinutes },
@@ -1860,7 +1902,8 @@ final class AppModel: ObservableObject {
         providerStyle(for: account.id)
       },
       widgetVisibility: widgetVisibility,
-      providerTileSlots: providerTileSlots
+      providerTileSlots: providerTileSlots,
+      alertSettings: alertSettings
     )
   }
 
