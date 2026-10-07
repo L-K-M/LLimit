@@ -715,10 +715,13 @@ private struct MenuBarContent: View {
         Group {
           if model.isRefreshing {
             Text("Updating quotas...")
-          } else if let reason = model.refreshAvailability.reason {
-            Text(reason)
+          } else if let snapshot = model.snapshot, let reason = model.refreshAvailability.reason {
+            // Keep the data age visible while explaining why Refresh is unavailable.
+            Text("\(reason) · Updated \(relativeTimeString(from: snapshot.generatedAt, relativeTo: now))")
           } else if let snapshot = model.snapshot {
             Text("Updated \(relativeTimeString(from: snapshot.generatedAt, relativeTo: now))")
+          } else if let reason = model.refreshAvailability.reason {
+            Text(reason)
           } else {
             Text("Waiting for quota data")
           }

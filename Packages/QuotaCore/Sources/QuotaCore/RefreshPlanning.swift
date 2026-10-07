@@ -50,10 +50,17 @@ public enum RefreshAvailability: Equatable, Sendable {
   /// Tooltip for Refresh controls.
   public var help: String { reason ?? "Fetch current usage" }
 
-  /// A refresh cycle acts on accounts with complete credentials, and also on
-  /// managed Claude profiles, which it renews first and reports when that fails.
+  /// A refresh cycle acts on accounts with complete credentials, and also prepares
+  /// some first: it renews managed Claude profiles (reporting when that fails), and
+  /// renews or adopts an imported OpenAI login's access token from its refresh token
+  /// or ChatGPT account id.
   private static func isRefreshable(_ account: ProviderAccount) -> Bool {
-    account.hasRequiredCredentials || ClaudeCodeProfile.profile(from: account.credentials) != nil
+    let credentials = account.credentials
+    if account.hasRequiredCredentials || ClaudeCodeProfile.profile(from: credentials) != nil { return true }
+    guard account.provider == .openAI, !CodexAccountProfile.isManaged(credentials) else { return false }
+    return [CredentialField.openAIRefreshToken, CredentialField.openAIAccountID].contains { key in
+      credentials[key]?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+    }
   }
 }
 

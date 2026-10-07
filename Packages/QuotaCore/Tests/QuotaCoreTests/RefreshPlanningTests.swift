@@ -70,6 +70,30 @@ final class RefreshAvailabilityTests: XCTestCase {
     XCTAssertEqual(availability, .ready)
   }
 
+  func testImportedOpenAILoginWithoutAccessTokenIsRefreshable() {
+    // Each cycle renews or adopts an imported login's access token before fetching.
+    for credentials in [[CredentialField.openAIRefreshToken: "refresh"], [CredentialField.openAIAccountID: "account"]] {
+      let imported = ProviderAccount(id: "imported", provider: .openAI, credentials: credentials)
+      let availability = RefreshAvailability(isRefreshing: false, accounts: [imported], signingInAccountIDs: [])
+      XCTAssertEqual(availability, .ready)
+    }
+  }
+
+  func testOpenAILoginWithNothingToRenewIsIncomplete() {
+    let empty = ProviderAccount(id: "empty", provider: .openAI, credentials: [CredentialField.openAIRefreshToken: " "])
+    let managed = ProviderAccount(id: "managed", provider: .openAI, credentials: [
+      CredentialField.openAIRefreshToken: "refresh",
+      CredentialField.openAIAccountID: "account",
+      // A managed profile without its verified identity needs a reconnect, not a refresh.
+      CredentialField.openAICodexProfileID: UUID().uuidString
+    ])
+
+    for account in [empty, managed] {
+      let availability = RefreshAvailability(isRefreshing: false, accounts: [account], signingInAccountIDs: [])
+      XCTAssertEqual(availability, .noCompleteAccounts)
+    }
+  }
+
   func testHelpExplainsEveryState() {
     XCTAssertFalse(RefreshAvailability.ready.help.isEmpty)
     XCTAssertEqual(RefreshAvailability.refreshing.help, RefreshAvailability.refreshing.reason)
