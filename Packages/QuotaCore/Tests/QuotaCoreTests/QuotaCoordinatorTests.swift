@@ -143,6 +143,11 @@ final class QuotaCoordinatorTests: XCTestCase {
     _ = await coordinator.refresh(configurations: [configuration(provider: .anthropic)], now: now.addingTimeInterval(86_400), previousSnapshot: capped)
     let fetched = await client.fetchedAccountIDs
     XCTAssertEqual(fetched, ["anthropic"])
+
+    let futureSnapshot = QuotaSnapshot(generatedAt: now.addingTimeInterval(7 * 86_400), providers: [], failures: previous.failures)
+    let futureCapped = await coordinator.refresh(configurations: [configuration(provider: .anthropic)], now: now, previousSnapshot: futureSnapshot)
+    XCTAssertEqual(futureCapped.failures.first?.retryAt, now.addingTimeInterval(86_400),
+                   "A future snapshot timestamp must not extend the cooldown cap")
   }
 
   func testCancelledOnlyRefreshKeepsTimestampAndActiveScope() async {

@@ -52,7 +52,8 @@ public struct QuotaCoordinator: Sendable {
             let retryAt = failure.retryAt,
             retryAt.timeIntervalSince1970.isFinite,
             let previousSnapshot else { return nil }
-      let deadline = min(retryAt, previousSnapshot.generatedAt.addingTimeInterval(RetryAfterPolicy.maximumDelay))
+      let cooldownStart = min(previousSnapshot.generatedAt, now)
+      let deadline = min(retryAt, cooldownStart.addingTimeInterval(RetryAfterPolicy.maximumDelay))
       guard deadline > now else { return nil }
       var bounded = failure
       bounded.retryAt = deadline
