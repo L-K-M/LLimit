@@ -25,6 +25,219 @@ final class QuotaCoordinatorTests: XCTestCase {
     XCTAssertEqual(snapshot.failures.first?.provider, .zhipu)
   }
 
+  func testRefreshWithNoTargetsUsesTheCurrentTimestamp() async {
+    let previousTime = Date(timeIntervalSince1970: 1_700_000_000)
+    let now = previousTime.addingTimeInterval(600)
+    let previous = QuotaSnapshot(generatedAt: previousTime, providers: [sampleUsage(provider: .openAI, at: previousTime)],
+                                 failures: [ProviderFailure(provider: .openAI, kind: .auth, message: "Rejected")])
+    let coordinator = QuotaCoordinator(clients: [MockClient(provider: .openAI, shouldFail: false)])
+    for configurations in [[], [ProviderRuntimeConfiguration(provider: .openAI, isEnabled: false, credentials: [:])],
+                           [ProviderRuntimeConfiguration(provider: .kimi, isEnabled: true, credentials: [:])]] {
+      let snapshot = await coordinator.refresh(configurations: configurations, now: now, previousSnapshot: previous)
+      XCTAssertEqual(snapshot.generatedAt, now)
+      XCTAssertTrue(snapshot.providers.isEmpty)
+      XCTAssertTrue(snapshot.failures.isEmpty)
+    }
+  }
+
+  func testPartialCancellationKeepsPreviousUsageAndCompletedAuthFailure() async {
+    let signal = RefreshSignal()
+    let coordinator = QuotaCoordinator(clients: [
+      SignalingClient(provider: .openAI, signal: signal),
+      SignalingClient(provider: .zhipu, signal: signal, error: ProviderClientError(kind: .auth, message: "Credential rejected")),
+      WaitingClient(provider: .anthropic, signal: signal)
+    ])
+    let seedTime = Date(timeIntervalSince1970: 1_700_000_000)
+    let refreshTime = seedTime.addingTimeInterval(100)
+    let seed = QuotaSnapshot(
+      generatedAt: seedTime,
+      providers: [.openAI, .anthropic, .zhipu].map { sampleUsage(provider: $0, at: seedTime) },
+      failures: []
+    )
+    let task = Task {
+      await coordinator.refresh(
+        configurations: [.openAI, .anthropic, .zhipu].map { configuration(provider: $0) },
+        now: refreshTime,
+        previousSnapshot: seed
+      )
+    }
+    await waitForClients(signal, count: 3)
+    task.cancel()
+    let snapshot = await task.value
+    let merged = snapshot.mergingStaleUsage(from: seed)
+
+    XCTAssertEqual(snapshot.generatedAt, refreshTime)
+    XCTAssertEqual(snapshot.providers.first { $0.provider == .openAI }?.fetchedAt, refreshTime)
+    XCTAssertEqual(snapshot.providers.first { $0.provider == .anthropic }, seed.providers[1],
+                   "Cancelled accounts need explicit carry-forward, not a synthetic failure")
+    XCTAssertEqual(merged.providers.first { $0.provider == .zhipu }?.fetchedAt, seedTime)
+    XCTAssertEqual(snapshot.failures.map(\.kind), [.auth])
+    XCTAssertEqual(snapshot.failures.first?.provider, .zhipu)
+  }
+
+  func testCancellationWithoutFreshUsageKeepsCompletedAuthFailure() async {
+    let signal = RefreshSignal()
+    let coordinator = QuotaCoordinator(clients: [
+      SignalingClient(provider: .zhipu, signal: signal, error: ProviderClientError(kind: .auth, message: "Credential rejected")),
+      WaitingClient(provider: .anthropic, signal: signal)
+    ])
+    let seedTime = Date(timeIntervalSince1970: 1_700_000_000)
+    let seed = QuotaSnapshot(
+      generatedAt: seedTime,
+      providers: [sampleUsage(provider: .anthropic, at: seedTime)],
+      failures: []
+    )
+    let task = Task {
+      await coordinator.refresh(
+        configurations: [.anthropic, .zhipu].map { configuration(provider: $0) },
+        now: seedTime.addingTimeInterval(100),
+        previousSnapshot: seed
+      )
+    }
+    await waitForClients(signal, count: 2)
+    task.cancel()
+    let snapshot = await task.value
+
+    XCTAssertEqual(snapshot.providers, seed.providers)
+    XCTAssertEqual(snapshot.failures.map(\.kind), [.auth],
+                   "A completed auth failure must survive cancellation even without fresh usage")
+  }
+
+  func testCooldownIsScopedToEnabledAccountAndProvider() async {
+    let client = RecordingClient(provider: .anthropic)
+    let other = RecordingClient(provider: .openAI)
+    let coordinator = QuotaCoordinator(clients: [client, other])
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let priorUsage = sampleUsage(provider: .anthropic, at: now.addingTimeInterval(-600))
+    let limited = ProviderFailure(accountID: "anthropic", provider: .anthropic, kind: .rateLimit,
+                                  message: "limited", retryAt: now.addingTimeInterval(600))
+    let previous = QuotaSnapshot(generatedAt: now.addingTimeInterval(-600), providers: [priorUsage], failures: [
+      limited,
+      ProviderFailure(accountID: "removed", provider: .anthropic, kind: .rateLimit, message: "limited", retryAt: now.addingTimeInterval(600)),
+      ProviderFailure(accountID: "disabled", provider: .anthropic, kind: .rateLimit, message: "limited", retryAt: now.addingTimeInterval(600)),
+      ProviderFailure(accountID: "shared-id", provider: .anthropic, kind: .rateLimit, message: "limited", retryAt: now.addingTimeInterval(600)),
+      ProviderFailure(accountID: "auth", provider: .anthropic, kind: .auth, message: "rejected", retryAt: now.addingTimeInterval(600))
+    ])
+    let configurations = [
+      configuration(provider: .anthropic),
+      ProviderRuntimeConfiguration(accountID: "auth", provider: .anthropic, isEnabled: true, credentials: [:]),
+      ProviderRuntimeConfiguration(accountID: "healthy", provider: .anthropic, isEnabled: true, credentials: [:]),
+      ProviderRuntimeConfiguration(accountID: "disabled", provider: .anthropic, isEnabled: false, credentials: [:]),
+      ProviderRuntimeConfiguration(accountID: "shared-id", provider: .openAI, isEnabled: true, credentials: [:])
+    ]
+    let snapshot = await coordinator.refresh(configurations: configurations, now: now, previousSnapshot: previous)
+    let fetched = await client.fetchedAccountIDs
+    let otherFetched = await other.fetchedAccountIDs
+    XCTAssertEqual(Set(fetched), ["auth", "healthy"])
+    XCTAssertEqual(otherFetched, ["shared-id"])
+    XCTAssertEqual(snapshot.failures, [limited])
+    XCTAssertEqual(snapshot.mergingStaleUsage(from: previous).providers.first { $0.accountID == "anthropic" }, priorUsage)
+
+    _ = await coordinator.refresh(configurations: [configuration(provider: .anthropic)], now: now.addingTimeInterval(600), previousSnapshot: snapshot)
+    let afterExpiry = await client.fetchedAccountIDs
+    XCTAssertTrue(afterExpiry.contains("anthropic"))
+  }
+
+  func testRateLimitDeadlineIsBoundedAtClientAndSnapshotBoundaries() async {
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    for delay in [90.0, 1e20, Double.infinity, -30] {
+      let client = SignalingClient(provider: .zhipu, signal: RefreshSignal(),
+                                   error: ProviderClientError(kind: .rateLimit, message: "limited", retryAfter: delay))
+      let snapshot = await QuotaCoordinator(clients: [client]).refresh(configurations: [configuration(provider: .zhipu)], now: now)
+      let expected = delay.isFinite && delay > 0 ? now.addingTimeInterval(min(delay, 86_400)) : nil
+      XCTAssertEqual(snapshot.failures.first?.retryAt, expected)
+    }
+
+    let client = RecordingClient(provider: .anthropic)
+    let previous = QuotaSnapshot(generatedAt: now, providers: [], failures: [
+      ProviderFailure(provider: .anthropic, kind: .rateLimit, message: "limited", retryAt: .distantFuture)
+    ])
+    let coordinator = QuotaCoordinator(clients: [client])
+    let capped = await coordinator.refresh(configurations: [configuration(provider: .anthropic)], now: now, previousSnapshot: previous)
+    XCTAssertEqual(capped.failures.first?.retryAt, now.addingTimeInterval(86_400))
+    _ = await coordinator.refresh(configurations: [configuration(provider: .anthropic)], now: now.addingTimeInterval(86_400), previousSnapshot: capped)
+    let fetched = await client.fetchedAccountIDs
+    XCTAssertEqual(fetched, ["anthropic"])
+
+    let futureSnapshot = QuotaSnapshot(generatedAt: now.addingTimeInterval(7 * 86_400), providers: [], failures: previous.failures)
+    let futureCapped = await coordinator.refresh(configurations: [configuration(provider: .anthropic)], now: now, previousSnapshot: futureSnapshot)
+    XCTAssertEqual(futureCapped.failures.first?.retryAt, now.addingTimeInterval(86_400),
+                   "A future snapshot timestamp must not extend the cooldown cap")
+  }
+
+  func testCancelledOnlyRefreshKeepsTimestampAndActiveScope() async {
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let coordinator = QuotaCoordinator(clients: [CancelledClient(provider: .anthropic)])
+    let previous = QuotaSnapshot(generatedAt: now, providers: [.anthropic, .openAI].map { sampleUsage(provider: $0, at: now) }, failures: [], refreshIntervalMinutes: 90)
+    let snapshot = await coordinator.refresh(configurations: [configuration(provider: .anthropic)], now: now.addingTimeInterval(60), previousSnapshot: previous)
+    XCTAssertEqual(snapshot.generatedAt, now)
+    XCTAssertEqual(snapshot.refreshIntervalMinutes, 90)
+    XCTAssertEqual(snapshot.providers.map(\.provider), [.anthropic])
+    XCTAssertTrue(snapshot.failures.isEmpty)
+
+    let first = await coordinator.refresh(configurations: [configuration(provider: .anthropic)], now: now)
+    XCTAssertTrue(first.providers.isEmpty)
+    XCTAssertTrue(first.failures.isEmpty)
+  }
+
+  private func waitForClients(_ signal: RefreshSignal, count: Int) async {
+    for _ in 0..<500 {
+      if await signal.count == count { return }
+      try? await Task.sleep(nanoseconds: 10_000_000)
+    }
+    XCTFail("Clients did not reach the cancellation boundary")
+  }
+
+  private func configuration(provider: QuotaProvider) -> ProviderRuntimeConfiguration {
+    ProviderRuntimeConfiguration(provider: provider, isEnabled: true, credentials: [:])
+  }
+
+  private func sampleUsage(provider: QuotaProvider, at date: Date) -> ProviderUsage {
+    ProviderUsage(
+      provider: provider,
+      title: provider.displayName,
+      metrics: [UsageMetric(id: "primary", label: "primary", remainingPercent: 10)],
+      maxUsagePercent: 90,
+      fetchedAt: date
+    )
+  }
+}
+
+private actor RefreshSignal {
+  private(set) var count = 0
+  func mark() { count += 1 }
+}
+
+private struct SignalingClient: QuotaProviderClient {
+  let provider: QuotaProvider
+  let signal: RefreshSignal
+  var error: ProviderClientError?
+
+  func fetchUsage(configuration: ProviderRuntimeConfiguration, now: Date) async throws -> ProviderUsage {
+    await signal.mark()
+    if let error { throw error }
+    return ProviderUsage(
+      provider: provider,
+      title: provider.displayName,
+      metrics: [UsageMetric(id: "primary", label: "primary", remainingPercent: 50)],
+      maxUsagePercent: 50,
+      fetchedAt: now
+    )
+  }
+}
+
+private struct WaitingClient: QuotaProviderClient {
+  let provider: QuotaProvider
+  let signal: RefreshSignal
+
+  func fetchUsage(configuration: ProviderRuntimeConfiguration, now: Date) async throws -> ProviderUsage {
+    await signal.mark()
+    try await Task.sleep(nanoseconds: 60_000_000_000)
+    throw CancellationError()
+  }
+}
+
+extension QuotaCoordinatorTests {
   func testMalformedClinePercentagesKeepLastGoodUsageWhenMerged() async throws {
     for window in [#"{"type":"weekly"}"#, #"{"type":"weekly","percentUsed":null}"#] {
       try await assertMalformedSubscriptionKeepsLastGoodUsage(
@@ -182,5 +395,26 @@ private struct MockClient: QuotaProviderClient {
       maxUsagePercent: 50,
       fetchedAt: now
     )
+  }
+}
+
+private actor RecordingClient: QuotaProviderClient {
+  let provider: QuotaProvider
+  private(set) var fetchedAccountIDs: [String] = []
+
+  init(provider: QuotaProvider) { self.provider = provider }
+
+  func fetchUsage(configuration: ProviderRuntimeConfiguration, now: Date) async throws -> ProviderUsage {
+    fetchedAccountIDs.append(configuration.accountID)
+    return ProviderUsage(accountID: configuration.accountID, provider: provider, title: configuration.displayName,
+                         metrics: [], fetchedAt: now)
+  }
+}
+
+private struct CancelledClient: QuotaProviderClient {
+  let provider: QuotaProvider
+
+  func fetchUsage(configuration: ProviderRuntimeConfiguration, now: Date) async throws -> ProviderUsage {
+    throw CancellationError()
   }
 }

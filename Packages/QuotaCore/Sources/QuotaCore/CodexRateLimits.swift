@@ -44,6 +44,7 @@ public struct CodexRateLimits: Sendable {
           remainingPercent: window.usedPercent.flatMap(percentRemaining(fromUsedPercent:)),
           resetAt: resetAt,
           resetIn: resetAt.map { formatResetCountdown(to: $0, now: now) },
+          windowSeconds: window.windowDurationMins.flatMap { reportedWindowSeconds(count: $0, unitSeconds: 60) },
           detail: nonEmptyString(bucket.snapshot.limitName)))
       }
     }

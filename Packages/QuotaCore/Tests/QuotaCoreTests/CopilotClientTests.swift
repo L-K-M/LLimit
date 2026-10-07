@@ -82,6 +82,46 @@ final class CopilotClientTests: XCTestCase {
     XCTAssertEqual(premium?.totalDisplay, "300") // pro tier limit
     XCTAssertEqual(premium?.remainingPercent, 89) // (300-33.75)/300 -> 88.75 -> 89
   }
+
+  func testQuotaAndTokenExchangeOutagesDoNotBecomeAuthFailures() async {
+    for responses in [[(503, "secret upstream response")],
+                      [(401, "rejected"), (401, "rejected"), (503, "secret upstream response")]] {
+      let http = SequencedCopilotHTTP(responses: responses)
+      do {
+        _ = try await CopilotClient(httpClient: http).fetchUsage(configuration: oauthConfig(), now: now)
+        XCTFail("Expected API failure")
+      } catch let error as ProviderClientError {
+        XCTAssertEqual(error.kind, .api)
+        XCTAssertEqual(error.statusCode, 503)
+        XCTAssertFalse(error.message.contains("secret upstream response"))
+      } catch { XCTFail("Unexpected error: \(error)") }
+      let requests = await http.requestCount
+      XCTAssertEqual(requests, responses.count, "Outages must stop the fallback chain")
+    }
+  }
+
+  func testBilling429IsRateLimit() async {
+    do {
+      _ = try await CopilotClient(httpClient: MockHTTP(status: 429, body: "secret response")).fetchUsage(configuration: patConfig(), now: now)
+      XCTFail("Expected rate limit")
+    } catch let error as ProviderClientError {
+      XCTAssertEqual(error.kind, .rateLimit)
+      XCTAssertFalse(error.message.contains("secret response"))
+    } catch { XCTFail("Unexpected error: \(error)") }
+  }
+}
+
+private actor SequencedCopilotHTTP: HTTPClient {
+  private var responses: [(Int, String)]
+  private(set) var requestCount = 0
+
+  init(responses: [(Int, String)]) { self.responses = responses }
+
+  func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+    requestCount += 1
+    let (status, body) = responses.isEmpty ? (404, "") : responses.removeFirst()
+    return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
+  }
 }
 
 private struct MockHTTP: HTTPClient {
