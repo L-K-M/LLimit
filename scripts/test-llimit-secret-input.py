@@ -45,6 +45,17 @@ def read_chunk(fd, timeout):
     return chunk or None
 
 
+def wait_for_exit(pid, deadline):
+    """Returns the wait status, or None if the child is still running at the deadline."""
+    while True:
+        reaped, status = os.waitpid(pid, os.WNOHANG)
+        if reaped == pid:
+            return status
+        if time.monotonic() > deadline:
+            return None
+        time.sleep(POLL_SECONDS)
+
+
 def run(binary, home):
     env = {
         "HOME": home,
@@ -63,7 +74,7 @@ def run(binary, home):
 
     transcript = b""
     deadline = time.monotonic() + TIMEOUT_SECONDS
-    finished = False
+    status = None
     try:
         while PROMPT not in transcript:
             if time.monotonic() > deadline:
@@ -89,11 +100,15 @@ def run(binary, home):
             if chunk is None:
                 break
             transcript += chunk
-        finished = True
+
+        # EOF only means the terminal was closed, not that llimit exited.
+        status = wait_for_exit(pid, deadline)
+        if status is None:
+            fail("llimit kept running after it closed the terminal", transcript)
     finally:
-        if not finished:
+        if status is None:
             os.kill(pid, signal.SIGKILL)
-        _, status = os.waitpid(pid, 0)
+            os.waitpid(pid, 0)
         os.close(fd)
 
     if SECRET in transcript[typed_from:]:
@@ -102,9 +117,13 @@ def run(binary, home):
         fail(f"llimit failed with wait status {status}", transcript)
 
     settings = os.path.join(env["XDG_CONFIG_HOME"], "LLimit", "quota-settings.json")
-    with open(settings, "rb") as file:
-        if SECRET not in file.read():
-            fail("the typed secret was not saved", transcript)
+    try:
+        with open(settings, "rb") as file:
+            saved = file.read()
+    except OSError as error:
+        fail(f"cannot read the saved settings: {error}", transcript)
+    if SECRET not in saved:
+        fail("the typed secret was not saved", transcript)
 
 
 def main():

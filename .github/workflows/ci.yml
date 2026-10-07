@@ -126,10 +126,18 @@ jobs:
       - name: Build .deb
         run: Packages/LLimitd/packaging/build-deb.sh "0.0.0~ci"
 
-      - name: Test secret input in the packaged binary
+      - name: Test the packaged binary
         run: |
           dpkg-deb -x "Packages/LLimitd/.build/llimit_0.0.0~ci_amd64.deb" "$RUNNER_TEMP/deb"
-          python3 -I scripts/test-llimit-secret-input.py "$RUNNER_TEMP/deb/usr/bin/llimit"
+          binary="$RUNNER_TEMP/deb/usr/bin/llimit"
+          # file prints "static-pie linked" instead when the binary is PIE.
+          linkage="$(file -b "$binary")"
+          echo "$linkage"
+          case "$linkage" in
+            *"statically linked"* | *"static-pie linked"*) ;;
+            *) echo "::error::the packaged llimit is not statically linked"; exit 1 ;;
+          esac
+          python3 -I scripts/test-llimit-secret-input.py "$binary"
 
   tray-test:
     name: Linux (tray)
