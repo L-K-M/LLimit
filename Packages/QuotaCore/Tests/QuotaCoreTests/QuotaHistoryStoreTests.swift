@@ -1,5 +1,10 @@
 import XCTest
 @testable import QuotaCore
+#if canImport(Darwin)
+import Darwin
+#else
+import Glibc
+#endif
 
 final class QuotaHistoryStoreTests: XCTestCase {
   private func makeStore() -> (QuotaHistoryStore, URL) {
@@ -264,8 +269,8 @@ final class QuotaHistoryStoreTests: XCTestCase {
     try store.save([QuotaSnapshot(generatedAt: now, providers: [], failures: [])])
     let historyURL = dir.appendingPathComponent("history.json")
 
-    // Make the file unreadable (skipped implicitly when running as root,
-    // where chmod 000 still permits reads).
+    // Root bypasses permission checks, so chmod 000 can't make the read fail.
+    try XCTSkipIf(geteuid() == 0, "chmod 000 doesn't block reads when running as root")
     try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: historyURL.path)
 
     let loaded = try store.load()

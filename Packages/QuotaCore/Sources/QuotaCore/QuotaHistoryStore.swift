@@ -113,9 +113,10 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     guard lhs.providers.count == rhs.providers.count else { return false }
 
     // Compare order-insensitively: fetch completion order must not defeat
-    // deduplication.
-    let lp = lhs.providers.sorted { $0.accountID < $1.accountID }
-    let rp = rhs.providers.sorted { $0.accountID < $1.accountID }
+    // deduplication. Composite keys keep ties deterministic even if ids
+    // repeat.
+    let lp = lhs.providers.sorted { ($0.accountID, $0.title) < ($1.accountID, $1.title) }
+    let rp = rhs.providers.sorted { ($0.accountID, $0.title) < ($1.accountID, $1.title) }
     for (p1, p2) in zip(lp, rp) {
       guard p1.accountID == p2.accountID,
             p1.provider == p2.provider,
@@ -125,8 +126,8 @@ public final class QuotaHistoryStore: @unchecked Sendable {
             p1.metrics.count == p2.metrics.count
       else { return false }
 
-      let lm = p1.metrics.sorted { $0.id < $1.id }
-      let rm = p2.metrics.sorted { $0.id < $1.id }
+      let lm = p1.metrics.sorted { ($0.id, $0.label) < ($1.id, $1.label) }
+      let rm = p2.metrics.sorted { ($0.id, $0.label) < ($1.id, $1.label) }
       for (m1, m2) in zip(lm, rm) {
         guard m1.id == m2.id,
               m1.label == m2.label,
