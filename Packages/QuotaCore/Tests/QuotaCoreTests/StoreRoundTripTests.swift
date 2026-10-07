@@ -294,6 +294,7 @@ final class StoreRoundTripTests: XCTestCase {
 
   func testSnapshotAndHistoryFilesAreOwnerOnly() throws {
     let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: tempDir) }
 
     let snapshotURL = tempDir.appendingPathComponent("snapshot.json")
