@@ -129,6 +129,8 @@ final class QuotaUtilitiesTests: XCTestCase {
     for body in [
       "Authorization: Bearer sk-ant-api03-abcdefghijklmnop rejected",
       "upstream said Bearer \(jwt) is expired",
+      "invalid token: \(jwt) (no Bearer prefix)",
+      "rejected key: sk-ant-api03-abcdefghijklmnop",
       "error: key ghp_0123456789abcdef not recognized",
       "token=sk-proj-abc123def456 invalid",
     ] {
