@@ -216,7 +216,8 @@ public struct ClaudeCodeProfile: Equatable, Sendable {
     for stored: [String: String], credentials candidate: ClaudeCodeCredentials,
     identity candidateIdentity: ClaudeCodeIdentity, profileID: UUID?, now: Date = Date()
   ) -> [String: String]? {
-    guard let storedIdentity = identity(from: stored),
+    guard stored[CredentialField.anthropicAccessToken]?.isEnvironmentReference != true,
+          let storedIdentity = identity(from: stored),
           storedIdentity.accountID == candidateIdentity.accountID,
           storedIdentity.organizationID == candidateIdentity.organizationID,
           !candidate.accessToken.isEmpty,
@@ -239,7 +240,7 @@ public struct ClaudeCodeProfile: Equatable, Sendable {
     let replacement = storedCredentials(token: candidate, identity: candidateIdentity, profileID: profileID)
     for key in metadataKeys { updated[key] = replacement[key] }
     updated[CredentialField.anthropicAccessToken] = candidate.accessToken
-    return updated
+    return updated.preservingEnvironmentReferences(from: stored)
   }
 
   private static func oauthObject(_ data: Data) -> [String: Any]? {

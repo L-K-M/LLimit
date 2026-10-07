@@ -1,4 +1,7 @@
 import XCTest
+#if canImport(Glibc)
+import Glibc
+#endif
 @testable import QuotaCore
 
 final class QuotaUtilitiesTests: XCTestCase {
@@ -129,5 +132,65 @@ final class QuotaUtilitiesTests: XCTestCase {
     XCTAssertEqual(components.year, 2024)
     XCTAssertEqual(components.month, 4)
     XCTAssertEqual(components.day, 1)
+  }
+
+  func testIsEnvironmentReference() {
+    XCTAssertTrue("env:LLIMIT_KEY".isEnvironmentReference)
+    XCTAssertTrue("env:_PRIVATE".isEnvironmentReference)
+    XCTAssertTrue("env:K1".isEnvironmentReference)
+    XCTAssertFalse("literal".isEnvironmentReference)
+    XCTAssertFalse("envx:LLIMIT_KEY".isEnvironmentReference)
+    XCTAssertFalse("env:".isEnvironmentReference)
+    XCTAssertFalse("env:1LEADING".isEnvironmentReference)
+    XCTAssertFalse("env:HAS-DASH".isEnvironmentReference)
+    XCTAssertFalse("env:HAS SPACE".isEnvironmentReference)
+    XCTAssertFalse("env:LLIMIT_KEY\n".isEnvironmentReference)
+    XCTAssertFalse("env:LLIMIT_KEY\r\n".isEnvironmentReference)
+  }
+
+  func testResolvingEnvironmentReferences() {
+    let credentials = [
+      "set": "env:LLIMIT_TEST_SET",
+      "unset": "env:LLIMIT_TEST_UNSET",
+      "invalid": "env:NOT A NAME",
+      "literal": "plain-value",
+    ]
+    let resolved = credentials.resolvingEnvironmentReferences(["LLIMIT_TEST_SET": "secret"])
+    XCTAssertEqual(resolved["set"], "secret")
+    XCTAssertEqual(resolved["unset"], "")
+    XCTAssertEqual(resolved["invalid"], "env:NOT A NAME")
+    XCTAssertEqual(resolved["literal"], "plain-value")
+  }
+
+  func testEnvironmentReferencedCredentialReadiness() {
+    // ProcessInfo.environment may be a cached snapshot (swift-corelibs-
+    // foundation caches after first access), so the environment is injected
+    // rather than mutated via setenv.
+    let varName = "LLIMIT_TEST_CREDENTIAL_READINESS"
+    let account = ProviderAccount(
+      provider: .venice,
+      credentials: [CredentialField.veniceAPIKey: "env:\(varName)"]
+    )
+    XCTAssertFalse(account.missingCredentialLabels(environment: [:]).isEmpty)
+    XCTAssertTrue(account.missingCredentialLabels(environment: [varName: "live-secret"]).isEmpty)
+    // The stored value stays the pointer, not the resolved secret.
+    XCTAssertEqual(account.credentials[CredentialField.veniceAPIKey], "env:\(varName)")
+  }
+
+  func testRuntimeResolutionDoesNotInterpretAResolvedValueAsAnotherPointer() {
+    let stored = ProviderAccount(provider: .venice, credentials: [CredentialField.veniceAPIKey: "env:OUTER"])
+    let runtime = stored.runtimeConfiguration(environment: ["OUTER": "env:INNER", "INNER": "different-secret"])
+
+    XCTAssertEqual(runtime.credentials[CredentialField.veniceAPIKey], "env:INNER")
+    XCTAssertEqual(stored.credentials[CredentialField.veniceAPIKey], "env:OUTER")
+  }
+
+  func testClaudeCodeVersionParsing() {
+    XCTAssertEqual(ClaudeCodeVersion.parseVersion(from: "2.0.30 (Claude Code)"), "2.0.30")
+    XCTAssertEqual(ClaudeCodeVersion.parseVersion(from: "1.0.110"), "1.0.110")
+    XCTAssertEqual(ClaudeCodeVersion.parseVersion(from: "claude version 0.9.1-beta"), "0.9.1-beta")
+    XCTAssertEqual(ClaudeCodeVersion.parseVersion(from: "2.1.0-rc.1 (Claude Code)"), "2.1.0-rc.1")
+    XCTAssertEqual(ClaudeCodeVersion.parseVersion(from: ""), nil)
+    XCTAssertEqual(ClaudeCodeVersion.parseVersion(from: "Claude Code"), nil)
   }
 }

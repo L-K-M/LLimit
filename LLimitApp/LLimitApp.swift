@@ -724,8 +724,12 @@ private struct MenuBarContent: View {
         Group {
           if model.isRefreshing {
             Text("Updating quotas...")
+          } else if let snapshot = model.snapshot, let reason = model.refreshAvailability.reason {
+            Text("\(reason) · Updated \(relativeTimeString(from: snapshot.generatedAt, relativeTo: now))")
           } else if let snapshot = model.snapshot {
             Text("Updated \(relativeTimeString(from: snapshot.generatedAt, relativeTo: now))")
+          } else if let reason = model.refreshAvailability.reason {
+            Text(reason)
           } else {
             Text("Waiting for quota data")
           }
@@ -831,7 +835,8 @@ private struct MenuBarContent: View {
           .foregroundStyle(.white)
       }
       .buttonStyle(.plain)
-      .disabled(model.isRefreshing)
+      .disabled(!model.refreshAvailability.allowsRefresh)
+      .help(model.refreshAvailability.help)
       .padding(.top, 4)
     }
     .frame(maxWidth: .infinity, minHeight: 220)
@@ -843,13 +848,14 @@ private struct MenuBarContent: View {
       ActionBarButton(
         title: model.isRefreshing ? "Refreshing" : "Refresh",
         systemImage: "arrow.clockwise",
-        isDisabled: model.isRefreshing,
+        isDisabled: !model.refreshAvailability.allowsRefresh,
         shortcut: KeyboardShortcut("r", modifiers: .command)
       ) {
         Task {
           await model.refreshNow()
         }
       }
+      .help(model.refreshAvailability.help)
 
       Spacer()
 
