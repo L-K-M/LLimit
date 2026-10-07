@@ -266,6 +266,9 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
   public var totalDisplay: String?
   public var resetAt: Date?
   public var resetIn: String?
+  /// The window's length as the provider reports it, never inferred from the
+  /// label. Absent in snapshots written before it existed.
+  public var windowSeconds: Int?
   public var isUnlimited: Bool
   public var detail: String?
 
@@ -279,6 +282,7 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
     totalDisplay: String? = nil,
     resetAt: Date? = nil,
     resetIn: String? = nil,
+    windowSeconds: Int? = nil,
     isUnlimited: Bool = false,
     detail: String? = nil
   ) {
@@ -291,6 +295,7 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
     self.totalDisplay = totalDisplay
     self.resetAt = resetAt
     self.resetIn = resetIn
+    self.windowSeconds = windowSeconds
     self.isUnlimited = isUnlimited
     self.detail = detail
   }

@@ -155,6 +155,36 @@ final class KimiClientTests: XCTestCase {
     XCTAssertEqual(QuotaWindowKind.classify(metricID: week.id, label: week.label), .weekly)
   }
 
+  // The reported duration becomes the pace length. The plan quota states no
+  // length, a month has none, and an unknown unit or an absurd count yields
+  // none rather than a guess or a trap.
+  func testReportedWindowDurationsAreKeptForPace() async throws {
+    let json = #"""
+    {
+      "usage": {"limit": "2048", "used": "214"},
+      "limits": [
+        {"window": {"duration": 300, "timeUnit": "TIME_UNIT_MINUTE"}, "detail": {"limit": "200", "used": "139"}},
+        {"window": {"duration": 2, "timeUnit": "TIME_UNIT_HOUR"}, "detail": {"limit": "50", "used": "5"}},
+        {"window": {"duration": 1, "timeUnit": "TIME_UNIT_DAY"}, "detail": {"limit": "50", "used": "5"}},
+        {"window": {"duration": 1, "timeUnit": "TIME_UNIT_WEEK"}, "detail": {"limit": "2048", "used": "10"}},
+        {"window": {"duration": 1, "timeUnit": "TIME_UNIT_MONTH"}, "detail": {"limit": "9000", "used": "10"}},
+        {"window": {"duration": 300}, "detail": {"limit": "200", "used": "1"}},
+        {"window": {"duration": 1e300, "timeUnit": "TIME_UNIT_WEEK"}, "detail": {"limit": "1", "used": "0"}},
+        {"window": {"duration": 9e18, "timeUnit": "TIME_UNIT_MINUTE"}, "detail": {"limit": "1", "used": "0"}}
+      ]
+    }
+    """#
+    let client = KimiQuotaClient(httpClient: MockHTTP(status: 200, body: json))
+
+    let usage = try await client.fetchUsage(configuration: config(), now: now)
+
+    XCTAssertEqual(usage.metrics.map(\.id), [
+      "plan-weekly", "window-5-hour", "window-2-hour", "window-1-day", "window-1-week",
+      "window-1-month", "limit-5", "limit-6", "window-150000000000000000-hour"
+    ])
+    XCTAssertEqual(usage.metrics.map(\.windowSeconds), [nil, 18_000, 7_200, 86_400, 604_800, nil, nil, nil, nil])
+  }
+
   // A duration with a missing or unknown timeUnit must not fabricate a
   // cadence ("300-second limit"); it gets the neutral positional fallback.
   func testUnknownTimeUnitFallsBackToNeutralLabel() async throws {
