@@ -8,6 +8,8 @@ final class LimitKindTests: XCTestCase {
     XCTAssertEqual(QuotaWindowKind.classify(metricID: "five_hour", label: "5-hour limit"), .session)
     XCTAssertEqual(QuotaWindowKind.classify(metricID: "seven_day", label: "Weekly limit"), .weekly)
     XCTAssertEqual(QuotaWindowKind.classify(metricID: "seven_day_opus", label: "Weekly (Opus)"), .weekly)
+    XCTAssertEqual(QuotaWindowKind.classify(metricID: "seven_day_sonnet", label: "Weekly (Sonnet)"), .weekly)
+    XCTAssertEqual(QuotaWindowKind.classify(metricID: "extra_usage", label: "Extra usage"), .other)
 
     // OpenAI windows are named from the reported window length in seconds.
     XCTAssertEqual(QuotaWindowKind.classify(metricID: "primary", label: "3-hour limit"), .session)
