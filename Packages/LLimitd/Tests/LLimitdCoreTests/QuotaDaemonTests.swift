@@ -351,7 +351,7 @@ final class QuotaDaemonTests: XCTestCase {
     let now = Date(timeIntervalSince1970: Date().timeIntervalSince1970.rounded(.down))
     let reset = now.addingTimeInterval(3 * 3_600)
     let daemon = makeDaemon(coordinator: QuotaCoordinator(clients: [ForecastFixtureClient(at: now, reset: reset)]))
-    let account = daemon.addAccount(provider: .anthropic, credentials: [CredentialField.anthropicAccessToken: "fixture-token"])
+    let account = try daemon.addAccount(provider: .anthropic, credentials: [CredentialField.anthropicAccessToken: "fixture-token"])
     let history = (0..<4).map { index in
       let date = now.addingTimeInterval(Double(index - 4) * 1_800)
       return QuotaSnapshot(generatedAt: date, providers: [ProviderUsage(accountID: account.id, provider: .anthropic,
