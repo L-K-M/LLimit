@@ -100,9 +100,6 @@ final class ChildProcessRunner: @unchecked Sendable {
   static let defaultTimeout: TimeInterval = 10
   private static let killGracePeriod: TimeInterval = 2
   private static let pollInterval: useconds_t = 20_000
-  /// Descriptors from 3 up to this bound are closed in the child unless already
-  /// close-on-exec. The daemon never has more open.
-  private static let inheritedDescriptorLimit: Int32 = 1_024
 
   private let timeout: TimeInterval
   private let log: (String) -> Void
@@ -136,7 +133,7 @@ final class ChildProcessRunner: @unchecked Sendable {
     let name = executable.lastPathComponent
     let pid: pid_t
     do {
-      pid = try Self.spawn(executable: executable, arguments: arguments, environment: environment)
+      pid = try AlertProcessLaunch().spawn(executable: executable, arguments: arguments, environment: environment)
     } catch {
       log("[llimitd] Could not start \(name): \(error.localizedDescription)")
       return .failedToLaunch
@@ -212,56 +209,108 @@ final class ChildProcessRunner: @unchecked Sendable {
   }
 
   struct SpawnError: LocalizedError {
-    var code: Int32
-    var errorDescription: String? { String(cString: strerror(code)) }
-  }
+    enum Operation: String {
+      case initializeAttributes = "posix_spawnattr_init"
+      case initializeFileActions = "posix_spawn_file_actions_init"
+      case setDefaultSignals = "posix_spawnattr_setsigdefault"
+      case setSignalMask = "posix_spawnattr_setsigmask"
+      case setProcessGroup = "posix_spawnattr_setpgroup"
+      case setFlags = "posix_spawnattr_setflags"
+      case openStandardInput = "posix_spawn_file_actions_addopen"
+      case inheritDescriptor = "posix_spawn_file_actions_addinherit_np"
+      case closeDescriptor = "posix_spawn_file_actions_addclose"
+      case spawn = "posix_spawn"
+    }
 
-  /// posix_spawn rather than Foundation's Process: the daemon ignores SIGTERM
-  /// and SIGINT so it can shut down through dispatch sources, ignored signals
-  /// survive exec, and Process keeps them, leaving a hook (and anything it
-  /// starts) deaf to the timeout and to Ctrl-C. Here the child starts with
-  /// default signal dispositions, an empty signal mask, its own process group,
-  /// stdin on /dev/null, and none of the daemon's other descriptors.
-  private static func spawn(executable: URL, arguments: [String], environment: [String: String]) throws -> pid_t {
-    #if canImport(Darwin)
-    var attributes: posix_spawnattr_t?
-    var actions: posix_spawn_file_actions_t?
-    #else
-    var attributes = posix_spawnattr_t()
-    var actions = posix_spawn_file_actions_t()
-    #endif
-    posix_spawnattr_init(&attributes)
-    defer { posix_spawnattr_destroy(&attributes) }
-    posix_spawn_file_actions_init(&actions)
-    defer { posix_spawn_file_actions_destroy(&actions) }
+    let operation: Operation
+    let code: Int32
+    var errorDescription: String? {
+      "\(operation.rawValue) returned \(code) (\(String(cString: strerror(code))))"
+    }
+  }
+}
+
+/// Owns the actual attributes and file actions from preparation through spawn.
+/// Keeping them alive across this boundary exposes descriptor lifetime races.
+final class AlertProcessLaunch {
+  private static let successfulReturnCode: Int32 = 0
+  /// Descriptors above stderr up to this bound are closed unless close-on-exec.
+  /// The daemon never has more open.
+  private static let inheritedDescriptorLimit: Int32 = 1_024
+
+  #if canImport(Darwin)
+  private var attributes: posix_spawnattr_t?
+  private var actions: posix_spawn_file_actions_t?
+  #else
+  private var attributes = posix_spawnattr_t()
+  private var actions = posix_spawn_file_actions_t()
+  #endif
+  private var attributesInitialized = false
+  private var actionsInitialized = false
+
+  /// Default dispositions let hooks stop even when the daemon ignores SIGTERM.
+  init() throws {
+    try Self.check(posix_spawnattr_init(&attributes), operation: .initializeAttributes)
+    attributesInitialized = true
+    try Self.check(posix_spawn_file_actions_init(&actions), operation: .initializeFileActions)
+    actionsInitialized = true
 
     var defaultSignals = sigset_t()
     sigfillset(&defaultSignals)
-    posix_spawnattr_setsigdefault(&attributes, &defaultSignals)
+    try Self.check(posix_spawnattr_setsigdefault(&attributes, &defaultSignals), operation: .setDefaultSignals)
     var blockedSignals = sigset_t()
     sigemptyset(&blockedSignals)
-    posix_spawnattr_setsigmask(&attributes, &blockedSignals)
-    posix_spawnattr_setpgroup(&attributes, 0)
-    posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETPGROUP))
+    try Self.check(posix_spawnattr_setsigmask(&attributes, &blockedSignals), operation: .setSignalMask)
+    try Self.check(posix_spawnattr_setpgroup(&attributes, 0), operation: .setProcessGroup)
+    let processFlags = Int16(POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETPGROUP)
+    #if canImport(Darwin)
+    let flags = processFlags | Int16(POSIX_SPAWN_CLOEXEC_DEFAULT)
+    #else
+    let flags = processFlags
+    #endif
+    try Self.check(posix_spawnattr_setflags(&attributes, flags), operation: .setFlags)
 
-    posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0)
-    for descriptor in 3..<inheritedDescriptorLimit {
+    try Self.check(
+      posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0),
+      operation: .openStandardInput
+    )
+    #if canImport(Darwin)
+    // CLOEXEC_DEFAULT keeps only explicit file actions, including stdin above.
+    // The kernel closes private FDs at spawn, even those opened after preparation.
+    for descriptor in [STDOUT_FILENO, STDERR_FILENO] {
+      try Self.check(posix_spawn_file_actions_addinherit_np(&actions, descriptor), operation: .inheritDescriptor)
+    }
+    #else
+    for descriptor in (STDERR_FILENO + 1)..<Self.inheritedDescriptorLimit {
       let flags = fcntl(descriptor, F_GETFD)
       if flags >= 0, flags & FD_CLOEXEC == 0 {
-        posix_spawn_file_actions_addclose(&actions, descriptor)
+        try Self.check(posix_spawn_file_actions_addclose(&actions, descriptor), operation: .closeDescriptor)
       }
     }
+    #endif
+  }
 
+  deinit {
+    if actionsInitialized { posix_spawn_file_actions_destroy(&actions) }
+    if attributesInitialized { posix_spawnattr_destroy(&attributes) }
+  }
+
+  func spawn(executable: URL, arguments: [String], environment: [String: String]) throws -> pid_t {
     var pid = pid_t()
-    let result = withCStrings([executable.path] + arguments) { argv in
-      withCStrings(environment.map { "\($0.key)=\($0.value)" }) { envp in
+    let result = Self.withCStrings([executable.path] + arguments) { argv in
+      Self.withCStrings(environment.map { "\($0.key)=\($0.value)" }) { envp in
         posix_spawn(&pid, executable.path, &actions, &attributes, argv, envp)
       }
     }
-    guard result == 0 else {
-      throw SpawnError(code: result)
-    }
+    try Self.check(result, operation: .spawn)
     return pid
+  }
+
+  private static func check(_ result: Int32, operation: ChildProcessRunner.SpawnError.Operation) throws {
+    guard result == successfulReturnCode else {
+      // POSIX spawn/setup functions return the error number, not global errno.
+      throw ChildProcessRunner.SpawnError(operation: operation, code: result)
+    }
   }
 
   private static func withCStrings<Value>(
