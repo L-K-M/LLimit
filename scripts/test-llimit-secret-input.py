@@ -23,6 +23,8 @@ PROVIDER = "venice"
 PROMPT = b"API key: "
 SECRET = b"llimit-echo-probe-0123456789"
 TIMEOUT_SECONDS = 15
+# After the terminal closes, llimit only has to exit.
+EXIT_TIMEOUT_SECONDS = 5
 POLL_SECONDS = 0.05
 
 
@@ -102,7 +104,7 @@ def run(binary, home):
             transcript += chunk
 
         # EOF only means the terminal was closed, not that llimit exited.
-        status = wait_for_exit(pid, deadline)
+        status = wait_for_exit(pid, time.monotonic() + EXIT_TIMEOUT_SECONDS)
         if status is None:
             fail("llimit kept running after it closed the terminal", transcript)
     finally:
