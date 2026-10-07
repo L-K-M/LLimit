@@ -1,5 +1,8 @@
 import XCTest
 @testable import QuotaCore
+#if canImport(Carbon)
+import Carbon.HIToolbox
+#endif
 
 final class DashboardHotkeyTests: XCTestCase {
   func testStoredRawValuesStayStable() {
@@ -33,9 +36,13 @@ final class DashboardHotkeyTests: XCTestCase {
   }
 
   func testKeyCodeMatchesKeySymbol() {
-    // 0x25 is kVK_ANSI_L in HIToolbox's Events.h. Change both together.
     XCTAssertEqual(DashboardHotkey.keySymbol, "L")
+    #if canImport(Carbon)
+    XCTAssertEqual(DashboardHotkey.keyCode, UInt32(kVK_ANSI_L))
+    #else
+    // kVK_ANSI_L in HIToolbox's Events.h, which only Apple platforms have.
     XCTAssertEqual(DashboardHotkey.keyCode, 0x25)
+    #endif
   }
 
   func testOnlyOffHasNoCombination() {
