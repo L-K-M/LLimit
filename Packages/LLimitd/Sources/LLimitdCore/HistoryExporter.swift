@@ -50,7 +50,10 @@ public enum HistoryExporter {
     // a Character literal "\r\n" would be one grapheme and never match.
     let guarded = field.unicodeScalars.first.map(Self.formulaPrefixCharacters.contains) == true
       ? "'" + field : field
-    guard guarded.contains(",") || guarded.contains("\"") || guarded.contains("\n") || guarded.contains("\r") else {
+    // isNewline also covers CRLF graphemes and Unicode separators — any of
+    // them can break a naive CSV row into two.
+    guard guarded.contains(",") || guarded.contains("\"")
+          || guarded.contains(where: \.isNewline) else {
       return guarded
     }
     return "\"" + guarded.replacingOccurrences(of: "\"", with: "\"\"") + "\""
