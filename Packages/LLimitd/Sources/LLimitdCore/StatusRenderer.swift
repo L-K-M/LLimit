@@ -338,15 +338,17 @@ public enum StatusRenderer {
   }
 
   static func sanitizedErrorText(_ message: String) -> String {
-    let scanned = message.prefix(maximumScannedErrorLength)
-    var text = String(scanned)
-    if scanned.endIndex != message.endIndex { text = droppingTrailingTagFragment(text) }
+    // Bound scalars: one grapheme can contain arbitrarily many combining marks.
+    let scanned = message.unicodeScalars.prefix(maximumScannedErrorLength)
+    var text = String(String.UnicodeScalarView(scanned))
+    if scanned.endIndex != message.unicodeScalars.endIndex { text = droppingTrailingTagFragment(text) }
     for pattern in errorTextNoise {
       text = pattern.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: " ")
     }
     text = singleLine(text.replacingOccurrences(of: "%{", with: "% {"))
-    guard text.count > maximumErrorLength else { return text }
-    return droppingTrailingTagFragment(String(text.prefix(maximumErrorLength - 1))).trimmingCharacters(in: .whitespaces) + "…"
+    guard text.unicodeScalars.count > maximumErrorLength else { return text }
+    let kept = String(String.UnicodeScalarView(text.unicodeScalars.prefix(maximumErrorLength - 1)))
+    return droppingTrailingTagFragment(kept).trimmingCharacters(in: .whitespaces) + "…"
   }
 
   private static func droppingTrailingTagFragment(_ text: String) -> String {

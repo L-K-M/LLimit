@@ -105,6 +105,11 @@ final class StatusContractTests: XCTestCase {
     XCTAssertEqual(StatusRenderer.sanitizedErrorText(String(repeating: "x", count: 155) + " <bold < 5 ok"), String(repeating: "x", count: 155) + "…")
   }
 
+  func testCombiningCharactersCannotBypassErrorScanAndDisplayBounds() {
+    let message = "e" + String(repeating: "\u{0301}", count: 20_000)
+    XCTAssertLessThanOrEqual(StatusRenderer.sanitizedErrorText(message).unicodeScalars.count, StatusRenderer.maximumErrorLength)
+  }
+
   func testCompactAmountAndFailureSummaryDoNotInventPercentages() {
     let balance = ProviderUsage(accountID: "v", provider: .venice, title: "Venice",
                                 metrics: [UsageMetric(id: "balance", label: "Balance", remainingAmount: 4.25, usedDisplay: "$4.25")], fetchedAt: now)
