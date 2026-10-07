@@ -64,15 +64,14 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     // only in volatile fields. Once that entry is an hour stale, fold the new
     // timestamps in and rewrite, so a long static stretch can't push the
     // newest point outside `loadRecent` windows.
-    if let last = history.max(by: { $0.generatedAt < $1.generatedAt }),
-       last.isContentEquivalent(to: snapshot) {
-      if snapshot.generatedAt.timeIntervalSince(last.generatedAt) < 3_600 {
+    if let index = history.indices.max(by: {
+      history[$0].generatedAt < history[$1].generatedAt
+    }), history[index].isContentEquivalent(to: snapshot) {
+      if snapshot.generatedAt.timeIntervalSince(history[index].generatedAt) < 3_600 {
         return
       }
-      if let index = history.lastIndex(of: last) {
-        history[index] = snapshot
-        try save(history)
-      }
+      history[index] = snapshot
+      try save(history)
       return
     }
 
