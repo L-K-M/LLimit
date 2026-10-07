@@ -62,7 +62,12 @@ public struct ZhipuQuotaClient: QuotaProviderClient {
     var metrics: [UsageMetric] = []
     var maxUsagePercent = 0
 
-    if let tokenLimit = limits.first(where: { ($0["type"] as? String) == "TOKENS_LIMIT" }) {
+    for tokenLimit in limits where (tokenLimit["type"] as? String) == "TOKENS_LIMIT" {
+      let window = TokenWindow(entry: tokenLimit)
+      // Two entries naming the same window keep the first, as this client
+      // always has, so a metric id never appears twice.
+      guard !metrics.contains(where: { $0.id == window.metricID }) else { continue }
+
       guard
         let percentage = parseNumeric(tokenLimit["percentage"]),
         let remaining = percentRemaining(fromUsedPercent: percentage)
@@ -98,8 +103,8 @@ public struct ZhipuQuotaClient: QuotaProviderClient {
 
       metrics.append(
         UsageMetric(
-          id: "tokens",
-          label: provider == .zhipu ? "5-hour token limit" : "Token limit",
+          id: window.metricID,
+          label: window.label(for: provider),
           remainingPercent: remaining,
           usedDisplay: usedDisplay,
           totalDisplay: totalDisplay,
@@ -163,6 +168,78 @@ public struct ZhipuQuotaClient: QuotaProviderClient {
       warning: maxUsagePercent >= 80 ? "High usage" : nil,
       fetchedAt: now
     )
+  }
+
+  /// Which window one `TOKENS_LIMIT` entry measures. The GLM Coding Plan sends
+  /// one entry per token cap and tells them apart only by `unit` and `number`:
+  /// (3, 5) is the 5-hour window and (6, 1) the weekly one, as observed by
+  /// third-party monitors (netspeedy/zquota); Z.ai documents neither code.
+  /// History and colors key on the metric id, so the 5-hour window keeps the
+  /// `tokens` id it has always had.
+  private enum TokenWindow {
+    /// No `unit` (absent or JSON null): the single-entry shape this client was
+    /// written for. It keeps its original id and per-host label.
+    case unannotated
+    case fiveHour
+    case weekly
+    /// A code pair with no known meaning, or a `unit` that is present but not
+    /// a number. It gets a neutral id and label, never a guessed cadence.
+    case unrecognized(unit: String, number: String?)
+
+    /// Stands in for a `unit` that is present but not a number. The raw text
+    /// is not echoed: it is unbounded, and a word like "HOUR" in the label
+    /// would make `QuotaWindowKind.classify` read a cadence into it.
+    private static let unreadableUnit = "unknown"
+
+    init(entry: [String: Any]) {
+      guard let rawUnit = entry["unit"], !(rawUnit is NSNull) else {
+        self = .unannotated
+        return
+      }
+
+      let number = parseNumeric(entry["number"])
+      guard let unitValue = parseNumeric(rawUnit), let unit = formatIntLike(unitValue) else {
+        self = .unrecognized(unit: Self.unreadableUnit, number: formatIntLike(number))
+        return
+      }
+
+      switch (unitValue, number) {
+      case (3, 5?):
+        self = .fiveHour
+      case (6, 1?):
+        self = .weekly
+      default:
+        self = .unrecognized(unit: unit, number: formatIntLike(number))
+      }
+    }
+
+    var metricID: String {
+      switch self {
+      case .unannotated, .fiveHour:
+        return "tokens"
+      case .weekly:
+        return "tokens-weekly"
+      case let .unrecognized(unit, number):
+        return "tokens-u\(unit)" + (number.map { "-n\($0)" } ?? "")
+      }
+    }
+
+    /// Labels `QuotaWindowKind.classify` can parse. The neutral label names no
+    /// cadence, so an unknown window classifies as `.other`.
+    func label(for provider: QuotaProvider) -> String {
+      switch self {
+      case .unannotated:
+        // Z.ai's single entry never named its duration; `classify` still maps
+        // the bare `tokens` id to the session window.
+        return provider == .zhipu ? "5-hour token limit" : "Token limit"
+      case .fiveHour:
+        return "5-hour token limit"
+      case .weekly:
+        return "Weekly token limit"
+      case let .unrecognized(unit, number):
+        return "Token limit (unit \(unit)" + (number.map { ", number \($0)" } ?? "") + ")"
+      }
+    }
   }
 
   /// Where the MCP quota's reset date came from. The menu dropdown prints the

@@ -32,6 +32,8 @@ final class ProviderMetricSelectionTests: XCTestCase {
       (.openAI, ["secondary", "primary"], ["primary", "secondary"]),
       (.zhipu, ["mcp", "tokens"], ["tokens", "mcp"]),
       (.zai, ["mcp", "tokens"], ["tokens", "mcp"]),
+      (.zhipu, ["mcp", "tokens-weekly", "tokens"], ["tokens", "tokens-weekly"]),
+      (.zai, ["mcp", "tokens-weekly", "tokens"], ["tokens", "tokens-weekly"]),
       (.gitHubCopilot, ["completions", "premium", "chat"], ["premium", "chat"]),
       (.googleAntigravity, ["gemini-3-flash", "gemini-3-pro-high"], ["gemini-3-pro-high", "gemini-3-flash"])
     ]

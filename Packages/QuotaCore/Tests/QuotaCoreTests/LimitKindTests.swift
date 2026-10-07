@@ -31,6 +31,13 @@ final class LimitKindTests: XCTestCase {
     // Pins the check order: the id fallback runs last, so a label that names a
     // cadence still wins over it.
     XCTAssertEqual(QuotaWindowKind.classify(metricID: "tokens", label: "Monthly token limit"), .monthly)
+    // The GLM Coding Plan's weekly token cap, and a code pair with no known
+    // cadence, which must not borrow the `tokens` session fallback.
+    XCTAssertEqual(QuotaWindowKind.classify(metricID: "tokens-weekly", label: "Weekly token limit"), .weekly)
+    XCTAssertEqual(
+      QuotaWindowKind.classify(metricID: "tokens-u5-n1", label: "Token limit (unit 5, number 1)"),
+      .other
+    )
 
     // Google Antigravity reports per-model quotas with no window wording.
     XCTAssertEqual(QuotaWindowKind.classify(metricID: "gemini-3-flash", label: "G3 Flash"), .other)
