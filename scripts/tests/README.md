@@ -17,7 +17,10 @@ It also runs the production profile-retention service with an injected temporary
 root: separate records must have private permissions, contain no credentials,
 preserve profile files, and reject symbolic-link markers without modifying their
 targets.
-It never launches Claude Code, accesses Keychain, or uses real credentials.
+It never launches Claude Code or uses real credentials. With
+`LLIMIT_TEST_LOGIN_KEYCHAIN=1`, as in CI, it also writes a fixture item to the login
+keychain the way Claude Code does, then requires the production service to read
+and delete it without a permission dialog. Without that variable it skips Keychain.
 
 Run `swift test --package-path Packages/QuotaCore` for the renewal sequence,
 credential identity checks, failure recovery, and subprocess timeout regressions.
@@ -35,8 +38,9 @@ normal mode. A synthetic child process checks the actual renewal environment.
 Keychain prompts are a separate manual check: reopen Settings and confirm it does
 not scan credentials automatically. On Add Account, click **Scan** to explicitly
 search for CLI logins. Auto-fill a non-Claude account and confirm it does not ask
-for the ordinary Claude Code Keychain entry. Claude **Scan**, **Auto-fill**, and
-**Connect Claude** may still request access to the relevant CLI-owned entry.
+for the ordinary Claude Code Keychain entry. Claude **Scan** and **Auto-fill** may
+still request access to that entry. **Connect Claude** and its renewals must not
+show a Keychain prompt.
 
 To verify the real sign-in flow manually:
 

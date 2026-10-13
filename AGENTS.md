@@ -40,7 +40,9 @@ Google Antigravity, Devin, Meta Muse, OpenCode Go, Venice, Cline.
   all non-UI logic here.
   - `CredentialDiscovery.swift` — scans local config files for credentials.
   - `ClaudeCodeProfile.swift`, `ClaudeCodeProcess.swift` — profile identity/adoption
-    rules and isolated CLI renewal execution; macOS Keychain access stays in the app.
+    rules and isolated CLI renewal execution; Security framework access stays in the app.
+  - `ClaudeCodeKeychain.swift` — reads and deletes Claude Code's Keychain items through
+    `/usr/bin/security`, with a deadline.
   - `Clients/*.swift` — one `QuotaProviderClient` per provider API.
   - `QuotaCoordinator.swift` — fans out client calls in parallel into a `QuotaSnapshot`.
   - `Models.swift`, `*Store.swift`, `Utilities.swift`.
@@ -115,6 +117,10 @@ Linux:
   `600`. Pass renewal material only to that CLI process; never log it or persist
   it in LLimit settings. A timed-out renewal may still be rotating its grant:
   retain the process, preserve the pending marker, and never replay the old token.
+- Read and delete a managed profile's Keychain item only through `/usr/bin/security`
+  (`ClaudeCodeKeychain`). Claude Code writes it with that tool, so the item trusts
+  only `security`, and every renewal rewrite drops any grant given to LLimit. An
+  in-process Security framework read would ask for the login password after each one.
 - Never replace every Claude account with the current global CLI token. Managed
   profiles must match profile UUID plus verified account and organization UUIDs;
   imports without verified identity remain unchanged until explicit reimport.

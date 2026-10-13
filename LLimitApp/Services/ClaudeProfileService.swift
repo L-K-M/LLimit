@@ -6,6 +6,8 @@ import QuotaCore
 /// Reads only the credential namespace belonging to a single LLimit profile.
 /// Claude Code owns the refresh token and writes it; LLimit keeps only an access-token cache.
 struct ClaudeProfileService {
+  /// On a locked keychain, `security` asks to unlock it and cannot be told not to.
+  /// Background reads never start it then; interactive reads wait for the answer.
   enum ReadMode { case interactive, background }
 
   struct Login {
@@ -22,7 +24,7 @@ struct ClaudeProfileService {
       case .cliMissing: return "Claude Code was not found. Install Claude Code, then connect this account again."
       case .unsafeDirectory: return "The Claude profile directory could not be secured. Check its permissions before reconnecting."
       case .notSignedIn: return "This Claude profile is not signed in. Open its terminal to connect."
-      case .keychainLocked: return "Allow LLimit to read this Claude profile in Keychain, then reconnect."
+      case .keychainLocked: return "Could not read this Claude login from Keychain. Make sure your login keychain is unlocked, then refresh."
       case .missingIdentity: return "Claude Code did not save an account identity. Complete sign-in again in this account’s terminal."
       case .settingsUnavailable: return "Could not save this account securely. Check LLimit’s settings file before trying again."
       case .renewalUnavailable: return "This Claude login cannot be renewed automatically. Reconnect this account."
@@ -30,7 +32,12 @@ struct ClaudeProfileService {
     }
   }
 
+  /// Long enough to answer a keychain unlock prompt.
+  private static let unlockTimeout: TimeInterval = 60
+  private static let backgroundTimeout: TimeInterval = 5
+
   private let root: URL
+  private let keychain = ClaudeCodeKeychain()
 
   init(root: URL? = nil) {
     self.root = root ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -104,24 +111,27 @@ struct ClaudeProfileService {
   }
 
   private func credentialData(in directory: URL, mode: ReadMode) throws -> Data {
-    let query: [String: Any] = [
-      kSecClass as String: kSecClassGenericPassword,
-      kSecAttrService as String: keychainService(for: directory),
-      kSecAttrAccount as String: keychainAccount,
-      kSecReturnData as String: true,
-      kSecMatchLimit as String: kSecMatchLimitOne,
-      kSecUseAuthenticationUI as String: mode == .interactive ? kSecUseAuthenticationUIAllow : kSecUseAuthenticationUIFail
-    ]
-    var result: CFTypeRef?
-    let status = SecItemCopyMatching(query as CFDictionary, &result)
-    if status == errSecSuccess, let data = result as? Data { return data }
-    guard status == errSecItemNotFound else { throw Failure.keychainLocked }
+    if mode == .background, defaultKeychainIsLocked() { throw Failure.keychainLocked }
+    let timeout = mode == .interactive ? Self.unlockTimeout : Self.backgroundTimeout
+    switch keychain.password(service: keychainService(for: directory), account: keychainAccount, timeout: timeout) {
+    case .success(let data?): return data
+    case .success(nil): break
+    case .failure: throw Failure.keychainLocked
+    }
     let fileURL = directory.appendingPathComponent(".credentials.json")
     guard let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]),
           values.isRegularFile == true, values.isSymbolicLink != true,
           let data = try? Data(contentsOf: fileURL) else { throw Failure.notSignedIn }
     try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
     return data
+  }
+
+  /// Asks without UI. Without a default keychain, Claude Code saved its login to a file.
+  private func defaultKeychainIsLocked() -> Bool {
+    var status = SecKeychainStatus()
+    // Deprecated, but the only UI-free lock check; SecItem queries may prompt.
+    guard SecKeychainGetStatus(nil, &status) == errSecSuccess else { return false }
+    return status & SecKeychainStatus(kSecUnlockStateStatus) == 0
   }
 
   func isRefreshLocked(_ profile: ClaudeCodeProfile) -> Bool {
@@ -173,11 +183,10 @@ struct ClaudeProfileService {
     // transaction having staged a recovery record first.
     try retain(profile)
     guard !isRefreshLocked(profile) else { throw Failure.renewalUnavailable }
-    let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-                               kSecAttrService as String: keychainService(for: directory),
-                               kSecAttrAccount as String: keychainAccount]
-    let status = SecItemDelete(query as CFDictionary)
-    guard status == errSecSuccess || status == errSecItemNotFound else { throw Failure.keychainLocked }
+    // Removal follows a user action, which may need to unlock the keychain.
+    let deletion = keychain.deletePassword(service: keychainService(for: directory), account: keychainAccount,
+                                           timeout: Self.unlockTimeout)
+    guard case .success = deletion else { throw Failure.keychainLocked }
     if FileManager.default.fileExists(atPath: directory.path) {
       try FileManager.default.removeItem(at: directory)
     }
