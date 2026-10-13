@@ -20,7 +20,8 @@ targets.
 It never launches Claude Code or uses real credentials. With
 `LLIMIT_TEST_LOGIN_KEYCHAIN=1`, as in CI, it also writes a fixture item to the login
 keychain the way Claude Code does, then requires the production service to read
-and delete it without a permission dialog. Without that variable it skips Keychain.
+and delete it without a permission dialog. Without that variable it skips Keychain,
+except in CI, where it fails.
 
 Run `swift test --package-path Packages/QuotaCore` for the renewal sequence,
 credential identity checks, failure recovery, and subprocess timeout regressions.

@@ -28,6 +28,8 @@ public struct ClaudeCodeKeychain: Sendable {
   static let itemNotFoundStatus: Int32 = 44
   /// Claude Code logins are a few kilobytes. Anything this large is not one.
   static let outputLimit = 1 << 20
+  /// Once the tool has exited, only end-of-file remains to read.
+  private static let drainGrace: TimeInterval = 1
 
   private let tool: URL
 
@@ -91,12 +93,14 @@ public struct ClaudeCodeKeychain: Sendable {
       drained.signal()
     }
 
-    let deadline = DispatchTime.now() + timeout
-    guard exited.wait(timeout: deadline) == .success, drained.wait(timeout: deadline) == .success else {
+    guard exited.wait(timeout: .now() + timeout) == .success else {
       Self.stop(process)
       return .failed
     }
-    guard process.terminationReason == .exit, let data = drain.data else { return .failed }
+
+    // An answer just before the deadline still counts: the drain gets its own grace.
+    guard drained.wait(timeout: .now() + Self.drainGrace) == .success,
+          process.terminationReason == .exit, let data = drain.data else { return .failed }
     return .exited(status: process.terminationStatus, output: data)
   }
 

@@ -200,6 +200,8 @@ struct ClaudeTerminalTests {
     /// read and delete it without asking for the login keychain password again.
     private static func verifyKeychainProfile(under fixture: URL) throws {
         guard ProcessInfo.processInfo.environment[keychainOptIn] == "1" else {
+            // CI must never lose this check silently.
+            precondition(ProcessInfo.processInfo.environment["CI"] == nil, "CI must set \(keychainOptIn)=1")
             print("Skipping Keychain checks. Set \(keychainOptIn)=1 to write a fixture item to the login keychain.")
             return
         }
@@ -218,6 +220,7 @@ struct ClaudeTerminalTests {
             let hex = Data(payload.utf8).map { String(format: "%02x", $0) }.joined()
             let command = "add-generic-password -U -a \"\(account)\" -s \"\(item)\" -X \"\(hex)\"\n"
             let status = security(["-i"], input: command)
+            if status != 0 { _ = security(["delete-generic-password", "-a", account, "-s", item]) }
             precondition(status == 0, "security could not write the Keychain fixture (status \(status))")
         }
 

@@ -7,7 +7,8 @@ import QuotaCore
 /// Claude Code owns the refresh token and writes it; LLimit keeps only an access-token cache.
 struct ClaudeProfileService {
   /// On a locked keychain, `security` asks to unlock it and cannot be told not to.
-  /// Background reads never start it then; interactive reads wait for the answer.
+  /// Background reads check the lock first and stop the tool after a few seconds;
+  /// interactive reads wait for the answer.
   enum ReadMode { case interactive, background }
 
   struct Login {
@@ -24,7 +25,7 @@ struct ClaudeProfileService {
       case .cliMissing: return "Claude Code was not found. Install Claude Code, then connect this account again."
       case .unsafeDirectory: return "The Claude profile directory could not be secured. Check its permissions before reconnecting."
       case .notSignedIn: return "This Claude profile is not signed in. Open its terminal to connect."
-      case .keychainLocked: return "Could not read this Claude login from Keychain. Make sure your login keychain is unlocked, then refresh."
+      case .keychainLocked: return "Could not access this Claude login in Keychain. Make sure your login keychain is unlocked, then try again."
       case .missingIdentity: return "Claude Code did not save an account identity. Complete sign-in again in this account’s terminal."
       case .settingsUnavailable: return "Could not save this account securely. Check LLimit’s settings file before trying again."
       case .renewalUnavailable: return "This Claude login cannot be renewed automatically. Reconnect this account."

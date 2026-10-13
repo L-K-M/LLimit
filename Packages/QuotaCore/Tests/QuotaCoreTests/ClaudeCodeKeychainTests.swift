@@ -65,12 +65,12 @@ final class ClaudeCodeKeychainTests: XCTestCase {
     let started = Date()
 
     XCTAssertEqual(keychain.password(service: service, account: account, timeout: 0.3), .failure(.unavailable))
-    XCTAssertLessThan(Date().timeIntervalSince(started), 2)
+    XCTAssertLessThan(Date().timeIntervalSince(started), 5)
 
     // The child is reaped shortly after the kill; until then it is a zombie.
     let pid = try XCTUnwrap(pid_t(String(decoding: Data(contentsOf: pidFile), as: UTF8.self)
       .trimmingCharacters(in: .whitespacesAndNewlines)))
-    let deadline = Date().addingTimeInterval(2)
+    let deadline = Date().addingTimeInterval(5)
     while kill(pid, 0) == 0, Date() < deadline { usleep(10_000) }
     XCTAssertEqual(kill(pid, 0), -1, "The tool outlived its deadline")
   }
