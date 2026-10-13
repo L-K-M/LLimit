@@ -220,8 +220,9 @@ open LLimit.xcodeproj
    then **Refresh Now**.
 4. Add the widget from the desktop / Notification Center gallery.
 
-The first time LLimit reads a Claude login from Keychain, macOS asks you to allow
-access. Choose **Always Allow** to let background refreshes read that login.
+Connected Claude accounts read their login through `/usr/bin/security`, as Claude
+Code does, so renewals do not ask for your keychain password. Importing the
+ordinary Claude Code login may ask macOS for access.
 Opening Settings does not scan credentials. Use **Scan** or Claude **Auto-fill**
 to request an import; other providers' **Auto-fill** does not request Claude
 Keychain access. Managed Claude accounts reuse their verified cached token until

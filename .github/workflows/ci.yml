@@ -54,6 +54,9 @@ jobs:
         run: scripts/test-panel-geometry.sh
 
       - name: Test Claude embedded terminal
+        timeout-minutes: 10
+        env:
+          LLIMIT_TEST_LOGIN_KEYCHAIN: "1"   # ephemeral runner keychain only
         run: scripts/test-claude-profile.sh --skip-build "$RUNNER_TEMP/LLimitBuild"
 
       - name: Test QuotaCore package

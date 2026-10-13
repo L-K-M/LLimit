@@ -1,9 +1,11 @@
 import AppKit
+import CryptoKit
 import Foundation
 import QuotaCore
 
 /// Runs production terminal sessions against a fake CLI, never the installed
-/// Claude binary, a network endpoint, or the user's credential stores.
+/// Claude binary, a network endpoint, or the user's credential stores. Only the
+/// opt-in Keychain check writes a fixture item to the login keychain.
 @main
 struct ClaudeTerminalTests {
     @MainActor static func main() throws {
@@ -91,6 +93,7 @@ struct ClaudeTerminalTests {
         waitForExit(cancelled, label: "cancellation")
         precondition(cancelled.state == .exited(130), "Control-C did not cancel the child")
         try verifyRetainedProfiles(under: fixture)
+        try verifyKeychainProfile(under: fixture)
         print("Claude integration checks passed: independent profiles, isolated environment, argv, PTY, Unicode input, hidden-session lifetime, exits, cancellation, and private retention records.")
     }
 
@@ -191,6 +194,103 @@ struct ClaudeTerminalTests {
         precondition(!files.fileExists(atPath: unsafeProfile.directory(under: root).path),
                      "Retention unexpectedly created a profile directory")
     }
+
+    /// Claude Code writes its macOS login only through /usr/bin/security, so the
+    /// item trusts that tool alone, and every renewal rewrites it. LLimit must
+    /// read and delete it without asking for the login keychain password again.
+    private static func verifyKeychainProfile(under fixture: URL) throws {
+        guard ProcessInfo.processInfo.environment[keychainOptIn] == "1" else {
+            // CI must never lose this check silently.
+            precondition(ProcessInfo.processInfo.environment["CI"] == nil, "CI must set \(keychainOptIn)=1")
+            print("Skipping Keychain checks. Set \(keychainOptIn)=1 to write a fixture item to the login keychain.")
+            return
+        }
+        let root = fixture.appendingPathComponent("keychain fixtures", isDirectory: true)
+        let service = ClaudeProfileService(root: root)
+        let profile = ClaudeCodeProfile()
+        let directory = try service.prepare(profile)
+        let identity = #"{"oauthAccount":{"accountUuid":"\#(UUID())","organizationUuid":"\#(UUID())"}}"#
+        try Data(identity.utf8).write(to: directory.appendingPathComponent(".claude.json"))
+        let item = claudeCodeKeychainService(for: directory)
+        let account = claudeCodeKeychainAccount
+
+        // Same command as Claude Code 2.1.296. The second write is a renewal.
+        for token in ["fixture-access-initial", "fixture-access-renewed"] {
+            let payload = #"{"claudeAiOauth":{"accessToken":"\#(token)","expiresAt":2000000000000}}"#
+            let hex = Data(payload.utf8).map { String(format: "%02x", $0) }.joined()
+            let command = "add-generic-password -U -a \"\(account)\" -s \"\(item)\" -X \"\(hex)\"\n"
+            let status = security(["-i"], input: command)
+            if status != 0 { _ = security(["delete-generic-password", "-a", account, "-s", item]) }
+            precondition(status == 0, "security could not write the Keychain fixture (status \(status))")
+        }
+
+        let read = withDeadline { Result { try service.read(profile, mode: .background) } }
+        var removal: Result<Void, Error>?
+        if case .success = read {
+            removal = withDeadline { Result { try service.remove(profile) } }
+        }
+        let remaining = security(["find-generic-password", "-a", account, "-s", item])
+        // Clean up before asserting: a failed precondition skips deferred work.
+        _ = security(["delete-generic-password", "-a", account, "-s", item])
+
+        guard let read else { preconditionFailure("Reading the Keychain item blocked, likely on a password dialog") }
+        switch read {
+        case .success(let login):
+            precondition(login.credentials.accessToken == "fixture-access-renewed", "Read a stale Keychain login")
+        case .failure(let error):
+            preconditionFailure("Reading the Keychain item failed: \(error)")
+        }
+        guard let removal else { preconditionFailure("Removing the Keychain item blocked, likely on a password dialog") }
+        if case .failure(let error) = removal { preconditionFailure("Removing the Keychain item failed: \(error)") }
+        precondition(remaining == itemNotFoundStatus, "Removing the profile left its Keychain item behind")
+    }
+
+    /// Mirrors Claude Code's CLAUDE_CONFIG_DIR-specific service name.
+    private static func claudeCodeKeychainService(for directory: URL) -> String {
+        let digest = SHA256.hash(data: Data(directory.path.precomposedStringWithCanonicalMapping.utf8))
+        return "Claude Code-credentials-" + digest.map { String(format: "%02x", $0) }.joined().prefix(8)
+    }
+
+    /// Mirrors Claude Code's account name: $USER, else a fixed fallback.
+    private static var claudeCodeKeychainAccount: String {
+        let user = ProcessInfo.processInfo.environment["USER"].flatMap { $0.isEmpty ? nil : $0 } ?? NSUserName()
+        return user.range(of: "^[A-Za-z0-9._-]+$", options: .regularExpression) == nil ? "claude-code-user" : user
+    }
+
+    @discardableResult
+    private static func security(_ arguments: [String], input: String? = nil) -> Int32 {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = arguments
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        let stdin = Pipe()
+        process.standardInput = input == nil ? FileHandle.nullDevice : stdin
+        do { try process.run() } catch { return -1 }
+        if let input {
+            stdin.fileHandleForWriting.write(Data(input.utf8))
+            try? stdin.fileHandleForWriting.close()
+        }
+        process.waitUntilExit()
+        return process.terminationStatus
+    }
+
+    /// Runs blocking work off the main thread. Nil means it never returned,
+    /// for example because macOS is waiting on a Keychain permission dialog.
+    private static func withDeadline<T>(_ work: @escaping () -> T) -> T? {
+        let done = DispatchSemaphore(value: 0)
+        var result: T?
+        DispatchQueue.global().async {
+            result = work()
+            done.signal()
+        }
+        guard done.wait(timeout: .now() + 20) == .success else { return nil }
+        return result
+    }
+
+    private static let keychainOptIn = "LLIMIT_TEST_LOGIN_KEYCHAIN"
+    /// `security` exits with the low byte of errSecItemNotFound (-25300).
+    private static let itemNotFoundStatus: Int32 = 44
 
     private static let fakeCLI = #"""
     #!/bin/sh
