@@ -229,3 +229,20 @@ the newly registered extension renders timelines successfully. A successful
 install therefore restarts Notification Center as well as chronod. Binary
 presence checks and shell syntax checks do not prove the gallery previews are
 visible; this procedure requires a graphical macOS session.
+
+# Trend widget fills its background
+
+1. With quota history available, place small and medium **Quota Trend Chart**
+   widgets. Use the default blue background, then a custom background color.
+2. Confirm the chart surface continues to every widget edge. There must be no
+   darker rounded panel surrounded by a lighter blue frame. Axis labels and
+   line endpoints must remain inside the widget's rounded corners.
+3. Select a transparent trend background in LLimit Settings. Confirm there is
+   no inset dark panel. Check an empty chart and a forecast warning as well;
+   text must retain its content padding.
+
+The regression combined default WidgetKit margins with the chart's own padding
+and an inset contrast panel. Native offscreen renders reproduced that panel in
+both families before the fix and confirmed its removal afterward. Offscreen
+rendering does not exercise WidgetKit's content margins or desktop clipping;
+the placed-widget procedure above verifies those host behaviors.
