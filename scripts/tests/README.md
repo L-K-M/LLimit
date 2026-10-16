@@ -246,3 +246,17 @@ and an inset contrast panel. Native offscreen renders reproduced that panel in
 both families before the fix and confirmed its removal afterward. Offscreen
 rendering does not exercise WidgetKit's content margins or desktop clipping;
 the placed-widget procedure above verifies those host behaviors.
+
+If a placed chart retains an older layout after installation, run
+`scripts/widget-diagnostics.sh --reset-chrono-cache`. A restart alone can reload
+the old serialized view tree. This reproduced a blue frame after the installed
+binary already contained the edge-to-edge fix; clearing the archives removed it.
+Successful installs now retire the extension process and invalidate LLimit's
+rendering cache before restarting the hosts. Keep the app and extension build
+numbers in sync when changing widget layouts.
+
+Run `python3 -m unittest discover -s scripts/tests -p test_widget_install.py -v`
+for the isolated installer regression. It executes the installer with temporary
+bundles and macOS tool stubs, checking cache invalidation before restart,
+preservation of neighboring data, and failure handling. It never changes HOME
+or accesses the real installed app or widget container.

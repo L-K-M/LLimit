@@ -158,6 +158,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+      - name: Test widget installer cache refresh
+        run: python3 -m unittest discover -s scripts/tests -p test_widget_install.py -v
       # The menu model is pure Python with no GTK import, so these run without
       # a display, a session bus or a panel.
       - name: Test tray menu model
