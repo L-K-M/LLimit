@@ -35,6 +35,7 @@ PLUGINKIT="/usr/bin/pluginkit"
 INSTALLED_APP="/Applications/$BUILD_APP_NAME.app"
 INSTALLED_WIDGET="$INSTALLED_APP/Contents/PlugIns/LLimitWidgetExtension.appex"
 WIDGET_BUNDLE_ID="ch.lkmc.llimit.app.widgetextension"
+CHRONO_DATA="$HOME/Library/Containers/$WIDGET_BUNDLE_ID/Data/SystemData/com.apple.chrono"
 
 # The install flow deregisters the app BEFORE building. If anything fails between
 # that point and the final registration below (build error, validation gate, copy
@@ -148,10 +149,24 @@ if [[ "$INSTALL" == true && -x "$LSREGISTER" && -d "$INSTALLED_APP" ]]; then
     "$PLUGINKIT" -a "$INSTALLED_WIDGET"
     "$PLUGINKIT" -e use -i "$WIDGET_BUNDLE_ID"
   fi
-  # The gallery lives in Notification Center. Keeping that process alive across
-  # replacement can leave it displaying discarded previews from the old build,
-  # even after chronod has registered and rendered the new widget catalog.
+  # Restarts alone can reuse archives containing the previous build's view tree.
+  # Move the cache atomically: live writers can recreate files during rm -rf.
+  # Account settings, history, and widget placements live elsewhere.
+  killall LLimitWidgetExtension >/dev/null 2>&1 || true
+  stale_cache=""
+  if [[ -e "$CHRONO_DATA" ]]; then
+    stale_cache="$(mktemp -d "$CHRONO_DATA.stale.XXXXXX")"
+    if ! mv "$CHRONO_DATA" "$stale_cache/archive"; then
+      rmdir "$stale_cache" || true
+      echo "error: failed to retire LLimit's WidgetKit rendering cache at $CHRONO_DATA" >&2
+      exit 1
+    fi
+  fi
+  # Notification Center also caches the widget gallery's previews.
   killall chronod NotificationCenter >/dev/null 2>&1 || true
+  if [[ -n "$stale_cache" ]] && ! rm -rf "$stale_cache"; then
+    echo "warn: fresh widget archives are enabled; retired cache remains at $stale_cache" >&2
+  fi
   DEREGISTERED=false
 
   echo "Registered $WIDGET_BUNDLE_ID build $WIDGET_BUILD from $INSTALLED_WIDGET"
