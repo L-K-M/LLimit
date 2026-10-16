@@ -260,3 +260,19 @@ for the isolated installer regression. It executes the installer with temporary
 bundles and macOS tool stubs, checking cache invalidation before restart,
 preservation of neighboring data, and failure handling. It never changes HOME
 or accesses the real installed app or widget container.
+
+# Trend widget reset connections
+
+Run `scripts/test-trend-chart.sh` on macOS, or pass `--skip-build` followed by an
+existing Debug DerivedData directory. The test renders the production chart with
+a 20% to 100% refill, then checks that its vertical connection remains visible
+for small and medium plots, session and weekly styles, and solid and dashed lines.
+Rendered PNGs remain in the selected build directory for visual inspection.
+Before the fix, all eight cases failed: the reset alone used a 0.6-point stroke
+at 30% opacity, making the otherwise connected trace appear disconnected.
+
+On a placed widget, confirm a quota refill holds the previous value until the
+new observation, then rises vertically with the trace's normal color and width.
+Same-color limits of one account remain distinguished by dash patterns, including
+their refill connections. This styling predates the reset-rendering regression;
+it identifies a separate quota, not a forecast or missing data.
