@@ -233,7 +233,7 @@ private struct TrendChartPlotView: View {
         ForEach(series) { line in
           if line.points.count >= 2 {
             let segments = TrendPathBuilder.segments(for: line.points)
-            let path = linePath(for: segments, kind: .consumption, width: width, height: height)
+            let path = linePath(for: segments, width: width, height: height)
             let casing = StrokeStyle(
               lineWidth: line.lineWidth + 1.5,
               lineCap: .round,
@@ -246,8 +246,6 @@ private struct TrendChartPlotView: View {
               dash: line.dashPattern
             )
 
-            linePath(for: segments, kind: .reset, width: width, height: height)
-              .stroke(line.color.opacity(0.3), lineWidth: 0.6)
             path.stroke(Color.black.opacity(0.28), style: casing)
             path.stroke(line.color.opacity(line.lineOpacity), style: stroke)
           }
@@ -267,13 +265,14 @@ private struct TrendChartPlotView: View {
     }
   }
 
-  private func linePath(for segments: [TrendPathSegment], kind: TrendPathSegment.Kind, width: CGFloat, height: CGFloat) -> Path {
+  private func linePath(for segments: [TrendPathSegment], width: CGFloat, height: CGFloat) -> Path {
     Path { path in
-      for segment in segments where segment.kind == kind {
-        for (index, point) in segment.samples.enumerated() {
+      // Resets belong to the same trace, including its casing and dash phase.
+      for segment in segments {
+        for point in segment.samples {
           let coordinate = CGPoint(x: xPosition(for: point.date, width: width),
             y: yPosition(for: point.remainingPercent, height: height))
-          if index == 0 { path.move(to: coordinate) } else { path.addLine(to: coordinate) }
+          if path.isEmpty { path.move(to: coordinate) } else { path.addLine(to: coordinate) }
         }
       }
     }
