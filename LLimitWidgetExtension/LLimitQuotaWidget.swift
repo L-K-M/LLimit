@@ -27,6 +27,7 @@ struct QuotaTrendChartWidget: Widget {
     .configurationDisplayName("Quota Trend Chart")
     .description("History lines across all accounts and limits.")
     .supportedFamilies([.systemSmall, .systemMedium])
+    .contentMarginsDisabled()
   }
 }
 
@@ -45,6 +46,12 @@ private extension View {
     } else {
       self.containerBackground(for: .widget) {
         FancyWidgetBackground(baseColor: backgroundBaseColor(from: style.backgroundHexColor))
+          .overlay {
+            // Keep chart contrast uniform through the widget edges.
+            if kind == .trend {
+              Color.black.opacity(0.3)
+            }
+          }
       }
     }
   }
@@ -178,8 +185,6 @@ private struct TrendChartPlotView: View {
       let ticks = timeTicks(width: width)
 
       ZStack {
-        // Axis labels retain contrast on the blue widget background.
-        RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.black.opacity(0.3))
         // Horizontal grid lines at 0%, 25%, 50%, 75%, 100%
         ForEach([0, 25, 50, 75, 100], id: \.self) { level in
           Path { path in
