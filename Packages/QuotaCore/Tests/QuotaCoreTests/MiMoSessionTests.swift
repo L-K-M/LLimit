@@ -235,6 +235,11 @@ final class MiMoSessionTests: XCTestCase {
     XCTAssertTrue(MiMoSignInPolicy.allowsNavigation(to: URL(string: "about:blank")!))
   }
 
+  func testNavigationAllowsInlineXiaomiSignInFrame() {
+    XCTAssertTrue(MiMoSignInPolicy.allowsNavigation(to: URL(string: "about:srcdoc")!))
+    XCTAssertFalse(MiMoSignInPolicy.allowsNavigation(to: URL(string: "about:config")!))
+  }
+
   func testNavigationAllowsExactPlatformHost() {
     XCTAssertTrue(MiMoSignInPolicy.allowsNavigation(to: URL(string: "https://platform.xiaomimimo.com/console/plan-manage")!))
     XCTAssertTrue(MiMoSignInPolicy.allowsNavigation(to: URL(string: "https://platform.xiaomimimo.com/api/v1/tokenPlan/detail")!))

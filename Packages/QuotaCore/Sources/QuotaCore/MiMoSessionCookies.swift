@@ -75,7 +75,9 @@ public enum MiMoSignInPolicy {
   public static let startURL = URL(string: "https://platform.xiaomimimo.com/console/plan-manage")!
 
   public static func allowsNavigation(to url: URL) -> Bool {
-    if url.absoluteString == "about:blank" { return true }
+    // Xiaomi's sign-in page embeds an inline document. These local documents
+    // inherit the containing page's origin and cannot supply a console login.
+    if ["about:blank", "about:srcdoc"].contains(url.absoluteString) { return true }
     guard url.scheme == "https", url.user == nil, url.password == nil,
           url.port == nil || url.port == 443, let host = url.host?.lowercased() else { return false }
     if host == MiMoSessionCookies.consoleHost { return true }
