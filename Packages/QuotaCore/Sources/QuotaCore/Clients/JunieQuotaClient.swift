@@ -5,7 +5,7 @@ import FoundationNetworking
 
 /// Reads the same account balance as Junie CLI's `/stats` command. The API
 /// supplies no total or reset. Percentages use an account-configured allowance
-/// or the personal AI Ultimate default, without inventing a reset date.
+/// or the personal AI Ultimate default. Reset dates are optional account settings.
 public struct JunieQuotaClient: QuotaProviderClient {
   public let provider: QuotaProvider = .junie
   private let endpoint: URL
@@ -28,6 +28,8 @@ public struct JunieQuotaClient: QuotaProviderClient {
       throw ProviderClientError(kind: .notConfigured, message: "Enter a Junie API key without spaces or control characters.")
     }
     let configuredAllowance = try Self.configuredAllowance(in: configuration.credentials)
+    let cycle = try Self.configuredCycle(in: configuration.credentials)
+    let resetAt = cycle?.resetAt(after: now)
 
     var request = URLRequest(url: endpoint)
     request.httpMethod = "GET"
@@ -93,11 +95,13 @@ public struct JunieQuotaClient: QuotaProviderClient {
     let remainingPercent = allowance > 0
       ? roundedPercent(min(max(balance, 0), allowance) / allowance * 100) : nil
     let detail: String
+    let resetDetail = resetAt == nil ? "Reset date not reported."
+      : "Uses your configured reset, repeating every 30 days."
     if allowance > 0 {
       let basis = configuredAllowance == nil ? "personal AI Ultimate default" : "configured allowance"
-      detail = "Based on \(Self.displayBalance(allowance, isUSD: false)) per 30 days (\(basis)). Top-ups may be included; reset date not reported."
+      detail = "Based on \(Self.displayBalance(allowance, isUSD: false)) per 30 days (\(basis)). Top-ups may be included. \(resetDetail)"
     } else {
-      detail = "JetBrains AI balance shared with Junie. Set a 30-day AI credit allowance to show percentages. Reset date not reported."
+      detail = "JetBrains AI balance shared with Junie. Set a 30-day AI credit allowance to show percentages. \(resetDetail)"
     }
 
     let warning: String?
@@ -117,12 +121,23 @@ public struct JunieQuotaClient: QuotaProviderClient {
         remainingPercent: remainingPercent, remainingAmount: balance,
         usedDisplay: Self.displayBalance(balance, isUSD: isUSD),
         totalDisplay: allowance > 0 ? Self.displayBalance(allowance, isUSD: isUSD) : nil,
+        resetAt: resetAt,
+        resetIn: resetAt.map { formatResetCountdown(to: $0, now: now) },
+        windowSeconds: allowance > 0 && resetAt != nil ? JunieCreditCycle.windowSeconds : nil,
         detail: detail
       )],
       maxUsagePercent: remainingPercent.map { 100 - $0 },
       warning: warning,
       fetchedAt: now
     )
+  }
+
+  private static func configuredCycle(in credentials: [String: String]) throws -> JunieCreditCycle? {
+    guard let text = nonEmptyString(credentials[CredentialField.junieResetAt]) else { return nil }
+    guard let cycle = JunieCreditCycle(anchor: text) else {
+      throw ProviderClientError(kind: .notConfigured, message: "Enter a valid reset date as YYYY-MM-DD or an ISO 8601 date-time with a timezone, or leave it empty if unknown.")
+    }
+    return cycle
   }
 
   private static func configuredAllowance(in credentials: [String: String]) throws -> Double? {

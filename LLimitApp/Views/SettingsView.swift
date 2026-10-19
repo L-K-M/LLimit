@@ -1250,7 +1250,10 @@ struct SettingsView: View {
         }
       }
 
-      if field.isSecret {
+      if field.key == CredentialField.junieResetAt,
+         model.account(withID: accountID)?.provider == .junie {
+        junieResetDateField(for: key)
+      } else if field.isSecret {
         committingDraft(
           SecureField(field.label, text: draftBinding(for: key))
             .textFieldStyle(.roundedBorder)
@@ -1266,12 +1269,75 @@ struct SettingsView: View {
         )
       }
 
-      if let help = field.help, !help.isEmpty {
+      if field.key == CredentialField.junieResetAt,
+         model.account(withID: accountID)?.provider == .junie {
+        Text("Set your credit renewal date and time. Repeats every 30 days. Leave off if unknown.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+      } else if let help = field.help, !help.isEmpty {
         Text(help)
           .font(.caption)
           .foregroundStyle(.secondary)
       }
     }
+  }
+
+  @ViewBuilder
+  private func junieResetDateField(for key: AccountFieldKey) -> some View {
+    let text = draftBinding(for: key).wrappedValue
+    let isEnabled = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+    Toggle("Set a reset date", isOn: Binding(
+      get: { !draftBinding(for: key).wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty },
+      set: { enabled in
+        if enabled {
+          let initial = Date().addingTimeInterval(TimeInterval(JunieCreditCycle.windowSeconds))
+          editJunieResetDate(initial, for: key)
+        } else {
+          accountDrafts.edit(key, text: "")
+        }
+        commitAccountDraft(key)
+      }
+    ))
+    .toggleStyle(.switch)
+
+    if isEnabled {
+      if let cycle = JunieCreditCycle(anchor: text) {
+        committingDraft(
+          DatePicker("Reset date and time", selection: Binding(
+            get: { JunieCreditCycle(anchor: draftBinding(for: key).wrappedValue)?.anchor ?? cycle.anchor },
+            set: { editJunieResetDate($0, for: key) }
+          ), displayedComponents: [.date, .hourAndMinute])
+            .labelsHidden()
+            .accessibilityLabel("Junie reset date and time"),
+          key: key
+        )
+      } else {
+        committingDraft(
+          TextField("YYYY-MM-DD or ISO 8601 timestamp", text: draftBinding(for: key))
+            .textFieldStyle(.roundedBorder)
+            .frame(maxWidth: 520),
+          key: key
+        )
+        Text("Enter a date such as 2026-10-19 or an ISO 8601 timestamp, or turn off the reset date.")
+          .font(.caption)
+          .foregroundStyle(.orange)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+    } else if let rejection = accountDrafts.rejection(for: key) {
+      Text(rejection.message)
+        .font(.caption)
+        .foregroundStyle(.orange)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+  }
+
+  private func editJunieResetDate(_ date: Date, for key: AccountFieldKey) {
+    let formatter = ISO8601DateFormatter()
+    formatter.timeZone = TimeZone(secondsFromGMT: 0)
+    let minute = Calendar.current.dateInterval(of: .minute, for: date)?.start ?? date
+    accountDrafts.edit(key, text: formatter.string(from: minute))
   }
 
   // MARK: - Account drafts

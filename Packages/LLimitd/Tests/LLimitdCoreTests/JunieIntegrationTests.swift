@@ -33,7 +33,9 @@ final class JunieIntegrationTests: XCTestCase {
       sourceLabel: "Junie CLI fixture", credentials: [CredentialField.junieAPIKey: "junie-import-fixture-secret"]
     )
     let imported = try daemon.editingSettings { try $0.importAccount(from: detected) }
-    let importedCredentials = detected.credentials.merging([CredentialField.junieCreditAllowance: "10"]) { _, new in new }
+    let importedCredentials = detected.credentials.merging([
+      CredentialField.junieCreditAllowance: "10", CredentialField.junieResetAt: ""
+    ]) { _, new in new }
     _ = try daemon.editingSettings {
       try $0.updateAccount(imported.id, credentials: .replacing(with: importedCredentials))
     }
@@ -86,7 +88,8 @@ final class JunieIntegrationTests: XCTestCase {
     XCTAssertTrue(settings.accounts.allSatisfy(\.isEnabled))
     XCTAssertEqual(settings.accounts[0].credentials, [
       CredentialField.junieAPIKey: "env:JUNIE_API_KEY",
-      CredentialField.junieCreditAllowance: ""
+      CredentialField.junieCreditAllowance: "",
+      CredentialField.junieResetAt: ""
     ])
     XCTAssertEqual(settings.accounts[1].credentials, importedCredentials)
     XCTAssertTrue(settings.redactedCredentials().accounts.allSatisfy { $0.credentials.isEmpty })
@@ -132,6 +135,7 @@ final class JunieIntegrationTests: XCTestCase {
       XCTAssertFalse(contents.contains("junie-import-fixture-secret"))
       XCTAssertFalse(contents.contains(CredentialField.junieAPIKey))
       XCTAssertFalse(contents.contains(CredentialField.junieCreditAllowance))
+      XCTAssertFalse(contents.contains(CredentialField.junieResetAt))
     }
     let savedSettings = String(decoding: try Data(contentsOf: paths.settingsFileURL), as: UTF8.self)
     XCTAssertFalse(savedSettings.contains("junie-env-fixture-secret"))
@@ -149,6 +153,29 @@ final class JunieIntegrationTests: XCTestCase {
     XCTAssertTrue(resetHistory.flatMap(\.providers).contains { $0.accountID == imported.id })
     await daemon.refreshNow()
     XCTAssertEqual(daemon.snapshot?.providers.first { $0.accountID == manual.id }?.metrics.first?.remainingPercent, 18)
+
+    // A reset date changes the countdown, while retaining observed percentages.
+    let formatter = ISO8601DateFormatter()
+    let resetText = formatter.string(from: Date().addingTimeInterval(15 * 86_400))
+    let resetAt = try XCTUnwrap(formatter.date(from: resetText))
+    _ = try daemon.editingSettings {
+      try $0.updateAccount(imported.id, credentials: .merging([CredentialField.junieResetAt: resetText]))
+    }
+    XCTAssertFalse(daemon.snapshot?.providers.contains { $0.accountID == imported.id } ?? false)
+    let retainedHistory = try QuotaHistoryStore(fileURL: paths.historyFileURL).load()
+    XCTAssertTrue(retainedHistory.flatMap(\.providers).contains { $0.accountID == imported.id })
+    await daemon.refreshNow()
+    let scheduled = try XCTUnwrap(daemon.snapshot?.providers.first { $0.accountID == imported.id })
+    XCTAssertEqual(scheduled.metrics.first?.resetAt, resetAt)
+    XCTAssertEqual(scheduled.metrics.first?.windowSeconds, 30 * 86_400)
+    let scheduledJSON = StatusRenderer.waybarJSON(snapshot: try XCTUnwrap(daemon.snapshot), now: Date())
+    let scheduledObject = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(scheduledJSON.utf8)) as? [String: Any])
+    let scheduledAccounts = try XCTUnwrap(scheduledObject["accounts"] as? [[String: Any]])
+    let scheduledAccount = try XCTUnwrap(scheduledAccounts.first { $0["id"] as? String == imported.id })
+    let scheduledMetric = try XCTUnwrap((scheduledAccount["metrics"] as? [[String: Any]])?.first)
+    XCTAssertEqual(scheduledMetric["resetAt"] as? String, resetText)
+    _ = try daemon.editingSettings { try $0.reimportAccount(imported.id, among: [detected]) }
+    XCTAssertEqual(daemon.settings.account(withID: imported.id)?.credentials[CredentialField.junieResetAt], resetText)
   }
 }
 

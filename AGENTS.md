@@ -167,7 +167,18 @@ Linux:
   <Junie API key>`, `X-Accept-EAP-License: false`, and
   `X-Accept-Release-License: true`. The response reports `balanceLeft` and
   `balanceUnit`: USD is unscaled, every other or absent unit is divided by
-  100,000 and displayed as credits. No allowance total or reset is supplied.
+  100,000 and displayed as credits. No allowance total is supplied. The API
+  does not report a reset date, but the user can configure one.
+  `junie.reset_at` is an optional nonsecret per-account setting. Blank means
+  reset unknown. Accepts `YYYY-MM-DD` (midnight UTC) or ISO 8601 date-time
+  with timezone, e.g. `2026-11-01T00:00:00Z`. It anchors a repeating fixed
+  30-day (2592000 second) cycle. Past anchor dates advance by whole 30-day
+  periods to the next strictly future reset. The configured schedule supplies
+  a reset countdown, and a 30-day window/pace when percentage allowance is
+  enabled; setting `credit_allowance` to `0` still shows balance and known
+  reset but no percentage/pace. No automatic balance refill or reset of credits
+  is performed. Reimport preserves the allowance and reset setting. macOS
+  Settings has an optional date+time picker.
   `junie.credit_allowance` is an optional nonsecret per-account denominator:
   nonnegative finite AI credits per 30 days, with `0` disabling percentages.
   Without an override, license `AIPU` uses the personal AI Ultimate default of
@@ -175,10 +186,10 @@ Linux:
   must override the personal default. One credit equals US$1. Clamp percentage
   geometry but retain the full balance, including top-ups. Label percentage
   metrics `30-day AI credits` for monthly colors; preserve `credit-balance` ids.
-  Keep `estimatedTotal`, `windowSeconds`, and reset fields nil: the allowance
-  is a declared plan basis, not an observed estimate or server-reported reset.
-  Allowance edits clear the account's chart history. Credential reimport and
-  Auto-fill preserve the account-owned allowance while replacing authentication.
+  Keep `estimatedTotal` nil. When `reset_at` is configured, use it for the reset;
+  otherwise keep `windowSeconds` and reset fields nil. Allowance edits
+  clear the account's chart history. Credential reimport and Auto-fill preserve
+  the account-owned allowance and reset setting while replacing authentication.
   Source: [JetBrains plan allowances](https://www.jetbrains.com/help/ai-assistant/licensing-and-subscriptions.html).
   Junie suppresses balances for `licenseType: GZL`;
   this does not establish unlimited access. Import `JUNIE_API_KEY` or

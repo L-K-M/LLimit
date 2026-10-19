@@ -148,13 +148,19 @@ accounts or other plans with `--set junie.credit_allowance=70` when adding an
 account, or `llimit accounts update <id> --set junie.credit_allowance=35`.
 Set it to `0` for balance only. Other license types need an explicit allowance.
 Changing it clears that account's previous chart history. Reimport preserves
-the configured allowance while replacing the API key.
-One AI credit equals US$1, so USD balances use the same ratio. Percentages cap
+the allowance and reset setting. One credit equals US$1. Percentages cap
 at 100% while the full balance, including additional purchased credits, remains
-available in JSON. The API provides no reset date; no countdown is inferred.
-GZL licenses do not report a usable balance. Import supports `JUNIE_API_KEY` and
-the permanent `simpleToken` in `<JUNIE_HOME>/secure_credentials.json` (default
-`~/.junie`), but excludes browser refresh grants and third-party provider keys.
+available in JSON. The API does not report a reset date, but you can configure
+one: `llimit accounts update <id> --set junie.reset_at=2026-11-01T00:00:00Z`.
+It accepts `YYYY-MM-DD` (midnight UTC) or ISO 8601 date-time with timezone,
+anchoring a repeating fixed 30-day cycle. Past dates advance to the next reset;
+clear it with `--set junie.reset_at=` if unknown. With a configured schedule and
+percentage allowance enabled, it shows a reset countdown and 30-day pace.
+Setting allowance to `0` still shows the balance and known reset but no
+percentage or pace. No automatic balance refill occurs. GZL licenses do not
+report a usable balance. Import supports `JUNIE_API_KEY` and the permanent
+`simpleToken` in `<JUNIE_HOME>/secure_credentials.json` (default `~/.junie`),
+but excludes browser refresh grants and third-party provider keys.
 macOS Keychain-only logins require a manually entered Junie API key. Saved keys
 work without Junie running and need explicit replacement when revoked or expired.
 

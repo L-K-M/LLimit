@@ -137,14 +137,21 @@ In your Junie account settings, **30-day AI credit allowance** overrides the
 default for organization accounts or other plans; enter `0` for balance only.
 Other license types stay amount-only until you set an allowance.
 Changing the allowance restarts that account's chart history. Auto-fill and
-credential reimport preserve your configured allowance.
+credential reimport preserve your configured allowance and reset date.
+
+The API does not report a reset date. You can optionally configure one with
+the **Reset date** picker in account settings. It repeats every 30 days,
+advancing past dates to the next reset. Leave it off if the date is unknown.
+With a configured schedule and percentage allowance enabled, LLimit shows a
+reset countdown and 30-day window pace. Setting the allowance to `0` still
+shows the balance and known reset but no percentage or pace. No automatic
+balance refill occurs.
 
 The [JetBrains plan allowance](https://www.jetbrains.com/help/ai-assistant/licensing-and-subscriptions.html)
 is the percentage basis, rather than a total reported by the API. One AI credit
 equals US$1, so USD balances use the same ratio. Additional purchased credits may
 raise the balance above the allowance; the amount stays visible and percentages
-cap at 100%. The API provides no reset date, so LLimit does not show a reset
-countdown. GZL licenses do not report a usable credit balance.
+cap at 100%. GZL licenses do not report a usable credit balance.
 
 Import reads `JUNIE_API_KEY` and the permanent `simpleToken` in Junie's fallback
 credential file under `JUNIE_HOME` (default `~/.junie`). Browser login refresh

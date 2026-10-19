@@ -224,6 +224,13 @@ public extension QuotaProvider {
           isSecret: false,
           isRequired: false,
           help: "Personal AI Ultimate defaults to 35 credits. Set your allowance for other plans or organization accounts, or 0 for balance only. Changing this restarts chart history."
+        ),
+        CredentialFieldDescriptor(
+          key: CredentialField.junieResetAt,
+          label: "Reset date",
+          isSecret: false,
+          isRequired: false,
+          help: "Optional reset date, repeating every 30 days. Use YYYY-MM-DD (midnight UTC) or an ISO 8601 date-time with a timezone. Leave empty if unknown."
         )
       ]
     }
@@ -538,17 +545,16 @@ public struct ProviderAccount: Codable, Hashable, Identifiable, Sendable {
       isEnabled: isEnabled, credentials: credentials.resolvingEnvironmentReferences(environment))
   }
 
-  /// Import replaces authentication, while Junie's account-owned allowance
-  /// survives when the source tool does not supply that setting.
+  /// Import replaces authentication, while Junie's account-owned credit settings
+  /// survive when the source tool does not supply them.
   public func credentialsForImport(_ imported: [String: String]) -> [String: String] {
-    guard provider == .junie,
-          imported[CredentialField.junieCreditAllowance] == nil,
-          let allowance = credentials[CredentialField.junieCreditAllowance] else {
-      return imported
-    }
+    guard provider == .junie else { return imported }
 
     var result = imported
-    result[CredentialField.junieCreditAllowance] = allowance
+    for key in [CredentialField.junieCreditAllowance, CredentialField.junieResetAt]
+      where imported[key] == nil {
+      result[key] = credentials[key]
+    }
     return result
   }
 
