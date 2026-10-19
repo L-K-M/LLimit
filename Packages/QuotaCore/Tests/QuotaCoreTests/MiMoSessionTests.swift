@@ -112,7 +112,7 @@ final class MiMoSessionTests: XCTestCase {
   // MARK: - HTTPCookie initializer
 
   func testCookieInitExcludesExpiredCookies() throws {
-    let past = Date().addingTimeInterval(-3600)
+    let past = Date(timeIntervalSince1970: 1_700_000_000)
     var props = [HTTPCookiePropertyKey: Any]()
     props[.name] = "api-platform_serviceToken"
     props[.value] = "tok"
