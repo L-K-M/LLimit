@@ -142,7 +142,16 @@ Junie reads your JetBrains AI balance as credits or USD without generating token
 Add it with `--provider junie` and a key from
 [Junie CLI](https://junie.jetbrains.com/cli), or use
 `llimit accounts add --provider junie --set junie.api_key=env:JUNIE_API_KEY`.
-The API provides no total or reset, so the balance has no percentage or ring.
+AI Ultimate defaults to the personal 35-credit allowance per 30 days, enabling
+percentages and monthly trend lines. Override the allowance for organization
+accounts or other plans with `--set junie.credit_allowance=70` when adding an
+account, or `llimit accounts update <id> --set junie.credit_allowance=35`.
+Set it to `0` for balance only. Other license types need an explicit allowance.
+Changing it clears that account's previous chart history. Reimport preserves
+the configured allowance while replacing the API key.
+One AI credit equals US$1, so USD balances use the same ratio. Percentages cap
+at 100% while the full balance, including additional purchased credits, remains
+available in JSON. The API provides no reset date; no countdown is inferred.
 GZL licenses do not report a usable balance. Import supports `JUNIE_API_KEY` and
 the permanent `simpleToken` in `<JUNIE_HOME>/secure_credentials.json` (default
 `~/.junie`), but excludes browser refresh grants and third-party provider keys.

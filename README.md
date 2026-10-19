@@ -130,9 +130,21 @@ import or a replacement key.
 For Junie, choose **Settings → Add Account → JetBrains Junie** and enter a key
 generated at [Junie CLI](https://junie.jetbrains.com/cli), or import a detected
 key. LLimit reads the JetBrains AI account balance without generating tokens.
-It shows credits or USD as reported by Junie; the API supplies no allowance total
-or reset date, so percentages and quota rings are unavailable. GZL licenses do
-not report a usable credit balance.
+It shows credits or USD as reported by Junie. AI Ultimate uses the personal
+allowance of 35 AI credits per 30 days to show remaining percentages, quota
+rings, the menu-bar graph, and trend lines. For example, 17.5 credits is 50% left.
+In your Junie account settings, **30-day AI credit allowance** overrides the
+default for organization accounts or other plans; enter `0` for balance only.
+Other license types stay amount-only until you set an allowance.
+Changing the allowance restarts that account's chart history. Auto-fill and
+credential reimport preserve your configured allowance.
+
+The [JetBrains plan allowance](https://www.jetbrains.com/help/ai-assistant/licensing-and-subscriptions.html)
+is the percentage basis, rather than a total reported by the API. One AI credit
+equals US$1, so USD balances use the same ratio. Additional purchased credits may
+raise the balance above the allowance; the amount stays visible and percentages
+cap at 100%. The API provides no reset date, so LLimit does not show a reset
+countdown. GZL licenses do not report a usable credit balance.
 
 Import reads `JUNIE_API_KEY` and the permanent `simpleToken` in Junie's fallback
 credential file under `JUNIE_HOME` (default `~/.junie`). Browser login refresh

@@ -167,8 +167,20 @@ Linux:
   <Junie API key>`, `X-Accept-EAP-License: false`, and
   `X-Accept-Release-License: true`. The response reports `balanceLeft` and
   `balanceUnit`: USD is unscaled, every other or absent unit is divided by
-  100,000 and displayed as credits. No allowance total or reset is supplied;
-  never invent a percentage. Junie suppresses balances for `licenseType: GZL`;
+  100,000 and displayed as credits. No allowance total or reset is supplied.
+  `junie.credit_allowance` is an optional nonsecret per-account denominator:
+  nonnegative finite AI credits per 30 days, with `0` disabling percentages.
+  Without an override, license `AIPU` uses the personal AI Ultimate default of
+  35 credits; other licenses stay amount-only. Organization Ultimate accounts
+  must override the personal default. One credit equals US$1. Clamp percentage
+  geometry but retain the full balance, including top-ups. Label percentage
+  metrics `30-day AI credits` for monthly colors; preserve `credit-balance` ids.
+  Keep `estimatedTotal`, `windowSeconds`, and reset fields nil: the allowance
+  is a declared plan basis, not an observed estimate or server-reported reset.
+  Allowance edits clear the account's chart history. Credential reimport and
+  Auto-fill preserve the account-owned allowance while replacing authentication.
+  Source: [JetBrains plan allowances](https://www.jetbrains.com/help/ai-assistant/licensing-and-subscriptions.html).
+  Junie suppresses balances for `licenseType: GZL`;
   this does not establish unlimited access. Import `JUNIE_API_KEY` or
   `<JUNIE_HOME>/secure_credentials.json` (default `~/.junie`), whose `secrets`
   array holds `key: jb-account-stored` and a JSON-encoded `secret` containing

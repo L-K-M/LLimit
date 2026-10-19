@@ -637,8 +637,8 @@ final class AppModel: ObservableObject {
   /// Fills an existing account's credentials from a login detected on this Mac (the
   /// per-account "Auto-fill" action). Running this on demand also triggers the macOS
   /// Keychain prompt for Claude, which a background scan can't surface clearly.
-  /// Returns true only when the detected login replaced the account's whole credential
-  /// set (every field, never a merge); false leaves the credentials unchanged.
+  /// Returns true only when the detected login replaced authentication. Junie's
+  /// account-owned credit allowance survives; false leaves credentials unchanged.
   @discardableResult
   func autofillCredentials(forAccountID accountID: String) -> Bool {
     guard let index = providerAccounts.firstIndex(where: { $0.id == accountID }) else { return false }
@@ -654,10 +654,11 @@ final class AppModel: ObservableObject {
 
     claudeAccountMessages[accountID] = nil
     claudeCredentialFailures.remove(accountID)
-    let outcome = updateAccount(accountID: accountID) { $0.credentials = match.credentials }
+    let importedCredentials = providerAccounts[index].credentialsForImport(match.credentials)
+    let outcome = updateAccount(accountID: accountID) { $0.credentials = importedCredentials }
     // Auto-fill uses the same committed replacement and revision boundary as typing.
     if case .rejected(let rejection) = outcome { statusMessage = rejection.message }
-    guard account(withID: accountID)?.credentials == match.credentials else { return false }
+    guard account(withID: accountID)?.credentials == importedCredentials else { return false }
     statusMessage = "Filled “\(providerAccounts[index].resolvedDisplayName)” from \(match.sourceLabel)."
     return true
   }
@@ -1738,7 +1739,7 @@ final class AppModel: ObservableObject {
     switch provider {
     case .gitHubCopilot, .zhipu, .zai: return .monthly
     case .googleAntigravity: return .other
-    case .junie: return .other
+    case .junie: return .monthly
     case .venice: return .daily
     // ClinePass reports a five-hour, weekly and monthly window; monthly is the
     // longest, and it owns the account's primary color once usage is live.
@@ -1833,9 +1834,14 @@ final class AppModel: ObservableObject {
       }
       do {
         // Old cache entries must not become stale-on-failure carries for the replacement login.
-        if previousAccount.provider == .venice,
-           previousAccount.credentials[CredentialField.veniceAPIKey] != updatedAccount.credentials[CredentialField.veniceAPIKey] {
-          try invalidateVeniceUsage(for: previousAccount)
+        let veniceKeyChanged = previousAccount.provider == .venice
+          && previousAccount.credentials[CredentialField.veniceAPIKey] != updatedAccount.credentials[CredentialField.veniceAPIKey]
+        let junieAllowanceChanged = previousAccount.provider == .junie
+          && (previousAccount.credentials[CredentialField.junieCreditAllowance] ?? "")
+            != (updatedAccount.credentials[CredentialField.junieCreditAllowance] ?? "")
+        if veniceKeyChanged || junieAllowanceChanged {
+          // Percentages under different denominators cannot share a trend line.
+          try invalidateAccountUsageAndHistory(for: previousAccount)
         } else {
           try invalidateAccountSnapshot(for: accountID)
         }
@@ -1859,7 +1865,7 @@ final class AppModel: ObservableObject {
     return .applied
   }
 
-  private func invalidateVeniceUsage(for account: ProviderAccount) throws {
+  private func invalidateAccountUsageAndHistory(for account: ProviderAccount) throws {
     try invalidateAccountSnapshot(for: account.id)
     try historyStore.remove(accountIDs: [account.id])
     reloadRecentHistory()
