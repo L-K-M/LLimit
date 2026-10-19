@@ -154,6 +154,12 @@ final class JunieIntegrationTests: XCTestCase {
     await daemon.refreshNow()
     XCTAssertEqual(daemon.snapshot?.providers.first { $0.accountID == manual.id }?.metrics.first?.remainingPercent, 18)
 
+    let historyBeforeFormattingChange = try QuotaHistoryStore(fileURL: paths.historyFileURL).load()
+    _ = try daemon.editingSettings {
+      try $0.updateAccount(manual.id, credentials: .merging([CredentialField.junieCreditAllowance: " 70.0 "]))
+    }
+    XCTAssertEqual(try QuotaHistoryStore(fileURL: paths.historyFileURL).load(), historyBeforeFormattingChange)
+
     // A reset date changes the countdown, while retaining observed percentages.
     let formatter = ISO8601DateFormatter()
     let resetText = formatter.string(from: Date().addingTimeInterval(15 * 86_400))

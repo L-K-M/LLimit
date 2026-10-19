@@ -9,6 +9,20 @@ final class JunieAllowanceTests: XCTestCase {
   // Inert sentinel consumed only by the injected HTTP fixture below.
   private let fixtureKey = "quota-fixture"
 
+  func testEquivalentAllowanceFormattingDoesNotRestartHistory() {
+    for text in ["35", "35.0", "35.00", " 35 \n", "3.5e1", "+35"] {
+      XCTAssertFalse(JunieCreditAllowance.hasChanged(from: "35", to: text))
+    }
+    XCTAssertFalse(JunieCreditAllowance.hasChanged(from: nil, to: " \n"))
+    XCTAssertFalse(JunieCreditAllowance.hasChanged(from: "0", to: "-0.0"))
+  }
+
+  func testDistinctAllowanceBasesStillRestartHistory() {
+    for (previous, updated) in [("35", "70"), ("35", "0"), ("", "0"), ("", "35"), ("35", "NaN"), ("NaN", "35")] {
+      XCTAssertTrue(JunieCreditAllowance.hasChanged(from: previous, to: updated))
+    }
+  }
+
   func testUltimateBalanceDrivesMonthlyRingsGraphAndTrend() async throws {
     let first = try await fetch(balance: 17.5)
     let metric = try XCTUnwrap(first.metrics.first)

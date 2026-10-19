@@ -142,7 +142,7 @@ public struct JunieQuotaClient: QuotaProviderClient {
 
   private static func configuredAllowance(in credentials: [String: String]) throws -> Double? {
     guard let text = nonEmptyString(credentials[CredentialField.junieCreditAllowance]) else { return nil }
-    guard let value = Double(text), value.isFinite, value >= 0 else {
+    guard let value = JunieCreditAllowance.parse(text) else {
       throw ProviderClientError(kind: .notConfigured, message: "Enter a nonnegative number of AI credits for the 30-day allowance, or 0 to show only the balance.")
     }
     return value

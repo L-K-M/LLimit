@@ -249,8 +249,9 @@ public final class QuotaDaemon {
       // Clear before saving the new login so a failed snapshot save cannot pair them.
       try discardSnapshotEntry(for: accountID)
       if previous.provider == .junie,
-         (previous.credentials[CredentialField.junieCreditAllowance] ?? "")
-           != (updated.credentials[CredentialField.junieCreditAllowance] ?? "") {
+         JunieCreditAllowance.hasChanged(
+           from: previous.credentials[CredentialField.junieCreditAllowance],
+           to: updated.credentials[CredentialField.junieCreditAllowance]) {
         // A changed allowance must not appear as consumption in old history.
         try historyStore.remove(accountIDs: [accountID])
       }

@@ -1837,8 +1837,9 @@ final class AppModel: ObservableObject {
         let veniceKeyChanged = previousAccount.provider == .venice
           && previousAccount.credentials[CredentialField.veniceAPIKey] != updatedAccount.credentials[CredentialField.veniceAPIKey]
         let junieAllowanceChanged = previousAccount.provider == .junie
-          && (previousAccount.credentials[CredentialField.junieCreditAllowance] ?? "")
-            != (updatedAccount.credentials[CredentialField.junieCreditAllowance] ?? "")
+          && JunieCreditAllowance.hasChanged(
+            from: previousAccount.credentials[CredentialField.junieCreditAllowance],
+            to: updatedAccount.credentials[CredentialField.junieCreditAllowance])
         if veniceKeyChanged || junieAllowanceChanged {
           // Percentages under different denominators cannot share a trend line.
           try invalidateAccountUsageAndHistory(for: previousAccount)

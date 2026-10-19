@@ -1307,7 +1307,10 @@ struct SettingsView: View {
         committingDraft(
           DatePicker("Reset date and time", selection: Binding(
             get: { JunieCreditCycle(anchor: draftBinding(for: key).wrappedValue)?.anchor ?? cycle.anchor },
-            set: { editJunieResetDate($0, for: key) }
+            set: {
+              editJunieResetDate($0, for: key)
+              commitAccountDraft(key)
+            }
           ), displayedComponents: [.date, .hourAndMinute])
             .labelsHidden()
             .accessibilityLabel("Junie reset date and time"),
