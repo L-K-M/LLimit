@@ -36,6 +36,8 @@ public func defaultRingMetrics(for usage: ProviderUsage) -> [UsageMetric] {
     // duration-named types, so a re-ordered `limits[]` cannot repoint the
     // ring at a different window.
     preferredIDs = ["five_hour", "weekly", "monthly"]
+  case .junie:
+    preferredIDs = ["credit-balance"]
   }
 
   var selected: [UsageMetric] = []

@@ -68,6 +68,7 @@ llimit accounts add --provider anthropic        # prompts for that provider's fi
 llimit accounts add --provider opencode-go      # prompts for your OpenCode Go API key
 llimit accounts add --provider venice           # prompts for your Venice API key
 llimit accounts add --provider cline            # prompts for your Cline API key
+llimit accounts add --provider junie            # prompts for your Junie API key
 llimit accounts import                          # list discovered local logins, import one
 llimit accounts enable|disable|remove <id>      # id may be a unique prefix
 llimit accounts rename <id> <name>
@@ -136,6 +137,17 @@ without a percentage. Add it with `--provider cline`, or import a Cline login fr
 (`clineApiKey`). Only the access token is imported: LLimit does not renew Cline
 sessions, so an expired one needs a fresh import. No Cline process is required
 after import, and polling reads the account API without making inference requests.
+
+Junie reads your JetBrains AI balance as credits or USD without generating tokens.
+Add it with `--provider junie` and a key from
+[Junie CLI](https://junie.jetbrains.com/cli), or use
+`llimit accounts add --provider junie --set junie.api_key=env:JUNIE_API_KEY`.
+The API provides no total or reset, so the balance has no percentage or ring.
+GZL licenses do not report a usable balance. Import supports `JUNIE_API_KEY` and
+the permanent `simpleToken` in `<JUNIE_HOME>/secure_credentials.json` (default
+`~/.junie`), but excludes browser refresh grants and third-party provider keys.
+macOS Keychain-only logins require a manually entered Junie API key. Saved keys
+work without Junie running and need explicit replacement when revoked or expired.
 
 ## systemd
 
