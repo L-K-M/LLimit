@@ -23,10 +23,7 @@ public struct MiMoSessionCookies: Sendable, Equatable {
       let name = pair[..<equals].trimmingCharacters(in: .whitespaces)
       guard Self.names.contains(name) else { continue }
       let value = pair[pair.index(after: equals)...].trimmingCharacters(in: .whitespaces)
-      guard result[name] == nil, !value.isEmpty, value.utf8.count <= 16_384,
-            value.unicodeScalars.allSatisfy({ scalar in
-              (0x21...0x7E).contains(scalar.value) && !"\"(),;\\".unicodeScalars.contains(scalar)
-            }) else { throw Self.invalid }
+      guard result[name] == nil, Self.isValidCookieValue(value, for: name) else { throw Self.invalid }
       result[name] = value
     }
     guard result["api-platform_serviceToken"] != nil, result["userId"] != nil else { throw Self.invalid }
@@ -49,6 +46,11 @@ public struct MiMoSessionCookies: Sendable, Equatable {
     }
     var selectedValues: [String: String] = [:]
     for cookie in selected {
+      // Validate before serialization so a separator cannot split a browser
+      // value into a different header, or trimming change its contents.
+      guard Self.isValidCookieValue(cookie.value, for: cookie.name) else {
+        throw Self.invalidConsoleSession
+      }
       // WebKit can retain the same cookie at overlapping domain/path scopes.
       // Identical values are unambiguous; never guess between different logins.
       if let previous = selectedValues[cookie.name], previous != cookie.value {
@@ -66,8 +68,32 @@ public struct MiMoSessionCookies: Sendable, Equatable {
     do {
       try self.init(header: header)
     } catch {
-      throw ProviderClientError(kind: .auth, message: "MiMo returned an invalid console session. Cancel and sign in again.")
+      throw Self.invalidConsoleSession
     }
+  }
+
+  private static func isValidCookieValue(_ value: String, for name: String) -> Bool {
+    guard value.utf8.count <= 16_384 else { return false }
+    var content = value[...]
+    // RFC 6265 permits one outer pair of quotes. Keep those bytes in the
+    // stored header because MiMo's console uses quoted session cookies.
+    if content.first == "\"" || content.last == "\"" {
+      guard content.count >= 2, content.first == "\"", content.last == "\"" else { return false }
+      content = content.dropFirst().dropLast()
+    }
+    if name == "api-platform_serviceToken" || name == "userId" {
+      guard !content.isEmpty else { return false }
+    }
+    return content.unicodeScalars.allSatisfy { scalar in
+      switch scalar.value {
+      case 0x21, 0x23...0x2B, 0x2D...0x3A, 0x3C...0x5B, 0x5D...0x7E: return true
+      default: return false
+      }
+    }
+  }
+
+  private static var invalidConsoleSession: ProviderClientError {
+    ProviderClientError(kind: .auth, message: "MiMo returned an invalid console session. Cancel and sign in again.")
   }
 
   public static func credentialsForStorage(_ credentials: [String: String]) throws -> [String: String] {
