@@ -134,24 +134,74 @@ final class MiMoSessionTests: XCTestCase {
     XCTAssertThrowsError(try MiMoSessionCookies(cookies: [expired, uid]))
   }
 
-  func testCookieInitExcludesInsecureCookies() throws {
+  func testCookieInitAcceptsCookiesWithoutSecureFlagForHTTPSConsole() throws {
     var props = [HTTPCookiePropertyKey: String]()
     props[.name] = "api-platform_serviceToken"
     props[.value] = "tok"
     props[.domain] = ".platform.xiaomimimo.com"
     props[.path] = "/api/v1/tokenPlan"
     // No .secure = "TRUE"
-    guard let insecure = HTTPCookie(properties: props) else { XCTFail("Failed to create cookie"); return }
+    let service = try XCTUnwrap(HTTPCookie(properties: props))
+    XCTAssertFalse(service.isSecure)
 
     var props2 = [HTTPCookiePropertyKey: String]()
     props2[.name] = "userId"
     props2[.value] = "u-001"
     props2[.domain] = ".xiaomimimo.com"
     props2[.path] = "/"
-    props2[.secure] = "TRUE"
     guard let uid = HTTPCookie(properties: props2) else { XCTFail("Failed to create cookie"); return }
+    XCTAssertFalse(uid.isSecure)
 
-    XCTAssertThrowsError(try MiMoSessionCookies(cookies: [insecure, uid]))
+    let session = try MiMoSessionCookies(cookies: [service, uid])
+    XCTAssertEqual(session.header, "api-platform_serviceToken=tok; userId=u-001")
+  }
+
+  func testCookieInitCollapsesIdenticalCookiesAtOverlappingScopes() throws {
+    let cookies = try [
+      browserCookie("api-platform_serviceToken", "same-fixture", path: "/"),
+      browserCookie("api-platform_serviceToken", "same-fixture", path: "/api"),
+      browserCookie("userId", "same-user", domain: ".xiaomimimo.com"),
+      browserCookie("userId", "same-user"),
+    ]
+    for order in [cookies, cookies.reversed().map { $0 }] {
+      let session = try MiMoSessionCookies(cookies: order)
+      XCTAssertEqual(session.header, "api-platform_serviceToken=same-fixture; userId=same-user")
+    }
+  }
+
+  func testCookieInitRejectsConflictingCookiesWithoutExposingTheirValues() throws {
+    let cookies = try [
+      browserCookie("api-platform_serviceToken", "first-private-fixture", path: "/"),
+      browserCookie("api-platform_serviceToken", "second-private-fixture", path: "/api"),
+      browserCookie("userId", "private-user-fixture"),
+    ]
+    XCTAssertThrowsError(try MiMoSessionCookies(cookies: cookies)) { error in
+      let failure = error as? ProviderClientError
+      XCTAssertEqual(failure?.kind, .auth)
+      XCTAssertTrue(failure?.message.contains("conflicting") == true)
+      for cookie in cookies { XCTAssertFalse(failure?.message.contains(cookie.value) == true) }
+    }
+  }
+
+  func testMissingBrowserSessionGivesReconnectGuidance() throws {
+    XCTAssertThrowsError(try MiMoSessionCookies(cookies: [browserCookie("userId", "fixture-user")])) { error in
+      let failure = error as? ProviderClientError
+      XCTAssertEqual(failure?.kind, .auth)
+      XCTAssertTrue(failure?.message.contains("session token") == true)
+      XCTAssertFalse(failure?.message.contains("Manual") == true)
+    }
+    XCTAssertThrowsError(try MiMoSessionCookies(cookies: [browserCookie("api-platform_serviceToken", "fixture-token")])) { error in
+      let failure = error as? ProviderClientError
+      XCTAssertEqual(failure?.kind, .auth)
+      XCTAssertTrue(failure?.message.contains("account ID") == true)
+    }
+  }
+
+  private func browserCookie(_ name: String, _ value: String,
+                             domain: String = ".platform.xiaomimimo.com", path: String = "/") throws -> HTTPCookie {
+    try XCTUnwrap(HTTPCookie(properties: [
+      .name: name, .value: value, .domain: domain, .path: path, .secure: "TRUE",
+    ]))
   }
 
   func testCookieInitExcludesUnapprovedDomains() throws {

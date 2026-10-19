@@ -36,7 +36,9 @@ public struct MiMoSessionCookies: Sendable, Equatable {
   /// Accept only the platform cookies from the new, isolated login store.
   public init(cookies: [HTTPCookie], now: Date = Date()) throws {
     let selected = cookies.filter { cookie in
-      guard Self.names.contains(cookie.name), cookie.isSecure,
+      // Secure restricts a cookie to HTTPS; it is not required for a cookie
+      // to be valid on HTTPS. Capture and quota requests both enforce HTTPS.
+      guard Self.names.contains(cookie.name),
             cookie.expiresDate.map({ $0 > now }) ?? true,
             ["/api/v1/tokenPlan/detail", "/api/v1/tokenPlan/usage"].allSatisfy({ path in
               path == cookie.path || path.hasPrefix(cookie.path.hasSuffix("/") ? cookie.path : cookie.path + "/")
@@ -45,7 +47,27 @@ public struct MiMoSessionCookies: Sendable, Equatable {
       if domain == Self.consoleHost { return true }
       return cookie.name == "userId" && domain == "xiaomimimo.com"
     }
-    try self.init(header: selected.map { "\($0.name)=\($0.value)" }.joined(separator: "; "))
+    var selectedValues: [String: String] = [:]
+    for cookie in selected {
+      // WebKit can retain the same cookie at overlapping domain/path scopes.
+      // Identical values are unambiguous; never guess between different logins.
+      if let previous = selectedValues[cookie.name], previous != cookie.value {
+        throw ProviderClientError(kind: .auth, message: "MiMo returned conflicting login cookies. Cancel and sign in again.")
+      }
+      selectedValues[cookie.name] = cookie.value
+    }
+    guard selectedValues["api-platform_serviceToken"] != nil else {
+      throw ProviderClientError(kind: .auth, message: "MiMo did not provide a console session token. Cancel and sign in again.")
+    }
+    guard selectedValues["userId"] != nil else {
+      throw ProviderClientError(kind: .auth, message: "MiMo did not provide an account ID cookie. Cancel and sign in again.")
+    }
+    let header = Self.names.compactMap { name in selectedValues[name].map { "\(name)=\($0)" } }.joined(separator: "; ")
+    do {
+      try self.init(header: header)
+    } catch {
+      throw ProviderClientError(kind: .auth, message: "MiMo returned an invalid console session. Cancel and sign in again.")
+    }
   }
 
   public static func credentialsForStorage(_ credentials: [String: String]) throws -> [String: String] {

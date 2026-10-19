@@ -40,7 +40,41 @@ struct MiMoLoginTests {
     second.connect() // about:blank cannot supply a platform login.
     precondition(callbacks == 0 && !first.isConnecting && !second.isConnecting)
     precondition(second.message.contains("Finish signing in"))
-    print("MiMo WebKit isolation, HttpOnly capture, cancellation, and origin checks passed")
+
+    var connected: (attemptID: UUID, cookies: MiMoSessionCookies)?
+    var connectionCallbacks = 0
+    let signedIn = MiMoLoginSession(accountID: "signed-in", startURL: blank) { attemptID, cookies in
+      connectionCallbacks += 1
+      connected = (attemptID, cookies)
+    }
+    defer { signedIn.cancel() }
+    let signedInStore = signedIn.webView.configuration.websiteDataStore
+    let fixtureProperties: [[HTTPCookiePropertyKey: String]] = [
+      [.name: "api-platform_serviceToken", .value: "offline-token", .domain: ".platform.xiaomimimo.com", .path: "/"],
+      [.name: "api-platform_serviceToken", .value: "offline-token", .domain: ".platform.xiaomimimo.com", .path: "/api/v1/tokenPlan"],
+      [.name: "userId", .value: "offline-user", .domain: ".xiaomimimo.com", .path: "/"],
+      [.name: "userId", .value: "offline-user", .domain: ".platform.xiaomimimo.com", .path: "/"],
+      [.name: "xiaomi_passport", .value: "excluded-sso", .domain: ".platform.xiaomimimo.com", .path: "/"],
+      [.name: "analytics_id", .value: "excluded-analytics", .domain: ".platform.xiaomimimo.com", .path: "/"],
+    ]
+    for properties in fixtureProperties {
+      let cookie = HTTPCookie(properties: properties)!
+      precondition(!cookie.isSecure, "The Secure flag must not be required for HTTPS console adoption")
+      var stored = false
+      signedInStore.httpCookieStore.setCookie(cookie) { stored = true }
+      wait(until: { stored })
+    }
+    // Supplying an HTTPS base establishes the real production origin guard
+    // without loading a remote page or weakening the navigation policy.
+    signedIn.webView.loadHTMLString("<html><body>Offline console fixture</body></html>", baseURL: origin)
+    wait(until: { signedIn.webView.url == origin && !signedIn.webView.isLoading })
+    signedIn.connect()
+    wait(until: { !signedIn.isConnecting })
+    precondition(connectionCallbacks == 1, "Connect must adopt the signed-in attempt's browser cookies")
+    precondition(connected?.attemptID == signedIn.id)
+    precondition(connected?.cookies.userID == "offline-user")
+    precondition(connected?.cookies.header == "api-platform_serviceToken=offline-token; userId=offline-user")
+    print("MiMo WebKit isolation, cookie adoption, filtering, cancellation, and origin checks passed")
   }
 
   @MainActor private static func wait(until complete: () -> Bool) {
