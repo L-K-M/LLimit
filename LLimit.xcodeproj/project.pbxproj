@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		62237005EA4ADF03CFCB1D82 /* MiMoLoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72F66A1D7EC7A58D858631EA /* MiMoLoginView.swift */; };
+		ABD3522DD192E20D0D18A429 /* MiMoLoginSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAC9788EA5B0B26ED62B0E74 /* MiMoLoginSession.swift */; };
 		97AF8D326AAA45F2B15B66F1 /* QuotaNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97AF8D326AAA45F2B15B66F2 /* QuotaNotifications.swift */; };
 		CDACCF16212E46E899C75F01 /* CodexLoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDACCF16212E46E899C75F02 /* CodexLoginView.swift */; };
 		90D9D53D985F3F47F8B0E80E /* ClaudeProfileService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B3F60D8AF12A17811395014 /* ClaudeProfileService.swift */; };
@@ -59,6 +61,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		72F66A1D7EC7A58D858631EA /* MiMoLoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiMoLoginView.swift; sourceTree = "<group>"; };
+		BAC9788EA5B0B26ED62B0E74 /* MiMoLoginSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiMoLoginSession.swift; sourceTree = "<group>"; };
 		97AF8D326AAA45F2B15B66F2 /* QuotaNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaNotifications.swift; sourceTree = "<group>"; };
 		CDACCF16212E46E899C75F02 /* CodexLoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexLoginView.swift; sourceTree = "<group>"; };
 		6B3F60D8AF12A17811395014 /* ClaudeProfileService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeProfileService.swift; sourceTree = "<group>"; };
@@ -136,6 +140,7 @@
 		52F914E8DE30DE6489408458 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				72F66A1D7EC7A58D858631EA /* MiMoLoginView.swift */,
 				0F28142772B4697E21774DC0 /* ClaudeTerminalView.swift */,
 				CDACCF16212E46E899C75F02 /* CodexLoginView.swift */,
 				660DB1B9EAE3B8BCD47F312A /* SettingsView.swift */,
@@ -191,6 +196,7 @@
 		AFE05ADAB087FC3F7B7E52D9 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				BAC9788EA5B0B26ED62B0E74 /* MiMoLoginSession.swift */,
 				6B3F60D8AF12A17811395014 /* ClaudeProfileService.swift */,
 				C70211A98D88A5AEA8688233 /* ClaudeTerminalSession.swift */,
 				8B7352862DDAF2A1582CFBB1 /* GlobalHotkeyService.swift */,
@@ -316,6 +322,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				BCF52573CAD84156B1B5D45D /* AppModel.swift in Sources */,
+				ABD3522DD192E20D0D18A429 /* MiMoLoginSession.swift in Sources */,
+				62237005EA4ADF03CFCB1D82 /* MiMoLoginView.swift in Sources */,
 				97AF8D326AAA45F2B15B66F1 /* QuotaNotifications.swift in Sources */,
 				4A4AC618CDAE0C085BE6E421 /* LLimitApp.swift in Sources */,
 				3A11C01DE4B02FBA9D01AA02 /* LimitKindColorScheme.swift in Sources */,

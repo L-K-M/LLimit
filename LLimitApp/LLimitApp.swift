@@ -1837,6 +1837,8 @@ private struct ProviderMark: View {
       return "chevron.left.forwardslash.chevron.right"
     case .junie:
       return "leaf.fill"
+    case .xiaomiMiMo:
+      return "lightbulb.fill"
     }
   }
 }

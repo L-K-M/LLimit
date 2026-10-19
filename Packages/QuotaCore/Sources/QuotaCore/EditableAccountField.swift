@@ -55,8 +55,9 @@ public enum AccountEditOutcome: Equatable, Sendable {
 }
 
 public enum AccountEditRejection: Equatable, Sendable {
-  /// An OpenAI browser sign-in for this account is still running.
+  /// A browser sign-in for this account is still running.
   case signInInProgress
+  case invalidMiMoSession
   /// The account is connected; its official CLI owns the credentials.
   case managedConnection
   /// The settings file could not be read at launch, so a key change cannot be saved.
@@ -67,7 +68,9 @@ public enum AccountEditRejection: Equatable, Sendable {
   public var message: String {
     switch self {
     case .signInInProgress:
-      return "Not saved while OpenAI sign-in is running. Finish or cancel the sign-in, then try again."
+      return "Not saved while sign-in is running. Finish or cancel the sign-in, then try again."
+    case .invalidMiMoSession:
+      return "Not saved. Connect MiMo to sign in, or enter valid console cookies including api-platform_serviceToken and userId."
     case .managedConnection:
       return "Not saved because this account is connected. Its sign-in manages these credentials."
     case .settingsUnreadable:

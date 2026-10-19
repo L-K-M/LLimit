@@ -14,6 +14,7 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
   case venice = "venice"
   case cline = "cline"
   case junie = "junie"
+  case xiaomiMiMo = "xiaomi-mimo"
 
   public var displayName: String {
     switch self {
@@ -43,6 +44,8 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
       return "Cline"
     case .junie:
       return "JetBrains Junie"
+    case .xiaomiMiMo:
+      return "Xiaomi MiMo"
     }
   }
 }
@@ -209,6 +212,14 @@ public extension QuotaProvider {
           key: CredentialField.clineAPIKey,
           label: "API key",
           help: "Create a key at app.cline.bot under Account -> API Keys. It reports ClinePass window usage and the prepaid credit balance."
+        )
+      ]
+    case .xiaomiMiMo:
+      return [
+        CredentialFieldDescriptor(
+          key: CredentialField.mimoSessionCookies,
+          label: "Console session cookies",
+          help: "Connect MiMo in LLimit to sign in. For manual setup, use the Cookie request header from platform.xiaomimimo.com. Token Plan API keys cannot supply console usage. Sessions may require signing in again after expiry."
         )
       ]
     case .junie:

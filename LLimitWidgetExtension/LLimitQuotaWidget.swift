@@ -874,6 +874,8 @@ private func compactProviderName(for provider: QuotaProvider) -> String {
     return "Cline"
   case .junie:
     return "Junie"
+  case .xiaomiMiMo:
+    return "MiMo"
   }
 }
 

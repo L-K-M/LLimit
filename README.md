@@ -89,6 +89,7 @@ and Claude Keychain import, are macOS-only. Linux Claude Code writes
 | **Venice** | API key; Admin key for reported daily DIEM allocation | Venice CLI (`~/.venice/config.json`), OpenCode (`venice` in `auth.json`) |
 | **Cline** | API key | Cline (`~/.cline/data/settings/providers.json`, legacy `secrets.json`) |
 | **JetBrains Junie** | Junie API key | `JUNIE_API_KEY`, Junie fallback file (`~/.junie/secure_credentials.json`) |
+| **Xiaomi MiMo** | Personal Token Plan console session | Connect MiMo on macOS; manual console cookies on Linux |
 
 For OpenCode Go, choose **Settings → Add Account → OpenCode Go** and enter your
 OpenCode API key, or scan for a saved Go key. LLimit shows the rolling, weekly,
@@ -159,6 +160,27 @@ grants and third-party provider keys are not imported. macOS Junie usually store
 its login in Keychain; generate and enter a Junie API key when the scan finds no
 key. Imported accounts work without Junie installed, and a revoked or expired
 key needs an explicit replacement or fresh import.
+
+For Xiaomi MiMo, choose **Settings → Add Account → Xiaomi MiMo**, then
+**Connect MiMo**. Sign in to the API Platform in LLimit's sign-in window and
+choose **Connect Account**. LLimit checks your personal Token Plan before saving
+its platform session cookies in your local settings. Each account uses a separate
+temporary browser session. Your usual browser login stays separate. Reconnect
+when the saved session expires.
+
+LLimit reads remaining percentages and reported credit counts without generating
+tokens. Any bonus credits appear separately. Rings, the menu-bar graph, and trend
+lines show the reported quota. The plan's expiry is shown as text; quota reset
+times and spending forecasts remain unavailable because the response does not
+establish a reset schedule. Billing frequency does not supply one.
+
+This supports the API Platform's personal Token Plan. Team/project quotas and
+MiMo Desktop memberships are not supported. MiMo Code sign-in supplies an
+inference key and account ID, which cannot replace the console session used here.
+LLimit does not import MiMo CLI or OpenCode keys. Linux setup uses a manually
+entered console Cookie header; see the [daemon guide](Packages/LLimitd/README.md).
+See [Xiaomi's MiMo Code guide](https://mimo.mi.com/docs/en-US/tokenplan/integration/mimo-code)
+for the distinction between inference credentials and console usage.
 
 ## How accounts work
 
@@ -325,5 +347,7 @@ are covered by unit tests that also run on Linux CI:
 swift test --package-path Packages/QuotaCore
 swift test --package-path Packages/LLimitd
 ```
+
+The local HTTP integration fixtures in the tests require Python 3.
 
 The Ubuntu port's design and phased plan: [`UBUNTU_PORT.md`](UBUNTU_PORT.md).

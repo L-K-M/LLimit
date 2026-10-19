@@ -65,6 +65,7 @@ final class AppModel: ObservableObject {
   private let claudeProcess = ClaudeCodeProcess()
 
   @Published var codexLogin: CodexLoginPresentation?
+  @Published var mimoLogin: MiMoLoginSession?
   @Published private(set) var codexAccountMessages: [String: String] = [:]
   @Published private var codexBusyAccounts: Set<String> = []
   private var signInSkippedAccountIDs: Set<String> = []
@@ -246,7 +247,11 @@ final class AppModel: ObservableObject {
   }
 
   var refreshAvailability: RefreshAvailability {
-    RefreshAvailability(isRefreshing: isRefreshing, accounts: providerAccounts, signingInAccountIDs: codexBusyAccounts)
+    RefreshAvailability(isRefreshing: isRefreshing, accounts: providerAccounts, signingInAccountIDs: signingInAccountIDs)
+  }
+
+  private var signingInAccountIDs: Set<String> {
+    codexBusyAccounts.union(mimoLogin.map { [$0.accountID] } ?? [])
   }
 
   func refreshNow() async {
@@ -265,7 +270,7 @@ final class AppModel: ObservableObject {
     // A sign-in owns only its account; siblings refresh and retain their own timestamps.
     let selection = RefreshSelection(
       configurations: runtimeConfigurations(), failedPreparation: Set(claudeFailures.map(\.accountID)),
-      signingInAccountIDs: codexBusyAccounts)
+      signingInAccountIDs: signingInAccountIDs)
     signInSkippedAccountIDs.formUnion(selection.skippedAccountIDs)
     let enabledConfigs = selection.fetched
     var provenance = RefreshProvenance(configurations: enabledConfigs, carriedConfigurations: selection.skipped,
@@ -512,6 +517,7 @@ final class AppModel: ObservableObject {
   func removeProviderAccount(accountID: String) {
     guard !isRefreshing, !claudeAccountIsBusy(accountID), !codexAccountIsBusy(accountID),
           let removedAccount = account(withID: accountID) else { return }
+    if mimoLogin?.accountID == accountID { dismissMiMoLogin() }
     var updated = currentSettings()
     updated.accounts.removeAll { $0.id == accountID }
     updated.providerStyleSettings.removeAll { $0.accountID == accountID }
@@ -896,6 +902,57 @@ final class AppModel: ObservableObject {
   }
 
   // MARK: - Independent Codex accounts
+
+  func connectMiMoAccount(_ accountID: String) {
+    guard !isRefreshing, mimoLogin == nil, !configurationLoadFailed,
+          account(withID: accountID)?.provider == .xiaomiMiMo else { return }
+    signInSkippedAccountIDs.insert(accountID)
+    let originalRevision = credentialEditRevisions[accountID]
+    mimoLogin = MiMoLoginSession(accountID: accountID) { [weak self] attemptID, cookies in
+      guard let self else { throw CancellationError() }
+      try await self.finishMiMoLogin(attemptID: attemptID, accountID: accountID,
+        originalRevision: originalRevision, cookies: cookies)
+    }
+  }
+
+  func dismissMiMoLogin() {
+    guard let session = mimoLogin else { return }
+    session.cancel()
+    mimoLogin = nil
+    catchUpAfterSignIn(session.accountID)
+  }
+
+  private func finishMiMoLogin(attemptID: UUID, accountID: String, originalRevision: UUID?,
+                               cookies: MiMoSessionCookies) async throws {
+    guard mimoLogin?.id == attemptID, let account = account(withID: accountID),
+          account.provider == .xiaomiMiMo else { throw CancellationError() }
+    let credentials = [CredentialField.mimoSessionCookies: cookies.header]
+    let candidate = ProviderRuntimeConfiguration(accountID: accountID, provider: .xiaomiMiMo,
+      displayName: account.resolvedDisplayName, isEnabled: true, credentials: credentials)
+    // Browser login alone is insufficient: verify that this private session can
+    // read an active Token Plan before replacing a previously working account.
+    _ = try await MiMoQuotaClient(httpClient: URLSessionHTTPClient()).fetchUsage(configuration: candidate, now: Date())
+    try Task.checkCancellation()
+    guard mimoLogin?.id == attemptID, credentialEditRevisions[accountID] == originalRevision,
+          !configurationLoadFailed,
+          let index = providerAccounts.firstIndex(where: { $0.id == accountID && $0.provider == .xiaomiMiMo }) else {
+      throw CancellationError()
+    }
+    let previous = providerAccounts[index]
+    if MiMoSessionCookies.hasChangedIdentity(from: previous.credentials[CredentialField.mimoSessionCookies], to: cookies.header) {
+      try invalidateAccountUsageAndHistory(for: previous)
+    } else {
+      try invalidateAccountSnapshot(for: accountID)
+    }
+    providerAccounts[index].credentials = credentials
+    do { try settingsStore.save(currentSettings()) }
+    catch { providerAccounts[index] = previous; throw error }
+    credentialEditRevisions[accountID] = UUID()
+    mimoLogin = nil
+    reloadAccountStatuses()
+    if syncSettingsToWidgetStore(currentSettings().redactedCredentials()) { reloadWidgetTimelines() }
+    catchUpAfterSignIn(accountID)
+  }
 
   func codexAccountIsManaged(_ id: String) -> Bool {
     account(withID: id).map { CodexAccountProfile.isManaged($0.credentials) } ?? false
@@ -1371,6 +1428,7 @@ final class AppModel: ObservableObject {
         account.displayName = value
       }
     case .credential(let fieldKey):
+      if mimoLogin?.accountID == accountID { return .rejected(.signInInProgress) }
       if codexAccountIsBusy(accountID) { return .rejected(.signInInProgress) }
       // A connection owns every credential of its account, and Settings hides all
       // manual fields while connected. A draft committed now was typed before the
@@ -1380,11 +1438,17 @@ final class AppModel: ObservableObject {
       }
       claudeAccountMessages[accountID] = nil
       claudeCredentialFailures.remove(accountID)
+      var credentialValue = value
+      if savedAccount.provider == .xiaomiMiMo, fieldKey == CredentialField.mimoSessionCookies,
+         !value.isEmpty, !value.isEnvironmentReference {
+        guard let cookies = try? MiMoSessionCookies(header: value) else { return .rejected(.invalidMiMoSession) }
+        credentialValue = cookies.header
+      }
       return updateAccount(accountID: accountID) { account in
         if account.provider == .anthropic && fieldKey == CredentialField.anthropicAccessToken {
           account.credentials = ClaudeCodeProfile.clearManagedMetadata(from: account.credentials)
         }
-        account.credentials[fieldKey] = value
+        account.credentials[fieldKey] = credentialValue
       }
     }
   }
@@ -1740,6 +1804,7 @@ final class AppModel: ObservableObject {
     case .gitHubCopilot, .zhipu, .zai: return .monthly
     case .googleAntigravity: return .other
     case .junie: return .monthly
+    case .xiaomiMiMo: return .other
     case .venice: return .daily
     // ClinePass reports a five-hour, weekly and monthly window; monthly is the
     // longest, and it owns the account's primary color once usage is live.
@@ -1840,7 +1905,11 @@ final class AppModel: ObservableObject {
           && JunieCreditAllowance.hasChanged(
             from: previousAccount.credentials[CredentialField.junieCreditAllowance],
             to: updatedAccount.credentials[CredentialField.junieCreditAllowance])
-        if veniceKeyChanged || junieAllowanceChanged {
+        let mimoIdentityChanged = previousAccount.provider == .xiaomiMiMo
+          && MiMoSessionCookies.hasChangedIdentity(
+            from: previousAccount.credentials[CredentialField.mimoSessionCookies],
+            to: updatedAccount.credentials[CredentialField.mimoSessionCookies])
+        if veniceKeyChanged || junieAllowanceChanged || mimoIdentityChanged {
           // Percentages under different denominators cannot share a trend line.
           try invalidateAccountUsageAndHistory(for: previousAccount)
         } else {

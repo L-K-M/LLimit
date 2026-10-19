@@ -50,6 +50,10 @@ jobs:
       - name: Test primary limit colors
         run: scripts/test-limit-colors.sh --skip-build "$RUNNER_TEMP/LLimitBuild"
 
+      - name: Test MiMo browser isolation
+        timeout-minutes: 3
+        run: scripts/test-mimo-login.sh --skip-build "$RUNNER_TEMP/LLimitBuild"
+
       - name: Test trend chart rendering
         run: scripts/test-trend-chart.sh --skip-build "$RUNNER_TEMP/LLimitBuild"
 

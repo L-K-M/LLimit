@@ -31,7 +31,8 @@ reference and verified account identity, without copying Codex tokens into its
 settings. The user's normal Codex login and existing imported accounts stay separate.
 
 Providers: Claude (Anthropic), OpenAI/ChatGPT, GitHub Copilot, Zhipu, Z.ai, Kimi,
-Google Antigravity, Devin, Meta Muse, OpenCode Go, Venice, Cline, JetBrains Junie.
+Google Antigravity, Devin, Meta Muse, OpenCode Go, Venice, Cline, JetBrains Junie,
+Xiaomi MiMo personal Token Plan.
 
 ## Layout
 
@@ -139,6 +140,14 @@ Linux:
   `~/.local/share/opencode`, `~/.local/share/devin`, `~/.config/muse`, `~/.venice`,
   `~/.cline`, `~/.junie`, and the Keychain). The widget extension **stays sandboxed**; it only reads the App
   Group container.
+- MiMo console cookies are owned by LLimit, stored only in local settings under
+  `mimo.session_cookies`, and redacted like other credentials. macOS sign-in uses
+  a separate nonpersistent WebKit store per attempt, validates personal Token Plan
+  usage before saving, and retains only `api-platform_serviceToken`,
+  `api-platform_slh`, `api-platform_ph`, and `userId`. Never scan normal browser
+  sessions or retain Xiaomi SSO/analytics cookies. Expired sessions require an
+  explicit reconnect or replacement. Quota transport must refuse redirects and
+  avoid shared cookie jars and caches.
 - Adding a `QuotaProvider` case is a breaking change for **six** exhaustive `switch`es:
   `Models.displayName`, `Models.credentialFields`,
   `ProviderMetricSelection.defaultRingMetrics`, the widget's `compactProviderName`,
@@ -162,6 +171,26 @@ Linux:
 
 ## Provider API notes
 
+- **Xiaomi MiMo**: provider `xiaomi-mimo`, secret `mimo.session_cookies`.
+  Read-only `GET https://platform.xiaomimimo.com/api/v1/tokenPlan/detail` and
+  `/api/v1/tokenPlan/usage` use the console Cookie header. Linux accepts it through
+  `accounts add --provider xiaomi-mimo`; macOS uses **Connect MiMo**. No credential
+  discovery or inference-key import. MiMo Code's browser login yields an inference
+  key plus UID/base URL, not this console session. Initial support covers personal
+  Token Plans, excluding team/project quotas and Desktop memberships.
+  Require wrapper `code: 0` or `200`; rate-limit codes fail with fixed errors.
+  `data.usage.items[]` supplies `name`, `used`, `limit`, and `percent` (used fraction).
+  Explicit percent wins; valid counts are fallback. Preserve separate
+  `compensation_total_token` bonus quota, omitting it only when its limit is zero.
+  Keep IDs `plan-<name>` stable. `detail.currentPeriodEnd` is expiry text only:
+  preserve its precision/timezone, never populate reset or window fields from it
+  or infer cadence from monthly/annual billing. No balance/inference requests.
+  Sources: official console
+  [request/endpoint bundle](https://platform.xiaomimimo.com/static/main.1097440ce549c686.chunk.js)
+  and [quota UI bundle](https://platform.xiaomimimo.com/static/279.384318a602760797.chunk.js),
+  [MiMo Code authentication](https://github.com/XiaomiMiMo/MiMo-Code/blob/43c9daa2027f1edb5c83a176ccc35e62881eba2b/packages/cli/src/plugin/mimo.ts),
+  [official configuration guide](https://mimo.mi.com/docs/en-US/tokenplan/integration/mimo-code),
+  and the [API-key quota endpoint request](https://github.com/XiaomiMiMo/MiMo-Code/issues/2495).
 - **JetBrains Junie**: current Junie CLI `/stats` reads `GET
   https://ingrazzio-cloud-prod.labs.jb.gg/auth/test` with `Authorization: Bearer
   <Junie API key>`, `X-Accept-EAP-License: false`, and
