@@ -1839,6 +1839,8 @@ private struct ProviderMark: View {
       return "leaf.fill"
     case .xiaomiMiMo:
       return "lightbulb.fill"
+    case .minimax:
+      return "sparkles"
     }
   }
 }

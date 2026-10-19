@@ -89,6 +89,7 @@ and Claude Keychain import, are macOS-only. Linux Claude Code writes
 | **Venice** | API key; Admin key for reported daily DIEM allocation | Venice CLI (`~/.venice/config.json`), OpenCode (`venice` in `auth.json`) |
 | **Cline** | API key | Cline (`~/.cline/data/settings/providers.json`, legacy `secrets.json`) |
 | **JetBrains Junie** | Junie API key | `JUNIE_API_KEY`, Junie fallback file (`~/.junie/secure_credentials.json`) |
+| **MiniMax M Plan** | Global (`minimax.io`) Subscription Key | OpenCode (`minimax-coding-plan` in `auth.json`) |
 | **Xiaomi MiMo** | Personal Token Plan console session | Connect MiMo on macOS; manual console cookies on Linux |
 
 For OpenCode Go, choose **Settings → Add Account → OpenCode Go** and enter your
@@ -160,6 +161,25 @@ grants and third-party provider keys are not imported. macOS Junie usually store
 its login in Keychain; generate and enter a Junie API key when the scan finds no
 key. Imported accounts work without Junie installed, and a revoked or expired
 key needs an explicit replacement or fresh import.
+
+For MiniMax M Plan, choose **Settings → Add Account → MiniMax** and enter your
+global (`minimax.io`) **Subscription Key** from
+[M Plan](https://www.minimax.io/m-plan), or import OpenCode's
+`minimax-coding-plan` API-key entry. Standard pay-as-you-go keys are separate.
+LLimit reads quota without generating tokens and shows the server's interval
+and weekly percentages, reset times, rings, and trend lines. Quotas and reset
+dates come from MiniMax, including when you pay annually.
+
+The response may report several buckets, such as general and video, or unlimited
+windows. Explicit remaining percentages take precedence over count fields.
+Weekly boosts above 100% remain visible in the metric details; progress geometry
+caps at 100%. The quota response does not report a credit-pack or pay-as-you-go
+balance, so those balances are not shown. Import reads only the exact global
+plan entry in OpenCode's `auth.json`, honoring absolute `XDG_DATA_HOME` and the
+legacy `~/.config/opencode/auth.json` path. Generic MiniMax and China entries
+are excluded. Imported accounts work without OpenCode running.
+See the [M Plan FAQ](https://platform.minimax.io/docs/m-plan/faq) for key and
+usage-window details.
 
 For Xiaomi MiMo, choose **Settings → Add Account → Xiaomi MiMo**, then
 **Connect MiMo**. Sign in to the API Platform in LLimit's sign-in window and

@@ -36,6 +36,8 @@ public enum CredentialField {
 
   public static let clineAPIKey = "cline.api_key"
 
+  public static let minimaxAPIKey = "minimax.api_key"
+
   public static let mimoSessionCookies = "mimo.session_cookies"
 
   public static let junieAPIKey = "junie.api_key"
