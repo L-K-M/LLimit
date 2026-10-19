@@ -113,14 +113,15 @@ final class MiMoSessionTests: XCTestCase {
 
   func testCookieInitExcludesExpiredCookies() throws {
     let past = Date().addingTimeInterval(-3600)
-    var props = [HTTPCookiePropertyKey: String]()
+    var props = [HTTPCookiePropertyKey: Any]()
     props[.name] = "api-platform_serviceToken"
     props[.value] = "tok"
     props[.domain] = ".platform.xiaomimimo.com"
     props[.path] = "/api/v1/tokenPlan"
     props[.secure] = "TRUE"
-    props[.expires] = ISO8601DateFormatter().string(from: past)
+    props[.expires] = past
     guard let expired = HTTPCookie(properties: props) else { XCTFail("Failed to create cookie"); return }
+    XCTAssertEqual(expired.expiresDate, past)
 
     var props2 = [HTTPCookiePropertyKey: String]()
     props2[.name] = "userId"
