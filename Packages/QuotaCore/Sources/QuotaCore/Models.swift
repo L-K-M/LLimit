@@ -13,6 +13,7 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
   case openCodeGo = "opencode-go"
   case venice = "venice"
   case cline = "cline"
+  case junie = "junie"
 
   public var displayName: String {
     switch self {
@@ -40,6 +41,8 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
       return "Venice"
     case .cline:
       return "Cline"
+    case .junie:
+      return "JetBrains Junie"
     }
   }
 }
@@ -206,6 +209,14 @@ public extension QuotaProvider {
           key: CredentialField.clineAPIKey,
           label: "API key",
           help: "Create a key at app.cline.bot under Account -> API Keys. It reports ClinePass window usage and the prepaid credit balance."
+        )
+      ]
+    case .junie:
+      return [
+        CredentialFieldDescriptor(
+          key: CredentialField.junieAPIKey,
+          label: "Junie API key",
+          help: "Create a Junie API key at junie.jetbrains.com/cli. LLimit reads your JetBrains AI credit balance."
         )
       ]
     }

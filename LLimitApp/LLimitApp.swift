@@ -1835,6 +1835,8 @@ private struct ProviderMark: View {
       return "water.waves"
     case .cline:
       return "chevron.left.forwardslash.chevron.right"
+    case .junie:
+      return "leaf.fill"
     }
   }
 }

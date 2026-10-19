@@ -32,7 +32,8 @@ public struct QuotaCoordinator: Sendable {
         MetaMuseQuotaClient(httpClient: httpClient),
         OpenCodeGoQuotaClient(httpClient: httpClient),
         VeniceQuotaClient(httpClient: httpClient),
-        ClineQuotaClient(httpClient: httpClient)
+        ClineQuotaClient(httpClient: httpClient),
+        JunieQuotaClient(httpClient: httpClient)
       ]
     )
   }

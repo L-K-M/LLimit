@@ -88,6 +88,7 @@ and Claude Keychain import, are macOS-only. Linux Claude Code writes
 | **OpenCode Go** | API key for a Go subscription | OpenCode (`opencode-go` in `auth.json`) |
 | **Venice** | API key; Admin key for reported daily DIEM allocation | Venice CLI (`~/.venice/config.json`), OpenCode (`venice` in `auth.json`) |
 | **Cline** | API key | Cline (`~/.cline/data/settings/providers.json`, legacy `secrets.json`) |
+| **JetBrains Junie** | Junie API key | `JUNIE_API_KEY`, Junie fallback file (`~/.junie/secure_credentials.json`) |
 
 For OpenCode Go, choose **Settings → Add Account → OpenCode Go** and enter your
 OpenCode API key, or scan for a saved Go key. LLimit shows the rolling, weekly,
@@ -125,6 +126,20 @@ the monthly window takes the account's primary color. Polling only reads the
 account API and never makes an inference request. Imported keys work without Cline
 running; because LLimit does not renew Cline sessions, an expired one needs a fresh
 import or a replacement key.
+
+For Junie, choose **Settings → Add Account → JetBrains Junie** and enter a key
+generated at [Junie CLI](https://junie.jetbrains.com/cli), or import a detected
+key. LLimit reads the JetBrains AI account balance without generating tokens.
+It shows credits or USD as reported by Junie; the API supplies no allowance total
+or reset date, so percentages and quota rings are unavailable. GZL licenses do
+not report a usable credit balance.
+
+Import reads `JUNIE_API_KEY` and the permanent `simpleToken` in Junie's fallback
+credential file under `JUNIE_HOME` (default `~/.junie`). Browser login refresh
+grants and third-party provider keys are not imported. macOS Junie usually stores
+its login in Keychain; generate and enter a Junie API key when the scan finds no
+key. Imported accounts work without Junie installed, and a revoked or expired
+key needs an explicit replacement or fresh import.
 
 ## How accounts work
 

@@ -13,7 +13,7 @@ CLI for login and renewal, with a private profile for each account.
 
 `CredentialDiscovery` exists only as an *optional import shortcut* — it can detect a
 login from a locally installed tool (Claude Code, Codex, Copilot, Antigravity,
-OpenCode, Devin CLI, Muse Code, Venice CLI, Cline) so the
+OpenCode, Devin CLI, Muse Code, Venice CLI, Cline, Junie) so the
 user can one-click create a pre-filled account instead of pasting a token. Once
 imported, the account is copied into and owned by LLimit.
 
@@ -31,7 +31,7 @@ reference and verified account identity, without copying Codex tokens into its
 settings. The user's normal Codex login and existing imported accounts stay separate.
 
 Providers: Claude (Anthropic), OpenAI/ChatGPT, GitHub Copilot, Zhipu, Z.ai, Kimi,
-Google Antigravity, Devin, Meta Muse, OpenCode Go, Venice, Cline.
+Google Antigravity, Devin, Meta Muse, OpenCode Go, Venice, Cline, JetBrains Junie.
 
 ## Layout
 
@@ -137,7 +137,7 @@ Linux:
 - The host app is **not sandboxed** (the import shortcut reads `~/.claude`, `~/.codex`,
   `~/.config/github-copilot`, `~/.kimi`, `~/.kimi-code`, `~/.gemini`,
   `~/.local/share/opencode`, `~/.local/share/devin`, `~/.config/muse`, `~/.venice`,
-  `~/.cline`, and the Keychain). The widget extension **stays sandboxed**; it only reads the App
+  `~/.cline`, `~/.junie`, and the Keychain). The widget extension **stays sandboxed**; it only reads the App
   Group container.
 - Adding a `QuotaProvider` case is a breaking change for **six** exhaustive `switch`es:
   `Models.displayName`, `Models.credentialFields`,
@@ -162,6 +162,23 @@ Linux:
 
 ## Provider API notes
 
+- **JetBrains Junie**: current Junie CLI `/stats` reads `GET
+  https://ingrazzio-cloud-prod.labs.jb.gg/auth/test` with `Authorization: Bearer
+  <Junie API key>`, `X-Accept-EAP-License: false`, and
+  `X-Accept-Release-License: true`. The response reports `balanceLeft` and
+  `balanceUnit`: USD is unscaled, every other or absent unit is divided by
+  100,000 and displayed as credits. No allowance total or reset is supplied;
+  never invent a percentage. Junie suppresses balances for `licenseType: GZL`;
+  this does not establish unlimited access. Import `JUNIE_API_KEY` or
+  `<JUNIE_HOME>/secure_credentials.json` (default `~/.junie`), whose `secrets`
+  array holds `key: jb-account-stored` and a JSON-encoded `secret` containing
+  `simpleToken`. Copy only that permanent API key, never browser refresh grants
+  or BYOK credentials. macOS normally uses Keychain, which this import does not
+  read; users can paste a key generated at junie.jetbrains.com/cli. Protocol and
+  scale verified statically in the official Junie CLI release 3659.7 classes
+  `CheckIngrazzioInteractiveKt`, `FormatCostKt`, `IngrazzioAuthInfoKt`, and
+  `FallbackFileStorage`; the endpoint is undocumented. Official key/environment
+  reference: [Junie environment variables](https://junie.jetbrains.com/docs/environment-variables.html).
 - **Cline**: read-only account API at `https://api.cline.bot`, authenticated with
   `Authorization: Bearer <API key>` and `Accept: application/json`. Every response
   is wrapped in `{success, error, data}`; an on-premise or older deployment can

@@ -52,6 +52,8 @@ public struct CredentialDiscovery: Sendable {
   private let xdgDataHome: String?
   /// XDG config dir, when set — Muse Code honors it for auth.json.
   private let xdgConfigHome: String?
+  private let junieHome: String?
+  private let junieAPIKey: String?
 
   public init(
     homeDirectories: [URL]? = nil,
@@ -61,6 +63,8 @@ public struct CredentialDiscovery: Sendable {
     self.fileManager = fileManager
     self.xdgDataHome = environment["XDG_DATA_HOME"]
     self.xdgConfigHome = environment["XDG_CONFIG_HOME"]
+    self.junieHome = environment["JUNIE_HOME"]
+    self.junieAPIKey = environment["JUNIE_API_KEY"]
     if let homeDirectories, !homeDirectories.isEmpty {
       self.homeDirectories = homeDirectories
     } else {
@@ -85,11 +89,51 @@ public struct CredentialDiscovery: Sendable {
 
     candidates += scanDevin(diagnostics: &diagnostics)
     candidates += scanMuse(diagnostics: &diagnostics)
+    candidates += scanJunie(diagnostics: &diagnostics)
 
     return CredentialDiscoveryResult(credentials: dedupe(candidates), diagnostics: diagnostics)
   }
 
   // MARK: - Sources
+
+  /// Junie's fallback storage wraps its permanent key in a JSON-encoded
+  /// `secret`. Account refresh grants and BYOK credentials are not imported.
+  /// macOS usually stores this entry in Keychain instead; users can add a
+  /// generated Junie API key manually when no fallback file exists.
+  private func scanJunie(diagnostics: inout [String]) -> [DiscoveredCredential] {
+    var results: [DiscoveredCredential] = []
+    if let key = nonEmptyString(junieAPIKey) {
+      results.append(DiscoveredCredential(
+        stableID: "junie:environment", provider: .junie, suggestedName: "JetBrains Junie",
+        sourceLabel: "Junie (JUNIE_API_KEY)", credentials: [CredentialField.junieAPIKey: key]
+      ))
+      diagnostics.append("Junie: found API key in JUNIE_API_KEY")
+    }
+
+    let directories: [URL]
+    if let junieHome = nonEmptyString(junieHome), junieHome.hasPrefix("/") {
+      directories = [URL(fileURLWithPath: junieHome, isDirectory: true)]
+    } else {
+      directories = homeDirectories.map { path($0, ".junie") }
+    }
+    for directory in directories {
+      let url = directory.appendingPathComponent("secure_credentials.json")
+      guard let object = readJSON(at: url, label: "Junie", diagnostics: &diagnostics),
+            let secrets = object["secrets"] as? [[String: Any]],
+            let entry = secrets.first(where: { ($0["key"] as? String) == "jb-account-stored" }),
+            let secret = entry["secret"] as? String,
+            let data = secret.data(using: .utf8),
+            let account = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+            let key = nonEmptyString(account["simpleToken"]) else { continue }
+
+      results.append(DiscoveredCredential(
+        stableID: "junie:cli", provider: .junie, suggestedName: "JetBrains Junie",
+        sourceLabel: "Junie CLI (\(shortPath(url)))", credentials: [CredentialField.junieAPIKey: key]
+      ))
+      diagnostics.append("Junie: found API key (\(shortPath(url)))")
+    }
+    return results
+  }
 
   private func scanClaudeCode(home: URL, diagnostics: inout [String]) -> [DiscoveredCredential] {
     let url = path(home, ".claude", ".credentials.json")
