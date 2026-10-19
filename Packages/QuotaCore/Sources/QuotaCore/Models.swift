@@ -14,6 +14,7 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
   case venice = "venice"
   case cline = "cline"
   case junie = "junie"
+  case minimax = "minimax"
 
   public var displayName: String {
     switch self {
@@ -43,6 +44,8 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
       return "Cline"
     case .junie:
       return "JetBrains Junie"
+    case .minimax:
+      return "MiniMax"
     }
   }
 }
@@ -209,6 +212,14 @@ public extension QuotaProvider {
           key: CredentialField.clineAPIKey,
           label: "API key",
           help: "Create a key at app.cline.bot under Account -> API Keys. It reports ClinePass window usage and the prepaid credit balance."
+        )
+      ]
+    case .minimax:
+      return [
+        CredentialFieldDescriptor(
+          key: CredentialField.minimaxAPIKey,
+          label: "M Plan subscription key",
+          help: "Use your Subscription Key from the MiniMax API Platform (minimax.io). It reports M Plan quota windows. You can also import it from OpenCode's MiniMax Token Plan connection."
         )
       ]
     case .junie:

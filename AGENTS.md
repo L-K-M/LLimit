@@ -31,7 +31,8 @@ reference and verified account identity, without copying Codex tokens into its
 settings. The user's normal Codex login and existing imported accounts stay separate.
 
 Providers: Claude (Anthropic), OpenAI/ChatGPT, GitHub Copilot, Zhipu, Z.ai, Kimi,
-Google Antigravity, Devin, Meta Muse, OpenCode Go, Venice, Cline, JetBrains Junie.
+Google Antigravity, Devin, Meta Muse, OpenCode Go, Venice, Cline, JetBrains Junie,
+MiniMax M Plan.
 
 ## Layout
 
@@ -162,6 +163,26 @@ Linux:
 
 ## Provider API notes
 
+- **MiniMax M Plan**: read-only `GET https://www.minimax.io/v1/token_plan/remains`
+  with `Authorization: Bearer <global M Plan Subscription Key>`. Provider ID
+  `minimax`, credential field `minimax.api_key`. Preserve each returned bucket's
+  interval and weekly windows, server resets, and unlimited status. Explicit
+  remaining percentages are authoritative. Legacy `*_usage_count` fields mean
+  remaining counts unless the explicit percentage agrees with consumed counts;
+  omit incompatible count detail. Apply `weekly_boost_permille` to the weekly
+  percentage, retaining values above 100% in detail while clamping progress.
+  Do not infer quota from billing frequency, invent a denominator, or report
+  credit-pack/PAYG balances absent from this response. Discovery imports only
+  OpenCode's exact `minimax-coding-plan` API-key entry, honoring absolute
+  `XDG_DATA_HOME`; generic MiniMax, China entries, and environment variables
+  are excluded. The Linux account command prompts for a key; `--set` stores
+  literal values and does not resolve environment references. Sources:
+  [M Plan FAQ](https://platform.minimax.io/docs/m-plan/faq),
+  [official OpenCode setup](https://platform.minimax.io/docs/m-plan/opencode),
+  and MiniMax CLI commit `38aba5f`:
+  [`types/api.ts`](https://github.com/MiniMax-AI/cli/blob/38aba5f/src/types/api.ts),
+  [`utils/quota.ts`](https://github.com/MiniMax-AI/cli/blob/38aba5f/src/utils/quota.ts),
+  [`output/quota-table.ts`](https://github.com/MiniMax-AI/cli/blob/38aba5f/src/output/quota-table.ts).
 - **JetBrains Junie**: current Junie CLI `/stats` reads `GET
   https://ingrazzio-cloud-prod.labs.jb.gg/auth/test` with `Authorization: Bearer
   <Junie API key>`, `X-Accept-EAP-License: false`, and

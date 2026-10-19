@@ -433,6 +433,14 @@ public struct CredentialDiscovery: Sendable {
                             [CredentialField.veniceAPIKey: key]))
       }
 
+      // M Plan's official OpenCode setup uses this exact global plan ID:
+      // https://platform.minimax.io/docs/m-plan/opencode
+      // Generic MiniMax API keys and China plan entries are separate products.
+      if let key = apiKey(in: object, provider: "minimax-coding-plan") {
+        results.append(make("minimax:opencode", .minimax, "MiniMax M Plan", url,
+                            [CredentialField.minimaxAPIKey: key]))
+      }
+
       if let copilot = object["github-copilot"] as? [String: Any],
          (copilot["type"] as? String) == "oauth",
          let oauth = nonEmptyString(copilot["refresh"]) ?? nonEmptyString(copilot["access"]) {

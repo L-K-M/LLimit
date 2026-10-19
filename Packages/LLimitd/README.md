@@ -69,6 +69,7 @@ llimit accounts add --provider opencode-go      # prompts for your OpenCode Go A
 llimit accounts add --provider venice           # prompts for your Venice API key
 llimit accounts add --provider cline            # prompts for your Cline API key
 llimit accounts add --provider junie            # prompts for your Junie API key
+llimit accounts add --provider minimax          # prompts for your global M Plan Subscription Key
 llimit accounts import                          # list discovered local logins, import one
 llimit accounts enable|disable|remove <id>      # id may be a unique prefix
 llimit accounts rename <id> <name>
@@ -163,6 +164,19 @@ report a usable balance. Import supports `JUNIE_API_KEY` and the permanent
 but excludes browser refresh grants and third-party provider keys.
 macOS Keychain-only logins require a manually entered Junie API key. Saved keys
 work without Junie running and need explicit replacement when revoked or expired.
+
+MiniMax reports global (`minimax.io`) M Plan interval and weekly usage, including
+server reset times and any separate quota buckets. Add it with
+`llimit accounts add --provider minimax` and your M Plan **Subscription Key**.
+The command prompts for your key and saves it in local settings. Discovery does
+not read `MINIMAX_API_KEY`. Import accepts only OpenCode's `minimax-coding-plan`
+API-key entry in `auth.json`, with absolute `XDG_DATA_HOME` supported.
+Standard pay-as-you-go and China entries are excluded. Percentages use reported
+quota, with no manual denominator or annual billing inference. Unlimited windows
+are preserved, and weekly boosts above 100% appear in details while progress
+caps at 100%. Credit-pack and pay-as-you-go balances are not reported by this
+quota endpoint. Polling makes no inference requests and requires no OpenCode
+process. See the [M Plan FAQ](https://platform.minimax.io/docs/m-plan/faq).
 
 ## systemd
 

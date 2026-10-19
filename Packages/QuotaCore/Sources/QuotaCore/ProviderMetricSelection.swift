@@ -38,6 +38,9 @@ public func defaultRingMetrics(for usage: ProviderUsage) -> [UsageMetric] {
     preferredIDs = ["five_hour", "weekly", "monthly"]
   case .junie:
     preferredIDs = ["credit-balance"]
+  case .minimax:
+    // Keep the general bucket's short and long windows together.
+    preferredIDs = ["general-interval", "general-weekly"]
   }
 
   var selected: [UsageMetric] = []
