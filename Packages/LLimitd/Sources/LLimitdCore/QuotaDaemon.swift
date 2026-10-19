@@ -198,6 +198,9 @@ public final class QuotaDaemon {
     for (key, value) in credentials {
       mergedCredentials[key] = value
     }
+    if provider == .xiaomiMiMo {
+      mergedCredentials = try MiMoSessionCookies.credentialsForStorage(mergedCredentials)
+    }
 
     let name = displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
     let account = ProviderAccount(
@@ -239,6 +242,9 @@ public final class QuotaDaemon {
       updated.displayName = name
     }
     updated.credentials = try Self.credentials(of: previous, applying: change)
+    if updated.provider == .xiaomiMiMo {
+      updated.credentials = try MiMoSessionCookies.credentialsForStorage(updated.credentials)
+    }
     guard updated != previous else { return previous }
 
     if updated.credentials != previous.credentials {
@@ -248,10 +254,12 @@ public final class QuotaDaemon {
       // Old usage belongs to the old login, including Venice's estimated allowance.
       // Clear before saving the new login so a failed snapshot save cannot pair them.
       try discardSnapshotEntry(for: accountID)
-      if previous.provider == .junie,
-         JunieCreditAllowance.hasChanged(
+      let junieAllowanceChanged = previous.provider == .junie && JunieCreditAllowance.hasChanged(
            from: previous.credentials[CredentialField.junieCreditAllowance],
-           to: updated.credentials[CredentialField.junieCreditAllowance]) {
+           to: updated.credentials[CredentialField.junieCreditAllowance])
+      let mimoIdentityChanged = previous.provider == .xiaomiMiMo && MiMoSessionCookies.hasChangedIdentity(
+        from: previous.credentials[CredentialField.mimoSessionCookies], to: updated.credentials[CredentialField.mimoSessionCookies])
+      if junieAllowanceChanged || mimoIdentityChanged {
         // A changed allowance must not appear as consumption in old history.
         try historyStore.remove(accountIDs: [accountID])
       }

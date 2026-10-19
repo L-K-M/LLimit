@@ -70,6 +70,7 @@ llimit accounts add --provider venice           # prompts for your Venice API ke
 llimit accounts add --provider cline            # prompts for your Cline API key
 llimit accounts add --provider junie            # prompts for your Junie API key
 llimit accounts add --provider minimax          # prompts for your global M Plan Subscription Key
+llimit accounts add --provider xiaomi-mimo      # prompts for console session cookies
 llimit accounts import                          # list discovered local logins, import one
 llimit accounts enable|disable|remove <id>      # id may be a unique prefix
 llimit accounts rename <id> <name>
@@ -177,6 +178,24 @@ are preserved, and weekly boosts above 100% appear in details while progress
 caps at 100%. Credit-pack and pay-as-you-go balances are not reported by this
 quota endpoint. Polling makes no inference requests and requires no OpenCode
 process. See the [M Plan FAQ](https://platform.minimax.io/docs/m-plan/faq).
+
+Xiaomi MiMo supports personal API Platform Token Plans. Run
+`llimit accounts add --provider xiaomi-mimo` to enter the console Cookie header
+in a hidden terminal prompt. Sign in to
+[Subscription Management](https://platform.xiaomimimo.com/console/plan-manage),
+then copy the Cookie request header for `/api/v1/tokenPlan/usage` from your
+browser's developer tools. The secret field is `mimo.session_cookies`.
+LLimit retains only the platform service cookies and `userId` in its own local
+settings; snapshots and status output contain usage data only. Replace the header
+when the session expires. MiMo Code and OpenCode API-key imports do not provide
+this console session. On macOS, **Connect MiMo** offers a separate sign-in window.
+
+Quota checks read the personal plan detail and usage endpoints without inference
+or balance requests. Status includes remaining percentages, reported credit counts,
+and separate bonus credits. Expiry is preserved as detail, with no inferred
+monthly/annual reset or pace. Team/project quotas and MiMo Desktop memberships
+are not supported. See [Xiaomi's MiMo Code guide](https://mimo.mi.com/docs/en-US/tokenplan/integration/mimo-code)
+for inference-key setup and its separate console usage page.
 
 ## systemd
 

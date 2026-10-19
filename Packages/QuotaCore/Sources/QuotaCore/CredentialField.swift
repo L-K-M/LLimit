@@ -38,6 +38,8 @@ public enum CredentialField {
 
   public static let minimaxAPIKey = "minimax.api_key"
 
+  public static let mimoSessionCookies = "mimo.session_cookies"
+
   public static let junieAPIKey = "junie.api_key"
   public static let junieCreditAllowance = "junie.credit_allowance"
   public static let junieResetAt = "junie.reset_at"

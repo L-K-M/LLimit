@@ -34,7 +34,8 @@ public struct QuotaCoordinator: Sendable {
         VeniceQuotaClient(httpClient: httpClient),
         ClineQuotaClient(httpClient: httpClient),
         JunieQuotaClient(httpClient: httpClient),
-        MiniMaxQuotaClient(httpClient: httpClient)
+        MiniMaxQuotaClient(httpClient: httpClient),
+        MiMoQuotaClient(httpClient: httpClient)
       ]
     )
   }

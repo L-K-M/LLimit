@@ -38,6 +38,10 @@ public func defaultRingMetrics(for usage: ProviderUsage) -> [UsageMetric] {
     preferredIDs = ["five_hour", "weekly", "monthly"]
   case .junie:
     preferredIDs = ["credit-balance"]
+  case .xiaomiMiMo:
+    // Client returns deterministic plan bucket order (ordinary quota then
+    // compensation); generic candidate fallback selects first two.
+    preferredIDs = []
   case .minimax:
     // Keep the general bucket's short and long windows together.
     preferredIDs = ["general-interval", "general-weekly"]

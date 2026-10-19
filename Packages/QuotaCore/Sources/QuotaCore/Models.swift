@@ -15,6 +15,7 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
   case cline = "cline"
   case junie = "junie"
   case minimax = "minimax"
+  case xiaomiMiMo = "xiaomi-mimo"
 
   public var displayName: String {
     switch self {
@@ -46,6 +47,8 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
       return "JetBrains Junie"
     case .minimax:
       return "MiniMax"
+    case .xiaomiMiMo:
+      return "Xiaomi MiMo"
     }
   }
 }
@@ -220,6 +223,14 @@ public extension QuotaProvider {
           key: CredentialField.minimaxAPIKey,
           label: "M Plan subscription key",
           help: "Use your Subscription Key from the MiniMax API Platform (minimax.io). It reports M Plan quota windows. You can also import it from OpenCode's MiniMax Token Plan connection."
+        )
+      ]
+    case .xiaomiMiMo:
+      return [
+        CredentialFieldDescriptor(
+          key: CredentialField.mimoSessionCookies,
+          label: "Console session cookies",
+          help: "Connect MiMo in LLimit to sign in. For manual setup, use the Cookie request header from platform.xiaomimimo.com. Token Plan API keys cannot supply console usage. Sessions may require signing in again after expiry."
         )
       ]
     case .junie:

@@ -72,6 +72,10 @@ struct SettingsView: View {
     .sheet(item: $model.codexLogin, onDismiss: { model.dismissCodexLogin() }) { _ in
       CodexLoginView(model: model)
     }
+    .sheet(item: $model.mimoLogin, onDismiss: { model.dismissMiMoLogin() }) { session in
+      MiMoLoginView(session: session, onClose: { model.dismissMiMoLogin() })
+        .interactiveDismissDisabled()
+    }
     .onChange(of: model.providerAccounts.map(\.id)) { _, accountIDs in
       if case .account(let accountID) = selection, !accountIDs.contains(accountID) {
         selection = .overview
@@ -88,6 +92,7 @@ struct SettingsView: View {
     // Rejected drafts survive the close and show again, with their reason, on reopen.
     .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { notification in
       guard let window = notification.object as? NSWindow, window === hostWindow.window else { return }
+      model.dismissMiMoLogin()
       commitAccountDrafts()
     }
     // One last attempt on quit. A draft that is still rejected cannot be saved and
@@ -317,9 +322,10 @@ struct SettingsView: View {
               selection = .account(account.id)
               if providerToAdd == .anthropic { model.connectClaudeAccount(account.id) }
               if providerToAdd == .openAI { model.connectCodexAccount(account.id) }
+              if providerToAdd == .xiaomiMiMo { model.connectMiMoAccount(account.id) }
             }
             .buttonStyle(.borderedProminent)
-            .disabled((providerToAdd == .anthropic || providerToAdd == .openAI) && model.isRefreshing)
+            .disabled((providerToAdd == .anthropic || providerToAdd == .openAI || providerToAdd == .xiaomiMiMo) && model.isRefreshing)
           }
           if providerToAdd == .anthropic {
             Text("Sign in inside LLimit with Claude Code installed on this Mac. Add another Claude account to connect a second subscription. Credentials renew automatically.")
@@ -330,6 +336,10 @@ struct SettingsView: View {
             Text("Sign in with ChatGPT in your browser, using Codex installed on this Mac. Add another OpenAI account to connect a second subscription. Each account stays signed in separately.")
               .font(.caption)
               .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          } else if providerToAdd == .xiaomiMiMo {
+            Text("Sign in to the MiMo API Platform inside LLimit. Each account has its own login. Connect again when the console session expires.")
+              .font(.caption).foregroundStyle(.secondary)
               .fixedSize(horizontal: false, vertical: true)
           }
         }
@@ -347,6 +357,7 @@ struct SettingsView: View {
     switch providerToAdd {
     case .anthropic: return "Connect Claude"
     case .openAI: return "Connect OpenAI"
+    case .xiaomiMiMo: return "Connect MiMo"
     default: return "Add Account"
     }
   }
@@ -1110,6 +1121,15 @@ struct SettingsView: View {
               claudeCredentials(for: account)
             } else if account.provider == .openAI {
               codexCredentials(for: account)
+            } else if account.provider == .xiaomiMiMo {
+              VStack(alignment: .leading, spacing: 10) {
+                Button("Connect MiMo") { commitAccountDrafts(); model.connectMiMoAccount(account.id) }
+                  .buttonStyle(.borderedProminent).disabled(model.isRefreshing)
+                Text("Sign in to the API Platform to read Token Plan usage. MiMo Code login supplies an inference key; it does not supply this console session. Sign in again after your session expires.")
+                  .font(.caption).foregroundStyle(.secondary)
+                  .fixedSize(horizontal: false, vertical: true)
+                DisclosureGroup("Manual setup") { manualCredentials(for: account) }
+              }
             } else {
               manualCredentials(for: account)
             }

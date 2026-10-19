@@ -27,6 +27,10 @@ public final class SettingsStore: @unchecked Sendable {
       withIntermediateDirectories: true
     )
 
+    var settings = settings
+    for index in settings.accounts.indices where settings.accounts[index].provider == .xiaomiMiMo {
+      settings.accounts[index].credentials = try MiMoSessionCookies.credentialsForStorage(settings.accounts[index].credentials)
+    }
     let data = try encoder.encode(settings)
     try writeOwnerOnlyAtomically(data, to: fileURL)
   }
