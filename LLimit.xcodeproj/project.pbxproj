@@ -529,7 +529,7 @@
 				CODE_SIGN_ENTITLEMENTS = LLimitWidgetExtension/LLimitWidgetExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 39;
+				CURRENT_PROJECT_VERSION = 40;
 				DEVELOPMENT_TEAM = 293A48LC7B;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LLimitWidgetExtension/Info.plist;
@@ -555,7 +555,7 @@
 				CODE_SIGN_ENTITLEMENTS = LLimitWidgetExtension/LLimitWidgetExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 39;
+				CURRENT_PROJECT_VERSION = 40;
 				DEVELOPMENT_TEAM = 293A48LC7B;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LLimitWidgetExtension/Info.plist;
