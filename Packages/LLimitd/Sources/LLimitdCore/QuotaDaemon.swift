@@ -248,6 +248,13 @@ public final class QuotaDaemon {
       // Old usage belongs to the old login, including Venice's estimated allowance.
       // Clear before saving the new login so a failed snapshot save cannot pair them.
       try discardSnapshotEntry(for: accountID)
+      if previous.provider == .junie,
+         JunieCreditAllowance.hasChanged(
+           from: previous.credentials[CredentialField.junieCreditAllowance],
+           to: updated.credentials[CredentialField.junieCreditAllowance]) {
+        // A changed allowance must not appear as consumption in old history.
+        try historyStore.remove(accountIDs: [accountID])
+      }
     }
     settings.accounts[index] = updated
     try normalizeAndSave()
@@ -683,7 +690,7 @@ public final class QuotaDaemon {
     case .unchanged: return account.credentials
     case .replacing(let values):
       let blank = Dictionary(uniqueKeysWithValues: account.provider.credentialFields.map { ($0.key, "") })
-      return blank.merging(values) { _, new in new }
+      return blank.merging(account.credentialsForImport(values)) { _, new in new }
     case .merging(let values):
       let editable = editableCredentialKeys(of: account)
       if let unknown = values.keys.sorted().first(where: { !editable.contains($0) }) {

@@ -7,7 +7,7 @@ import FoundationNetworking
 #endif
 
 final class JunieIntegrationTests: XCTestCase {
-  func testLiveRefreshPersistsOwnedAccountsAndRendersCredentialFreeBalances() async throws {
+  func testLiveRefreshPersistsAllowancesAndRendersCredentialFreePercentages() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
     let paths = LinuxPaths(
@@ -33,6 +33,12 @@ final class JunieIntegrationTests: XCTestCase {
       sourceLabel: "Junie CLI fixture", credentials: [CredentialField.junieAPIKey: "junie-import-fixture-secret"]
     )
     let imported = try daemon.editingSettings { try $0.importAccount(from: detected) }
+    let importedCredentials = detected.credentials.merging([
+      CredentialField.junieCreditAllowance: "10", CredentialField.junieResetAt: ""
+    ]) { _, new in new }
+    _ = try daemon.editingSettings {
+      try $0.updateAccount(imported.id, credentials: .replacing(with: importedCredentials))
+    }
 
     await daemon.refreshNow()
 
@@ -45,15 +51,24 @@ final class JunieIntegrationTests: XCTestCase {
     XCTAssertEqual(work.title, "Imported Junie")
     XCTAssertEqual(personal.metrics.first?.remainingAmount, 12.5)
     XCTAssertEqual(work.metrics.first?.remainingAmount, 4.25)
+    XCTAssertEqual(personal.metrics.first?.remainingPercent, 36)
+    XCTAssertEqual(work.metrics.first?.remainingPercent, 43)
+    XCTAssertEqual(personal.maxUsagePercent, 64)
+    XCTAssertEqual(work.maxUsagePercent, 57)
+    XCTAssertEqual(personal.metrics.first?.usageLine, "12.5 credits / 35 credits")
+    XCTAssertEqual(work.metrics.first?.usageLine, "4.25 USD / 10 USD")
     for usage in snapshot.providers {
       XCTAssertEqual(usage.provider, .junie)
       XCTAssertEqual(usage.metrics.count, 1)
       let metric = try XCTUnwrap(usage.metrics.first)
-      XCTAssertNil(metric.remainingPercent)
+      XCTAssertEqual(metric.id, "credit-balance")
+      XCTAssertEqual(metric.label, "30-day AI credits")
+      XCTAssertEqual(QuotaWindowKind.classify(metricID: metric.id, label: metric.label), .monthly)
       XCTAssertNil(metric.estimatedTotal)
-      XCTAssertNil(metric.totalDisplay)
       XCTAssertNil(metric.resetAt)
       XCTAssertNil(metric.resetIn)
+      XCTAssertNil(metric.windowSeconds)
+      XCTAssertNil(metric.paceEstimate)
     }
 
     let requests = await http.requests
@@ -71,35 +86,46 @@ final class JunieIntegrationTests: XCTestCase {
     XCTAssertEqual(settings.accounts.map(\.provider), [.junie, .junie])
     XCTAssertEqual(settings.accounts.map(\.resolvedDisplayName), ["Personal Junie", "Imported Junie"])
     XCTAssertTrue(settings.accounts.allSatisfy(\.isEnabled))
-    XCTAssertEqual(settings.accounts[0].credentials, [CredentialField.junieAPIKey: "env:JUNIE_API_KEY"])
-    XCTAssertEqual(settings.accounts[1].credentials, detected.credentials)
+    XCTAssertEqual(settings.accounts[0].credentials, [
+      CredentialField.junieAPIKey: "env:JUNIE_API_KEY",
+      CredentialField.junieCreditAllowance: "",
+      CredentialField.junieResetAt: ""
+    ])
+    XCTAssertEqual(settings.accounts[1].credentials, importedCredentials)
     XCTAssertTrue(settings.redactedCredentials().accounts.allSatisfy { $0.credentials.isEmpty })
     let attributes = try FileManager.default.attributesOfItem(atPath: paths.settingsFileURL.path)
     XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o600)
 
     let json = StatusRenderer.waybarJSON(snapshot: snapshot, now: snapshot.generatedAt)
     let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
-    XCTAssertNil(object["percentage"])
+    XCTAssertEqual(object["percentage"] as? Int, 36)
     let accounts = try XCTUnwrap(object["accounts"] as? [[String: Any]])
     XCTAssertEqual(accounts.count, 2)
     for account in accounts {
       XCTAssertEqual(account["provider"] as? String, "junie")
-      XCTAssertNil(account["remainingPercent"] as? Int)
+      let isPersonal = account["id"] as? String == manual.id
+      let expectedRemaining = isPersonal ? 36 : 43
+      XCTAssertEqual(account["remainingPercent"] as? Int, expectedRemaining)
       let metric = try XCTUnwrap((account["metrics"] as? [[String: Any]])?.first)
-      XCTAssertNil(metric["remainingPercent"])
+      XCTAssertEqual(metric["remainingPercent"] as? Int, expectedRemaining)
+      XCTAssertEqual(metric["remainingAmount"] as? Double, isPersonal ? 12.5 : 4.25)
+      XCTAssertEqual(metric["usageLine"] as? String, isPersonal ? "12.5 credits / 35 credits" : "4.25 USD / 10 USD")
+      XCTAssertEqual(metric["window"] as? String, "monthly")
       XCTAssertNil(metric["resetAt"])
+      XCTAssertNil(metric["estimated"])
     }
     let human = StatusRenderer.humanReadable(snapshot: snapshot, now: snapshot.generatedAt)
+    XCTAssertTrue(human.contains("36%"))
+    XCTAssertTrue(human.contains("43%"))
     for output in [json, human] {
-      XCTAssertTrue(output.contains("12.5 credits"))
-      XCTAssertTrue(output.contains("4.25 USD"))
-      XCTAssertFalse(output.contains("%"))
       XCTAssertFalse(output.contains("junie-env-fixture-secret"))
       XCTAssertFalse(output.contains("junie-import-fixture-secret"))
     }
 
     let persistedSnapshot = try XCTUnwrap(SnapshotStore(fileURL: paths.snapshotFileURL).load())
     XCTAssertEqual(Set(persistedSnapshot.providers.map(\.accountID)), [manual.id, imported.id])
+    XCTAssertEqual(persistedSnapshot.providers.first { $0.accountID == manual.id }?.metrics.first?.remainingPercent, 36)
+    XCTAssertEqual(persistedSnapshot.providers.first { $0.accountID == imported.id }?.metrics.first?.remainingPercent, 43)
     let history = try QuotaHistoryStore(fileURL: paths.historyFileURL).load()
     XCTAssertEqual(history.count, 1)
     XCTAssertEqual(Set(history[0].providers.map(\.accountID)), [manual.id, imported.id])
@@ -108,9 +134,54 @@ final class JunieIntegrationTests: XCTestCase {
       XCTAssertFalse(contents.contains("junie-env-fixture-secret"))
       XCTAssertFalse(contents.contains("junie-import-fixture-secret"))
       XCTAssertFalse(contents.contains(CredentialField.junieAPIKey))
+      XCTAssertFalse(contents.contains(CredentialField.junieCreditAllowance))
+      XCTAssertFalse(contents.contains(CredentialField.junieResetAt))
     }
     let savedSettings = String(decoding: try Data(contentsOf: paths.settingsFileURL), as: UTF8.self)
     XCTAssertFalse(savedSettings.contains("junie-env-fixture-secret"))
+
+    // Replacing authentication does not replace the user's subscription plan.
+    _ = try daemon.editingSettings { try $0.reimportAccount(imported.id, among: [detected]) }
+    XCTAssertEqual(daemon.settings.account(withID: imported.id)?.credentials[CredentialField.junieCreditAllowance], "10")
+
+    // A denominator change must not look like consumption in existing history.
+    _ = try daemon.editingSettings {
+      try $0.updateAccount(manual.id, credentials: .merging([CredentialField.junieCreditAllowance: "70"]))
+    }
+    let resetHistory = try QuotaHistoryStore(fileURL: paths.historyFileURL).load()
+    XCTAssertFalse(resetHistory.flatMap(\.providers).contains { $0.accountID == manual.id })
+    XCTAssertTrue(resetHistory.flatMap(\.providers).contains { $0.accountID == imported.id })
+    await daemon.refreshNow()
+    XCTAssertEqual(daemon.snapshot?.providers.first { $0.accountID == manual.id }?.metrics.first?.remainingPercent, 18)
+
+    let historyBeforeFormattingChange = try QuotaHistoryStore(fileURL: paths.historyFileURL).load()
+    _ = try daemon.editingSettings {
+      try $0.updateAccount(manual.id, credentials: .merging([CredentialField.junieCreditAllowance: " 70.0 "]))
+    }
+    XCTAssertEqual(try QuotaHistoryStore(fileURL: paths.historyFileURL).load(), historyBeforeFormattingChange)
+
+    // A reset date changes the countdown, while retaining observed percentages.
+    let formatter = ISO8601DateFormatter()
+    let resetText = formatter.string(from: Date().addingTimeInterval(15 * 86_400))
+    let resetAt = try XCTUnwrap(formatter.date(from: resetText))
+    _ = try daemon.editingSettings {
+      try $0.updateAccount(imported.id, credentials: .merging([CredentialField.junieResetAt: resetText]))
+    }
+    XCTAssertFalse(daemon.snapshot?.providers.contains { $0.accountID == imported.id } ?? false)
+    let retainedHistory = try QuotaHistoryStore(fileURL: paths.historyFileURL).load()
+    XCTAssertTrue(retainedHistory.flatMap(\.providers).contains { $0.accountID == imported.id })
+    await daemon.refreshNow()
+    let scheduled = try XCTUnwrap(daemon.snapshot?.providers.first { $0.accountID == imported.id })
+    XCTAssertEqual(scheduled.metrics.first?.resetAt, resetAt)
+    XCTAssertEqual(scheduled.metrics.first?.windowSeconds, 30 * 86_400)
+    let scheduledJSON = StatusRenderer.waybarJSON(snapshot: try XCTUnwrap(daemon.snapshot), now: Date())
+    let scheduledObject = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(scheduledJSON.utf8)) as? [String: Any])
+    let scheduledAccounts = try XCTUnwrap(scheduledObject["accounts"] as? [[String: Any]])
+    let scheduledAccount = try XCTUnwrap(scheduledAccounts.first { $0["id"] as? String == imported.id })
+    let scheduledMetric = try XCTUnwrap((scheduledAccount["metrics"] as? [[String: Any]])?.first)
+    XCTAssertEqual(scheduledMetric["resetAt"] as? String, resetText)
+    _ = try daemon.editingSettings { try $0.reimportAccount(imported.id, among: [detected]) }
+    XCTAssertEqual(daemon.settings.account(withID: imported.id)?.credentials[CredentialField.junieResetAt], resetText)
   }
 }
 
@@ -122,7 +193,7 @@ private actor JunieAccountHTTP: HTTPClient {
     let body: String
     switch request.value(forHTTPHeaderField: "Authorization") {
     case "Bearer junie-env-fixture-secret":
-      body = #"{"active":true,"balanceLeft":1250000,"balanceUnit":"AI_CREDITS","licenseType":"ULTIMATE"}"#
+      body = #"{"active":true,"balanceLeft":1250000,"balanceUnit":"AI_CREDITS","licenseType":"AIPU"}"#
     case "Bearer junie-import-fixture-secret":
       body = #"{"active":true,"balanceLeft":4.25,"balanceUnit":"USD","licenseType":"PRO"}"#
     default:

@@ -217,6 +217,20 @@ public extension QuotaProvider {
           key: CredentialField.junieAPIKey,
           label: "Junie API key",
           help: "Create a Junie API key at junie.jetbrains.com/cli. LLimit reads your JetBrains AI credit balance."
+        ),
+        CredentialFieldDescriptor(
+          key: CredentialField.junieCreditAllowance,
+          label: "30-day AI credit allowance",
+          isSecret: false,
+          isRequired: false,
+          help: "Personal AI Ultimate defaults to 35 credits. Set your allowance for other plans or organization accounts, or 0 for balance only. Changing this restarts chart history."
+        ),
+        CredentialFieldDescriptor(
+          key: CredentialField.junieResetAt,
+          label: "Reset date",
+          isSecret: false,
+          isRequired: false,
+          help: "Optional reset date, repeating every 30 days. Use YYYY-MM-DD (midnight UTC) or an ISO 8601 date-time with a timezone. Leave empty if unknown."
         )
       ]
     }
@@ -529,6 +543,19 @@ public struct ProviderAccount: Codable, Hashable, Identifiable, Sendable {
     ProviderRuntimeConfiguration(
       accountID: id, provider: provider, displayName: resolvedDisplayName,
       isEnabled: isEnabled, credentials: credentials.resolvingEnvironmentReferences(environment))
+  }
+
+  /// Import replaces authentication, while Junie's account-owned credit settings
+  /// survive when the source tool does not supply them.
+  public func credentialsForImport(_ imported: [String: String]) -> [String: String] {
+    guard provider == .junie else { return imported }
+
+    var result = imported
+    for key in [CredentialField.junieCreditAllowance, CredentialField.junieResetAt]
+      where imported[key] == nil {
+      result[key] = credentials[key]
+    }
+    return result
   }
 
   public func redactedCredentials() -> ProviderAccount {

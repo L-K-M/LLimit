@@ -37,6 +37,8 @@ public enum CredentialField {
   public static let clineAPIKey = "cline.api_key"
 
   public static let junieAPIKey = "junie.api_key"
+  public static let junieCreditAllowance = "junie.credit_allowance"
+  public static let junieResetAt = "junie.reset_at"
 
   public static let copilotOAuthToken = "copilot.oauth_token"
   public static let copilotPATToken = "copilot.pat_token"
