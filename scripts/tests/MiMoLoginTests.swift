@@ -50,8 +50,10 @@ struct MiMoLoginTests {
     defer { signedIn.cancel() }
     let signedInStore = signedIn.webView.configuration.websiteDataStore
     let fixtureProperties: [[HTTPCookiePropertyKey: String]] = [
-      [.name: "api-platform_serviceToken", .value: "offline-token", .domain: ".platform.xiaomimimo.com", .path: "/"],
-      [.name: "api-platform_serviceToken", .value: "offline-token", .domain: ".platform.xiaomimimo.com", .path: "/api/v1/tokenPlan"],
+      [.name: "api-platform_serviceToken", .value: "\"offline-token\"", .domain: ".platform.xiaomimimo.com", .path: "/"],
+      [.name: "api-platform_serviceToken", .value: "\"offline-token\"", .domain: ".platform.xiaomimimo.com", .path: "/api/v1/tokenPlan"],
+      [.name: "api-platform_slh", .value: "\"offline-slh\"", .domain: ".platform.xiaomimimo.com", .path: "/"],
+      [.name: "api-platform_ph", .value: "\"offline-ph\"", .domain: ".platform.xiaomimimo.com", .path: "/"],
       [.name: "userId", .value: "offline-user", .domain: ".xiaomimimo.com", .path: "/"],
       [.name: "userId", .value: "offline-user", .domain: ".platform.xiaomimimo.com", .path: "/"],
       [.name: "xiaomi_passport", .value: "excluded-sso", .domain: ".platform.xiaomimimo.com", .path: "/"],
@@ -73,7 +75,7 @@ struct MiMoLoginTests {
     precondition(connectionCallbacks == 1, "Connect must adopt the signed-in attempt's browser cookies")
     precondition(connected?.attemptID == signedIn.id)
     precondition(connected?.cookies.userID == "offline-user")
-    precondition(connected?.cookies.header == "api-platform_serviceToken=offline-token; userId=offline-user")
+    precondition(connected?.cookies.header == "api-platform_serviceToken=\"offline-token\"; api-platform_slh=\"offline-slh\"; api-platform_ph=\"offline-ph\"; userId=offline-user")
     print("MiMo WebKit isolation, cookie adoption, filtering, cancellation, and origin checks passed")
   }
 

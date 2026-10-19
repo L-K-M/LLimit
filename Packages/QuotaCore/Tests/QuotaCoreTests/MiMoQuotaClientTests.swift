@@ -90,6 +90,21 @@ final class MiMoQuotaClientTests: XCTestCase {
     XCTAssertTrue(policies.allSatisfy { $0 == .refuse })
   }
 
+  func testBothRequestsPreserveQuotedConsoleCookies() async throws {
+    let cookies = #"api-platform_serviceToken="fake-svc-tok"; api-platform_slh="fake-slh"; api-platform_ph="fake-ph"; userId=fake-u-001"#
+    let http = MiMoHTTPStub(
+      detail: #"{"code":0,"data":{"planCode":"standard","planName":"Standard"}}"#,
+      usage: #"{"code":0,"data":{"usage":{"items":[{"name":"credits","used":0,"limit":100}]}}}"#
+    )
+    _ = try await MiMoQuotaClient(httpClient: http).fetchUsage(configuration: configuration(cookies: cookies), now: now)
+    let requests = await http.requests
+    XCTAssertEqual(requests.count, 2)
+    for request in requests {
+      XCTAssertEqual(request.value(forHTTPHeaderField: "Cookie"), cookies)
+      XCTAssertFalse(request.httpShouldHandleCookies)
+    }
+  }
+
   // MARK: - Missing and invalid credentials
 
   func testMissingCredentialsThrowsWithoutHTTP() async {
