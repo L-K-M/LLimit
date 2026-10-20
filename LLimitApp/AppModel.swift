@@ -1439,7 +1439,7 @@ final class AppModel: ObservableObject {
       claudeAccountMessages[accountID] = nil
       claudeCredentialFailures.remove(accountID)
       var credentialValue = value
-      if savedAccount.provider == .xiaomiMiMo, fieldKey == CredentialField.mimoResetAt,
+      if fieldKey == manualResetField(for: savedAccount.provider),
          !value.isEmpty, parseQuotaResetDate(value) == nil {
         return .rejected(.invalidResetDate)
       }
@@ -1448,13 +1448,57 @@ final class AppModel: ObservableObject {
         guard let cookies = try? MiMoSessionCookies(header: value) else { return .rejected(.invalidMiMoSession) }
         credentialValue = cookies.header
       }
-      return updateAccount(accountID: accountID) { account in
+      let outcome = updateAccount(accountID: accountID) { account in
         if account.provider == .anthropic && fieldKey == CredentialField.anthropicAccessToken {
           account.credentials = ClaudeCodeProfile.clearManagedMetadata(from: account.credentials)
         }
         account.credentials[fieldKey] = credentialValue
       }
+      if outcome == .applied, fieldKey == manualResetField(for: savedAccount.provider) {
+        let revision = credentialEditRevisions[accountID]
+        let requestedAt = Date()
+        Task { [weak self] in
+          await self?.refreshManualResetAccount(accountID, revision: revision, requestedAt: requestedAt)
+        }
+      }
+      return outcome
     }
+  }
+
+  private func manualResetField(for provider: QuotaProvider) -> String? {
+    switch provider {
+    case .junie: return CredentialField.junieResetAt
+    case .xiaomiMiMo: return CredentialField.mimoResetAt
+    default: return nil
+    }
+  }
+
+  /// Coalesce edits behind the active cycle and query only the latest account
+  /// configuration. An older response must not undo another edit or login.
+  private func refreshManualResetAccount(_ id: String, revision: UUID?, requestedAt: Date) async {
+    while isRefreshing {
+      guard credentialEditRevisions[id] == revision else { return }
+      do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+    }
+    guard !Task.isCancelled, !configurationLoadFailed, credentialEditRevisions[id] == revision,
+          let account = account(withID: id), account.isEnabled, account.hasRequiredCredentials,
+          manualResetField(for: account.provider) != nil else { return }
+    if let fetchedAt = snapshot?.providers.first(where: { $0.accountID == id })?.fetchedAt,
+       fetchedAt >= requestedAt, snapshot?.failures.contains(where: { $0.accountID == id }) == false { return }
+    isRefreshing = true
+    defer { isRefreshing = false }
+    let configuration = account.runtimeConfiguration()
+    let provenance = RefreshProvenance(configurations: [configuration], credentialRevisions: credentialEditRevisions)
+    let fetched = await refreshService.fetch(configurations: [configuration])
+    guard let current = self.account(withID: id),
+          configuration.matchesCurrentAccount(current, expectedCredentialRevision: revision,
+            currentCredentialRevision: credentialEditRevisions[id]) else { return }
+    let partial = validatedRefreshResults(fetched.mergingStaleUsage(from: snapshot), provenance: provenance)
+    var refreshed = snapshot?.replacingResults(forAccountIDs: [id], from: partial) ?? partial
+    refreshed.generatedAt = partial.generatedAt
+    do { try refreshService.save(refreshed) }
+    catch { statusMessage = "Could not save the updated reset schedule. Check LLimit's storage permissions."; return }
+    publishSnapshot(refreshed)
   }
 
   func accountEnabledBinding(for accountID: String) -> Binding<Bool> {
@@ -2138,6 +2182,16 @@ final class AppModel: ObservableObject {
 
     guard let snapshot else {
       return true
+    }
+
+    // Upgrade cached one-off/30-day schedules without waiting for their normal
+    // refresh interval. Account settings remain local; widgets receive usage only.
+    for account in providerAccounts where account.isEnabled && account.hasRequiredCredentials {
+      guard let key = manualResetField(for: account.provider),
+            let text = account.credentials[key], let cycle = MonthlyQuotaCycle(anchor: text) else { continue }
+      guard let usage = snapshot.providers.first(where: { $0.accountID == account.id }) else { return true }
+      let metrics = usage.metrics.filter { $0.id != "plan-compensation_total_token" }
+      if metrics.contains(where: { $0.resetAt != cycle.resetAt(after: now) }) { return true }
     }
 
     let clampedMinutes = min(

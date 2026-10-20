@@ -150,14 +150,18 @@ accounts or other plans with `--set junie.credit_allowance=70` when adding an
 account, or `llimit accounts update <id> --set junie.credit_allowance=35`.
 Set it to `0` for balance only. Other license types need an explicit allowance.
 Changing it clears that account's previous chart history. Reimport preserves
-the allowance and reset setting. One credit equals US$1. Percentages cap
+the allowance and purchase-date setting. One credit equals US$1. Percentages cap
 at 100% while the full balance, including additional purchased credits, remains
-available in JSON. The API does not report a reset date, but you can configure
-one: `llimit accounts update <id> --set junie.reset_at=2026-11-01T00:00:00Z`.
+available in JSON. The API does not report a reset date, but you can enter the date
+you bought the subscription to anchor monthly resets:
+`llimit accounts update <id> --set junie.reset_at=2026-10-19T00:00:00Z`.
 It accepts `YYYY-MM-DD` (midnight UTC) or ISO 8601 date-time with timezone,
-anchoring a repeating fixed 30-day cycle. Past dates advance to the next reset;
-clear it with `--set junie.reset_at=` if unknown. With a configured schedule and
-percentage allowance enabled, it shows a reset countdown and 30-day pace.
+anchoring a reset every calendar month using the purchase date's UTC day and time.
+Shorter months use their last day, then restore the original day in later months.
+Past dates advance to the next future reset; clear the setting with
+`--set junie.reset_at=` if unknown. With a configured schedule and percentage
+allowance enabled, it shows a reset countdown and pace using the current monthly
+cycle's actual length once the cycle starts.
 Setting allowance to `0` still shows the balance and known reset but no
 percentage or pace. No automatic balance refill occurs. GZL licenses do not
 report a usable balance. Import supports `JUNIE_API_KEY` and the permanent
@@ -193,12 +197,16 @@ this console session. On macOS, **Connect MiMo** offers a separate sign-in windo
 Quota checks read the personal plan detail and usage endpoints without inference
 or balance requests. Status includes remaining percentages, reported credit counts,
 and separate bonus credits. Expiry is preserved as detail, with no inferred
-monthly/annual reset or pace. Set an optional next reset for plan credits with
-`llimit accounts update <id> --set mimo.reset_at=2026-11-01T00:00:00Z`.
+monthly/annual reset or pace. Enter the date you bought the subscription to anchor
+monthly plan-credit resets with
+`llimit accounts update <id> --set mimo.reset_at=2026-10-19T00:00:00Z`.
 Date-only `YYYY-MM-DD` means midnight UTC; date-times require a timezone. The
-setting survives cookie replacement. Update it after it passes, or clear it with
-`--set mimo.reset_at=`. It supplies a countdown, without a recurring period or a
-reset for bonus credits. Team/project quotas and MiMo Desktop memberships
+setting survives cookie replacement. Resets repeat every calendar month using the
+purchase date's UTC day and time. Shorter months use their last day, then restore
+the original day in later months. The schedule supplies a countdown and pace using
+the current monthly cycle's actual length once the cycle starts. Clear it with
+`--set mimo.reset_at=` if unknown. It does not reset bonus credits or refill quota.
+Team/project quotas and MiMo Desktop memberships
 are not supported. See [Xiaomi's MiMo Code guide](https://mimo.mi.com/docs/en-US/tokenplan/integration/mimo-code)
 for inference-key setup and its separate console usage page.
 

@@ -234,10 +234,10 @@ public extension QuotaProvider {
         ),
         CredentialFieldDescriptor(
           key: CredentialField.mimoResetAt,
-          label: "Reset date",
+          label: "Subscription purchase date",
           isSecret: false,
           isRequired: false,
-          help: "Optional next reset for plan credits. Use YYYY-MM-DD (midnight UTC) or an ISO 8601 date-time with a timezone. Update it after it passes, or leave empty if unknown."
+          help: "Optional purchase date anchoring plan-credit resets every calendar month in UTC. Use YYYY-MM-DD (midnight UTC) or an ISO 8601 date-time with a timezone. Shorter months use their last day. Leave empty if unknown."
         )
       ]
     case .junie:
@@ -256,10 +256,10 @@ public extension QuotaProvider {
         ),
         CredentialFieldDescriptor(
           key: CredentialField.junieResetAt,
-          label: "Reset date",
+          label: "Subscription purchase date",
           isSecret: false,
           isRequired: false,
-          help: "Optional reset date, repeating every 30 days. Use YYYY-MM-DD (midnight UTC) or an ISO 8601 date-time with a timezone. Leave empty if unknown."
+          help: "Optional purchase date anchoring resets every calendar month in UTC. Use YYYY-MM-DD (midnight UTC) or an ISO 8601 date-time with a timezone. Shorter months use their last day. Leave empty if unknown."
         )
       ]
     }
@@ -324,7 +324,7 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
   public var totalDisplay: String?
   public var resetAt: Date?
   public var resetIn: String?
-  /// Provider-reported duration, never inferred from a display label.
+  /// Reported or explicitly configured duration, never inferred from a display label.
   public var windowSeconds: Int?
   public var isUnlimited: Bool
   public var detail: String?

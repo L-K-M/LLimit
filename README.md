@@ -139,15 +139,18 @@ In your Junie account settings, **30-day AI credit allowance** overrides the
 default for organization accounts or other plans; enter `0` for balance only.
 Other license types stay amount-only until you set an allowance.
 Changing the allowance restarts that account's chart history. Auto-fill and
-credential reimport preserve your configured allowance and reset date.
+credential reimport preserve your configured allowance and purchase date.
 
-The API does not report a reset date. You can optionally configure one with
-the **Reset date** picker in account settings. It repeats every 30 days,
-advancing past dates to the next reset. Leave it off if the date is unknown.
-With a configured schedule and percentage allowance enabled, LLimit shows a
-reset countdown and 30-day window pace. Setting the allowance to `0` still
-shows the balance and known reset but no percentage or pace. No automatic
-balance refill occurs.
+The API does not report a reset date. Enable **Set a purchase date** in account
+settings and enter when you bought the subscription. Resets repeat every calendar
+month using the purchase date's UTC day and time; the picker shows local time.
+Shorter months use their last day, then return to the original day in later months.
+For example, a 31 January purchase resets on 28 February and 31 March in a
+non-leap year. Leave it off if the date is unknown. With a configured schedule
+and percentage allowance enabled, LLimit shows a reset countdown and pace using
+the current monthly cycle's actual length once the cycle starts. Setting the
+allowance to `0` still shows the balance and known reset but no percentage or pace.
+No automatic balance refill occurs.
 
 The [JetBrains plan allowance](https://www.jetbrains.com/help/ai-assistant/licensing-and-subscriptions.html)
 is the percentage basis, rather than a total reported by the API. One AI credit
@@ -191,10 +194,14 @@ when the saved session expires.
 LLimit reads remaining percentages and reported credit counts without generating
 tokens. Any bonus credits appear separately. Rings, the menu-bar graph, and trend
 lines show the reported quota. The plan's expiry is shown as text. You can enable
-**Set a reset date** beside **Connect MiMo** to enter the next plan-credit reset
-date and time. LLimit shows its countdown and keeps the setting when you reconnect.
-Update it after it passes, or turn it off if unknown. Bonus credits keep their
-separate terms. A single date does not establish a recurring window or spending pace.
+**Set a purchase date** beside **Connect MiMo** and enter when you bought the
+subscription. Plan-credit resets repeat every calendar month using the purchase
+date's UTC day and time; the picker shows local time. Shorter months use their last
+day, then return to the original day in later months. LLimit shows a countdown and
+pace using the current monthly cycle's actual length once the cycle starts, and
+keeps the setting when you reconnect. Turn it off if unknown. Bonus credits keep their
+separate terms. The plan's expiry does not establish the reset schedule, and no
+automatic credit refill occurs.
 
 This supports the API Platform's personal Token Plan. Team/project quotas and
 MiMo Desktop memberships are not supported. MiMo Code sign-in supplies an

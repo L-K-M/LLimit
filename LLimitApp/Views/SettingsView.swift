@@ -1314,18 +1314,17 @@ struct SettingsView: View {
   @ViewBuilder
   private func resetDateField(
     for key: AccountFieldKey,
-    initialDate: Date,
     pickerLabel: String,
     helpText: String
   ) -> some View {
     let text = draftBinding(for: key).wrappedValue
     let isEnabled = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 
-    Toggle("Set a reset date", isOn: Binding(
+    Toggle("Set a purchase date", isOn: Binding(
       get: { !draftBinding(for: key).wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty },
       set: { enabled in
         if enabled {
-          formatResetDate(initialDate, for: key)
+          formatResetDate(Date(), for: key)
         } else {
           accountDrafts.edit(key, text: "")
         }
@@ -1337,7 +1336,7 @@ struct SettingsView: View {
     if isEnabled {
       if let parsed = parseQuotaResetDate(text) {
         committingDraft(
-          DatePicker("Reset date and time", selection: Binding(
+          DatePicker("Purchase date and time", selection: Binding(
             get: { parseQuotaResetDate(draftBinding(for: key).wrappedValue) ?? parsed },
             set: {
               formatResetDate($0, for: key)
@@ -1355,7 +1354,7 @@ struct SettingsView: View {
             .frame(maxWidth: 520),
           key: key
         )
-        Text("Enter a date such as 2026-10-19 or an ISO 8601 timestamp, or turn off the reset date.")
+        Text("Enter your purchase date as YYYY-MM-DD or an ISO 8601 timestamp with a timezone, or turn off the purchase date.")
           .font(.caption)
           .foregroundStyle(.orange)
           .fixedSize(horizontal: false, vertical: true)
@@ -1375,23 +1374,19 @@ struct SettingsView: View {
 
   @ViewBuilder
   private func junieResetDateField(for key: AccountFieldKey) -> some View {
-    let initial = Date().addingTimeInterval(TimeInterval(JunieCreditCycle.windowSeconds))
     resetDateField(
       for: key,
-      initialDate: initial,
-      pickerLabel: "Junie reset date and time",
-      helpText: "Set your credit renewal date and time. Repeats every 30 days. Leave off if unknown."
+      pickerLabel: "Junie purchase date and time",
+      helpText: "Enter when you bought the subscription. Resets repeat every calendar month in UTC; the picker shows your local time. Shorter months use their last day. Leave off if unknown."
     )
   }
 
   @ViewBuilder
   private func mimoResetDateField(for key: AccountFieldKey) -> some View {
-    let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
     resetDateField(
       for: key,
-      initialDate: tomorrow,
-      pickerLabel: "MiMo reset date and time",
-      helpText: "Applies to plan credits. Set the next reset date. Update it after it passes. Leave off if unknown."
+      pickerLabel: "MiMo purchase date and time",
+      helpText: "Enter when you bought the subscription. Plan-credit resets repeat every calendar month in UTC; the picker shows your local time. Shorter months use their last day. Leave off if unknown."
     )
   }
 

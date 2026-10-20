@@ -206,12 +206,17 @@ Linux:
   Keep IDs `plan-<name>` stable. `detail.currentPeriodEnd` is expiry text only:
   preserve its precision/timezone, never populate reset or window fields from it
   or infer cadence from monthly/annual billing. No balance/inference requests.
-  `mimo.reset_at` is optional nonsecret account configuration for the next
-  plan-credit reset. Date-only input means midnight UTC; ISO date-times require
-  a timezone. Preserve it through storage and reconnects. Future dates supply
-  `resetAt`/countdown on ordinary plan metrics only, never bonus credits or a
-  window duration. Past dates stay saved with an update reminder and no active
-  reset. Blank disables it; no recurrence or credit refill is inferred.
+  `mimo.reset_at` is optional nonsecret account configuration for a subscription
+  purchase date anchoring plan-credit resets every calendar month. Date-only input
+  means midnight UTC; ISO date-times require a timezone. Preserve it through
+  storage and reconnects. Use Gregorian UTC calendar months and the original
+  anchor day/time, clamping to a short month's last day and restoring the original
+  day in later months. Select the next strictly future reset. The manual schedule
+  supplies `resetAt`/countdown and the actual monthly cycle's `windowSeconds`
+  after the cycle starts on ordinary plan metrics only, never bonus credits. A future
+  purchase date supplies only a countdown until the cycle starts. Scheduled plan
+  metrics use `Monthly plan credits`. Blank disables it; no credit refill is
+  performed.
   Sources: official console
   [request/endpoint bundle](https://platform.xiaomimimo.com/static/main.1097440ce549c686.chunk.js)
   and [quota UI bundle](https://platform.xiaomimimo.com/static/279.384318a602760797.chunk.js),
@@ -225,13 +230,15 @@ Linux:
   `balanceUnit`: USD is unscaled, every other or absent unit is divided by
   100,000 and displayed as credits. No allowance total is supplied. The API
   does not report a reset date, but the user can configure one.
-  `junie.reset_at` is an optional nonsecret per-account setting. Blank means
-  reset unknown. Accepts `YYYY-MM-DD` (midnight UTC) or ISO 8601 date-time
-  with timezone, e.g. `2026-11-01T00:00:00Z`. It anchors a repeating fixed
-  30-day (2592000 second) cycle. Past anchor dates advance by whole 30-day
-  periods to the next strictly future reset. The configured schedule supplies
-  a reset countdown, and a 30-day window/pace when percentage allowance is
-  enabled; setting `credit_allowance` to `0` still shows balance and known
+  `junie.reset_at` is an optional nonsecret per-account subscription purchase
+  date. Blank means reset unknown. Accepts `YYYY-MM-DD` (midnight UTC) or ISO 8601
+  date-time with timezone, e.g. `2026-10-19T00:00:00Z`. It anchors a reset every
+  calendar month using the same Gregorian UTC rules as MiMo, including original
+  day restoration after a shorter month. Select the next strictly future reset.
+  The configured schedule supplies a reset countdown and the actual monthly
+  cycle's window/pace after the cycle starts when percentage allowance is enabled;
+  a future purchase date supplies only a countdown until then. Setting
+  `credit_allowance` to `0` still shows balance and known
   reset but no percentage/pace. No automatic balance refill or reset of credits
   is performed. Reimport preserves the allowance and reset setting. macOS
   Settings has an optional date+time picker.
@@ -241,7 +248,8 @@ Linux:
   35 credits; other licenses stay amount-only. Organization Ultimate accounts
   must override the personal default. One credit equals US$1. Clamp percentage
   geometry but retain the full balance, including top-ups. Label percentage
-  metrics `30-day AI credits` for monthly colors; preserve `credit-balance` ids.
+  metrics `Monthly AI credits` with a manual schedule, otherwise `30-day AI credits`
+  for monthly colors; preserve `credit-balance` ids.
   Keep `estimatedTotal` nil. When `reset_at` is configured, use it for the reset;
   otherwise keep `windowSeconds` and reset fields nil. Allowance edits
   clear the account's chart history. Credential reimport and Auto-fill preserve

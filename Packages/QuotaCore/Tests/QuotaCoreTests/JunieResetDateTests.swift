@@ -6,53 +6,49 @@ import FoundationNetworking
 
 final class JunieResetDateTests: XCTestCase {
   private let now = Date(timeIntervalSince1970: 1_792_368_000)
-  private let cycleSeconds = 30 * 86_400
 
   func testDateParsingUsesUTCAndHonorsExplicitOffsets() throws {
     let midnight = Date(timeIntervalSince1970: 1_793_491_200)
     for text in ["2026-11-01", "2026-11-01T00:00:00Z", "2026-11-01T02:30:00+02:30", " 2026-11-01 \n"] {
-      XCTAssertEqual(try XCTUnwrap(JunieCreditCycle(anchor: text)).anchor, midnight)
+      XCTAssertEqual(try XCTUnwrap(MonthlyQuotaCycle(anchor: text)).anchor, midnight)
     }
-    XCTAssertEqual(try XCTUnwrap(JunieCreditCycle(anchor: "2026-11-01T00:00:00.125Z")).anchor.timeIntervalSince(midnight), 0.125, accuracy: 0.001)
+    XCTAssertEqual(try XCTUnwrap(MonthlyQuotaCycle(anchor: "2026-11-01T00:00:00.125Z")).anchor.timeIntervalSince(midnight), 0.125, accuracy: 0.001)
     for text in ["2026-02-29", "2026-13-01", "2026-01-32", "0000-01-01", "2026-11-01T00:00:00+24:00", "2026-11-01T00:00:00Z\nextra"] {
-      XCTAssertNil(JunieCreditCycle(anchor: text))
+      XCTAssertNil(MonthlyQuotaCycle(anchor: text))
     }
-    XCTAssertNotNil(JunieCreditCycle(anchor: "2028-02-29"))
+    XCTAssertNotNil(MonthlyQuotaCycle(anchor: "2028-02-29"))
   }
 
-  func testCycleAdvancesAtBoundaryAndUsesFixedDaysAcrossDST() throws {
-    let cycle = try XCTUnwrap(JunieCreditCycle(anchor: "2026-10-20T12:00:00+02:00"))
-    XCTAssertEqual(cycle.resetAt(after: cycle.anchor.addingTimeInterval(-0.001)), cycle.anchor)
-    let next = cycle.resetAt(after: cycle.anchor)
-    XCTAssertEqual(next.timeIntervalSince(cycle.anchor), TimeInterval(cycleSeconds))
-    XCTAssertEqual(next, try XCTUnwrap(JunieCreditCycle(anchor: "2026-11-19T11:00:00+01:00")).anchor)
-    XCTAssertEqual(cycle.resetAt(after: next), next.addingTimeInterval(TimeInterval(cycleSeconds)))
-  }
-
-  func testConfiguredResetEnablesCountdownAndThirtyDayPace() async throws {
-    let anchor = now.addingTimeInterval(TimeInterval(cycleSeconds / 2))
-    let usage = try await fetch(reset: ISO8601DateFormatter().string(from: anchor))
+  func testConfiguredMonthlyResetEnablesCalendarMonthPace() async throws {
+    let usage = try await fetch(reset: "2026-10-01")
     let metric = try XCTUnwrap(usage.metrics.first)
-    XCTAssertEqual(metric.resetAt, anchor)
-    XCTAssertEqual(metric.resetIn, formatResetCountdown(to: anchor, now: now))
-    XCTAssertEqual(metric.windowSeconds, cycleSeconds)
+    let expectedReset = ISO8601DateFormatter().date(from: "2026-11-01T00:00:00Z")!
+    XCTAssertEqual(metric.resetAt, expectedReset)
+    XCTAssertEqual(metric.resetIn, formatResetCountdown(to: expectedReset, now: now))
+    XCTAssertEqual(metric.windowSeconds, 31 * 86_400)
     XCTAssertEqual(metric.remainingPercent, 50)
-    XCTAssertTrue(try XCTUnwrap(metric.detail).contains("configured reset"))
+    XCTAssertEqual(metric.label, "Monthly AI credits")
+    XCTAssertTrue(try XCTUnwrap(metric.detail).contains("monthly"))
     let pace = try XCTUnwrap(QuotaPace(metric: metric, provider: .junie, fetchedAt: now, now: now))
-    XCTAssertEqual(pace.elapsedFraction, 0.5, accuracy: 0.000001)
-    XCTAssertEqual(pace.delta, 0, accuracy: 0.000001)
+    let start = ISO8601DateFormatter().date(from: "2026-10-01T00:00:00Z")!
+    XCTAssertEqual(pace.elapsedFraction, now.timeIntervalSince(start) / Double(31 * 86_400), accuracy: 0.000001)
   }
 
-  func testPastAnchorAdvancesByThirtyDaysWithoutRefillingBalance() async throws {
-    for elapsed in [0, 1, cycleSeconds, cycleSeconds * 3 + 86_400] {
-      let anchor = now.addingTimeInterval(-TimeInterval(elapsed))
-      let usage = try await fetch(reset: ISO8601DateFormatter().string(from: anchor))
-      let metric = try XCTUnwrap(usage.metrics.first)
-      let expected = anchor.addingTimeInterval(TimeInterval((elapsed / cycleSeconds + 1) * cycleSeconds))
-      XCTAssertEqual(metric.resetAt, expected)
-      XCTAssertEqual(metric.remainingAmount, 17.5)
-      XCTAssertEqual(metric.remainingPercent, 50)
-    }
+  func testPastPurchaseDateRepeatsMonthlyWithoutRefillingBalance() async throws {
+    let usage = try await fetch(reset: "2026-01-31")
+    let metric = try XCTUnwrap(usage.metrics.first)
+    let expected = ISO8601DateFormatter().date(from: "2026-10-31T00:00:00Z")!
+    XCTAssertEqual(metric.resetAt, expected)
+    XCTAssertEqual(metric.remainingAmount, 17.5)
+    XCTAssertEqual(metric.remainingPercent, 50)
+  }
+
+  func testFuturePurchaseDateHasNoElapsedPace() async throws {
+    let usage = try await fetch(reset: "2026-11-01")
+    let metric = try XCTUnwrap(usage.metrics.first)
+    XCTAssertEqual(metric.resetAt, ISO8601DateFormatter().date(from: "2026-11-01T00:00:00Z"))
+    XCTAssertNil(metric.windowSeconds)
+    XCTAssertNil(QuotaPace(metric: metric, provider: .junie, fetchedAt: now, now: now))
   }
 
   func testBlankResetStaysUnknownAndZeroAllowanceKeepsKnownReset() async throws {
