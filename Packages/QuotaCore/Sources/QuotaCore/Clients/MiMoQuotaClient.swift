@@ -12,11 +12,28 @@ public struct MiMoQuotaClient: QuotaProviderClient {
   public init(httpClient: any HTTPClient) { self.httpClient = httpClient }
 
   public func fetchUsage(configuration: ProviderRuntimeConfiguration, now: Date) async throws -> ProviderUsage {
+    let configuredReset = try configuredQuotaResetDate(configuration.credentials[CredentialField.mimoResetAt])
     let cookies = try MiMoSessionCookies(header: configuration.credentials[CredentialField.mimoSessionCookies] ?? "")
     async let detail = fetch("detail", cookies: cookies)
     async let usage = fetch("usage", cookies: cookies)
-    return try await MiMoTokenPlanDecoder.decode(detailData: detail, usageData: usage,
+    var result = try await MiMoTokenPlanDecoder.decode(detailData: detail, usageData: usage,
       accountID: configuration.accountID, title: configuration.displayName, now: now)
+    if let configuredReset {
+      // The account supplies only the next reset, not a recurring window.
+      // Bonus credits have separate terms and do not inherit the plan reset.
+      for index in result.metrics.indices where result.metrics[index].id != "plan-compensation_total_token" {
+        let detail: String
+        if configuredReset > now {
+          result.metrics[index].resetAt = configuredReset
+          result.metrics[index].resetIn = formatResetCountdown(to: configuredReset, now: now)
+          detail = "Uses your configured reset date."
+        } else {
+          detail = "Your configured reset date has passed. Set the next reset date."
+        }
+        result.metrics[index].detail = [result.metrics[index].detail, detail].compactMap { $0 }.joined(separator: " ")
+      }
+    }
+    return result
   }
 
   private func fetch(_ resource: String, cookies: MiMoSessionCookies) async throws -> Data {

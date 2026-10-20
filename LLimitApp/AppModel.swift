@@ -926,7 +926,7 @@ final class AppModel: ObservableObject {
                                cookies: MiMoSessionCookies) async throws {
     guard mimoLogin?.id == attemptID, let account = account(withID: accountID),
           account.provider == .xiaomiMiMo else { throw CancellationError() }
-    let credentials = [CredentialField.mimoSessionCookies: cookies.header]
+    let credentials = account.credentialsForImport([CredentialField.mimoSessionCookies: cookies.header])
     let candidate = ProviderRuntimeConfiguration(accountID: accountID, provider: .xiaomiMiMo,
       displayName: account.resolvedDisplayName, isEnabled: true, credentials: credentials)
     // Browser login alone is insufficient: verify that this private session can
@@ -1439,6 +1439,10 @@ final class AppModel: ObservableObject {
       claudeAccountMessages[accountID] = nil
       claudeCredentialFailures.remove(accountID)
       var credentialValue = value
+      if savedAccount.provider == .xiaomiMiMo, fieldKey == CredentialField.mimoResetAt,
+         !value.isEmpty, parseQuotaResetDate(value) == nil {
+        return .rejected(.invalidResetDate)
+      }
       if savedAccount.provider == .xiaomiMiMo, fieldKey == CredentialField.mimoSessionCookies,
          !value.isEmpty, !value.isEnvironmentReference {
         guard let cookies = try? MiMoSessionCookies(header: value) else { return .rejected(.invalidMiMoSession) }

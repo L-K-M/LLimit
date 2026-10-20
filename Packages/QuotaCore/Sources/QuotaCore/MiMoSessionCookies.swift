@@ -98,12 +98,19 @@ public struct MiMoSessionCookies: Sendable, Equatable {
 
   public static func credentialsForStorage(_ credentials: [String: String]) throws -> [String: String] {
     guard !credentials.isEmpty else { return [:] }
-    let value = credentials[CredentialField.mimoSessionCookies] ?? ""
-    if value.isEnvironmentReference { return [CredentialField.mimoSessionCookies: value] }
-    guard !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-      return [CredentialField.mimoSessionCookies: ""]
+    var result: [String: String] = [:]
+    if try configuredQuotaResetDate(credentials[CredentialField.mimoResetAt]) != nil {
+      result[CredentialField.mimoResetAt] = credentials[CredentialField.mimoResetAt]
     }
-    return [CredentialField.mimoSessionCookies: try Self(header: value).header]
+    guard let value = credentials[CredentialField.mimoSessionCookies] else { return result }
+    if value.isEnvironmentReference {
+      result[CredentialField.mimoSessionCookies] = value
+    } else if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      result[CredentialField.mimoSessionCookies] = ""
+    } else {
+      result[CredentialField.mimoSessionCookies] = try Self(header: value).header
+    }
+    return result
   }
 
   public static func hasChangedIdentity(from previous: String?, to updated: String?) -> Bool {

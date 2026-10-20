@@ -394,3 +394,40 @@ func startOfNextMonth(from date: Date) -> Date? {
 
   return monthEndDate(year: year, month: month)
 }
+
+/// Parses a configured reset date. Date-only input means midnight UTC;
+/// date-times require an explicit timezone and a valid Gregorian date.
+public func parseQuotaResetDate(_ text: String) -> Date? {
+  let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+  let datePattern = "[0-9]{4}-[0-9]{2}-[0-9]{2}"
+  let timePattern = "(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]{1,9})?"
+  let zonePattern = "(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])"
+  guard text.range(of: "\\A\(datePattern)(?:T\(timePattern)\(zonePattern))?\\z", options: .regularExpression) != nil else {
+    return nil
+  }
+
+  let formatter = DateFormatter()
+  formatter.locale = Locale(identifier: "en_US_POSIX")
+  formatter.calendar = Calendar(identifier: .gregorian)
+  formatter.timeZone = TimeZone(secondsFromGMT: 0)
+  formatter.dateFormat = "yyyy-MM-dd"
+  formatter.isLenient = false
+  let day = String(text.prefix(10))
+  guard let midnight = formatter.date(from: day), formatter.string(from: midnight) == day else { return nil }
+
+  if text.count == 10 {
+    return midnight
+  } else {
+    guard let date = parseISO8601(text) else { return nil }
+    return date
+  }
+}
+
+func configuredQuotaResetDate(_ text: String?) throws -> Date? {
+  guard let text = nonEmptyString(text) else { return nil }
+  guard let date = parseQuotaResetDate(text) else {
+    throw ProviderClientError(kind: .notConfigured,
+      message: "Enter a valid reset date as YYYY-MM-DD or an ISO 8601 date-time with a timezone, or leave it empty if unknown.")
+  }
+  return date
+}

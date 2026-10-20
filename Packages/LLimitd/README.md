@@ -193,7 +193,12 @@ this console session. On macOS, **Connect MiMo** offers a separate sign-in windo
 Quota checks read the personal plan detail and usage endpoints without inference
 or balance requests. Status includes remaining percentages, reported credit counts,
 and separate bonus credits. Expiry is preserved as detail, with no inferred
-monthly/annual reset or pace. Team/project quotas and MiMo Desktop memberships
+monthly/annual reset or pace. Set an optional next reset for plan credits with
+`llimit accounts update <id> --set mimo.reset_at=2026-11-01T00:00:00Z`.
+Date-only `YYYY-MM-DD` means midnight UTC; date-times require a timezone. The
+setting survives cookie replacement. Update it after it passes, or clear it with
+`--set mimo.reset_at=`. It supplies a countdown, without a recurring period or a
+reset for bonus credits. Team/project quotas and MiMo Desktop memberships
 are not supported. See [Xiaomi's MiMo Code guide](https://mimo.mi.com/docs/en-US/tokenplan/integration/mimo-code)
 for inference-key setup and its separate console usage page.
 

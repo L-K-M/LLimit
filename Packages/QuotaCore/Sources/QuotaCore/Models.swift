@@ -231,6 +231,13 @@ public extension QuotaProvider {
           key: CredentialField.mimoSessionCookies,
           label: "Console session cookies",
           help: "Connect MiMo in LLimit to sign in. For manual setup, use the Cookie request header from platform.xiaomimimo.com. Token Plan API keys cannot supply console usage. Sessions may require signing in again after expiry."
+        ),
+        CredentialFieldDescriptor(
+          key: CredentialField.mimoResetAt,
+          label: "Reset date",
+          isSecret: false,
+          isRequired: false,
+          help: "Optional next reset for plan credits. Use YYYY-MM-DD (midnight UTC) or an ISO 8601 date-time with a timezone. Update it after it passes, or leave empty if unknown."
         )
       ]
     case .junie:
@@ -567,14 +574,18 @@ public struct ProviderAccount: Codable, Hashable, Identifiable, Sendable {
       isEnabled: isEnabled, credentials: credentials.resolvingEnvironmentReferences(environment))
   }
 
-  /// Import replaces authentication, while Junie's account-owned credit settings
-  /// survive when the source tool does not supply them.
+  /// Import replaces authentication while retaining account-owned quota settings
+  /// omitted by the replacement login.
   public func credentialsForImport(_ imported: [String: String]) -> [String: String] {
-    guard provider == .junie else { return imported }
+    let retainedKeys: [String]
+    switch provider {
+    case .junie: retainedKeys = [CredentialField.junieCreditAllowance, CredentialField.junieResetAt]
+    case .xiaomiMiMo: retainedKeys = [CredentialField.mimoResetAt]
+    default: return imported
+    }
 
     var result = imported
-    for key in [CredentialField.junieCreditAllowance, CredentialField.junieResetAt]
-      where imported[key] == nil {
+    for key in retainedKeys where imported[key] == nil {
       result[key] = credentials[key]
     }
     return result
