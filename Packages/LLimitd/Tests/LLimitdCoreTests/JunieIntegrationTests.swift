@@ -173,7 +173,7 @@ final class JunieIntegrationTests: XCTestCase {
     await daemon.refreshNow()
     let scheduled = try XCTUnwrap(daemon.snapshot?.providers.first { $0.accountID == imported.id })
     XCTAssertEqual(scheduled.metrics.first?.resetAt, resetAt)
-    XCTAssertEqual(scheduled.metrics.first?.windowSeconds, 30 * 86_400)
+    XCTAssertNil(scheduled.metrics.first?.windowSeconds, "A future purchase anchor has no elapsed spending period")
     let scheduledJSON = StatusRenderer.waybarJSON(snapshot: try XCTUnwrap(daemon.snapshot), now: Date())
     let scheduledObject = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(scheduledJSON.utf8)) as? [String: Any])
     let scheduledAccounts = try XCTUnwrap(scheduledObject["accounts"] as? [[String: Any]])

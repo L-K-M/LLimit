@@ -10,7 +10,7 @@ final class MiMoResetDateTests: XCTestCase {
   private let now = ISO8601DateFormatter().date(from: "2026-10-20T12:00:00Z")!
   private let header = "api-platform_serviceToken=reset-fixture; userId=42"
 
-  func testConfiguredDateAppliesOnlyToPlanCreditsWithoutInventingWindow() async throws {
+  func testFuturePurchaseDateAppliesOnlyToPlanCreditsWithoutElapsedWindow() async throws {
     let expected = ISO8601DateFormatter().date(from: "2026-11-01T00:00:00Z")!
     for text in ["2026-11-01", "2026-11-01T00:00:00Z", "2026-11-01T02:30:00+02:30", " 2026-11-01 \n"] {
       let usage = try await fetch(reset: text)
@@ -20,7 +20,7 @@ final class MiMoResetDateTests: XCTestCase {
       XCTAssertEqual(plan.remainingPercent, 75)
       XCTAssertNil(plan.windowSeconds)
       XCTAssertNil(QuotaPace(metric: plan, provider: .xiaomiMiMo, fetchedAt: now, now: now))
-      XCTAssertTrue(plan.detail?.contains("configured reset") == true)
+      XCTAssertTrue(plan.detail?.contains("configured monthly reset") == true)
       XCTAssertTrue(plan.detail?.contains("Plan expires 2026-12-31") == true)
       let bonus = try XCTUnwrap(usage.metrics.first { $0.id == "plan-compensation_total_token" })
       XCTAssertNil(bonus.resetAt)
@@ -38,15 +38,23 @@ final class MiMoResetDateTests: XCTestCase {
     }
   }
 
-  func testElapsedDateDoesNotAdvanceOrRefillQuota() async throws {
-    for text in ["2026-10-01", "2026-10-20T12:00:00Z"] {
+  func testPurchaseDateRepeatsMonthlyWithoutRefillingQuota() async throws {
+    for (text, expected) in [
+      ("2026-10-01", "2026-11-01T00:00:00Z"),
+      ("2026-10-20T12:00:00Z", "2026-11-20T12:00:00Z"),
+      ("2026-10-19T20:14:00Z", "2026-11-19T20:14:00Z")
+    ] {
       let usage = try await fetch(reset: text)
       let plan = try XCTUnwrap(usage.metrics.first)
-      XCTAssertNil(plan.resetAt)
-      XCTAssertNil(plan.resetIn)
-      XCTAssertNil(plan.windowSeconds)
+      let reset = ISO8601DateFormatter().date(from: expected)!
+      XCTAssertEqual(plan.resetAt, reset)
+      XCTAssertEqual(plan.resetIn, formatResetCountdown(to: reset, now: now))
+      XCTAssertEqual(plan.windowSeconds, 31 * 86_400)
       XCTAssertEqual(plan.remainingPercent, 75)
-      XCTAssertTrue(plan.detail?.contains("reset date has passed") == true)
+      XCTAssertEqual(plan.label, "Monthly plan credits")
+      XCTAssertTrue(plan.detail?.contains("monthly") == true)
+      XCTAssertTrue(plan.detail?.contains("Plan expires 2026-12-31") == true)
+      XCTAssertNotNil(QuotaPace(metric: plan, provider: .xiaomiMiMo, fetchedAt: now, now: now))
     }
   }
 

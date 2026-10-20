@@ -96,7 +96,7 @@ public struct JunieQuotaClient: QuotaProviderClient {
       ? roundedPercent(min(max(balance, 0), allowance) / allowance * 100) : nil
     let detail: String
     let resetDetail = resetAt == nil ? "Reset date not reported."
-      : "Uses your configured reset, repeating every 30 days."
+      : "Uses your configured monthly reset in UTC."
     if allowance > 0 {
       let basis = configuredAllowance == nil ? "personal AI Ultimate default" : "configured allowance"
       detail = "Based on \(Self.displayBalance(allowance, isUSD: false)) per 30 days (\(basis)). Top-ups may be included. \(resetDetail)"
@@ -117,13 +117,13 @@ public struct JunieQuotaClient: QuotaProviderClient {
       accountID: configuration.accountID, provider: provider, title: configuration.displayName,
       subtitle: "JetBrains AI",
       metrics: [UsageMetric(
-        id: "credit-balance", label: allowance > 0 ? "30-day AI credits" : "Credit balance",
+        id: "credit-balance", label: allowance > 0 ? (cycle == nil ? "30-day AI credits" : "Monthly AI credits") : "Credit balance",
         remainingPercent: remainingPercent, remainingAmount: balance,
         usedDisplay: Self.displayBalance(balance, isUSD: isUSD),
         totalDisplay: allowance > 0 ? Self.displayBalance(allowance, isUSD: isUSD) : nil,
         resetAt: resetAt,
         resetIn: resetAt.map { formatResetCountdown(to: $0, now: now) },
-        windowSeconds: allowance > 0 && resetAt != nil ? JunieCreditCycle.windowSeconds : nil,
+        windowSeconds: allowance > 0 ? cycle?.window(containing: now).map { Int($0.duration.rounded()) } : nil,
         detail: detail
       )],
       maxUsagePercent: remainingPercent.map { 100 - $0 },
@@ -132,9 +132,9 @@ public struct JunieQuotaClient: QuotaProviderClient {
     )
   }
 
-  private static func configuredCycle(in credentials: [String: String]) throws -> JunieCreditCycle? {
+  private static func configuredCycle(in credentials: [String: String]) throws -> MonthlyQuotaCycle? {
     guard let text = nonEmptyString(credentials[CredentialField.junieResetAt]) else { return nil }
-    guard let cycle = JunieCreditCycle(anchor: text) else {
+    guard let cycle = MonthlyQuotaCycle(anchor: text) else {
       throw ProviderClientError(kind: .notConfigured, message: "Enter a valid reset date as YYYY-MM-DD or an ISO 8601 date-time with a timezone, or leave it empty if unknown.")
     }
     return cycle
