@@ -193,4 +193,36 @@ final class MiMoAccountTests: XCTestCase {
     XCTAssertEqual(try Data(contentsOf: paths.settingsFileURL), saved)
     XCTAssertEqual(daemon.settings.accounts.first?.credentials, expected)
   }
+
+  func testManualResetSurvivesCookieReplacementAndCanBeCleared() throws {
+    let daemon = daemon()
+    let account = try add(to: daemon)
+    _ = try seedUsage(for: [account])
+    let history = try Data(contentsOf: paths.historyFileURL)
+    let reset = "2026-11-01T00:00:00Z"
+    let configured = try daemon.editingSettings {
+      try $0.updateAccount(account.id, credentials: .merging([CredentialField.mimoResetAt: reset]))
+    }
+    XCTAssertEqual(configured.credentials[CredentialField.mimoResetAt], reset)
+    XCTAssertFalse(daemon.snapshot?.providers.contains { $0.accountID == account.id } ?? false)
+    XCTAssertEqual(try Data(contentsOf: paths.historyFileURL), history)
+    let replacement = [CredentialField.mimoSessionCookies: "api-platform_serviceToken=renewed-fixture; userId=42"]
+    let renewed = try daemon.editingSettings {
+      try $0.updateAccount(account.id, credentials: .replacing(with: replacement))
+    }
+    XCTAssertEqual(renewed.credentials[CredentialField.mimoResetAt], reset)
+    XCTAssertEqual(try SettingsStore(fileURL: paths.settingsFileURL).load().account(withID: account.id)?.credentials, renewed.credentials)
+    let durable = try Data(contentsOf: paths.settingsFileURL)
+    XCTAssertThrowsError(try daemon.editingSettings {
+      try $0.updateAccount(account.id, credentials: .merging([CredentialField.mimoResetAt: "2026-02-30"]))
+    })
+    XCTAssertEqual(try Data(contentsOf: paths.settingsFileURL), durable)
+    XCTAssertEqual(daemon.settings.account(withID: account.id)?.credentials, renewed.credentials)
+    let cleared = try daemon.editingSettings {
+      try $0.updateAccount(account.id, credentials: .merging([CredentialField.mimoResetAt: ""]))
+    }
+    XCTAssertNil(cleared.credentials[CredentialField.mimoResetAt])
+    XCTAssertEqual(cleared.credentials[CredentialField.mimoSessionCookies], replacement[CredentialField.mimoSessionCookies])
+    XCTAssertEqual(daemon.settings.redactedCredentials().account(withID: account.id)?.credentials, [:])
+  }
 }

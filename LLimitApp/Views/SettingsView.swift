@@ -1039,7 +1039,7 @@ struct SettingsView: View {
     }
   }
 
-  private func manualCredentials(for account: ProviderAccount) -> some View {
+  private func manualCredentials(for account: ProviderAccount, excludingFields: [String] = []) -> some View {
     VStack(alignment: .leading, spacing: 12) {
       HStack(spacing: 10) {
         Button {
@@ -1057,7 +1057,9 @@ struct SettingsView: View {
           .foregroundStyle(.secondary)
       }
       ForEach(account.provider.credentialFields) { field in
-        credentialField(field, accountID: account.id)
+        if !excludingFields.contains(field.key) {
+          credentialField(field, accountID: account.id)
+        }
       }
     }
   }
@@ -1128,7 +1130,8 @@ struct SettingsView: View {
                 Text("Sign in to the API Platform to read Token Plan usage. MiMo Code login supplies an inference key; it does not supply this console session. Sign in again after your session expires.")
                   .font(.caption).foregroundStyle(.secondary)
                   .fixedSize(horizontal: false, vertical: true)
-                DisclosureGroup("Manual setup") { manualCredentials(for: account) }
+                mimoResetDateField(for: AccountFieldKey(accountID: account.id, field: .credential(CredentialField.mimoResetAt)))
+                DisclosureGroup("Manual setup") { manualCredentials(for: account, excludingFields: [CredentialField.mimoResetAt]) }
               }
             } else {
               manualCredentials(for: account)
@@ -1273,6 +1276,9 @@ struct SettingsView: View {
       if field.key == CredentialField.junieResetAt,
          model.account(withID: accountID)?.provider == .junie {
         junieResetDateField(for: key)
+      } else if field.key == CredentialField.mimoResetAt,
+         model.account(withID: accountID)?.provider == .xiaomiMiMo {
+        mimoResetDateField(for: key)
       } else if field.isSecret {
         committingDraft(
           SecureField(field.label, text: draftBinding(for: key))
@@ -1289,13 +1295,8 @@ struct SettingsView: View {
         )
       }
 
-      if field.key == CredentialField.junieResetAt,
-         model.account(withID: accountID)?.provider == .junie {
-        Text("Set your credit renewal date and time. Repeats every 30 days. Leave off if unknown.")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
-      } else if let help = field.help, !help.isEmpty {
+      if field.key != CredentialField.junieResetAt, field.key != CredentialField.mimoResetAt,
+         let help = field.help, !help.isEmpty {
         Text(help)
           .font(.caption)
           .foregroundStyle(.secondary)
@@ -1303,8 +1304,20 @@ struct SettingsView: View {
     }
   }
 
+  private func formatResetDate(_ date: Date, for key: AccountFieldKey) {
+    let formatter = ISO8601DateFormatter()
+    formatter.timeZone = TimeZone(secondsFromGMT: 0)
+    let minute = Calendar.current.dateInterval(of: .minute, for: date)?.start ?? date
+    accountDrafts.edit(key, text: formatter.string(from: minute))
+  }
+
   @ViewBuilder
-  private func junieResetDateField(for key: AccountFieldKey) -> some View {
+  private func resetDateField(
+    for key: AccountFieldKey,
+    initialDate: Date,
+    pickerLabel: String,
+    helpText: String
+  ) -> some View {
     let text = draftBinding(for: key).wrappedValue
     let isEnabled = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 
@@ -1312,8 +1325,7 @@ struct SettingsView: View {
       get: { !draftBinding(for: key).wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty },
       set: { enabled in
         if enabled {
-          let initial = Date().addingTimeInterval(TimeInterval(JunieCreditCycle.windowSeconds))
-          editJunieResetDate(initial, for: key)
+          formatResetDate(initialDate, for: key)
         } else {
           accountDrafts.edit(key, text: "")
         }
@@ -1323,17 +1335,17 @@ struct SettingsView: View {
     .toggleStyle(.switch)
 
     if isEnabled {
-      if let cycle = JunieCreditCycle(anchor: text) {
+      if let parsed = parseQuotaResetDate(text) {
         committingDraft(
           DatePicker("Reset date and time", selection: Binding(
-            get: { JunieCreditCycle(anchor: draftBinding(for: key).wrappedValue)?.anchor ?? cycle.anchor },
+            get: { parseQuotaResetDate(draftBinding(for: key).wrappedValue) ?? parsed },
             set: {
-              editJunieResetDate($0, for: key)
+              formatResetDate($0, for: key)
               commitAccountDraft(key)
             }
           ), displayedComponents: [.date, .hourAndMinute])
             .labelsHidden()
-            .accessibilityLabel("Junie reset date and time"),
+            .accessibilityLabel(pickerLabel),
           key: key
         )
       } else {
@@ -1354,13 +1366,33 @@ struct SettingsView: View {
         .foregroundStyle(.orange)
         .fixedSize(horizontal: false, vertical: true)
     }
+
+    Text(helpText)
+      .font(.caption)
+      .foregroundStyle(.secondary)
+      .fixedSize(horizontal: false, vertical: true)
   }
 
-  private func editJunieResetDate(_ date: Date, for key: AccountFieldKey) {
-    let formatter = ISO8601DateFormatter()
-    formatter.timeZone = TimeZone(secondsFromGMT: 0)
-    let minute = Calendar.current.dateInterval(of: .minute, for: date)?.start ?? date
-    accountDrafts.edit(key, text: formatter.string(from: minute))
+  @ViewBuilder
+  private func junieResetDateField(for key: AccountFieldKey) -> some View {
+    let initial = Date().addingTimeInterval(TimeInterval(JunieCreditCycle.windowSeconds))
+    resetDateField(
+      for: key,
+      initialDate: initial,
+      pickerLabel: "Junie reset date and time",
+      helpText: "Set your credit renewal date and time. Repeats every 30 days. Leave off if unknown."
+    )
+  }
+
+  @ViewBuilder
+  private func mimoResetDateField(for key: AccountFieldKey) -> some View {
+    let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+    resetDateField(
+      for: key,
+      initialDate: tomorrow,
+      pickerLabel: "MiMo reset date and time",
+      helpText: "Applies to plan credits. Set the next reset date. Update it after it passes. Leave off if unknown."
+    )
   }
 
   // MARK: - Account drafts

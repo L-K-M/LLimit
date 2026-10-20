@@ -190,9 +190,11 @@ when the saved session expires.
 
 LLimit reads remaining percentages and reported credit counts without generating
 tokens. Any bonus credits appear separately. Rings, the menu-bar graph, and trend
-lines show the reported quota. The plan's expiry is shown as text; quota reset
-times and spending forecasts remain unavailable because the response does not
-establish a reset schedule. Billing frequency does not supply one.
+lines show the reported quota. The plan's expiry is shown as text. You can enable
+**Set a reset date** beside **Connect MiMo** to enter the next plan-credit reset
+date and time. LLimit shows its countdown and keeps the setting when you reconnect.
+Update it after it passes, or turn it off if unknown. Bonus credits keep their
+separate terms. A single date does not establish a recurring window or spending pace.
 
 This supports the API Platform's personal Token Plan. Team/project quotas and
 MiMo Desktop memberships are not supported. MiMo Code sign-in supplies an

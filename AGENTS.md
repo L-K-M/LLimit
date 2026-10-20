@@ -206,6 +206,12 @@ Linux:
   Keep IDs `plan-<name>` stable. `detail.currentPeriodEnd` is expiry text only:
   preserve its precision/timezone, never populate reset or window fields from it
   or infer cadence from monthly/annual billing. No balance/inference requests.
+  `mimo.reset_at` is optional nonsecret account configuration for the next
+  plan-credit reset. Date-only input means midnight UTC; ISO date-times require
+  a timezone. Preserve it through storage and reconnects. Future dates supply
+  `resetAt`/countdown on ordinary plan metrics only, never bonus credits or a
+  window duration. Past dates stay saved with an update reminder and no active
+  reset. Blank disables it; no recurrence or credit refill is inferred.
   Sources: official console
   [request/endpoint bundle](https://platform.xiaomimimo.com/static/main.1097440ce549c686.chunk.js)
   and [quota UI bundle](https://platform.xiaomimimo.com/static/279.384318a602760797.chunk.js),

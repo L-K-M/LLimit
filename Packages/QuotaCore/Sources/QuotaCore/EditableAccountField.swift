@@ -58,6 +58,7 @@ public enum AccountEditRejection: Equatable, Sendable {
   /// A browser sign-in for this account is still running.
   case signInInProgress
   case invalidMiMoSession
+  case invalidResetDate
   /// The account is connected; its official CLI owns the credentials.
   case managedConnection
   /// The settings file could not be read at launch, so a key change cannot be saved.
@@ -71,6 +72,8 @@ public enum AccountEditRejection: Equatable, Sendable {
       return "Not saved while sign-in is running. Finish or cancel the sign-in, then try again."
     case .invalidMiMoSession:
       return "Not saved. Connect MiMo to sign in, or enter valid console cookies including api-platform_serviceToken and userId."
+    case .invalidResetDate:
+      return "Not saved. Enter a valid reset date as YYYY-MM-DD or an ISO 8601 date-time with a timezone, or turn off the reset date."
     case .managedConnection:
       return "Not saved because this account is connected. Its sign-in manages these credentials."
     case .settingsUnreadable:
