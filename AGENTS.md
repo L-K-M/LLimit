@@ -141,13 +141,23 @@ Linux:
   `~/.cline`, `~/.junie`, and the Keychain). The widget extension **stays sandboxed**; it only reads the App
   Group container.
 - MiMo console cookies are owned by LLimit, stored only in local settings under
-  `mimo.session_cookies`, and redacted like other credentials. macOS sign-in uses
-  a separate nonpersistent WebKit store per attempt, validates personal Token Plan
-  usage before saving, and retains only `api-platform_serviceToken`,
-  `api-platform_slh`, `api-platform_ph`, and `userId`. Never scan normal browser
-  sessions or retain Xiaomi SSO/analytics cookies. Expired sessions require an
-  explicit reconnect or replacement. Quota transport must refuse redirects and
-  avoid shared cookie jars and caches.
+  `mimo.session_cookies`, and redacted like other credentials. macOS keeps an
+  isolated per-account saved Xiaomi Account login, authentication cookies only,
+  under the secret `mimo.browser_session`: only `passToken` and `userId` scoped
+  to `account.xiaomi.com` at `/`, honoring server expiry and forcing HTTPS.
+  Console cookies remain limited to
+  `api-platform_serviceToken`, `api-platform_slh`, `api-platform_ph`, and `userId`.
+  Temporary nonpersistent WebKit attempts load saved authentication
+  only to renew after console authentication failure. Never access normal browser
+  sessions, retain analytics cookies, send Xiaomi SSO to quota endpoints, or leak
+  secrets to shared settings, widgets, snapshots, history, or logs. Validate personal
+  Token Plan usage before saving a connection. Automatic renewal must match the
+  saved `userId` before publishing usage or accepting renewed credentials.
+  Existing macOS connections must reconnect once to adopt the saved login. Manual
+  console cookies and Linux still require replacement or reconnect when expired.
+  Xiaomi may request interactive sign-in if its saved login expires, is revoked,
+  or requires a challenge. Monthly manual purchase/reset settings remain preserved.
+  Quota transport must refuse redirects and avoid shared cookie jars and caches.
 - Adding a `QuotaProvider` case is a breaking change for **six** exhaustive `switch`es:
   `Models.displayName`, `Models.credentialFields`,
   `ProviderMetricSelection.defaultRingMetrics`, the widget's `compactProviderName`,

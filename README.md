@@ -187,9 +187,11 @@ usage-window details.
 For Xiaomi MiMo, choose **Settings → Add Account → Xiaomi MiMo**, then
 **Connect MiMo**. Sign in to the API Platform in LLimit's sign-in window and
 choose **Connect Account**. LLimit checks your personal Token Plan before saving
-its platform session cookies in your local settings. Each account uses a separate
-temporary browser session. Your usual browser login stays separate. Reconnect
-when the saved session expires.
+its platform session cookies in your local settings. On macOS, LLimit keeps your
+Xiaomi Account signed in and renews automatically in the background. If Xiaomi
+requests a new sign-in, reconnect that account. Each LLimit account has its own
+saved login, separate from your usual browser. Existing connections must reconnect
+once to enable automatic renewal.
 
 LLimit reads remaining percentages and reported credit counts without generating
 tokens. Any bonus credits appear separately. Rings, the menu-bar graph, and trend
@@ -206,8 +208,9 @@ automatic credit refill occurs.
 This supports the API Platform's personal Token Plan. Team/project quotas and
 MiMo Desktop memberships are not supported. MiMo Code sign-in supplies an
 inference key and account ID, which cannot replace the console session used here.
-LLimit does not import MiMo CLI or OpenCode keys. Linux setup uses a manually
-entered console Cookie header; see the [daemon guide](Packages/LLimitd/README.md).
+LLimit does not import MiMo CLI or OpenCode keys. Manual console cookies, including
+those used on Linux, require replacement when expired; see the
+[daemon guide](Packages/LLimitd/README.md).
 See [Xiaomi's MiMo Code guide](https://mimo.mi.com/docs/en-US/tokenplan/integration/mimo-code)
 for the distinction between inference credentials and console usage.
 

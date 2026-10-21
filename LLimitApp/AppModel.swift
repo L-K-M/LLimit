@@ -303,6 +303,11 @@ final class AppModel: ObservableObject {
                                                      provenance: provenance)
       var retryConfigurations = recovered.configurations
       var retryRevisions = recovered.credentialRevisions
+      let renewedMiMo = await recoverFailedMiMoSessions(in: refreshed, provenance: provenance)
+      provenance.recordQueries(renewedMiMo.configurations, credentialRevisions: renewedMiMo.credentialRevisions)
+      let renewedSnapshot = QuotaSnapshot(generatedAt: Date(), providers: renewedMiMo.usages, failures: [])
+      refreshed = refreshed.replacingResults(forAccountIDs: Set(renewedMiMo.configurations.map(\.accountID)),
+        from: validatedRefreshResults(renewedSnapshot, provenance: provenance))
       let blockedClaudeIDs = Set(claudeFailures.map(\.accountID))
       for failure in refreshed.failures where failure.provider == .anthropic && failure.kind == .auth
         && !blockedClaudeIDs.contains(failure.accountID) {
@@ -908,10 +913,10 @@ final class AppModel: ObservableObject {
           account(withID: accountID)?.provider == .xiaomiMiMo else { return }
     signInSkippedAccountIDs.insert(accountID)
     let originalRevision = credentialEditRevisions[accountID]
-    mimoLogin = MiMoLoginSession(accountID: accountID) { [weak self] attemptID, cookies in
+    mimoLogin = MiMoLoginSession(accountID: accountID) { [weak self] attemptID, login in
       guard let self else { throw CancellationError() }
       try await self.finishMiMoLogin(attemptID: attemptID, accountID: accountID,
-        originalRevision: originalRevision, cookies: cookies)
+        originalRevision: originalRevision, login: login)
     }
   }
 
@@ -923,10 +928,10 @@ final class AppModel: ObservableObject {
   }
 
   private func finishMiMoLogin(attemptID: UUID, accountID: String, originalRevision: UUID?,
-                               cookies: MiMoSessionCookies) async throws {
+                               login: MiMoBrowserLogin) async throws {
     guard mimoLogin?.id == attemptID, let account = account(withID: accountID),
           account.provider == .xiaomiMiMo else { throw CancellationError() }
-    let credentials = account.credentialsForImport([CredentialField.mimoSessionCookies: cookies.header])
+    let credentials = try login.credentials(replacing: account)
     let candidate = ProviderRuntimeConfiguration(accountID: accountID, provider: .xiaomiMiMo,
       displayName: account.resolvedDisplayName, isEnabled: true, credentials: credentials)
     // Browser login alone is insufficient: verify that this private session can
@@ -939,7 +944,7 @@ final class AppModel: ObservableObject {
       throw CancellationError()
     }
     let previous = providerAccounts[index]
-    if MiMoSessionCookies.hasChangedIdentity(from: previous.credentials[CredentialField.mimoSessionCookies], to: cookies.header) {
+    if MiMoSessionCookies.hasChangedIdentity(from: previous.credentials[CredentialField.mimoSessionCookies], to: login.console.header) {
       try invalidateAccountUsageAndHistory(for: previous)
     } else {
       try invalidateAccountSnapshot(for: accountID)
@@ -952,6 +957,59 @@ final class AppModel: ObservableObject {
     reloadAccountStatuses()
     if syncSettingsToWidgetStore(currentSettings().redactedCredentials()) { reloadWidgetTimelines() }
     catchUpAfterSignIn(accountID)
+  }
+
+  private func recoverFailedMiMoSessions(in result: QuotaSnapshot, provenance: RefreshProvenance)
+    async -> (configurations: [ProviderRuntimeConfiguration], credentialRevisions: [String: UUID], usages: [ProviderUsage]) {
+    var configurations: [ProviderRuntimeConfiguration] = []
+    var revisions: [String: UUID] = [:]
+    var usages: [ProviderUsage] = []
+    for failure in result.failures where failure.provider == .xiaomiMiMo && failure.kind == .auth {
+      guard !Task.isCancelled, !configurationLoadFailed,
+            let original = account(withID: failure.accountID), original.isEnabled,
+            original.provider == .xiaomiMiMo,
+            provenance.matchesQuery(original, credentialRevisions: credentialEditRevisions),
+            let raw = original.credentials[CredentialField.mimoBrowserSession],
+            let browser = try? MiMoBrowserSession(serialized: raw),
+            let console = try? MiMoSessionCookies(header: original.credentials[CredentialField.mimoSessionCookies] ?? ""),
+            browser.matches(console), !browser.cookies().isEmpty else { continue }
+      let revision = credentialEditRevisions[original.id]
+      let originalConfiguration = original.runtimeConfiguration()
+      do {
+        let renewal = MiMoSessionRenewal(browser: browser)
+        let login = try await renewal.renew()
+        try Task.checkCancellation()
+        guard let current = account(withID: original.id),
+              originalConfiguration.matchesCurrentAccount(current, expectedCredentialRevision: revision,
+                currentCredentialRevision: credentialEditRevisions[current.id]),
+              browser.matches(login.console) else { continue }
+        let credentials = try login.credentials(replacing: current)
+        let candidate = ProviderRuntimeConfiguration(accountID: current.id, provider: .xiaomiMiMo,
+          displayName: current.resolvedDisplayName, isEnabled: true, credentials: credentials)
+        // Redirect completion is not proof of a usable subscription. Verify quota
+        // and then recheck ownership before saving any renewed authentication.
+        let usage = try await MiMoQuotaClient(httpClient: URLSessionHTTPClient()).fetchUsage(configuration: candidate, now: Date())
+        try Task.checkCancellation()
+        guard !configurationLoadFailed,
+              let index = providerAccounts.firstIndex(where: { $0.id == original.id }),
+              originalConfiguration.matchesCurrentAccount(providerAccounts[index], expectedCredentialRevision: revision,
+                currentCredentialRevision: credentialEditRevisions[original.id]) else { continue }
+        var settings = currentSettings()
+        settings.accounts[index].credentials = credentials
+        try settingsStore.save(settings)
+        providerAccounts[index].credentials = credentials
+        let renewedRevision = UUID()
+        credentialEditRevisions[original.id] = renewedRevision
+        configurations.append(providerAccounts[index].runtimeConfiguration())
+        revisions[original.id] = renewedRevision
+        usages.append(usage)
+      } catch is CancellationError { break }
+      catch {
+        // Keep the existing login and last good usage. A transient network error
+        // must not erase SSO, and errors from browser navigation contain secrets.
+      }
+    }
+    return (configurations, revisions, usages)
   }
 
   func codexAccountIsManaged(_ id: String) -> Bool {
@@ -1451,6 +1509,9 @@ final class AppModel: ObservableObject {
       let outcome = updateAccount(accountID: accountID) { account in
         if account.provider == .anthropic && fieldKey == CredentialField.anthropicAccessToken {
           account.credentials = ClaudeCodeProfile.clearManagedMetadata(from: account.credentials)
+        }
+        if account.provider == .xiaomiMiMo && fieldKey == CredentialField.mimoSessionCookies {
+          account.credentials[CredentialField.mimoBrowserSession] = nil
         }
         account.credentials[fieldKey] = credentialValue
       }

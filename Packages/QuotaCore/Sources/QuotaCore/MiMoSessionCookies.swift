@@ -4,7 +4,7 @@ import FoundationNetworking
 #endif
 
 /// LLimit-owned console credentials. Inference keys returned by MiMo Code do
-/// not provide this web session. Never collect Xiaomi SSO or analytics cookies.
+/// not provide this web session. Xiaomi saved-login cookies stay separate.
 public struct MiMoSessionCookies: Sendable, Equatable {
   public static let consoleHost = "platform.xiaomimimo.com"
   private static let names = ["api-platform_serviceToken", "api-platform_slh", "api-platform_ph", "userId"]
@@ -72,7 +72,7 @@ public struct MiMoSessionCookies: Sendable, Equatable {
     }
   }
 
-  private static func isValidCookieValue(_ value: String, for name: String) -> Bool {
+  static func isValidCookieValue(_ value: String, for name: String) -> Bool {
     guard value.utf8.count <= 16_384 else { return false }
     var content = value[...]
     // RFC 6265 permits one outer pair of quotes. Keep those bytes in the
@@ -110,6 +110,14 @@ public struct MiMoSessionCookies: Sendable, Equatable {
     } else {
       result[CredentialField.mimoSessionCookies] = try Self(header: value).header
     }
+    if let raw = credentials[CredentialField.mimoBrowserSession], !raw.isEmpty {
+      let browser = try MiMoBrowserSession(serialized: raw)
+      guard let header = result[CredentialField.mimoSessionCookies],
+            let session = try? Self(header: header), browser.matches(session) else {
+        throw ProviderClientError(kind: .auth, message: "The saved Xiaomi login does not match this MiMo account. Connect MiMo to sign in again.")
+      }
+      result[CredentialField.mimoBrowserSession] = try browser.encoded()
+    }
     return result
   }
 
@@ -128,6 +136,7 @@ public struct MiMoSessionCookies: Sendable, Equatable {
 
 public enum MiMoSignInPolicy {
   public static let startURL = URL(string: "https://platform.xiaomimimo.com/console/plan-manage")!
+  public static let renewalURL = URL(string: "https://platform.xiaomimimo.com/api/v1/genLoginUrl?currentPath=%2Fconsole%2Fplan-manage")!
 
   public static func allowsNavigation(to url: URL) -> Bool {
     // Xiaomi's sign-in page embeds an inline document. These local documents
