@@ -338,7 +338,7 @@ struct SettingsView: View {
               .foregroundStyle(.secondary)
               .fixedSize(horizontal: false, vertical: true)
           } else if providerToAdd == .xiaomiMiMo {
-            Text("Sign in to the MiMo API Platform inside LLimit. Each account has its own login. Connect again when the console session expires.")
+            Text("Sign in to the MiMo API Platform inside LLimit. LLimit stays signed in and renews automatically. Reconnect if Xiaomi asks for a new sign-in.")
               .font(.caption).foregroundStyle(.secondary)
               .fixedSize(horizontal: false, vertical: true)
           }
@@ -1127,7 +1127,12 @@ struct SettingsView: View {
               VStack(alignment: .leading, spacing: 10) {
                 Button("Connect MiMo") { commitAccountDrafts(); model.connectMiMoAccount(account.id) }
                   .buttonStyle(.borderedProminent).disabled(model.isRefreshing)
-                Text("Sign in to the API Platform to read Token Plan usage. MiMo Code login supplies an inference key; it does not supply this console session. Sign in again after your session expires.")
+                if account.hasRequiredCredentials && account.credentials[CredentialField.mimoBrowserSession] == nil {
+                  Text("Connect MiMo to save a Xiaomi login for automatic renewal. Manual console cookies expire.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                Text("Sign in to the API Platform to read Token Plan usage. MiMo Code login supplies an inference key; it does not supply this console session. LLimit stays signed in and renews automatically. Reconnect if Xiaomi asks.")
                   .font(.caption).foregroundStyle(.secondary)
                   .fixedSize(horizontal: false, vertical: true)
                 mimoResetDateField(for: AccountFieldKey(accountID: account.id, field: .credential(CredentialField.mimoResetAt)))

@@ -67,7 +67,9 @@ final class MiMoQuotaClientTests: XCTestCase {
     let detailBody = #"{"code":0,"data":{"planCode":"standard","planName":"Standard"}}"#
     let usageBody = #"{"code":0,"data":{"usage":{"items":[{"name":"credits","used":0,"limit":100,"percent":0}]}}}"#
     let http = MiMoHTTPStub(detail: detailBody, usage: usageBody)
-    _ = try await MiMoQuotaClient(httpClient: http).fetchUsage(configuration: configuration(), now: now)
+    var target = configuration()
+    target.credentials[CredentialField.mimoBrowserSession] = "private-saved-login-fixture"
+    _ = try await MiMoQuotaClient(httpClient: http).fetchUsage(configuration: target, now: now)
 
     let requests = await http.requests
     let req = try XCTUnwrap(requests.first)
@@ -77,6 +79,11 @@ final class MiMoQuotaClientTests: XCTestCase {
     XCTAssertTrue(cookieHeader.contains("userId=fake-u-001"))
     XCTAssertNil(req.value(forHTTPHeaderField: "Authorization"))
     XCTAssertFalse(req.httpShouldHandleCookies)
+    for request in requests {
+      XCTAssertEqual(request.value(forHTTPHeaderField: "Cookie"), fixtureCookies)
+      XCTAssertFalse(request.allHTTPHeaderFields?.values.contains(where: { $0.contains("private-saved-login-fixture") }) ?? true)
+      XCTAssertNil(request.httpBody)
+    }
   }
 
   func testRequestRefusesRedirects() async throws {

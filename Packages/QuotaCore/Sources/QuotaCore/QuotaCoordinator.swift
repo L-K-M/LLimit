@@ -163,13 +163,19 @@ private struct FailureMessagePolicy: Sendable {
   private let secrets: [String]
 
   init(configurations: [ProviderRuntimeConfiguration]) {
-    let hiddenSecretKeys: Set<String> = [CredentialField.openAIRefreshToken, CredentialField.kimiRefreshToken]
+    let hiddenSecretKeys: Set<String> = [CredentialField.openAIRefreshToken, CredentialField.kimiRefreshToken,
+                                       CredentialField.mimoBrowserSession]
     let values = configurations.flatMap { configuration in
       let keys = Set(configuration.provider.credentialFields.filter(\.isSecret).map(\.key))
         .union(hiddenSecretKeys)
-      return configuration.credentials.compactMap { key, value in
+      var values = configuration.credentials.compactMap { key, value in
         keys.contains(key) && !value.isEmpty ? value : nil
       }
+      if let raw = configuration.credentials[CredentialField.mimoBrowserSession],
+         let browser = try? MiMoBrowserSession(serialized: raw) {
+        values += browser.secretValues
+      }
+      return values
     }
     secrets = Set(values).sorted { $0.count > $1.count }
   }

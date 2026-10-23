@@ -12,7 +12,7 @@ struct MiMoLoginView: View {
         Spacer()
         Button("Cancel", action: onClose).keyboardShortcut(.cancelAction)
       }
-      Text("Each LLimit account signs in separately. Sign in again if your MiMo session expires.")
+      Text("LLimit stays signed in and renews automatically. Reconnect if Xiaomi asks for a new sign-in.")
         .font(.caption).foregroundStyle(.secondary)
       MiMoBrowserView(webView: session.webView)
         .frame(minWidth: 720, minHeight: 500)

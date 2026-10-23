@@ -194,6 +194,26 @@ final class FailurePrivacyTests: XCTestCase {
     XCTAssertEqual(snapshot.failures.first?.message, "Short: [redacted]. Long: [redacted].")
   }
 
+  func testSavedXiaomiLoginAndItsIndividualTokensAreRedacted() async throws {
+    let cookies = ["passToken": "renewal-secret-fixture", "userId": "xiaomi-user-fixture"].map { name, value in
+      HTTPCookie(properties: [.name: name, .value: value, .domain: ".account.xiaomi.com", .path: "/", .secure: "TRUE"])!
+    }
+    let browser = try MiMoBrowserSession(cookies: cookies, userID: "xiaomi-user-fixture")
+    let encoded = try browser.encoded()
+    let coordinator = QuotaCoordinator(clients: [
+      PrivacyFailingClient(provider: .xiaomiMiMo, error: ProviderClientError(kind: .auth,
+        message: "Saved login: \(encoded). Token: renewal-secret-fixture. User: xiaomi-user-fixture."))
+    ])
+    let snapshot = await coordinator.refresh(configurations: [
+      ProviderRuntimeConfiguration(provider: .xiaomiMiMo, isEnabled: true,
+        credentials: [CredentialField.mimoBrowserSession: encoded])
+    ], now: now)
+    XCTAssertEqual(snapshot.failures.first?.message, "Saved login: [redacted]. Token: [redacted]. User: [redacted].")
+    let text = String(decoding: try JSONEncoder().encode(snapshot), as: UTF8.self)
+    XCTAssertFalse(text.contains("renewal-secret-fixture"))
+    XCTAssertFalse(text.contains("xiaomi-user-fixture"))
+  }
+
   func testTruncationCannotRetainAPartialSecretAtTheBoundary() async throws {
     let prefixLength = Self.reflectedSecret.count / 2
     let padding = String(repeating: "x", count: Self.maximumMessageScalars - prefixLength)

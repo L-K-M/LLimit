@@ -84,6 +84,26 @@ final class MiMoPersistenceTests: XCTestCase {
     XCTAssertEqual(try store.load().accounts, accounts)
   }
 
+  func testSavedXiaomiLoginSurvivesRestartAndIsRedacted() throws {
+    let browser = "[{\"name\":\"passToken\",\"value\":\"renewal-fixture\",\"domain\":\".account.xiaomi.com\",\"path\":\"/\",\"secure\":true,\"httpOnly\":true},{\"name\":\"userId\",\"value\":\"42\",\"domain\":\".account.xiaomi.com\",\"path\":\"/\",\"secure\":true,\"httpOnly\":true}]"
+    let account = ProviderAccount(provider: .xiaomiMiMo, credentials: [
+      CredentialField.mimoSessionCookies: "api-platform_serviceToken=console-fixture; userId=42",
+      "mimo.browser_session": browser
+    ])
+    let file = directory.appendingPathComponent("settings.json")
+    let store = SettingsStore(fileURL: file)
+    try store.save(AppSettings(accounts: [account]))
+    let saved = try store.load()
+    XCTAssertEqual(saved.accounts.first?.credentials[CredentialField.mimoBrowserSession],
+      try MiMoBrowserSession(serialized: browser).encoded(), "A saved Xiaomi login must survive restarting LLimit")
+    XCTAssertTrue(saved.redactedCredentials().accounts[0].credentials.isEmpty)
+    let before = try Data(contentsOf: file)
+    var wrongAccount = account
+    wrongAccount.credentials[CredentialField.mimoSessionCookies] = "api-platform_serviceToken=other-fixture; userId=99"
+    XCTAssertThrowsError(try store.save(AppSettings(accounts: [wrongAccount])))
+    XCTAssertEqual(try Data(contentsOf: file), before, "A mismatched Xiaomi login must not replace durable settings")
+  }
+
   func testSessionIdentityUsesUserIDRatherThanToken() {
     let old = "api-platform_serviceToken=old-fixture; userId=42"
     let renewed = "api-platform_serviceToken=new-fixture; api-platform_ph=csrf-fixture; userId=42"

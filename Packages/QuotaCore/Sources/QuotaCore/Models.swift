@@ -230,7 +230,7 @@ public extension QuotaProvider {
         CredentialFieldDescriptor(
           key: CredentialField.mimoSessionCookies,
           label: "Console session cookies",
-          help: "Connect MiMo in LLimit to sign in. For manual setup, use the Cookie request header from platform.xiaomimimo.com. Token Plan API keys cannot supply console usage. Sessions may require signing in again after expiry."
+          help: "Connect MiMo in LLimit to sign in and renew console sessions automatically on macOS. Manual cookies need replacing after expiry. Use the Cookie request header from platform.xiaomimimo.com, not a Token Plan API key."
         ),
         CredentialFieldDescriptor(
           key: CredentialField.mimoResetAt,
