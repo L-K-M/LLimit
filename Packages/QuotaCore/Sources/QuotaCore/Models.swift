@@ -16,6 +16,8 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
   case junie = "junie"
   case minimax = "minimax"
   case xiaomiMiMo = "xiaomi-mimo"
+  case tencentTokenHub = "tencent-tokenhub"
+  case stepfun = "stepfun"
 
   public var displayName: String {
     switch self {
@@ -49,6 +51,10 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
       return "MiniMax"
     case .xiaomiMiMo:
       return "Xiaomi MiMo"
+    case .tencentTokenHub:
+      return "Tencent TokenHub"
+    case .stepfun:
+      return "StepFun"
     }
   }
 }
@@ -260,6 +266,53 @@ public extension QuotaProvider {
           isSecret: false,
           isRequired: false,
           help: "Optional purchase date anchoring resets every calendar month in UTC. Use YYYY-MM-DD (midnight UTC) or an ISO 8601 date-time with a timezone. Shorter months use their last day. Leave empty if unknown."
+        )
+      ]
+    case .tencentTokenHub:
+      return [
+        CredentialFieldDescriptor(
+          key: CredentialField.tokenhubSecretID,
+          label: "SecretId",
+          help: "Tencent Cloud API key ID — not the sk-tp-… plan key, which cannot query quota. You can import it from thcli (~/.thcli)."
+        ),
+        CredentialFieldDescriptor(
+          key: CredentialField.tokenhubSecretKey,
+          label: "SecretKey"
+        ),
+        CredentialFieldDescriptor(
+          key: CredentialField.tokenhubSessionToken,
+          label: "Session token",
+          isRequired: false,
+          help: "Optional. Only for temporary (STS) credentials."
+        ),
+        CredentialFieldDescriptor(
+          key: CredentialField.tokenhubRegion,
+          label: "Region",
+          isSecret: false,
+          isRequired: false,
+          help: "Optional. Defaults to ap-singapore (international site)."
+        ),
+        CredentialFieldDescriptor(
+          key: CredentialField.tokenhubEndpoint,
+          label: "API endpoint",
+          isSecret: false,
+          isRequired: false,
+          help: "Optional. Defaults to tokenhub.intl.tencentcloudapi.com; use tokenhub.tencentcloudapi.com for the China site."
+        )
+      ]
+    case .stepfun:
+      return [
+        CredentialFieldDescriptor(
+          key: CredentialField.stepfunOasisToken,
+          label: "Oasis-Token",
+          help: "The Oasis-Token cookie from a platform.stepfun.com or platform.stepfun.ai browser session (Step Plan sign-in). The inference API key cannot read plan quota."
+        ),
+        CredentialFieldDescriptor(
+          key: CredentialField.stepfunSite,
+          label: "Site",
+          isSecret: false,
+          isRequired: false,
+          help: "Optional: \"com\" (default) or \"ai\" for the overseas site."
         )
       ]
     }

@@ -45,6 +45,15 @@ public enum CredentialField {
   public static let junieCreditAllowance = "junie.credit_allowance"
   public static let junieResetAt = "junie.reset_at"
 
+  public static let tokenhubSecretID = "tokenhub.secret_id"
+  public static let tokenhubSecretKey = "tokenhub.secret_key"
+  public static let tokenhubSessionToken = "tokenhub.session_token"
+  public static let tokenhubRegion = "tokenhub.region"
+  public static let tokenhubEndpoint = "tokenhub.endpoint"
+
+  public static let stepfunOasisToken = "stepfun.oasis_token"
+  public static let stepfunSite = "stepfun.site"
+
   public static let copilotOAuthToken = "copilot.oauth_token"
   public static let copilotPATToken = "copilot.pat_token"
   public static let copilotUsername = "copilot.username"

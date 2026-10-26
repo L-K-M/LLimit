@@ -85,6 +85,8 @@ public struct CredentialDiscovery: Sendable {
       candidates += scanVenice(home: home, diagnostics: &diagnostics)
       candidates += scanCline(home: home, diagnostics: &diagnostics)
       candidates += scanOpenCode(home: home, diagnostics: &diagnostics)
+      candidates += scanThcli(home: home, diagnostics: &diagnostics)
+      candidates += scanStepCode(home: home, diagnostics: &diagnostics)
     }
 
     candidates += scanDevin(diagnostics: &diagnostics)
@@ -579,6 +581,119 @@ public struct CredentialDiscovery: Sendable {
       ))
     }
 
+    return results
+  }
+
+  /// Tencent's official TokenHub CLI writes `~/.thcli/<profile>.<site>.credential`
+  /// JSON files holding the Tencent Cloud SecretId/SecretKey used for the signed
+  /// control-plane quota API. `<site>` is `intl` or `cn`; cn credentials are
+  /// imported with the China-site endpoint and region so the same account keeps
+  /// working. `token`-type entries carry a temporary session token that is
+  /// imported too — it stops working when thcli's lease expires, and the account
+  /// then needs a reimport.
+  private func scanThcli(home: URL, diagnostics: inout [String]) -> [DiscoveredCredential] {
+    let directory = path(home, ".thcli")
+    guard let entries = try? fileManager.contentsOfDirectory(
+      at: directory,
+      includingPropertiesForKeys: nil,
+      options: [.skipsHiddenFiles]
+    ) else { return [] }
+
+    var results: [DiscoveredCredential] = []
+    for url in entries where url.pathExtension == "credential" {
+      // "<profile>.<site>.credential" → profile + site.
+      let stem = url.deletingPathExtension().lastPathComponent
+      let site = stem.split(separator: ".").last.map(String.init) ?? "intl"
+      let profile = stem.split(separator: ".").dropLast().joined(separator: ".")
+      let label = profile.isEmpty ? "default" : profile
+
+      guard let object = readJSON(at: url, label: "thcli", diagnostics: &diagnostics) else { continue }
+      guard let secretID = nonEmptyString(object["secretId"]),
+            let secretKey = nonEmptyString(object["secretKey"]) else {
+        diagnostics.append("thcli: \(shortPath(url)) has no SecretId/SecretKey")
+        continue
+      }
+
+      var credentials = [
+        CredentialField.tokenhubSecretID: secretID,
+        CredentialField.tokenhubSecretKey: secretKey
+      ]
+      if let token = nonEmptyString(object["token"]) {
+        credentials[CredentialField.tokenhubSessionToken] = token
+      }
+      if site == "cn" {
+        credentials[CredentialField.tokenhubEndpoint] = "https://tokenhub.tencentcloudapi.com"
+        credentials[CredentialField.tokenhubRegion] = "ap-guangzhou"
+      }
+
+      results.append(DiscoveredCredential(
+        stableID: "tencent-tokenhub:thcli:\(site):\(label)",
+        provider: .tencentTokenHub,
+        suggestedName: "Tencent TokenHub (\(label))",
+        sourceLabel: "thcli (\(shortPath(url)))",
+        credentials: credentials
+      ))
+      diagnostics.append("thcli: found \(site) credentials (\(shortPath(url)))")
+    }
+    return results
+  }
+
+  /// Step Code's `/login` writes the Step Plan OAuth session to
+  /// `~/.stepcode/auth.json`. The Oasis-Token value is an
+  /// `access...refresh` JWT pair, stored whole or split into `access` +
+  /// `refresh` fields depending on the version; a `site` field ("com"/"ai")
+  /// selects the platform host when recorded.
+  private func scanStepCode(home: URL, diagnostics: inout [String]) -> [DiscoveredCredential] {
+    var results: [DiscoveredCredential] = []
+
+    if let token = nonEmptyString(ProcessInfo.processInfo.environment["STEPFUN_TOKEN"]) {
+      results.append(DiscoveredCredential(
+        stableID: "stepfun:environment",
+        provider: .stepfun,
+        suggestedName: "StepFun",
+        sourceLabel: "StepFun (STEPFUN_TOKEN)",
+        credentials: [CredentialField.stepfunOasisToken: token]
+      ))
+      diagnostics.append("StepFun: found Oasis-Token in STEPFUN_TOKEN")
+    }
+
+    let url = path(home, ".stepcode", "auth.json")
+    if let object = readJSON(at: url, label: "Step Code", diagnostics: &diagnostics) {
+      // Provider entries are keyed under names like "step"/"stepfun" with
+      // either a flat token string or access/refresh halves.
+      let candidates: [(key: String, entry: [String: Any])] =
+        object.compactMap { key, value in
+          guard let entry = value as? [String: Any],
+                key.lowercased().contains("step") else { return nil }
+          return (key, entry)
+        }
+      for (key, entry) in candidates {
+        var token = nonEmptyString(entry["oasis_token"])
+          ?? nonEmptyString(entry["oasisToken"])
+          ?? nonEmptyString(entry["token"])
+        if token == nil,
+           let access = nonEmptyString(entry["access"]) {
+          let refresh = nonEmptyString(entry["refresh"])
+          token = refresh.map { "\(access)...\($0)" } ?? access
+        }
+        guard let token else { continue }
+
+        var credentials = [CredentialField.stepfunOasisToken: token]
+        if let site = nonEmptyString(entry["site"]), site == "ai" || site == "com" {
+          credentials[CredentialField.stepfunSite] = site
+        }
+        results.append(DiscoveredCredential(
+          stableID: "stepfun:stepcode:\(key)",
+          provider: .stepfun,
+          suggestedName: "StepFun",
+          sourceLabel: "Step Code (\(shortPath(url)))",
+          credentials: credentials
+        ))
+      }
+      if results.contains(where: { $0.sourceLabel.contains("Step Code") }) {
+        diagnostics.append("Step Code: found Step Plan token (\(shortPath(url)))")
+      }
+    }
     return results
   }
 

@@ -71,6 +71,8 @@ llimit accounts add --provider cline            # prompts for your Cline API key
 llimit accounts add --provider junie            # prompts for your Junie API key
 llimit accounts add --provider minimax          # prompts for your global M Plan Subscription Key
 llimit accounts add --provider xiaomi-mimo      # prompts for console session cookies
+llimit accounts add --provider tencent-tokenhub # prompts for SecretId + SecretKey
+llimit accounts add --provider stepfun          # prompts for the Oasis-Token web session
 llimit accounts import                          # list discovered local logins, import one
 llimit accounts enable|disable|remove <id>      # id may be a unique prefix
 llimit accounts rename <id> <name>

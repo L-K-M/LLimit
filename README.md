@@ -91,6 +91,8 @@ and Claude Keychain import, are macOS-only. Linux Claude Code writes
 | **JetBrains Junie** | Junie API key | `JUNIE_API_KEY`, Junie fallback file (`~/.junie/secure_credentials.json`) |
 | **MiniMax M Plan** | Global (`minimax.io`) Subscription Key | OpenCode (`minimax-coding-plan` in `auth.json`) |
 | **Xiaomi MiMo** | Personal Token Plan console session | Connect MiMo on macOS; manual console cookies on Linux |
+| **Tencent TokenHub** | Tencent Cloud SecretId + SecretKey | thcli (`~/.thcli/*.credential`) |
+| **StepFun** | Oasis-Token web session | Step Code (`~/.stepcode/auth.json`), `STEPFUN_TOKEN` |
 
 For OpenCode Go, choose **Settings → Add Account → OpenCode Go** and enter your
 OpenCode API key, or scan for a saved Go key. LLimit shows the rolling, weekly,
@@ -210,6 +212,26 @@ LLimit does not import MiMo CLI or OpenCode keys. Linux setup uses a manually
 entered console Cookie header; see the [daemon guide](Packages/LLimitd/README.md).
 See [Xiaomi's MiMo Code guide](https://mimo.mi.com/docs/en-US/tokenplan/integration/mimo-code)
 for the distinction between inference credentials and console usage.
+
+For Tencent TokenHub, choose **Settings → Add Account → Tencent TokenHub** and
+enter a Tencent Cloud **SecretId/SecretKey** pair, or import credentials saved
+by the official `thcli` CLI (`~/.thcli/*.credential`; China-site files are used
+against the China endpoint automatically). LLimit lists the account's Token
+Plans and shows each plan's current billing cycle quota, shared pool, and
+whole-package usage with their reset and expiry dates — the same numbers the
+`thcli` CLI prints. The `sk-tp-…` personal plan key and `sk-sp-…` Coding Plan
+key are inference credentials only: Tencent exposes no quota endpoint for
+them, so they cannot be used here. Temporary (STS) credentials additionally
+need their session token.
+
+For StepFun, choose **Settings → Add Account → StepFun** and paste the
+**Oasis-Token** cookie from a signed-in `platform.stepfun.com` (or
+`platform.stepfun.ai` — set Site to `ai`) browser session, or import a Step
+Code sign-in (`~/.stepcode/auth.json`). LLimit reads the Step Plan dashboard:
+monthly Credit allowance and booster packs on current plans, or the rolling
+5-hour and weekly windows on grandfathered Coding Plan accounts, plus your
+plan name. The Step inference API key cannot read plan quota. Reimport when
+the web session expires.
 
 ## How accounts work
 

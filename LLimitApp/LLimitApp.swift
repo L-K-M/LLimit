@@ -1841,6 +1841,10 @@ private struct ProviderMark: View {
       return "lightbulb.fill"
     case .minimax:
       return "sparkles"
+    case .tencentTokenHub:
+      return "cube.fill"
+    case .stepfun:
+      return "chart.line.uptrend.xyaxis"
     }
   }
 }
