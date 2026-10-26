@@ -47,6 +47,15 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             clean build | xcbeautify
 
+      # The app must carry the notices of the third-party code it links.
+      - name: Check bundled license notices
+        run: |
+          notices="$RUNNER_TEMP/LLimitBuild/Build/Products/Debug/LLimit.app/Contents/Resources/Third-Party-Notices.txt"
+          test -s "$notices"
+          grep -q '^SwiftTerm ' "$notices"
+          grep -q 'Miguel de Icaza' "$notices"      # SwiftTerm's MIT notice
+          grep -q 'UNICODE LICENSE V3' "$notices"   # its Unicode data tables
+
       - name: Test primary limit colors
         run: scripts/test-limit-colors.sh --skip-build "$RUNNER_TEMP/LLimitBuild"
 

@@ -25,7 +25,9 @@ Runs on every pull request and on every push to `main`. Steps:
 3. **Install xcbeautify** (via Homebrew) to keep the `xcodebuild` log readable.
 4. **Build app** — `xcodebuild clean build` on the shared `LLimitApp` scheme with
    `CODE_SIGNING_ALLOWED=NO`, so it builds with no certificate or provisioning
-   profile. The result bundle is written to `TestResults.xcresult`.
+   profile. The result bundle is written to `TestResults.xcresult`. The next step
+   checks that the app's "Bundle license notices" build phase put
+   `Third-Party-Notices.txt` into `Contents/Resources`.
 5. **Test QuotaCore package** — `swift test` against the `QuotaCore` Swift package
    under `Packages/`. See the note below on why the tests run this way.
 6. **Upload build results on failure** — if anything fails, `TestResults.xcresult`
@@ -85,11 +87,12 @@ Pushing any `v*` tag triggers the release workflow, which:
    `MARKETING_VERSION`; `CURRENT_PROJECT_VERSION` is set to the workflow run number.
 3. Builds the app in **Release** configuration with `CODE_SIGNING_ALLOWED=NO`
    (no Developer ID, no provisioning profile).
-4. **Ad-hoc signs** the app (`codesign --sign -`). This requires no certificate or
+4. Checks that the app carries `Contents/Resources/Third-Party-Notices.txt`, then
+   **ad-hoc signs** it (`codesign --sign -`). This requires no certificate or
    keychain but is needed for the app to launch on Apple Silicon. It is **not** a
    Developer ID signature and the app is **not** notarized.
 5. Packages a `LLimit-<version>.zip` (via `ditto`) and a `LLimit-<version>.dmg`
-   (via `create-dmg`).
+   (via `create-dmg`), and checks that the zip carries the notices.
 6. Publishes a **GitHub Release** named `LLimit <version>` with the `.dmg` and
    `.zip` attached and auto-generated release notes.
 
