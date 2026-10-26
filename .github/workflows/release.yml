@@ -137,6 +137,20 @@ jobs:
       - name: Build .deb
         run: Packages/LLimitd/packaging/build-deb.sh "$VERSION"
 
+      # The static SDK links curl, BoringSSL, ICU and musl into the binary;
+      # their notices must ship in the .deb.
+      - name: Check packaged license notices
+        run: |
+          dpkg-deb -x "Packages/LLimitd/.build/llimit_${VERSION}_amd64.deb" "$RUNNER_TEMP/deb"
+          doc="$RUNNER_TEMP/deb/usr/share/doc/llimit"
+          for file in "$doc/copyright" "$doc/Third-Party-Notices.txt"; do
+            test -s "$file"
+            grep -q 'Daniel Stenberg' "$file"   # curl
+            grep -q 'BoringSSL' "$file"
+            grep -q 'Unicode, Inc' "$file"      # ICU
+            grep -q 'Rich Felker' "$file"       # musl
+          done
+
       - name: Attach .deb to the GitHub Release
         uses: softprops/action-gh-release@v3
         with:

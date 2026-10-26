@@ -12,11 +12,15 @@
 # which runs with no Swift runtime and no library dependencies at all, so the
 # .deb needs nothing beyond a kernel and (for TLS) ca-certificates.
 #
+# Writing the license notices needs python3 plus the Swift toolchain and static
+# Linux SDK that built the binary (set SWIFT_SDK_SBOM to the SDK's
+# sbom.spdx.json if the lookup below cannot find it).
+#
 # Layout produced:
 #   /usr/bin/llimit                      the binary (stripped when `strip` is available)
 #   /usr/lib/systemd/user/llimit*.service|.timer   user units, ExecStart=/usr/bin/llimit
 #   /usr/share/llimit/examples/          waybar/polybar/eww module examples
-#   /usr/share/doc/llimit/               README
+#   /usr/share/doc/llimit/               README, copyright, Third-Party-Notices.txt
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -95,6 +99,45 @@ chmod 0755 "$STAGE/usr/bin/llimit-tray"
 mkdir -p "$STAGE/usr/share/llimit" "$STAGE/usr/share/doc/llimit"
 cp -r "$ROOT/examples" "$STAGE/usr/share/llimit/examples"
 install -m 0644 "$ROOT/README.md" "$STAGE/usr/share/doc/llimit/README.md"
+
+# License notices for what the static SDK links into the binary: curl,
+# BoringSSL, ICU, musl, zlib and the Swift runtime. The generators fail on a
+# missing license text; packaging/licenses/README.md lists the sources.
+REPO_ROOT="$(cd "$ROOT/../.." && pwd)"
+DOC="$STAGE/usr/share/doc/llimit"
+# runtimeResourcePath is <prefix>/usr/lib/swift, so the runtime's license is
+# <prefix>/usr/share/swift/LICENSE.txt. "Swift version 6.2.3
+# (swift-6.2.3-RELEASE)" names the sources and the matching static SDK.
+SWIFT_INFO="$(swift -print-target-info)"
+SWIFT_RESOURCES="$(python3 -c 'import json, sys; print(json.load(sys.stdin)["paths"]["runtimeResourcePath"])' <<<"$SWIFT_INFO")"
+SWIFT_TAG="$(python3 -c 'import json, re, sys; print(re.search(r"\((swift-[^)]+)\)", json.load(sys.stdin)["compilerVersion"]).group(1))' <<<"$SWIFT_INFO")"
+SWIFT_VERSION="${SWIFT_TAG#swift-}"
+SWIFT_VERSION="${SWIFT_VERSION%-RELEASE}"
+if [[ -z "${SWIFT_SDK_SBOM:-}" ]]; then
+  mapfile -t sboms < <(find "$HOME/.swiftpm/swift-sdks" "$HOME/.config/swiftpm/swift-sdks" \
+    -path "*/${SWIFT_TAG}_static-linux-*.artifactbundle/sbom.spdx.json" 2>/dev/null)
+  if [[ ${#sboms[@]} -ne 1 ]]; then
+    echo "expected one $SWIFT_TAG static Linux SDK SBOM, found ${#sboms[@]}; set SWIFT_SDK_SBOM" >&2
+    exit 1
+  fi
+  SWIFT_SDK_SBOM="${sboms[0]}"
+fi
+export SWIFT_LICENSE="$SWIFT_RESOURCES/../../share/swift/LICENSE.txt" SWIFT_TAG SWIFT_VERSION SWIFT_SDK_SBOM
+# Third-Party-Notices.txt also fails when the SDK's SBOM lists a library or
+# version that packaging/licenses/notices.json does not cover.
+python3 -I "$REPO_ROOT/scripts/swiftpm-notices.py" --title llimit \
+  --overrides "$ROOT/packaging/licenses/notices.json" --output "$DOC/Third-Party-Notices.txt"
+python3 -I "$REPO_ROOT/scripts/deb-copyright.py" generate "$ROOT/packaging/licenses/components.json" \
+  --copyright-out "$DOC/copyright"
+python3 -I "$REPO_ROOT/scripts/deb-copyright.py" check "$DOC/copyright" --no-common-licenses
+# Compare both files with what the stripped binary links, so an SDK change that
+# adds a library or bumps curl, zlib or ICU fails here instead of shipping stale
+# notices. LLVM's exception waives attribution for libunwind in binaries.
+for notices in Third-Party-Notices.txt copyright; do
+  python3 -I "$REPO_ROOT/scripts/static-runtime-notices.py" check "$STAGE/usr/bin" --notices "$DOC/$notices" \
+    --allow 'libunwind=Apache-2.0 WITH LLVM-exception, no attribution required'
+done
+chmod 0644 "$DOC/copyright" "$DOC/Third-Party-Notices.txt"
 
 mkdir -p "$STAGE/DEBIAN"
 cat > "$STAGE/DEBIAN/control" <<EOF

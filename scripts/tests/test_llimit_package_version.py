@@ -4,6 +4,7 @@ import subprocess
 import tempfile
 import unittest
 import importlib.util
+import json
 import os
 import re
 import sys
@@ -70,6 +71,33 @@ class PackageVersionTests(unittest.TestCase):
             binary.parent.mkdir(parents=True)
             binary.write_text(f'#!/bin/sh\nprintf "llimit {version[1]} (LLimitd, QuotaCore)\\n"\n')
             binary.chmod(0o755)
+
+            # Packaging writes license notices: give it the generators, their inputs,
+            # and a stand-in Swift toolchain and static SDK SBOM that match notices.json.
+            shutil.copyfile(ROOT / "LICENSE", root / "LICENSE")
+            for name in ["swiftpm-notices.py", "deb-copyright.py", "static-runtime-notices.py"]:
+                shutil.copyfile(ROOT / "scripts" / name, root / "scripts" / name)
+            shutil.copytree(ROOT / "Packages/LLimitd/packaging/licenses", packaging / "licenses")
+            notices = json.loads((packaging / "licenses/notices.json").read_text())
+            sbom = [{"name": name, "versionInfo": "0"} for name in notices["spdx_sbom"]["skip"]]
+            sbom += [{"name": c["sbom_name"], "versionInfo": c["version"]}
+                     for c in notices["components"] if "sbom_name" in c]
+            swift_tag = "swift-" + next(c["version"] for c in notices["components"] if c.get("sbom_name") == "swift")
+            home = root / "home"
+            bundle = home / ".swiftpm/swift-sdks" / f"{swift_tag}_static-linux-0.0.1.artifactbundle"
+            bundle.mkdir(parents=True)
+            (bundle / "sbom.spdx.json").write_text(json.dumps({"packages": sbom}, indent=2))
+            toolchain = root / "toolchain/usr"
+            (toolchain / "lib/swift").mkdir(parents=True)
+            (toolchain / "share/swift").mkdir(parents=True)
+            (toolchain / "share/swift/LICENSE.txt").write_text("Stand-in Swift license, Runtime Library Exception\n")
+            (toolchain / "bin").mkdir()
+            target_info = json.dumps({"compilerVersion": f"Swift version stand-in ({swift_tag})",
+                                      "paths": {"runtimeResourcePath": str(toolchain / "lib/swift")}})
+            (toolchain / "bin/swift").write_text(f"#!/bin/sh\ncat <<'EOF'\n{target_info}\nEOF\n")
+            (toolchain / "bin/swift").chmod(0o755)
+            environment.update(HOME=str(home), PATH=f"{toolchain / 'bin'}{os.pathsep}{os.environ['PATH']}")
+
             packaged = subprocess.run(["bash", "-c", package[1]], cwd=root, env=environment,
                                       capture_output=True, text=True, timeout=15)
             self.assertEqual(packaged.returncode, 0, packaged.stderr)
@@ -77,6 +105,9 @@ class PackageVersionTests(unittest.TestCase):
             result = subprocess.run(["dpkg-deb", "-f", str(artifact), "Version"], capture_output=True, text=True, timeout=15)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout.strip(), CI_PACKAGE_VERSION)
+            contents = subprocess.run(["dpkg-deb", "-c", str(artifact)], capture_output=True, text=True, timeout=15)
+            for name in ["copyright", "Third-Party-Notices.txt"]:
+                self.assertIn(f"./usr/share/doc/llimit/{name}", contents.stdout)
 
     def test_stamp_updates_only_one_version_declaration(self):
         source = 'public enum LLimitdInfo {\n  public static let version = "1.0.1"\n}\n'
