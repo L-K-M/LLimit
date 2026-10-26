@@ -92,7 +92,7 @@ Pushing any `v*` tag triggers the release workflow, which:
    keychain but is needed for the app to launch on Apple Silicon. It is **not** a
    Developer ID signature and the app is **not** notarized.
 5. Packages a `LLimit-<version>.zip` (via `ditto`) and a `LLimit-<version>.dmg`
-   (via `create-dmg`), and checks that the zip carries the notices.
+   (via `create-dmg`), and checks that the zip and the DMG carry the notices.
 6. Publishes a **GitHub Release** named `LLimit <version>` with the `.dmg` and
    `.zip` attached and auto-generated release notes.
 

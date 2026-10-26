@@ -76,6 +76,14 @@ jobs:
           [ -f "$DMG" ] || { echo "::error::DMG was not created"; exit 1; }
           # The zip is what users download; it must carry the notices too.
           unzip -p "$ZIP" "$APP_NAME.app/Contents/Resources/Third-Party-Notices.txt" | grep -q 'UNICODE LICENSE V3'
+          # So must the DMG; create-dmg errors are ignored above, so check its app's notices.
+          MNT="$RUNNER_TEMP/dmg-check"
+          mkdir -p "$MNT"
+          hdiutil attach -readonly -nobrowse -noautoopen -mountpoint "$MNT" "$DMG" >/dev/null
+          dmg_notices=$(find "$MNT" -maxdepth 4 -path '*/Contents/Resources/Third-Party-Notices.txt' -print -quit)
+          test -s "$dmg_notices"
+          grep -q 'UNICODE LICENSE V3' "$dmg_notices"
+          hdiutil detach "$MNT" >/dev/null
           echo "ZIP=$ZIP" >> "$GITHUB_ENV"
           echo "DMG=$DMG" >> "$GITHUB_ENV"
 
