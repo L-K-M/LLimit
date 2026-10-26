@@ -478,6 +478,9 @@ swift build -c release --swift-sdk x86_64-swift-linux-musl --package-path Packag
 Packages/LLimitd/packaging/build-deb.sh <version>
 ```
 
+Packaging needs `python3`: `build-deb.sh` writes the license notices for what the
+static SDK links into the binary, from `packaging/licenses/`.
+
 ## Build & test
 
 ```
@@ -488,3 +491,10 @@ swift test  --package-path Packages/LLimitd
 No third-party dependencies; the only dependency is `../QuotaCore` by path.
 `scripts/release.sh` stamps the CLI through the shared post-bump hook; the tag
 build also stamps it before compilation. Packaging rejects a version mismatch.
+
+## License
+
+LLimit's own code is released under the [Unlicense](../../LICENSE). The static
+`llimit` binary includes curl, BoringSSL, ICU, musl, musl-fts, zlib and the Swift
+runtime, which keep their own licenses. The `.deb` ships their notices in
+`/usr/share/doc/llimit/` as `copyright` and `Third-Party-Notices.txt`.

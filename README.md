@@ -383,3 +383,16 @@ swift test --package-path Packages/LLimitd
 The local HTTP integration fixtures in the tests require Python 3.
 
 The Ubuntu port's design and phased plan: [`UBUNTU_PORT.md`](UBUNTU_PORT.md).
+
+## License
+
+LLimit's own code is released under the [Unlicense](LICENSE). The builds
+bundle third-party code that keeps its own licenses: the macOS app includes
+SwiftTerm (MIT) and its Unicode data tables (Unicode License V3); the Linux
+`llimit` binary is built with Swift's static Linux SDK, which links in curl,
+BoringSSL, ICU, musl, musl-fts and zlib, plus the Swift runtime under its
+Runtime Library Exception. Their notices ship inside each artifact:
+
+- macOS: `LLimit.app/Contents/Resources/Third-Party-Notices.txt`
+- Linux `.deb`: `/usr/share/doc/llimit/copyright` and
+  `/usr/share/doc/llimit/Third-Party-Notices.txt`
