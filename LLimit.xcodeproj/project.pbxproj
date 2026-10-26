@@ -217,6 +217,7 @@
 				853B209FEE1FC5CB7F34D576 /* Resources */,
 				DC4BBF5282EF389DD1CFEA4F /* Frameworks */,
 				2375891AED35FC7322EC596A /* Embed Foundation Extensions */,
+				DB88B1539D2A3F638D18870A /* Bundle license notices */,
 			);
 			buildRules = (
 			);
@@ -303,6 +304,34 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		DB88B1539D2A3F638D18870A /* Bundle license notices */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/scripts/bundle-notices.sh",
+				"$(SRCROOT)/scripts/swiftpm-notices.py",
+				"$(SRCROOT)/scripts/third-party-notices.json",
+				"$(SRCROOT)/LLimit.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved",
+			);
+			name = "Bundle license notices";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/Third-Party-Notices.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "bash \"$SRCROOT/scripts/bundle-notices.sh\"";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		49A13C62C4CC90130746BE9E /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -361,6 +390,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 44;
 				DEVELOPMENT_TEAM = 293A48LC7B;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LLimitApp/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -506,6 +536,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 44;
 				DEVELOPMENT_TEAM = 293A48LC7B;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LLimitApp/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (

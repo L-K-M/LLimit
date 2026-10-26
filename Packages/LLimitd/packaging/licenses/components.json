@@ -1,0 +1,139 @@
+{
+  "_comment": [
+    "What packaging/build-deb.sh writes to usr/share/doc/llimit/copyright through",
+    "scripts/deb-copyright.py. Paths are relative to this file. $SWIFT_LICENSE,",
+    "$SWIFT_VERSION and $SWIFT_TAG come from the toolchain that built the binary.",
+    "The Swift static Linux SDK links these components into usr/bin/llimit;",
+    "notices.json lists the same set for Third-Party-Notices.txt and checks it",
+    "against the SDK's SBOM, and scripts/static-runtime-notices.py fails the build",
+    "if the binary links anything these files do not name."
+  ],
+  "package": "llimit",
+  "upstream_name": "LLimit",
+  "upstream_contact": "L-K-M <https://github.com/L-K-M/LLimit>",
+  "source": "https://github.com/L-K-M/LLimit",
+  "own": {
+    "copyright": [
+      "2026 L-K-M"
+    ],
+    "license": "Unlicense",
+    "license_files": [
+      "../../../../LICENSE"
+    ]
+  },
+  "components": [
+    {
+      "name": "Swift standard library, Foundation and libdispatch",
+      "version": "$SWIFT_VERSION",
+      "license": "Apache-2.0 WITH Swift-exception",
+      "copyright": [
+        "Apple Inc. and the Swift project authors"
+      ],
+      "source_url": "https://github.com/swiftlang/swift/tree/$SWIFT_TAG",
+      "license_files": [
+        "$SWIFT_LICENSE"
+      ],
+      "embedded_in": [
+        "usr/bin/llimit"
+      ],
+      "comment": "The static SDK's Swift runtime, swift-corelibs-foundation, swift-foundation and libdispatch. The Runtime Library Exception waives attribution; listed for completeness."
+    },
+    {
+      "name": "ICU",
+      "version": "74.1",
+      "license": "Unicode-3.0",
+      "copyright": [
+        "2016 and later Unicode, Inc. and others",
+        "1995-2016 International Business Machines Corporation and others"
+      ],
+      "source_url": "https://github.com/swiftlang/swift-foundation-icu/tree/$SWIFT_TAG",
+      "license_files": [
+        "ICU-74.1-LICENSE.txt"
+      ],
+      "embedded_in": [
+        "usr/bin/llimit"
+      ],
+      "comment": "Foundation's ICU code and data, including the third-party dictionaries and time zone data whose terms are part of the license text. Not covered by the Swift Runtime Library Exception."
+    },
+    {
+      "name": "curl",
+      "version": "8.7.1",
+      "license": "curl",
+      "copyright": [
+        "1996 - 2024, Daniel Stenberg, <daniel@haxx.se>, and many contributors"
+      ],
+      "source_url": "https://github.com/curl/curl/tree/curl-8_7_1",
+      "license_files": [
+        "curl-8.7.1-COPYING.txt"
+      ],
+      "embedded_in": [
+        "usr/bin/llimit"
+      ],
+      "comment": "libcurl, for FoundationNetworking. Built from curl's git tag curl-8_7_1, so the binary reports libcurl/8.7.0-DEV."
+    },
+    {
+      "name": "BoringSSL",
+      "version": "fips-20220613",
+      "license": "OpenSSL AND ISC AND MIT",
+      "copyright": [
+        "1998-2011 The OpenSSL Project",
+        "1995-1998 Eric Young (eay@cryptsoft.com)",
+        "2015, Google Inc.",
+        "2015-2016 the fiat-crypto authors"
+      ],
+      "source_url": "https://boringssl.googlesource.com/boringssl/+/refs/tags/fips-20220613",
+      "license_files": [
+        "boringssl-fips-20220613-LICENSE.txt"
+      ],
+      "embedded_in": [
+        "usr/bin/llimit"
+      ],
+      "comment": "TLS for libcurl. One upstream LICENSE file covers all three licenses."
+    },
+    {
+      "name": "zlib",
+      "version": "1.3.1",
+      "license": "Zlib",
+      "copyright": [
+        "1995-2024 Jean-loup Gailly and Mark Adler"
+      ],
+      "source_url": "https://github.com/madler/zlib/tree/v1.3.1",
+      "license_files": [
+        "zlib-1.3.1-LICENSE.txt"
+      ],
+      "embedded_in": [
+        "usr/bin/llimit"
+      ]
+    },
+    {
+      "name": "musl",
+      "version": "1.2.5",
+      "license": "MIT",
+      "copyright": [
+        "2005-2020 Rich Felker, et al."
+      ],
+      "source_url": "https://git.musl-libc.org/cgit/musl/tree/?h=v1.2.5",
+      "license_files": [
+        "musl-1.2.5-COPYRIGHT.txt"
+      ],
+      "embedded_in": [
+        "usr/bin/llimit"
+      ]
+    },
+    {
+      "name": "musl-fts",
+      "version": "1.2.7",
+      "license": "BSD-3-Clause",
+      "copyright": [
+        "1989, 1993 The Regents of the University of California"
+      ],
+      "source_url": "https://github.com/void-linux/musl-fts/tree/v1.2.7",
+      "license_files": [
+        "musl-fts-1.2.7-COPYING.txt"
+      ],
+      "embedded_in": [
+        "usr/bin/llimit"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "comment": "Overrides for swiftpm-notices.py (run by bundle-notices.sh from the LLimitApp build phase). Every entry states why it exists. files paths are relative to this file.",
+  "preamble": [
+    "LLimit's own code is released under the Unlicense (see LICENSE in the source",
+    "repository). Every Swift package LLimit.app resolves is listed below, plus",
+    "data compiled into the app; each keeps its own license. A resolved package",
+    "is not necessarily linked: swift-argument-parser serves only SwiftTerm's",
+    "Termcast tool and is listed for completeness. The Swift runtime and system",
+    "frameworks ship with macOS."
+  ],
+  "packages": {
+    "swift-argument-parser": {
+      "skip_files": [".license_header_template"],
+      "reason": "Included like every resolved pin, although only SwiftTerm's Termcast executable uses it. Its .license_header_template is the source-file header template for the package's own development, not a license text; LICENSE.txt carries the license."
+    }
+  },
+  "components": [
+    {
+      "name": "Unicode Character Database tables in SwiftTerm",
+      "version": "17.0",
+      "license": "Unicode-3.0",
+      "source": "https://www.unicode.org/Public/17.0.0/ucd/",
+      "files": ["licenses/Unicode-License-V3.txt"],
+      "verify_version": {
+        "file": "checkout:swiftterm/Sources/SwiftTerm/Apple/BidiMirroringData.swift",
+        "regex": "Generated from Unicode ([0-9.]+) BidiMirroring"
+      },
+      "reason": "SwiftTerm compiles tables generated from the UCD (UnicodeWidthData.swift, Apple/ArabicShapingData.swift, Apple/BidiMirroringData.swift), which fall under the Unicode License V3 (https://www.unicode.org/license.txt) that SwiftTerm's MIT LICENSE does not include. A separate component rather than add_files, so SwiftTerm still fails the build if its own LICENSE goes missing."
+    }
+  ]
+}

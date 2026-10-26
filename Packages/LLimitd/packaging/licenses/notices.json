@@ -1,0 +1,88 @@
+{
+  "comment": "Overrides for scripts/swiftpm-notices.py, which build-deb.sh runs to write usr/share/doc/llimit/Third-Party-Notices.txt. The llimit binary has no SwiftPM pins; these are the libraries the Swift static Linux SDK links into it. SWIFT_SDK_SBOM is the installed SDK's sbom.spdx.json and SWIFT_LICENSE the toolchain's LICENSE.txt, both set by build-deb.sh. Every SDK package must be a component with the SBOM's version or skipped with a reason, so an SDK bump fails until the texts here are updated. Keep components.json in step.",
+  "preamble": [
+    "LLimit's own code is released under the Unlicense (its text is in the",
+    "copyright file next to this file). The llimit binary is built with the Swift",
+    "static Linux SDK, which links the components below into it. They keep their",
+    "own licenses. The SDK's curl 8.7.1 reports itself as libcurl/8.7.0-DEV: it",
+    "is built from curl's git tag curl-8_7_1, which keeps the development version",
+    "string."
+  ],
+  "spdx_sbom": {
+    "file": "$SWIFT_SDK_SBOM",
+    "reason": "A new or bumped SDK component must fail the build until its notice is added.",
+    "skip": {
+      "Swift statically linked SDK for Linux": "The SDK bundle itself; its code is the Swift runtime and the libraries listed here.",
+      "libxml2": "Linked only through FoundationXML, which no LLimit module imports. static-runtime-notices.py finds no libxml2 in the binary and fails the build if that changes."
+    }
+  },
+  "components": [
+    {
+      "name": "Swift standard library, Foundation and libdispatch",
+      "sbom_name": "swift",
+      "version": "6.2.3-RELEASE",
+      "license": "Apache-2.0 WITH Swift-exception",
+      "source": "https://github.com/swiftlang/swift/tree/swift-6.2.3-RELEASE",
+      "files": ["$SWIFT_LICENSE"],
+      "reason": "The SDK's Swift runtime, swift-corelibs-foundation, swift-foundation and libdispatch. The Runtime Library Exception waives attribution; listed for completeness."
+    },
+    {
+      "name": "ICU (swift-foundation-icu)",
+      "version": "74.1",
+      "license": "Unicode-3.0",
+      "source": "https://github.com/swiftlang/swift-foundation-icu/tree/swift-6.2.3-RELEASE",
+      "files": ["ICU-74.1-LICENSE.txt"],
+      "verify_version": {
+        "file": "$SWIFT_SDK_SBOM",
+        "regex": "\"name\": \"swift\",\\s*\"versionInfo\": \"([^\"]+)\"",
+        "expect": "6.2.3-RELEASE"
+      },
+      "reason": "Foundation links lib_FoundationICU (icudt74l in the binary), which the Swift exception does not cover. swift-foundation-icu reports ICU 74.1 at swift-6.2.3-RELEASE; Swift 6.3 and 6.4 ship 76.1, so recheck when the Swift release changes."
+    },
+    {
+      "name": "curl",
+      "sbom_name": "curl",
+      "version": "8.7.1",
+      "license": "curl",
+      "source": "https://github.com/curl/curl/tree/curl-8_7_1",
+      "files": ["curl-8.7.1-COPYING.txt"],
+      "reason": "FoundationNetworking links libcurl. The SBOM says MIT; curl's own license is the SPDX id curl."
+    },
+    {
+      "name": "BoringSSL",
+      "sbom_name": "boringssl",
+      "version": "fips-20220613",
+      "license": "OpenSSL AND ISC AND MIT",
+      "source": "https://boringssl.googlesource.com/boringssl/+/refs/tags/fips-20220613",
+      "files": ["boringssl-fips-20220613-LICENSE.txt"],
+      "reason": "The SDK's libcurl uses BoringSSL for TLS."
+    },
+    {
+      "name": "zlib",
+      "sbom_name": "zlib",
+      "version": "1.3.1",
+      "license": "Zlib",
+      "source": "https://github.com/madler/zlib/tree/v1.3.1",
+      "files": ["zlib-1.3.1-LICENSE.txt"],
+      "reason": "Linked through libcurl; the binary carries zlib's inflate 1.3.1 copyright string."
+    },
+    {
+      "name": "musl",
+      "sbom_name": "musl",
+      "version": "1.2.5",
+      "license": "MIT",
+      "source": "https://git.musl-libc.org/cgit/musl/tree/?h=v1.2.5",
+      "files": ["musl-1.2.5-COPYRIGHT.txt"],
+      "reason": "The static SDK's C library."
+    },
+    {
+      "name": "musl-fts",
+      "sbom_name": "musl-fts",
+      "version": "1.2.7",
+      "license": "BSD-3-Clause",
+      "source": "https://github.com/void-linux/musl-fts/tree/v1.2.7",
+      "files": ["musl-fts-1.2.7-COPYING.txt"],
+      "reason": "Foundation's directory enumeration uses fts, which musl takes from musl-fts."
+    }
+  ]
+}

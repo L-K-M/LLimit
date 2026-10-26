@@ -464,6 +464,24 @@ cd Packages/QuotaCore && swift test
 swift test --package-path Packages/LLimitd   # Linux daemon + CLI (runs on macOS too)
 ```
 
+## Licensing
+
+- LLimit's own code is Unlicense (`LICENSE`). Keep license statements in the
+  READMEs, Info.plist and the `.deb`'s `copyright` consistent with it.
+- Before adding a dependency, vendored file or bundled asset (fonts, images,
+  icons, data), confirm its license allows redistribution in the app and the
+  `.deb`. Never vendor third-party code without its license file.
+- The LLimitApp build phase "Bundle license notices" (`scripts/bundle-notices.sh`,
+  overrides in `scripts/third-party-notices.json`) writes
+  `LLimit.app/Contents/Resources/Third-Party-Notices.txt` from
+  `Package.resolved` and fails on a package without license text. It lists
+  every resolved package, linked or not; a new pin needs its license text.
+  Keep the phase in both `project.yml` and the committed `project.pbxproj`.
+- `Packages/LLimitd/packaging/build-deb.sh` writes the `.deb`'s `copyright` and
+  `Third-Party-Notices.txt` from `Packages/LLimitd/packaging/licenses/`. A Swift
+  or static SDK bump fails there until the texts and versions are updated (see
+  that directory's README). Keep the CI notice checks passing.
+
 <!-- shared-rules:start -->
 
 ## Working practices

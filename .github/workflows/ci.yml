@@ -47,6 +47,15 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             clean build | xcbeautify
 
+      # The app must carry the notices of the third-party code it links.
+      - name: Check bundled license notices
+        run: |
+          notices="$RUNNER_TEMP/LLimitBuild/Build/Products/Debug/LLimit.app/Contents/Resources/Third-Party-Notices.txt"
+          test -s "$notices"
+          grep -q '^SwiftTerm ' "$notices"
+          grep -q 'Miguel de Icaza' "$notices"      # SwiftTerm's MIT notice
+          grep -q 'UNICODE LICENSE V3' "$notices"   # its Unicode data tables
+
       - name: Test primary limit colors
         run: scripts/test-limit-colors.sh --skip-build "$RUNNER_TEMP/LLimitBuild"
 
@@ -159,6 +168,19 @@ jobs:
             *) echo "::error::the packaged llimit is not statically linked"; exit 1 ;;
           esac
           python3 -I scripts/test-llimit-secret-input.py "$binary"
+
+      # The static SDK links curl, BoringSSL, ICU and musl into the binary;
+      # their notices must ship in the .deb.
+      - name: Check packaged license notices
+        run: |
+          doc="$RUNNER_TEMP/deb/usr/share/doc/llimit"
+          for file in "$doc/copyright" "$doc/Third-Party-Notices.txt"; do
+            test -s "$file"
+            grep -q 'Daniel Stenberg' "$file"   # curl
+            grep -q 'BoringSSL' "$file"
+            grep -q 'Unicode, Inc' "$file"      # ICU
+            grep -q 'Rich Felker' "$file"       # musl
+          done
 
   tray-test:
     name: Linux (tray)

@@ -48,6 +48,12 @@ jobs:
         run: |
           APP=$(find "$RUNNER_TEMP/DerivedData/Build/Products/Release" -maxdepth 1 -name "$APP_NAME.app" -print -quit)
           [ -n "$APP" ] || { echo "::error::built $APP_NAME.app not found"; exit 1; }
+          # The notices of the third-party code it links must be in the app before signing.
+          notices="$APP/Contents/Resources/Third-Party-Notices.txt"
+          test -s "$notices"
+          grep -q '^SwiftTerm ' "$notices"
+          grep -q 'Miguel de Icaza' "$notices"      # SwiftTerm's MIT notice
+          grep -q 'UNICODE LICENSE V3' "$notices"   # its Unicode data tables
           # Ad-hoc sign (identity "-"): no certificate, keychain, or API key required,
           # but it IS required for the app to launch on Apple Silicon. This is not a
           # Developer ID signature and the app is not notarized — Gatekeeper still warns.
@@ -68,6 +74,19 @@ jobs:
             --app-drop-link 390 185 \
             "$DMG" "$APP_PATH" || true
           [ -f "$DMG" ] || { echo "::error::DMG was not created"; exit 1; }
+          # The zip is what users download; it must carry the notices too.
+          unzip -p "$ZIP" "$APP_NAME.app/Contents/Resources/Third-Party-Notices.txt" | grep -q 'UNICODE LICENSE V3'
+          # So must the DMG; create-dmg errors are ignored above, so check its app's notices.
+          MNT="$RUNNER_TEMP/dmg-check"
+          mkdir -p "$MNT"
+          hdiutil attach -readonly -nobrowse -noautoopen -mountpoint "$MNT" "$DMG" >/dev/null
+          dmg_notices=$(find "$MNT" -maxdepth 4 -path '*/Contents/Resources/Third-Party-Notices.txt' -print -quit)
+          test -s "$dmg_notices"
+          grep -q 'UNICODE LICENSE V3' "$dmg_notices"
+          # Detach can fail with "Resource busy" (create-dmg retries it for that reason).
+          # The checks above passed and the runner is discarded, so only warn.
+          hdiutil detach "$MNT" >/dev/null || hdiutil detach -force "$MNT" >/dev/null \
+            || echo "::warning::could not detach $MNT"
           echo "ZIP=$ZIP" >> "$GITHUB_ENV"
           echo "DMG=$DMG" >> "$GITHUB_ENV"
 
@@ -128,6 +147,20 @@ jobs:
 
       - name: Build .deb
         run: Packages/LLimitd/packaging/build-deb.sh "$VERSION"
+
+      # The static SDK links curl, BoringSSL, ICU and musl into the binary;
+      # their notices must ship in the .deb.
+      - name: Check packaged license notices
+        run: |
+          dpkg-deb -x "Packages/LLimitd/.build/llimit_${VERSION}_amd64.deb" "$RUNNER_TEMP/deb"
+          doc="$RUNNER_TEMP/deb/usr/share/doc/llimit"
+          for file in "$doc/copyright" "$doc/Third-Party-Notices.txt"; do
+            test -s "$file"
+            grep -q 'Daniel Stenberg' "$file"   # curl
+            grep -q 'BoringSSL' "$file"
+            grep -q 'Unicode, Inc' "$file"      # ICU
+            grep -q 'Rich Felker' "$file"       # musl
+          done
 
       - name: Attach .deb to the GitHub Release
         uses: softprops/action-gh-release@v3
