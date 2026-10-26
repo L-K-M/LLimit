@@ -83,7 +83,10 @@ jobs:
           dmg_notices=$(find "$MNT" -maxdepth 4 -path '*/Contents/Resources/Third-Party-Notices.txt' -print -quit)
           test -s "$dmg_notices"
           grep -q 'UNICODE LICENSE V3' "$dmg_notices"
-          hdiutil detach "$MNT" >/dev/null
+          # Detach can fail with "Resource busy" (create-dmg retries it for that reason).
+          # The checks above passed and the runner is discarded, so only warn.
+          hdiutil detach "$MNT" >/dev/null || hdiutil detach -force "$MNT" >/dev/null \
+            || echo "::warning::could not detach $MNT"
           echo "ZIP=$ZIP" >> "$GITHUB_ENV"
           echo "DMG=$DMG" >> "$GITHUB_ENV"
 
