@@ -474,8 +474,8 @@ swift test --package-path Packages/LLimitd   # Linux daemon + CLI (runs on macOS
 - The LLimitApp build phase "Bundle license notices" (`scripts/bundle-notices.sh`,
   overrides in `scripts/third-party-notices.json`) writes
   `LLimit.app/Contents/Resources/Third-Party-Notices.txt` from
-  `Package.resolved` and fails on a package without license text. A new pin
-  needs its license, or an `exclude` override saying why it is not linked.
+  `Package.resolved` and fails on a package without license text. It lists
+  every resolved package, linked or not; a new pin needs its license text.
   Keep the phase in both `project.yml` and the committed `project.pbxproj`.
 - `Packages/LLimitd/packaging/build-deb.sh` writes the `.deb`'s `copyright` and
   `Third-Party-Notices.txt` from `Packages/LLimitd/packaging/licenses/`. A Swift

@@ -2,13 +2,16 @@
   "comment": "Overrides for swiftpm-notices.py (run by bundle-notices.sh from the LLimitApp build phase). Every entry states why it exists. files paths are relative to this file.",
   "preamble": [
     "LLimit's own code is released under the Unlicense (see LICENSE in the source",
-    "repository). The components below are compiled into LLimit.app and keep their",
-    "own licenses. The Swift runtime and system frameworks ship with macOS."
+    "repository). Every Swift package LLimit.app resolves is listed below, plus",
+    "data compiled into the app; each keeps its own license. A resolved package",
+    "is not necessarily linked: swift-argument-parser serves only SwiftTerm's",
+    "Termcast tool and is listed for completeness. The Swift runtime and system",
+    "frameworks ship with macOS."
   ],
   "packages": {
     "swift-argument-parser": {
-      "exclude": true,
-      "reason": "Pinned only because SwiftTerm 1.18.0's Termcast executable uses it (checked in SwiftTerm's Package.swift at 1.18.0); LLimitApp links the SwiftTerm library product, whose target has no dependencies."
+      "skip_files": [".license_header_template"],
+      "reason": "Included like every resolved pin, although only SwiftTerm's Termcast executable uses it. Its .license_header_template is the source-file header template for the package's own development, not a license text; LICENSE.txt carries the license."
     }
   },
   "components": [
