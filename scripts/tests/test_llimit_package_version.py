@@ -82,7 +82,9 @@ class PackageVersionTests(unittest.TestCase):
             sbom = [{"name": name, "versionInfo": "0"} for name in notices["spdx_sbom"]["skip"]]
             sbom += [{"name": c["sbom_name"], "versionInfo": c["version"]}
                      for c in notices["components"] if "sbom_name" in c]
-            swift_tag = "swift-" + next(c["version"] for c in notices["components"] if c.get("sbom_name") == "swift")
+            swift_versions = [c["version"] for c in notices["components"] if c.get("sbom_name") == "swift"]
+            self.assertTrue(swift_versions, "notices.json must list the static SDK's swift component")
+            swift_tag = "swift-" + swift_versions[0]
             home = root / "home"
             bundle = home / ".swiftpm/swift-sdks" / f"{swift_tag}_static-linux-0.0.1.artifactbundle"
             bundle.mkdir(parents=True)
@@ -106,6 +108,7 @@ class PackageVersionTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout.strip(), CI_PACKAGE_VERSION)
             contents = subprocess.run(["dpkg-deb", "-c", str(artifact)], capture_output=True, text=True, timeout=15)
+            self.assertEqual(contents.returncode, 0, contents.stderr)
             for name in ["copyright", "Third-Party-Notices.txt"]:
                 self.assertIn(f"./usr/share/doc/llimit/{name}", contents.stdout)
 
