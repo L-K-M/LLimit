@@ -2,5 +2,7 @@
 
 ## Unreleased
 
-- No changes recorded yet. Earlier history lives in the commit log and any
-  GitHub releases; future changes will be noted here.
+- Added the Tencent TokenHub (`tencent-tokenhub`) and StepFun (`stepfun`)
+  providers, with credential discovery (thcli credential files,
+  `~/.stepcode/auth.json`, `STEPFUN_TOKEN`), quota metrics, widget/app
+  integration, and QuotaCore tests.
