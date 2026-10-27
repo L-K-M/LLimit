@@ -1,9 +1,19 @@
 import SwiftUI
 import QuotaCore
 
-/// Browsing and inspecting providers never creates an account. Only the setup action does.
+/// Browsing never creates accounts; detected Add and provider setup are explicit actions.
 struct ProviderChooserView: View {
   let isRefreshing: Bool
+  let detectedCredentials: [DiscoveredCredential]
+  let addedCredentialIDs: Set<String>
+  let accountCounts: [QuotaProvider: Int]
+  let isScanningCredentials: Bool
+  let hasScannedCredentials: Bool
+  let discoveryDiagnostics: [String]
+  let discoveryImportMessage: String?
+  let onScan: () -> Void
+  let onImport: (DiscoveredCredential) -> Void
+  let onOpen: (DiscoveredCredential) -> Void
   let onAdd: (QuotaProvider) -> Void
   @State private var query = ""
   @State private var selectedProvider: QuotaProvider?
@@ -15,7 +25,7 @@ struct ProviderChooserView: View {
       VStack(alignment: .leading, spacing: 8) {
         Text("Add Account")
           .font(.title2.weight(.semibold))
-        Text("Choose the service you subscribe to. You can add more than one account for each provider.")
+        Text("Add a login found on this Mac, or choose a provider to connect another account.")
           .font(.subheadline)
           .foregroundStyle(.secondary)
           .fixedSize(horizontal: false, vertical: true)
@@ -61,12 +71,21 @@ struct ProviderChooserView: View {
       .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary) }
 
       let matches = ProviderCatalog.search(query)
-      Text(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        ? "All providers" : (matches.count == 1 ? "1 provider found" : "\(matches.count) providers found"))
-        .font(.caption.weight(.medium))
-        .foregroundStyle(.secondary)
+      let detectedMatches = ProviderCatalog.search(query, credentials: detectedCredentials)
+      DetectedAccountsView(credentials: detectedMatches, addedCredentialIDs: addedCredentialIDs,
+        isScanning: isScanningCredentials, hasScanned: hasScannedCredentials, query: query,
+        diagnostics: discoveryDiagnostics, errorMessage: discoveryImportMessage,
+        onScan: onScan, onAdd: onImport, onOpen: onOpen)
 
-      if matches.isEmpty {
+      Divider().padding(.vertical, 4)
+      if !matches.isEmpty || detectedMatches.isEmpty {
+        Text(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+          ? "Connect another provider" : (matches.count == 1 ? "1 provider found" : "\(matches.count) providers found"))
+          .font(.caption.weight(.medium))
+          .foregroundStyle(.secondary)
+      }
+
+      if matches.isEmpty && detectedMatches.isEmpty {
         ContentUnavailableView {
           Label("No matching providers", systemImage: "magnifyingglass")
         } description: {
@@ -85,9 +104,17 @@ struct ProviderChooserView: View {
             } label: {
               HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
-                  Text(entry.title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
+                  HStack(spacing: 6) {
+                    Text(entry.title)
+                      .font(.subheadline.weight(.semibold))
+                      .foregroundStyle(.primary)
+                    if let count = accountCounts[entry.provider], count > 0 {
+                      Text("\(count) added")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize()
+                    }
+                  }
                   Text(entry.context)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -111,12 +138,19 @@ struct ProviderChooserView: View {
                   .allowsHitTesting(false)
               }
             }
-            .accessibilityLabel("\(entry.title), \(entry.context)")
+            .accessibilityLabel(providerAccessibilityLabel(entry))
             .accessibilityHint("Show account setup")
           }
         }
       }
     }
+  }
+
+  private func providerAccessibilityLabel(_ entry: ProviderCatalogEntry) -> String {
+    let label = "\(entry.title), \(entry.context)"
+    let count = accountCounts[entry.provider, default: 0]
+    guard count > 0 else { return label }
+    return "\(label), \(count) \(count == 1 ? "account" : "accounts") added"
   }
 
   private func setup(for provider: QuotaProvider) -> some View {
@@ -174,7 +208,7 @@ struct ProviderChooserView: View {
     case .stepFun:
       return "Sign in to StepFun inside LLimit. LLimit renews the saved login automatically when possible."
     default:
-      return "Add the account, then enter its credentials. You can also import an existing login from Detected on this Mac below."
+      return "Add the account, then enter its credentials. To use a detected login, go back to Found on this Mac."
     }
   }
 }

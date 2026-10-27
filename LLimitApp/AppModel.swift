@@ -4,9 +4,6 @@ import AppKit
 import WidgetKit
 import ServiceManagement
 import QuotaCore
-#if canImport(Security)
-import Security
-#endif
 
 struct ProviderAccountStatus: Identifiable, Hashable {
   let accountID: String
@@ -53,6 +50,11 @@ final class AppModel: ObservableObject {
   /// Human-readable log of the last detection scan, shown in Settings to explain what
   /// was (or wasn't) found — including the macOS Keychain result for Claude.
   @Published var discoveryDiagnostics: [String] = []
+  @Published private(set) var isScanningCredentials = false
+  @Published private(set) var hasScannedCredentials = false
+  @Published private(set) var discoveryImportMessage: String?
+  private var discoveryRequestID = UUID()
+  private var isExplicitDiscoveryRunning = false
 
   @Published var claudeTerminalSession: ClaudeTerminalSession?
   @Published private(set) var claudeAccountMessages: [String: String] = [:]
@@ -628,32 +630,35 @@ final class AppModel: ObservableObject {
   /// Scans local AI tools for credentials you could import into a new LLimit account.
   /// Optional convenience so you don't have to hunt for tokens — nothing here is a
   /// runtime dependency; imported accounts are copied into LLimit and stored locally.
-  func scanForDetectedCredentials(for provider: QuotaProvider? = nil) {
-    var result = CredentialDiscovery().discover()
+  func scanForDetectedCredentials(for provider: QuotaProvider? = nil) async -> CredentialDiscoveryResult? {
+    guard !isExplicitDiscoveryRunning else { return nil }
+    isExplicitDiscoveryRunning = true
+    defer { isExplicitDiscoveryRunning = false }
+    return await performCredentialScan(for: provider, interaction: .allowPrompts)
+  }
 
-    #if canImport(Security)
-    // Explicit scans may request Claude access. Auto-fill for another provider
-    // must not ask permission for an unrelated Claude Code login.
-    if (provider == nil || provider == .anthropic),
-       !result.credentials.contains(where: { $0.provider == .anthropic }) {
-      let keychain = Self.readClaudeKeychainToken()
-      result.diagnostics.append("Claude Code Keychain: \(keychain.diagnostic)")
-      if let token = keychain.token {
-        result.credentials.append(
-          DiscoveredCredential(
-            stableID: "anthropic:keychain",
-            provider: .anthropic,
-            suggestedName: "Claude",
-            sourceLabel: "Claude Code (macOS Keychain)",
-            credentials: [CredentialField.anthropicAccessToken: token]
-          )
-        )
-      }
+  /// Opening Add Account reads supported tool logins off the main actor. A
+  /// Keychain lookup waits for an explicit Scan Again action.
+  func scanForDetectedCredentialsAutomatically() async {
+    guard !isExplicitDiscoveryRunning else { return }
+    _ = await performCredentialScan(interaction: .withoutPrompts)
+  }
+
+  private func performCredentialScan(for provider: QuotaProvider? = nil,
+                                     interaction: LocalCredentialScanner.KeychainInteraction) async -> CredentialDiscoveryResult? {
+    let requestID = UUID()
+    discoveryRequestID = requestID
+    isScanningCredentials = true
+    defer {
+      if discoveryRequestID == requestID { isScanningCredentials = false }
     }
-    #endif
-
+    let result = await LocalCredentialScanner().discoverInBackground(for: provider, interaction: interaction)
+    guard !Task.isCancelled, discoveryRequestID == requestID else { return nil }
     detectedCredentials = result.credentials
     discoveryDiagnostics = result.diagnostics
+    hasScannedCredentials = true
+    discoveryImportMessage = nil
+    return result
   }
 
   /// Fills an existing account's credentials from a login detected on this Mac (the
@@ -662,14 +667,22 @@ final class AppModel: ObservableObject {
   /// Returns true only when the detected login replaced authentication. Junie's
   /// account-owned credit allowance survives; false leaves credentials unchanged.
   @discardableResult
-  func autofillCredentials(forAccountID accountID: String) -> Bool {
-    guard let index = providerAccounts.firstIndex(where: { $0.id == accountID }) else { return false }
-    let provider = providerAccounts[index].provider
-    guard !codexAccountIsManaged(accountID), !codexAccountIsBusy(accountID) else { return false }
+  func autofillCredentials(forAccountID accountID: String) async -> Bool {
+    guard let original = account(withID: accountID) else { return false }
+    let provider = original.provider
+    let revision = credentialEditRevisions[accountID]
+    guard acceptsCredentialAutofill(original) else { return false }
 
-    scanForDetectedCredentials(for: provider)
+    guard let result = await scanForDetectedCredentials(for: provider) else { return false }
+    // A scan can wait on permission while the user edits, removes, or reconnects
+    // an account. Never apply that result to changed authentication or an old index.
+    guard let index = providerAccounts.firstIndex(where: { $0.id == accountID }),
+          providerAccounts[index].provider == provider,
+          providerAccounts[index].credentials == original.credentials,
+          credentialEditRevisions[accountID] == revision,
+          acceptsCredentialAutofill(providerAccounts[index]) else { return false }
 
-    guard let match = detectedCredentials.first(where: { $0.provider == provider }) else {
+    guard let match = result.credentials.first(where: { $0.provider == provider }) else {
       statusMessage = "No \(provider.displayName) login detected on this Mac. Sign in to a supported tool, or paste the credentials manually."
       return false
     }
@@ -685,9 +698,25 @@ final class AppModel: ObservableObject {
     return true
   }
 
+  private func acceptsCredentialAutofill(_ account: ProviderAccount) -> Bool {
+    !CodexAccountProfile.isManaged(account.credentials)
+      && account.credentials[CredentialField.anthropicCredentialSource] != ClaudeCodeCredentialSource.managedProfile.rawValue
+      && !codexAccountIsBusy(account.id) && !claudeAccountIsBusy(account.id)
+  }
+
   /// Creates a new LLimit-owned account pre-filled with a detected credential.
   @discardableResult
-  func importAccount(from detected: DiscoveredCredential) -> ProviderAccount {
+  func importAccount(from detected: DiscoveredCredential) -> ProviderAccount? {
+    discoveryImportMessage = nil
+    if let existing = providerAccounts.first(where: { detected.matchesStoredAccount($0) }) { return existing }
+    guard !configurationLoadFailed else {
+      discoveryImportMessage = "Accounts could not be loaded. Fix the settings file and relaunch LLimit before adding an account."
+      return nil
+    }
+    guard detectedCredentials.contains(detected) else {
+      discoveryImportMessage = "This detected login has changed. Choose Scan Again, then add it again."
+      return nil
+    }
     let name = detected.suggestedName.trimmingCharacters(in: .whitespacesAndNewlines)
     let account = ProviderAccount(
       provider: detected.provider,
@@ -696,66 +725,38 @@ final class AppModel: ObservableObject {
       credentials: detected.credentials
     )
 
-    providerAccounts.append(account)
-    providerStyleSettings[account.id] = ProviderStyleSettings.defaultValue(
+    let style = ProviderStyleSettings.defaultValue(
       for: account.id,
       provider: detected.provider,
       fallbackStyle: widgetStyle
     )
+    var settings = currentSettings()
+    settings.accounts.append(account)
+    settings.providerStyleSettings.append(style)
+    do { try settingsStore.save(settings) }
+    catch {
+      discoveryImportMessage = "Could not save this account. Check LLimit’s storage permissions, then try Add again."
+      return nil
+    }
+    // Publish Added only after the owner-only settings file has been committed.
+    settingsSaveTask?.cancel()
+    settingsSaveTask = nil
+    providerAccounts = settings.accounts
+    providerStyleSettings[account.id] = style
+    credentialEditRevisions[account.id] = UUID()
     reloadAccountStatuses()
-    saveConfiguration(showSuccessMessage: true)
+    let widgetSyncReady = syncSettingsToWidgetStore(settings.redactedCredentials())
+    if widgetSyncReady { reloadWidgetTimelines() }
+    statusMessage = widgetSyncReady ? "Added \(account.resolvedDisplayName)"
+      : "Added \(account.resolvedDisplayName) locally. Widget sync unavailable."
     return account
   }
 
   /// True when an existing account already holds the same token for this provider,
   /// so we can show "Added" instead of offering a duplicate import.
   func isDetectedCredentialImported(_ detected: DiscoveredCredential) -> Bool {
-    let tokens = Set(detected.credentials.values.filter { !$0.isEmpty })
-    guard !tokens.isEmpty else { return false }
-    return providerAccounts.contains { account in
-      account.provider == detected.provider
-        && !Set(account.credentials.values).isDisjoint(with: tokens)
-    }
+    providerAccounts.contains { detected.matchesStoredAccount($0) }
   }
-
-  #if canImport(Security)
-  private static func readClaudeKeychainToken() -> (token: String?, diagnostic: String) {
-    // Import only the ordinary CLI login. Enumerating every service containing
-    // "claude" would expose a private managed profile as an unrelated import.
-    let query: [String: Any] = [
-      kSecClass as String: kSecClassGenericPassword,
-      kSecAttrService as String: "Claude Code-credentials",
-      kSecReturnData as String: true,
-      kSecMatchLimit as String: kSecMatchLimitOne
-    ]
-    var data: CFTypeRef?
-    let status = SecItemCopyMatching(query as CFDictionary, &data)
-    if status == errSecSuccess, let payload = data as? Data, let token = claudeToken(fromKeychainData: payload) {
-      return (token, "found the default Claude Code login")
-    }
-    if status == errSecInteractionNotAllowed {
-      return (nil, "the default Claude Code login needs Keychain permission. Allow access, then scan again.")
-    }
-    return (nil, "no readable default Claude Code login. Use Connect Claude to sign in to a separate account.")
-  }
-
-  /// Claude Code stores JSON (`{ "claudeAiOauth": { "accessToken": ... } }`), but be
-  /// lenient: accept a flat object or a raw token string too.
-  private static func claudeToken(fromKeychainData data: Data) -> String? {
-    if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-      let oauth = (object["claudeAiOauth"] as? [String: Any]) ?? object
-      let token = ((oauth["accessToken"] as? String) ?? (oauth["access_token"] as? String))?
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-      return (token?.isEmpty == false) ? token : nil
-    }
-
-    let raw = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-    if let raw, raw.count > 20, !raw.contains(" ") {
-      return raw
-    }
-    return nil
-  }
-  #endif
 
   /// Prepares ChatGPT/Codex access tokens before a refresh: adopts the live tokens Codex
   /// maintains on disk, then refreshes anything still missing/expired. ChatGPT tokens

@@ -74,12 +74,22 @@ The same providers work on both platforms. Managed Claude Code and Codex connect
 and Claude Keychain import, are macOS-only. Linux Claude Code writes
 `~/.claude/.credentials.json` directly, which LLimit reads on both platforms.
 
-On macOS, **Settings → Add Account** shows a searchable provider catalog. Search
-by product, company, or plan, such as Codex, Cognition, or GLM. Each card shows
-the service and account type; the GLM choices distinguish **China (Zhipu AI /
-BigModel)** from **International (Z.ai)**. Choose a card to review its setup, then
-connect or add the account. Browsing the catalog does not create accounts.
-Detected logins remain available below the catalog as an optional import shortcut.
+On macOS, **Settings → Add Account** automatically scans supported local tool
+files and shows the logins it finds first. **Add** saves a copy in LLimit without
+leaving the chooser, so you can add several accounts in succession. A matching
+saved login shows **Added** and **Open**. Matching uses authentication and account
+context; a shared provider, email, or plan setting alone does not mean the login
+has already been added. Imported sessions may need reimporting when they expire.
+Automatic scans do not read Keychain items or open permission dialogs. Choose
+**Scan Again** to also check the ordinary Claude Code Keychain login.
+
+The searchable catalog remains below detected logins for browser sign-in, manual
+setup, and additional accounts. Search by product, company, plan, detected name,
+or source. Provider cards show how many accounts are already added without
+blocking another account. The GLM choices distinguish **China (Zhipu AI /
+BigModel)** from **International (Z.ai)**. Choose a card to review setup before
+creating an account. Providers without a supported local importer, including
+StepFun and MiMo, use their existing connection flows.
 
 | Provider | Credential it needs | One-click import from |
 | --- | --- | --- |
