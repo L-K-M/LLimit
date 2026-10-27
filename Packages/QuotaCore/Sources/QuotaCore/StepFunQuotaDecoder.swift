@@ -96,9 +96,9 @@ enum StepFunQuotaDecoder {
 
     var metrics: [UsageMetric] = []
     let reset = try timestamp(credits.subscriptionCreditResetTime) ?? subscriptionResets.min()
-    // A reported reset establishes a subscription's omitted protobuf zero.
+    // A reset or subscription bucket establishes an omitted protobuf zero.
     // Optional bucket counts must not revive an exhausted subscription.
-    let fraction = credits.subscriptionCreditLeftRate ?? reset.map { _ in 0.0 } ?? subscription.fraction
+    let fraction = credits.subscriptionCreditLeftRate ?? ((reset != nil || subscription.total > 0) ? 0.0 : nil)
     if let fraction {
       metrics.append(try creditMetric(id: "monthly-credits", label: "Monthly plan credits", fraction: fraction,
         counts: subscription, reset: reset, detail: nil, now: now))
