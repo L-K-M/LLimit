@@ -1,7 +1,7 @@
 import SwiftUI
 import QuotaCore
 
-/// Browsing and inspecting providers never creates an account. Only the setup action does.
+/// Browsing never creates accounts; detected Add and provider setup are explicit actions.
 struct ProviderChooserView: View {
   let isRefreshing: Bool
   let detectedCredentials: [DiscoveredCredential]
@@ -138,12 +138,19 @@ struct ProviderChooserView: View {
                   .allowsHitTesting(false)
               }
             }
-            .accessibilityLabel("\(entry.title), \(entry.context), \(accountCounts[entry.provider, default: 0]) accounts added")
+            .accessibilityLabel(providerAccessibilityLabel(entry))
             .accessibilityHint("Show account setup")
           }
         }
       }
     }
+  }
+
+  private func providerAccessibilityLabel(_ entry: ProviderCatalogEntry) -> String {
+    let label = "\(entry.title), \(entry.context)"
+    let count = accountCounts[entry.provider, default: 0]
+    guard count > 0 else { return label }
+    return "\(label), \(count) \(count == 1 ? "account" : "accounts") added"
   }
 
   private func setup(for provider: QuotaProvider) -> some View {

@@ -41,6 +41,13 @@ struct LocalCredentialScanner: Sendable {
     return result
   }
 
+  func discoverInBackground(for provider: QuotaProvider? = nil,
+                            interaction: KeychainInteraction = .withoutPrompts) async -> CredentialDiscoveryResult {
+    await Task.detached(priority: .userInitiated) {
+      discover(for: provider, interaction: interaction)
+    }.value
+  }
+
   static func claudeKeychainQuery() -> [String: Any] {
     [
       kSecClass as String: kSecClassGenericPassword,

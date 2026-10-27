@@ -45,11 +45,13 @@ If the App Group store is unavailable, a successful local import must still
 report widget sync as unavailable and retain the account after relaunch.
 
 Keychain prompts remain a separate manual check: **Scan Again** explicitly checks
-the ordinary Claude Code login and may ask for access. Auto-fill a non-Claude
+the ordinary Claude Code login and may ask for access. Auto-filling a non-Claude
 account must not ask for that Keychain entry. **Connect Claude** and its renewals
 must not show a Keychain prompt. `scripts/test-local-credential-scanner.sh` checks
-the automatic/explicit policy and parsing offline with injected readers; it never
-reads a real credential or Keychain item.
+the automatic/explicit policy, background I/O, and parsing offline with injected
+readers; it never reads a real credential or Keychain item. Both kinds of scan
+must leave the main thread responsive. An account edited or reconnected while
+Auto-fill waits must retain its newer credentials and pending drafts.
 
 To verify the real sign-in flow manually:
 

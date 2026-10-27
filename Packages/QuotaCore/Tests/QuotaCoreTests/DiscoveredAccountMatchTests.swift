@@ -3,6 +3,7 @@ import XCTest
 @testable import QuotaCore
 
 final class DiscoveredAccountMatchTests: XCTestCase {
+  // Authentication strings below are inert fixtures for local comparison tests.
   private func discovered(_ provider: QuotaProvider, _ credentials: [String: String]) -> DiscoveredCredential {
     DiscoveredCredential(stableID: "inert-discovery", provider: provider, suggestedName: "Imported fixture",
       sourceLabel: "Offline fixture", credentials: credentials)

@@ -54,6 +54,7 @@ final class AppModel: ObservableObject {
   @Published private(set) var hasScannedCredentials = false
   @Published private(set) var discoveryImportMessage: String?
   private var discoveryRequestID = UUID()
+  private var isExplicitDiscoveryRunning = false
 
   @Published var claudeTerminalSession: ClaudeTerminalSession?
   @Published private(set) var claudeAccountMessages: [String: String] = [:]
@@ -629,35 +630,35 @@ final class AppModel: ObservableObject {
   /// Scans local AI tools for credentials you could import into a new LLimit account.
   /// Optional convenience so you don't have to hunt for tokens — nothing here is a
   /// runtime dependency; imported accounts are copied into LLimit and stored locally.
-  func scanForDetectedCredentials(for provider: QuotaProvider? = nil) {
-    // An explicit action supersedes any automatic scan still reading files.
-    discoveryRequestID = UUID()
-    isScanningCredentials = true
-    defer { isScanningCredentials = false }
-    let result = LocalCredentialScanner().discover(for: provider, interaction: .allowPrompts)
-    detectedCredentials = result.credentials
-    discoveryDiagnostics = result.diagnostics
-    hasScannedCredentials = true
-    discoveryImportMessage = nil
+  func scanForDetectedCredentials(for provider: QuotaProvider? = nil) async -> CredentialDiscoveryResult? {
+    guard !isExplicitDiscoveryRunning else { return nil }
+    isExplicitDiscoveryRunning = true
+    defer { isExplicitDiscoveryRunning = false }
+    return await performCredentialScan(for: provider, interaction: .allowPrompts)
   }
 
   /// Opening Add Account reads supported tool logins off the main actor. A
   /// Keychain lookup waits for an explicit Scan Again action.
   func scanForDetectedCredentialsAutomatically() async {
+    guard !isExplicitDiscoveryRunning else { return }
+    _ = await performCredentialScan(interaction: .withoutPrompts)
+  }
+
+  private func performCredentialScan(for provider: QuotaProvider? = nil,
+                                     interaction: LocalCredentialScanner.KeychainInteraction) async -> CredentialDiscoveryResult? {
     let requestID = UUID()
     discoveryRequestID = requestID
     isScanningCredentials = true
     defer {
       if discoveryRequestID == requestID { isScanningCredentials = false }
     }
-    let result = await Task.detached(priority: .userInitiated) {
-      LocalCredentialScanner().discover()
-    }.value
-    guard !Task.isCancelled, discoveryRequestID == requestID else { return }
+    let result = await LocalCredentialScanner().discoverInBackground(for: provider, interaction: interaction)
+    guard !Task.isCancelled, discoveryRequestID == requestID else { return nil }
     detectedCredentials = result.credentials
     discoveryDiagnostics = result.diagnostics
     hasScannedCredentials = true
     discoveryImportMessage = nil
+    return result
   }
 
   /// Fills an existing account's credentials from a login detected on this Mac (the
@@ -666,14 +667,22 @@ final class AppModel: ObservableObject {
   /// Returns true only when the detected login replaced authentication. Junie's
   /// account-owned credit allowance survives; false leaves credentials unchanged.
   @discardableResult
-  func autofillCredentials(forAccountID accountID: String) -> Bool {
-    guard let index = providerAccounts.firstIndex(where: { $0.id == accountID }) else { return false }
-    let provider = providerAccounts[index].provider
-    guard !codexAccountIsManaged(accountID), !codexAccountIsBusy(accountID) else { return false }
+  func autofillCredentials(forAccountID accountID: String) async -> Bool {
+    guard let original = account(withID: accountID) else { return false }
+    let provider = original.provider
+    let revision = credentialEditRevisions[accountID]
+    guard acceptsCredentialAutofill(original) else { return false }
 
-    scanForDetectedCredentials(for: provider)
+    guard let result = await scanForDetectedCredentials(for: provider) else { return false }
+    // A scan can wait on permission while the user edits, removes, or reconnects
+    // an account. Never apply that result to changed authentication or an old index.
+    guard let index = providerAccounts.firstIndex(where: { $0.id == accountID }),
+          providerAccounts[index].provider == provider,
+          providerAccounts[index].credentials == original.credentials,
+          credentialEditRevisions[accountID] == revision,
+          acceptsCredentialAutofill(providerAccounts[index]) else { return false }
 
-    guard let match = detectedCredentials.first(where: { $0.provider == provider }) else {
+    guard let match = result.credentials.first(where: { $0.provider == provider }) else {
       statusMessage = "No \(provider.displayName) login detected on this Mac. Sign in to a supported tool, or paste the credentials manually."
       return false
     }
@@ -687,6 +696,12 @@ final class AppModel: ObservableObject {
     guard account(withID: accountID)?.credentials == importedCredentials else { return false }
     statusMessage = "Filled “\(providerAccounts[index].resolvedDisplayName)” from \(match.sourceLabel)."
     return true
+  }
+
+  private func acceptsCredentialAutofill(_ account: ProviderAccount) -> Bool {
+    !CodexAccountProfile.isManaged(account.credentials)
+      && account.credentials[CredentialField.anthropicCredentialSource] != ClaudeCodeCredentialSource.managedProfile.rawValue
+      && !codexAccountIsBusy(account.id) && !claudeAccountIsBusy(account.id)
   }
 
   /// Creates a new LLimit-owned account pre-filled with a detected credential.

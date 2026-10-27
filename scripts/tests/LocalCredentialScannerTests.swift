@@ -8,7 +8,7 @@ import QuotaCore
 struct LocalCredentialScannerTests {
   private static let fixtureToken = "offline-claude-access-fixture-value"
 
-  static func main() throws {
+  @MainActor static func main() throws {
     testAutomaticScanNeverReadsKeychain()
     testExplicitScanCanRequestKeychainPermission()
     testFileClaudeLoginSkipsKeychain()
@@ -17,7 +17,8 @@ struct LocalCredentialScannerTests {
     testKeychainLoginIsAppendedWithItsOwnIdentity()
     try testJSONPayloadParsing()
     testRawPayloadParsing()
-    print("Local credential scanner: 8 offline policy and parsing checks passed")
+    testDiscoveryRunsOffTheMainThread()
+    print("Local credential scanner offline policy, parsing, and background checks passed")
   }
 
   private static func testAutomaticScanNeverReadsKeychain() {
@@ -128,10 +129,46 @@ struct LocalCredentialScannerTests {
     precondition(LocalCredentialScanner.claudeToken(from: Data([0xFF, 0xFE])) == nil)
   }
 
+  @MainActor private static func testDiscoveryRunsOffTheMainThread() {
+    precondition(Thread.isMainThread, "The regression must start from the app's main-thread actor")
+    let fileLogin = credential(provider: .kimi, key: CredentialField.kimiAPIKey, value: "offline-background-file-fixture")
+    let scanner = LocalCredentialScanner(
+      discoverFiles: {
+        precondition(!Thread.isMainThread, "File discovery must not block the main thread")
+        return CredentialDiscoveryResult(credentials: [fileLogin], diagnostics: ["background file fixture"])
+      },
+      readKeychain: { interaction in
+        precondition(!Thread.isMainThread, "An explicit Keychain scan must not block the main thread")
+        precondition(interaction == .allowPrompts)
+        return .init(token: fixtureToken, diagnostic: "background keychain fixture")
+      })
+    let completion = ScanCompletion()
+    let task = Task { @MainActor in
+      precondition(Thread.isMainThread, "Invoke discovery from the same main-thread actor as the app")
+      completion.result = await scanner.discoverInBackground(interaction: .allowPrompts)
+      precondition(Thread.isMainThread, "Results must return to their caller's actor")
+    }
+    defer { task.cancel() }
+    // A synchronous main keeps macOS's main thread alive while its run loop
+    // services MainActor jobs, avoiding command-line async-main thread changes.
+    let deadline = Date().addingTimeInterval(15)
+    while completion.result == nil && Date() < deadline {
+      _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+    }
+    guard let result = completion.result else { preconditionFailure("Background discovery did not complete") }
+    precondition(result.credentials.count == 2 && result.credentials.first == fileLogin)
+    precondition(result.credentials.last?.credentials[CredentialField.anthropicAccessToken] == fixtureToken)
+    precondition(result.diagnostics == ["background file fixture", "Claude Code Keychain: background keychain fixture"])
+  }
+
   private static func credential(provider: QuotaProvider, key: String, value: String) -> DiscoveredCredential {
     DiscoveredCredential(stableID: "offline:\(provider.rawValue)", provider: provider,
       suggestedName: provider.displayName, sourceLabel: "offline fixture", credentials: [key: value])
   }
+}
+
+@MainActor private final class ScanCompletion {
+  var result: CredentialDiscoveryResult?
 }
 
 private final class InteractionRecorder: @unchecked Sendable {

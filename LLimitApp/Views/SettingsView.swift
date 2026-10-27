@@ -32,6 +32,7 @@ struct SettingsView: View {
   /// A rejected draft stays visible with its reason and is retried by the next commit.
   @State private var accountDrafts = PendingEdits<AccountFieldKey>()
   @FocusState private var focusedAccountField: AccountFieldKey?
+  @State private var autofillingAccountIDs: Set<String> = []
   @State private var hostWindow = HostWindowReference()
 
   private let refreshIntervalOptions = [15, 30, 45, 60, 90, 120, 180]
@@ -88,7 +89,12 @@ struct SettingsView: View {
       commitAccountDrafts()
     }
     .onChange(of: focusedAccountField) { previousField, _ in
-      if let previousField { commitAccountDraft(previousField) }
+      if let previousField {
+        // Disabling fields during Auto-fill must not commit an old draft just
+        // before the imported authentication replaces it.
+        if autofillingAccountIDs.contains(previousField.accountID), case .credential = previousField.field { return }
+        commitAccountDraft(previousField)
+      }
     }
     // The window is reused after closing (`isReleasedWhenClosed` is false), so closing
     // it does not reliably make this view disappear. Commit when it closes instead.
@@ -309,7 +315,7 @@ struct SettingsView: View {
         accountCounts: Dictionary(grouping: model.providerAccounts, by: \.provider).mapValues(\.count),
         isScanningCredentials: model.isScanningCredentials, hasScannedCredentials: model.hasScannedCredentials,
         discoveryDiagnostics: model.discoveryDiagnostics, discoveryImportMessage: model.discoveryImportMessage,
-        onScan: { model.scanForDetectedCredentials() },
+        onScan: { Task { _ = await model.scanForDetectedCredentials() } },
         onImport: { _ = model.importAccount(from: $0) },
         onOpen: { detected in
           if let account = model.providerAccounts.first(where: { detected.matchesStoredAccount($0) }) {
@@ -928,8 +934,12 @@ struct SettingsView: View {
           Button {
             // Auto-fill replaces every credential field at once; a draft committed
             // later would overwrite it. A failed auto-fill keeps the drafts.
-            if model.autofillCredentials(forAccountID: account.id) {
-              discardCredentialDrafts(for: account.id)
+            autofillingAccountIDs.insert(account.id)
+            Task {
+              defer { autofillingAccountIDs.remove(account.id) }
+              if await model.autofillCredentials(forAccountID: account.id) {
+                discardCredentialDrafts(for: account.id)
+              }
             }
           } label: {
             Label("Auto-fill from this Mac", systemImage: "sparkles")
@@ -946,6 +956,7 @@ struct SettingsView: View {
         }
       }
     }
+    .disabled(model.isScanningCredentials)
   }
 
   @ViewBuilder
