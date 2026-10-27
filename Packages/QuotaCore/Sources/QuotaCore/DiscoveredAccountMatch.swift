@@ -55,7 +55,19 @@ public extension DiscoveredCredential {
     case .cline: return sameSecret(CredentialField.clineAPIKey)
     case .junie: return sameSecret(CredentialField.junieAPIKey)
     case .minimax: return sameSecret(CredentialField.minimaxAPIKey)
-    case .xiaomiMiMo, .stepFun: return false // Browser connections have no local-tool importer.
+    case .stepFun:
+      guard sameSecret(CredentialField.stepFunPlanKey) else { return false }
+      let detectedUID = value(credentials, CredentialField.stepFunUserID)
+      let savedUID = value(account.credentials, CredentialField.stepFunUserID)
+      guard !detectedUID.isEmpty, !savedUID.isEmpty else { return true }
+      func userID(_ value: String) -> Int64? {
+        guard value.utf8.allSatisfy({ (0x30...0x39).contains($0) }),
+              let number = Int64(value), number > 0 else { return nil }
+        return number
+      }
+      guard let detectedID = userID(detectedUID), let savedID = userID(savedUID) else { return false }
+      return detectedID == savedID
+    case .xiaomiMiMo: return false // Browser connections have no local-tool importer.
     }
   }
 }

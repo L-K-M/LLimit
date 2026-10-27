@@ -21,7 +21,7 @@ to remain installed. Optional managed Claude Code and Codex connections on macOS
 use the installed official CLI to maintain each account's login.
 
 To make setup painless, LLimit can **optionally detect** logins from AI tools you're
-already signed in to (Claude Code, Codex, GitHub Copilot, Kimi, OpenCode, Devin, Muse Code) and import
+already signed in to (Claude Code, Codex, GitHub Copilot, Kimi, OpenCode, Devin, Muse Code, Step Code) and import
 them into a new account with one click — so for the common case you never hunt for a
 token. You can always add accounts manually too.
 
@@ -89,7 +89,7 @@ or source. Provider cards show how many accounts are already added without
 blocking another account. The GLM choices distinguish **China (Zhipu AI /
 BigModel)** from **International (Z.ai)**. Choose a card to review setup before
 creating an account. Providers without a supported local importer, including
-StepFun and MiMo, use their existing connection flows.
+MiMo, use their existing connection flows.
 
 | Provider | Credential it needs | One-click import from |
 | --- | --- | --- |
@@ -108,7 +108,7 @@ StepFun and MiMo, use their existing connection flows.
 | **JetBrains Junie** | Junie API key | `JUNIE_API_KEY`, Junie fallback file (`~/.junie/secure_credentials.json`) |
 | **MiniMax M Plan** | Global (`minimax.io`) Subscription Key | OpenCode (`minimax-coding-plan` in `auth.json`) |
 | **Xiaomi MiMo** | Personal Token Plan console session | Connect MiMo on macOS; manual console cookies on Linux |
-| **StepFun** | Global Step Plan console session | Connect StepFun on macOS; manual console token on Linux |
+| **StepFun** | Global Step Plan API key or console session | Step Code (`~/.stepcode/auth.json`), Connect StepFun on macOS; manual console token on Linux |
 
 For OpenCode Go, choose **Settings → Add Account → OpenCode Go** and enter your
 OpenCode API key, or scan for a saved Go key. LLimit shows the rolling, weekly,
@@ -232,26 +232,32 @@ those used on Linux, require replacement when expired; see the
 See [Xiaomi's MiMo Code guide](https://mimo.mi.com/docs/en-US/tokenplan/integration/mimo-code)
 for the distinction between inference credentials and console usage.
 
-For StepFun, choose **Settings → Add Account → StepFun**, then **Connect StepFun**.
-Sign in to the [global Step Plan console](https://platform.stepfun.ai/plan-subscribe)
-inside LLimit and choose **Connect Account**. LLimit verifies your account and
-quota before saving a separate sign-in for that account. It renews automatically
-when possible; reconnect if StepFun requires a new sign-in. Each account stays
-separate from your usual browser. No StepFun CLI is required, and inference API
-keys cannot replace the console session. Linux uses manual credentials; see the
+For StepFun on macOS, open **Settings → Add Account**. If you have signed in with Step Code,
+choose **Add** beside its detected login under **Found on this Mac**.
+Alternatively, choose **StepFun → Connect Account** to
+sign in to the [global Step Plan console](https://platform.stepfun.ai/plan-subscribe)
+inside LLimit. An existing StepFun account can import a Step Code login with
+**Import Step Code login**. LLimit copies only the global personal Plan key and
+optional account ID into its local settings. No Step Code CLI is required after
+import, and the key is not renewed automatically; reimport or reconnect if
+revoked. Generic PAYG/gateway/inference API keys and the China profile are excluded.
+
+With **Connect StepFun**, LLimit verifies your account and quota before saving a
+separate sign-in for that account. It renews automatically when possible;
+reconnect if StepFun requires a new sign-in. Each account stays separate from
+your usual browser. Linux supports Step Code import and manual credentials; see the
 [daemon guide](Packages/LLimitd/README.md).
 
 LLimit shows monthly subscription credits and top-up credits separately, using
-reported remaining fractions and bucket counts. Top-up expiry appears as text,
+server-reported percentages and bucket counts. Top-up expiry appears as text,
 without creating a recurring reset. Older Step Plans show their 5-hour and weekly
-limits. Reset times come from StepFun; monthly credit pace remains unavailable
-because the response does not report a cycle start or duration. Polling makes no
-inference requests. Session credentials stay in LLimit's local settings. LLimit
+limits. Reset times come from StepFun; no monthly cycle duration is invented.
+Polling makes no inference requests. Credentials stay in LLimit's local settings. LLimit
 retains only its own console authentication cookies, without reading normal browser
 profiles or retaining analytics cookies. Renewal follows the server's token expiry;
 revoked or expired sign-ins and interactive challenges can require reconnecting.
-This connection supports the global `platform.stepfun.ai` console and personal
-Step Plans; it does not query organization quotas or pay-as-you-go balances.
+This supports the global `platform.stepfun.ai` console and personal Step Plans;
+it does not query organization quotas or pay-as-you-go balances.
 
 ## How accounts work
 

@@ -13,7 +13,7 @@ CLI for login and renewal, with a private profile for each account.
 
 `CredentialDiscovery` exists only as an *optional import shortcut* — it can detect a
 login from a locally installed tool (Claude Code, Codex, Copilot, Antigravity,
-OpenCode, Devin CLI, Muse Code, Venice CLI, Cline, Junie) so the
+OpenCode, Devin CLI, Muse Code, Venice CLI, Cline, Junie, Step Code) so the
 user can one-click create a pre-filled account instead of pasting a token. Once
 imported, the account is copied into and owned by LLimit.
 
@@ -138,7 +138,7 @@ Linux:
 - The host app is **not sandboxed** (the import shortcut reads `~/.claude`, `~/.codex`,
   `~/.config/github-copilot`, `~/.kimi`, `~/.kimi-code`, `~/.gemini`,
   `~/.local/share/opencode`, `~/.local/share/devin`, `~/.config/muse`, `~/.venice`,
-  `~/.cline`, `~/.junie`, and the Keychain). The widget extension **stays sandboxed**; it only reads the App
+  `~/.cline`, `~/.junie`, `~/.stepcode`, and the Keychain). The widget extension **stays sandboxed**; it only reads the App
   Group container.
 - MiMo console cookies are owned by LLimit, stored only in local settings under
   `mimo.session_cookies`, and redacted like other credentials. macOS keeps an
@@ -189,35 +189,51 @@ Linux:
 
 ## Provider API notes
 
-- **StepFun**: provider `stepfun`. macOS uses **Connect StepFun** with a separate
-  nonpersistent WebKit session per attempt. Capture only the HttpOnly authentication
-  cookies `Oasis-Token` and `Oasis-Webid` for host `platform.stepfun.ai`, path `/`.
-  `Oasis-Token` contains an access JWT plus `...` plus a refresh JWT. Save them only
-  as secret `stepfun.browser_session` in the mode-600 local settings, honoring
-  expiry and HTTPS. Never access normal browser profiles or retain SSO/analytics
-  cookies; shared settings, widgets, snapshots, history and logs remain secret-free.
-  Validate signed-in renewal mode `2`, the server's UserInfo UID and quota before
-  committing a connection. HTTP 200 with anonymous mode `1` requires reconnecting;
-  never adopt that response as a signed-in session. Renew using the actual access
-  JWT expiry with a five-minute margin; authentication failure may also trigger
-  renewal. Do not promise a fixed session lifetime: the observed anonymous two-hour
-  expiry does not establish the signed-in contract. Honor refresh expiry; revoked
-  sessions and interactive challenges may require reconnecting.
+- **StepFun**: provider `stepfun`. Accepts either a Plan API key
+  (`stepfun.plan_key`) or a console browser session (`stepfun.browser_session` /
+  manual `stepfun.session_token` + `stepfun.web_id`). The Plan key authenticates
+  `GET https://api.stepfun.ai/step_plan/v1/usage` with `Authorization: Bearer`,
+  returning a versioned personal-account snapshot. Verify the response account
+  matches the imported UID before publishing usage when a UID is saved. Optional
+  `stepfun.user_id` (numeric UID from the auth file) is imported alongside the key
+  but is not required for quota queries. Step Code stores its personal Plan key at
+  `~/.stepcode/auth.json` under `step` with `type: "oauth"`, `profile:
+  "step_plan_oversea"`, `access` (the key), and optional `uid`. Import copies only
+  the global personal Plan key and optional UID into LLimit's owned mode-600
+  settings; it never copies the Passport refresh grant, `step-login.json`, or any
+  CLI session state. No Step Code CLI runtime dependency is required after import.
+  The imported key is not renewed by LLimit; reimport or reconnect if revoked.
+  Generic PAYG/gateway/inference API keys and China profile are excluded.
+  macOS **Connect StepFun** with a separate nonpersistent WebKit session per
+  attempt remains available as an alternative or fallback. Capture only the
+  HttpOnly authentication cookies `Oasis-Token` and `Oasis-Webid` for host
+  `platform.stepfun.ai`, path `/`. `Oasis-Token` contains an access JWT plus
+  `...` plus a refresh JWT. Save them only as secret `stepfun.browser_session`
+  in the mode-600 local settings, honoring expiry and HTTPS. Never access normal
+  browser profiles or retain SSO/analytics cookies; shared settings, widgets,
+  snapshots, history and logs remain secret-free. Validate signed-in renewal mode
+  `2`, the server's UserInfo UID and quota before committing a connection. HTTP
+  200 with anonymous mode `1` requires reconnecting; never adopt that response as
+  a signed-in session. Renew using the actual access JWT expiry with a
+  five-minute margin; authentication failure may also trigger renewal. Do not
+  promise a fixed session lifetime: the observed anonymous two-hour expiry does
+  not establish the signed-in contract. Honor refresh expiry; revoked sessions
+  and interactive challenges may require reconnecting.
   Renewal is `POST https://platform.stepfun.ai/passport/proto.api.passport.v1.PassportService/RefreshToken`
   with `{}`, the owned compound `Oasis-Token` cookie, matching `Oasis-Webid`,
   `Oasis-Appid: 20700`, `Oasis-Platform: web`, and `Connect-Protocol-Version: 1`.
   Verify the renewed server UID matches the saved account before committing
-  credentials or publishing usage. No CLI runtime dependency or credential import.
-  Linux retains manual secrets `stepfun.session_token` and `stepfun.web_id`;
-  users enter a console access token and matching web ID, replacing them when
-  expired. Linux does not renew manual credentials. If a compound token supplies
-  the web ID, derive `device_id` from its refresh JWT, not its access JWT, only as a
-  routing header and never as verified identity.
+  credentials or publishing usage.
+  Linux retains the manual console fallback (`stepfun.session_token` +
+  `stepfun.web_id`), replaced when expired; Linux does not renew manual
+  credentials. If a compound token supplies the web ID, derive `device_id` from
+  its refresh JWT, not its access JWT, only as a routing header and never as
+  verified identity.
   Global personal Step Plan quota uses read-only `POST
   https://platform.stepfun.ai/api/step.openapi.devcenter.Dashboard/QueryStepPlanRateLimit`
   with `{}`, `Oasis-Token`, matching `Oasis-Webid`, `Oasis-Appid: 20700`, and
-  `Oasis-Platform: web`. No inference API-key discovery. Refuse redirects and
-  isolate cookies/caches for quota and renewal requests.
+  `Oasis-Platform: web`. Refuse redirects and isolate cookies/caches for quota
+  and renewal requests.
   Require protobuf status `CODE_OK`/`1`; `CODE_TOO_MANY`/`5` is rate limiting.
   Protobuf JSON accepts snake_case/camelCase and int64 strings; omitted scalar
   zeros are defaults when a reported reset or credit bucket establishes quota.
@@ -231,13 +247,20 @@ Linux:
   subscription counts. With no top-up buckets, use `topup_credit_left_rate`.
   Legacy plans use `five_hour_usage_left_rate`/`weekly_usage_left_rate` and
   corresponding `*_reset_time` seconds. No billing-derived reset/window length,
-  organization quota, PAYG balance, or inference request. Sources: official
-  [console](https://platform.stepfun.ai/plan-subscribe),
+  organization quota, PAYG balance, or inference request. The Plan-key endpoint
+  reports used percentages and millisecond reset/expiry timestamps; convert to
+  remaining on display and preserve null percentages as unavailable. Exact count
+  strings are preserved. No monthly window is invented.
+  Sources: official [console](https://platform.stepfun.ai/plan-subscribe),
   [Step Code login renewal](https://github.com/stepfun-ai/Step-Code/blob/7b7c2d1dcee73752b29f0953ce56e4f1b514f4bf/packages/providers/src/step-provider/login-refresh.ts),
   [protobuf/auth bundle](https://platform.stepfun.ai/_next/static/chunks/8300-80e7d8753e1d65ea.js),
-  and [quota UI bundle](https://platform.stepfun.ai/_next/static/chunks/5731-6a1cbb3d71daa6f0.js),
-  inspected 2026-10-27. An unauthenticated quota request confirmed HTTP 401 with
-  Connect `code: unauthenticated`; successful account data remains fixture-tested.
+  [quota UI bundle](https://platform.stepfun.ai/_next/static/chunks/5731-6a1cbb3d71daa6f0.js),
+  and Step Code commit `81e79bc`:
+  [`packages/coding-agent/src/step/usage/account.ts`](https://github.com/stepfun-ai/Step-Code/blob/81e79bc4b699148d6823fedde9b5e70d9a80255f/packages/coding-agent/src/step/usage/account.ts),
+  [`packages/coding-agent/src/step/login-flow.ts`](https://github.com/stepfun-ai/Step-Code/blob/81e79bc4b699148d6823fedde9b5e70d9a80255f/packages/coding-agent/src/step/login-flow.ts),
+  inspected 2026-10-27. An authenticated Plan-key request confirmed HTTP 200 and
+  an account ID matching the stored Step Code UID. Console account data remains
+  fixture-tested.
 
 - **MiniMax M Plan**: read-only `GET https://www.minimax.io/v1/token_plan/remains`
   with `Authorization: Bearer <global M Plan Subscription Key>`. Provider ID

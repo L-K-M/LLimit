@@ -259,8 +259,11 @@ public final class QuotaDaemon {
            to: updated.credentials[CredentialField.junieCreditAllowance])
       let mimoIdentityChanged = previous.provider == .xiaomiMiMo && MiMoSessionCookies.hasChangedIdentity(
         from: previous.credentials[CredentialField.mimoSessionCookies], to: updated.credentials[CredentialField.mimoSessionCookies])
-      if junieAllowanceChanged || mimoIdentityChanged {
-        // A changed allowance must not appear as consumption in old history.
+      let stepFunIdentityChanged = previous.provider == .stepFun
+        && (previous.credentials[CredentialField.stepFunUserID]?.isEmpty != false
+          || previous.credentials[CredentialField.stepFunUserID] != updated.credentials[CredentialField.stepFunUserID])
+      if junieAllowanceChanged || mimoIdentityChanged || stepFunIdentityChanged {
+        // Different accounts or allowances must not share history.
         try historyStore.remove(accountIDs: [accountID])
       }
     }
@@ -714,11 +717,17 @@ public final class QuotaDaemon {
          cookies != result[CredentialField.mimoSessionCookies] {
         result[CredentialField.mimoBrowserSession] = nil
       }
-      if account.provider == .stepFun, [CredentialField.stepFunSessionToken, CredentialField.stepFunWebID].contains(where: {
+      if account.provider == .stepFun, [CredentialField.stepFunPlanKey, CredentialField.stepFunSessionToken, CredentialField.stepFunWebID].contains(where: {
         values[$0] != nil && values[$0] != result[$0]
       }) {
         result[CredentialField.stepFunBrowserSession] = nil
         result[CredentialField.stepFunUserID] = nil
+        if values[CredentialField.stepFunPlanKey] != nil {
+          result[CredentialField.stepFunSessionToken] = nil
+          result[CredentialField.stepFunWebID] = nil
+        } else {
+          result[CredentialField.stepFunPlanKey] = nil
+        }
       }
       return result.merging(values) { _, new in new }
     }
@@ -732,7 +741,17 @@ public final class QuotaDaemon {
   }
 
   private static func sharesPrimarySecret(_ lhs: [String: String], _ rhs: [String: String], provider: QuotaProvider) -> Bool {
-    provider.credentialFields.contains { field in
+    if provider == .stepFun {
+      let leftKey = lhs[CredentialField.stepFunPlanKey]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      let rightKey = rhs[CredentialField.stepFunPlanKey]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      if !leftKey.isEmpty || !rightKey.isEmpty {
+        guard !leftKey.isEmpty, leftKey == rightKey else { return false }
+        let leftID = lhs[CredentialField.stepFunUserID] ?? "", rightID = rhs[CredentialField.stepFunUserID] ?? ""
+        if leftID.isEmpty || rightID.isEmpty { return true }
+        return Int64(leftID).map { $0 > 0 && $0 == Int64(rightID) } == true
+      }
+    }
+    return provider.credentialFields.contains { field in
       guard field.isSecret, let value = lhs[field.key], !value.isEmpty else { return false }
       return rhs[field.key] == value
     }
