@@ -159,16 +159,19 @@ final class StepFunQuotaClientTests: XCTestCase {
   }
 
   func testSubscriptionFractionOverridesContradictoryBucketCounts() async throws {
-    let body = #"{"status":"CODE_OK","plan_family":2,"plan_credit_rate_limit":{"subscription_credit_left_rate":0.75,"credit_buckets":[{"type":1,"credit_total":"100","credit_residual":"10"}]}}"#
-    let usage = try await StepFunQuotaClient(httpClient: StepFunHTTPStub(body: body))
-      .fetchUsage(configuration: configuration(), now: now)
-
-    let metric = try XCTUnwrap(usage.metrics.first)
-    XCTAssertEqual(metric.id, "monthly-credits")
-    XCTAssertEqual(metric.remainingPercent, 75)
-    XCTAssertNil(metric.remainingAmount)
-    XCTAssertNil(metric.usedDisplay)
-    XCTAssertNil(metric.totalDisplay)
+    for body in [
+      #"{"status":"CODE_OK","plan_family":2,"plan_credit_rate_limit":{"subscription_credit_left_rate":0.75,"credit_buckets":[{"type":1,"credit_total":"100","credit_residual":"10"}]}}"#,
+      #"{"status":"CODE_OK","plan_family":2,"plan_credit_rate_limit":{"subscription_credit_left_rate":0.75,"credit_buckets":[{"type":1,"credit_total":"100","credit_residual":"75","expire_at":"1700000000"}]}}"#
+    ] {
+      let usage = try await StepFunQuotaClient(httpClient: StepFunHTTPStub(body: body))
+        .fetchUsage(configuration: configuration(), now: now)
+      let metric = try XCTUnwrap(usage.metrics.first)
+      XCTAssertEqual(metric.id, "monthly-credits")
+      XCTAssertEqual(metric.remainingPercent, 75)
+      XCTAssertNil(metric.remainingAmount)
+      XCTAssertNil(metric.usedDisplay)
+      XCTAssertNil(metric.totalDisplay)
+    }
   }
 
   func testOmittedSubscriptionFractionOverridesContradictoryBucketCounts() async throws {

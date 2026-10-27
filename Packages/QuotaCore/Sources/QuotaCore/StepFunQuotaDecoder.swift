@@ -82,6 +82,7 @@ enum StepFunQuotaDecoder {
       switch type {
       case "1", "TYPE_SUBSCRIPTION":
         // Subscription expiry is not a recurring reset date.
+        if expiry.map({ $0 <= now }) == true { continue }
         try subscription.add(total: total, residual: residual)
         if let reset { subscriptionResets.append(reset) }
       case "2", "TYPE_TOPUP":
