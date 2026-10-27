@@ -19,18 +19,24 @@ final class HTTPRedirectIntegrationTests: XCTestCase {
     process.arguments = ["python3", "-u", "-c", Self.server, folder.path]
     process.environment = ["PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"]
     process.standardOutput = Pipe()
-    process.standardError = Pipe()
+    let errorPipe = Pipe()
+    process.standardError = errorPipe
     try process.run()
     // Graceful fixture shutdown can hang under the asynchronous Linux runner.
     // It has no state to preserve, so cleanup must not wait on SIGTERM.
     defer { if process.isRunning { _ = kill(process.processIdentifier, SIGKILL) }; process.waitUntilExit() }
     let ready = folder.appendingPathComponent("port")
-    let deadline = Date().addingTimeInterval(5)
+    // A cold system Python launch on macOS CI can take longer than five seconds.
+    let deadline = Date().addingTimeInterval(30)
     while !FileManager.default.fileExists(atPath: ready.path), process.isRunning, Date() < deadline {
       try await Task.sleep(nanoseconds: 10_000_000)
     }
     guard FileManager.default.fileExists(atPath: ready.path) else {
-      XCTFail("The local redirect fixture did not start (python3 is required).")
+      let wasRunning = process.isRunning
+      if wasRunning { _ = kill(process.processIdentifier, SIGKILL) }
+      process.waitUntilExit()
+      let diagnostic = String(decoding: errorPipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+      XCTFail("The local redirect fixture did not start (running: \(wasRunning), exit: \(process.terminationStatus)). \(diagnostic.prefix(300))")
       return
     }
     let port = try String(contentsOf: ready).trimmingCharacters(in: .whitespacesAndNewlines)
