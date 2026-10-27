@@ -45,6 +45,16 @@ public func defaultRingMetrics(for usage: ProviderUsage) -> [UsageMetric] {
   case .minimax:
     // Keep the general bucket's short and long windows together.
     preferredIDs = ["general-interval", "general-weekly"]
+  case .tencentTokenHub:
+    // Metric ids embed the server-assigned TeamId, so there is no fixed list.
+    // The client's deterministic order (current cycle, then shared pool, then
+    // whole package) already puts the resetting window first.
+    preferredIDs = []
+  case .stepfun:
+    // Coding-Plan accounts get rolling windows; credit plans get the monthly
+    // pool. Credit plans have no five-hour metric, so the list degrades to
+    // whichever ids exist.
+    preferredIDs = ["stepfun-five-hour", "stepfun-credit", "stepfun-weekly", "stepfun-topup"]
   }
 
   var selected: [UsageMetric] = []

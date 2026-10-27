@@ -878,6 +878,10 @@ private func compactProviderName(for provider: QuotaProvider) -> String {
     return "MiMo"
   case .minimax:
     return "MiniMax"
+  case .tencentTokenHub:
+    return "TokenHub"
+  case .stepfun:
+    return "StepFun"
   }
 }
 

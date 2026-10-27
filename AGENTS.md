@@ -32,7 +32,8 @@ settings. The user's normal Codex login and existing imported accounts stay sepa
 
 Providers: Claude (Anthropic), OpenAI/ChatGPT, GitHub Copilot, Zhipu, Z.ai, Kimi,
 Google Antigravity, Devin, Meta Muse, OpenCode Go, Venice, Cline, JetBrains Junie,
-MiniMax M Plan, Xiaomi MiMo personal Token Plan.
+MiniMax M Plan, Xiaomi MiMo personal Token Plan, Tencent TokenHub Token Plan,
+StepFun Step Plan.
 
 ## Layout
 
@@ -233,6 +234,44 @@ Linux:
   [MiMo Code authentication](https://github.com/XiaomiMiMo/MiMo-Code/blob/43c9daa2027f1edb5c83a176ccc35e62881eba2b/packages/cli/src/plugin/mimo.ts),
   [official configuration guide](https://mimo.mi.com/docs/en-US/tokenplan/integration/mimo-code),
   and the [API-key quota endpoint request](https://github.com/XiaomiMiMo/MiMo-Code/issues/2495).
+- **Tencent TokenHub**: provider `tencent-tokenhub`, credentials
+  `tokenhub.secret_id`/`tokenhub.secret_key` plus optional `tokenhub.session_token`,
+  `tokenhub.region` (default `ap-singapore`), and `tokenhub.endpoint` (default
+  `tokenhub.intl.tencentcloudapi.com`; `tokenhub.tencentcloudapi.com` for the
+  China site). Quota comes from the signed control plane:
+  `DescribeTokenPlanList` then `DescribeTokenPlan` per TeamId, API version
+  `2026-03-22`. Auth is TC3-HMAC-SHA256 — implemented in-house in
+  `SHA256.swift`/`TencentCloudTC3.swift` because QuotaCore has no crypto
+  dependencies and CryptoKit does not exist on Linux. Signed headers are
+  `content-type;host`; `X-TC-Token` carries STS session tokens unsigned.
+  Personal `sk-tp-…` and Coding Plan `sk-sp-…` keys are inference-only: Tencent
+  exposes no quota endpoint for them, so the field help steers users to the
+  cloud API key pair. Metrics render `PackageInfo` like thcli: the current
+  billing cycle (`ExclusiveUsed`/`ExclusiveAllocated`, or the `CycleQuota`
+  allotment when the pool is unsplit) with `TokenSummary` cycle bounds as the
+  reset, the `SharedPool` top-up balance, and `TotalUsed`/`TotalQuota` across
+  the whole package. Enterprise `ProductType`s measure in credits, others in
+  tokens. API errors arrive as HTTP 200 with `Response.Error`; `AuthFailure.*`
+  maps to `.auth`, `RequestLimitExceeded`/`Throttling` to `.rateLimit`, and the
+  error `Message` is never surfaced. Discovery imports `~/.thcli/<profile>.<site>.credential`
+  files written by the official thcli CLI; `cn` files pin the China endpoint and
+  `ap-guangzhou`.
+- **StepFun**: provider `stepfun`, secret `stepfun.oasis_token`, optional
+  nonsecret `stepfun.site` (`com` default / `ai`). Quota is the web dashboard
+  Connect-RPC `POST .../step.openapi.devcenter.Dashboard/QueryStepPlanRateLimit`
+  (+ `GetStepPlanStatus` for the plan name) on `platform.stepfun.{com,ai}`;
+  the inference `STEP_API_KEY` cannot read it. Auth mirrors the web client:
+  `Cookie: Oasis-Token=<token>; Oasis-Webid=<webid>` with `oasis-webid` header
+  equal to the token's `device_id` JWT claim (from the `...`-separated refresh
+  half first), `oasis-appid: 10300`, `oasis-platform: web`. Success is
+  `status == 1` in a flat JSON body. `plan_family == 2` / present
+  `plan_credit_rate_limit` means the current Credit plan — monthly pool plus
+  booster credits, bucket `credit_residual`/`credit_total` weight the combined
+  percentage. Otherwise the grandfathered Coding Plan reports rolling
+  `five_hour_*`/`weekly_*` windows (reset timestamps can be string or number).
+  Reset `0`/`"0"` means "no window configured", not "used up". Discovery reads
+  `~/.stepcode/auth.json` provider entries and `STEPFUN_TOKEN`. Same semantics
+  as CodexBar's StepFun fetcher (see CodexBar `docs/stepfun.md`).
 - **JetBrains Junie**: current Junie CLI `/stats` reads `GET
   https://ingrazzio-cloud-prod.labs.jb.gg/auth/test` with `Authorization: Bearer
   <Junie API key>`, `X-Accept-EAP-License: false`, and

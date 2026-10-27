@@ -1918,6 +1918,11 @@ final class AppModel: ObservableObject {
     // ClinePass reports a five-hour, weekly and monthly window; monthly is the
     // longest, and it owns the account's primary color once usage is live.
     case .cline: return .monthly
+    // Token Plan quotas reset on the package's billing cycle.
+    case .tencentTokenHub: return .monthly
+    // Credit plans reset monthly; legacy windowed plans put weekly behind
+    // the rolling 5-hour window either way.
+    case .stepfun: return .monthly
     default: return .weekly
     }
   }

@@ -35,7 +35,9 @@ public struct QuotaCoordinator: Sendable {
         ClineQuotaClient(httpClient: httpClient),
         JunieQuotaClient(httpClient: httpClient),
         MiniMaxQuotaClient(httpClient: httpClient),
-        MiMoQuotaClient(httpClient: httpClient)
+        MiMoQuotaClient(httpClient: httpClient),
+        TencentTokenHubClient(httpClient: httpClient),
+        StepFunQuotaClient(httpClient: httpClient)
       ]
     )
   }
