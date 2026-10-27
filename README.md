@@ -91,6 +91,7 @@ and Claude Keychain import, are macOS-only. Linux Claude Code writes
 | **JetBrains Junie** | Junie API key | `JUNIE_API_KEY`, Junie fallback file (`~/.junie/secure_credentials.json`) |
 | **MiniMax M Plan** | Global (`minimax.io`) Subscription Key | OpenCode (`minimax-coding-plan` in `auth.json`) |
 | **Xiaomi MiMo** | Personal Token Plan console session | Connect MiMo on macOS; manual console cookies on Linux |
+| **StepFun** | Global Step Plan console session token | Manual `Oasis-Token` and matching `Oasis-Webid` |
 
 For OpenCode Go, choose **Settings → Add Account → OpenCode Go** and enter your
 OpenCode API key, or scan for a saved Go key. LLimit shows the rolling, weekly,
@@ -213,6 +214,25 @@ those used on Linux, require replacement when expired; see the
 [daemon guide](Packages/LLimitd/README.md).
 See [Xiaomi's MiMo Code guide](https://mimo.mi.com/docs/en-US/tokenplan/integration/mimo-code)
 for the distinction between inference credentials and console usage.
+
+For StepFun, choose **Settings → Add Account → StepFun**. Sign in to the
+[global Step Plan console](https://platform.stepfun.ai/plan-subscribe) in your
+browser, open Developer Tools → Network, and reload the page. Select the
+`QueryStepPlanRateLimit` request and copy its **Oasis-Token** request header into
+the console session token field. LLimit derives **Oasis-Webid** from the token's
+`device_id` when available; otherwise copy that header from the same request into
+the optional field. These values grant access to your console account, so keep
+them private. Inference API keys cannot replace this console session.
+
+LLimit shows monthly subscription credits and top-up credits separately, using
+reported remaining fractions and bucket counts. Top-up expiry appears as text,
+without creating a recurring reset. Older Step Plans show their 5-hour and weekly
+limits. Reset times come from StepFun; monthly credit pace remains unavailable
+because the response does not report a cycle start or duration. Polling makes no
+inference requests. Session credentials stay in LLimit's local settings; no browser
+profile is read or imported, and expired sessions require a replacement token.
+This connection supports the global `platform.stepfun.ai` console and personal
+Step Plans; it does not query organization quotas or pay-as-you-go balances.
 
 ## How accounts work
 

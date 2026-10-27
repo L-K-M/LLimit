@@ -1841,6 +1841,8 @@ private struct ProviderMark: View {
       return "lightbulb.fill"
     case .minimax:
       return "sparkles"
+    case .stepFun:
+      return "stairs"
     }
   }
 }

@@ -1918,6 +1918,7 @@ final class AppModel: ObservableObject {
     // ClinePass reports a five-hour, weekly and monthly window; monthly is the
     // longest, and it owns the account's primary color once usage is live.
     case .cline: return .monthly
+    case .stepFun: return .monthly
     default: return .weekly
     }
   }
