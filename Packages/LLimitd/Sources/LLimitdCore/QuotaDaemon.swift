@@ -259,8 +259,11 @@ public final class QuotaDaemon {
            to: updated.credentials[CredentialField.junieCreditAllowance])
       let mimoIdentityChanged = previous.provider == .xiaomiMiMo && MiMoSessionCookies.hasChangedIdentity(
         from: previous.credentials[CredentialField.mimoSessionCookies], to: updated.credentials[CredentialField.mimoSessionCookies])
-      if junieAllowanceChanged || mimoIdentityChanged {
-        // A changed allowance must not appear as consumption in old history.
+      let stepFunIdentityChanged = previous.provider == .stepFun
+        && (previous.credentials[CredentialField.stepFunUserID]?.isEmpty != false
+          || previous.credentials[CredentialField.stepFunUserID] != updated.credentials[CredentialField.stepFunUserID])
+      if junieAllowanceChanged || mimoIdentityChanged || stepFunIdentityChanged {
+        // Different accounts or allowances must not share history.
         try historyStore.remove(accountIDs: [accountID])
       }
     }

@@ -94,4 +94,27 @@ final class StepFunBrowserAccountTests: XCTestCase {
     let permissions = try FileManager.default.attributesOfItem(atPath: paths.settingsFileURL.path)[.posixPermissions] as? NSNumber
     XCTAssertEqual(permissions?.intValue, 0o600)
   }
+
+  func testReimportPreservesHistoryOnlyForTheSameKnownAccount() throws {
+    for userID in ["123", "456", nil] as [String?] {
+      let (daemon, account) = try seeded()
+      let now = Date()
+      let previous = QuotaSnapshot(generatedAt: now, providers: [account.id, "peer"].map {
+        ProviderUsage(accountID: $0, provider: .stepFun, title: "StepFun",
+          metrics: [UsageMetric(id: "monthly-credits", label: "Monthly plan credits", remainingPercent: 75)], fetchedAt: now)
+      }, failures: [])
+      let history = QuotaHistoryStore(fileURL: paths.historyFileURL)
+      try history.save([previous])
+      var credentials = [CredentialField.stepFunPlanKey: "fixture-plan-key"]
+      credentials[CredentialField.stepFunUserID] = userID
+      let detected = DiscoveredCredential(stableID: "stepfun:step-code", provider: .stepFun,
+        suggestedName: "StepFun", sourceLabel: "Step Code", credentials: credentials)
+      try daemon.editingSettings {
+        _ = try $0.reimportAccount(account.id, among: [detected])
+      }
+      let retained = try history.load().flatMap(\.providers).map(\.accountID)
+      XCTAssertTrue(retained.contains("peer"))
+      XCTAssertEqual(retained.contains(account.id), userID == "123")
+    }
+  }
 }

@@ -2138,8 +2138,11 @@ final class AppModel: ObservableObject {
           && MiMoSessionCookies.hasChangedIdentity(
             from: previousAccount.credentials[CredentialField.mimoSessionCookies],
             to: updatedAccount.credentials[CredentialField.mimoSessionCookies])
-        if veniceKeyChanged || junieAllowanceChanged || mimoIdentityChanged {
-          // Percentages under different denominators cannot share a trend line.
+        let stepFunIdentityChanged = previousAccount.provider == .stepFun
+          && (previousAccount.credentials[CredentialField.stepFunUserID]?.isEmpty != false
+            || previousAccount.credentials[CredentialField.stepFunUserID] != updatedAccount.credentials[CredentialField.stepFunUserID])
+        if veniceKeyChanged || junieAllowanceChanged || mimoIdentityChanged || stepFunIdentityChanged {
+          // Different accounts or denominators cannot share a trend line.
           try invalidateAccountUsageAndHistory(for: previousAccount)
         } else {
           try invalidateAccountSnapshot(for: accountID)
