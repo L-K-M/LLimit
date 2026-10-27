@@ -16,6 +16,7 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
   case junie = "junie"
   case minimax = "minimax"
   case xiaomiMiMo = "xiaomi-mimo"
+  case stepFun = "stepfun"
 
   public var displayName: String {
     switch self {
@@ -49,6 +50,8 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
       return "MiniMax"
     case .xiaomiMiMo:
       return "Xiaomi MiMo"
+    case .stepFun:
+      return "StepFun"
     }
   }
 }
@@ -260,6 +263,20 @@ public extension QuotaProvider {
           isSecret: false,
           isRequired: false,
           help: "Optional purchase date anchoring resets every calendar month in UTC. Use YYYY-MM-DD (midnight UTC) or an ISO 8601 date-time with a timezone. Shorter months use their last day. Leave empty if unknown."
+        )
+      ]
+    case .stepFun:
+      return [
+        CredentialFieldDescriptor(
+          key: CredentialField.stepFunSessionToken,
+          label: "Console session token",
+          help: "On Linux, copy the Oasis-Token cookie value from the StepFun platform's developer tools. On macOS, use Connect StepFun. API keys are not accepted."
+        ),
+        CredentialFieldDescriptor(
+          key: CredentialField.stepFunWebID,
+          label: "Oasis-Webid",
+          isRequired: false,
+          help: "Optional with a compound console cookie; otherwise copy the matching Oasis-Webid cookie value."
         )
       ]
     }

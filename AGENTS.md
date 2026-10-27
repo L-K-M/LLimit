@@ -32,7 +32,7 @@ settings. The user's normal Codex login and existing imported accounts stay sepa
 
 Providers: Claude (Anthropic), OpenAI/ChatGPT, GitHub Copilot, Zhipu, Z.ai, Kimi,
 Google Antigravity, Devin, Meta Muse, OpenCode Go, Venice, Cline, JetBrains Junie,
-MiniMax M Plan, Xiaomi MiMo personal Token Plan.
+MiniMax M Plan, Xiaomi MiMo personal Token Plan, StepFun Step Plan.
 
 ## Layout
 
@@ -180,6 +180,56 @@ Linux:
 6. Add unit tests (discovery parsing + client decoding) — these run on Linux.
 
 ## Provider API notes
+
+- **StepFun**: provider `stepfun`. macOS uses **Connect StepFun** with a separate
+  nonpersistent WebKit session per attempt. Capture only the HttpOnly authentication
+  cookies `Oasis-Token` and `Oasis-Webid` for host `platform.stepfun.ai`, path `/`.
+  `Oasis-Token` contains an access JWT plus `...` plus a refresh JWT. Save them only
+  as secret `stepfun.browser_session` in the mode-600 local settings, honoring
+  expiry and HTTPS. Never access normal browser profiles or retain SSO/analytics
+  cookies; shared settings, widgets, snapshots, history and logs remain secret-free.
+  Validate signed-in renewal mode `2`, the server's UserInfo UID and quota before
+  committing a connection. HTTP 200 with anonymous mode `1` requires reconnecting;
+  never adopt that response as a signed-in session. Renew using the actual access
+  JWT expiry with a five-minute margin; authentication failure may also trigger
+  renewal. Do not promise a fixed session lifetime: the observed anonymous two-hour
+  expiry does not establish the signed-in contract. Honor refresh expiry; revoked
+  sessions and interactive challenges may require reconnecting.
+  Renewal is `POST https://platform.stepfun.ai/passport/proto.api.passport.v1.PassportService/RefreshToken`
+  with `{}`, the owned compound `Oasis-Token` cookie, matching `Oasis-Webid`,
+  `Oasis-Appid: 20700`, `Oasis-Platform: web`, and `Connect-Protocol-Version: 1`.
+  Verify the renewed server UID matches the saved account before committing
+  credentials or publishing usage. No CLI runtime dependency or credential import.
+  Linux retains manual secrets `stepfun.session_token` and `stepfun.web_id`;
+  users enter a console access token and matching web ID, replacing them when
+  expired. Linux does not renew manual credentials. If a compound token supplies
+  the web ID, derive `device_id` from its refresh JWT, not its access JWT, only as a
+  routing header and never as verified identity.
+  Global personal Step Plan quota uses read-only `POST
+  https://platform.stepfun.ai/api/step.openapi.devcenter.Dashboard/QueryStepPlanRateLimit`
+  with `{}`, `Oasis-Token`, matching `Oasis-Webid`, `Oasis-Appid: 20700`, and
+  `Oasis-Platform: web`. No inference API-key discovery. Refuse redirects and
+  isolate cookies/caches for quota and renewal requests.
+  Require protobuf status `CODE_OK`/`1`; `CODE_TOO_MANY`/`5` is rate limiting.
+  Protobuf JSON accepts snake_case/camelCase and int64 strings; omitted scalar
+  zeros are defaults when a reported reset or credit bucket establishes quota.
+  `plan_family` 2/3 (`PLAN_FAMILY_TOKEN`/`PLAN_FAMILY_TOKEN_V3`) uses
+  `plan_credit_rate_limit`: `subscription_credit_left_rate` is a remaining
+  fraction, `subscription_credit_reset_time` is epoch seconds. Keep monthly
+  subscription and top-up percentages separate. Top-up buckets (`TYPE_TOPUP`/2)
+  report `credit_total`, `credit_residual`, and `expire_at`; sum live buckets
+  using their own counts, and show the earliest expiry as text, never as reset.
+  Subscription buckets are `TYPE_SUBSCRIPTION`/1. Fractions win over conflicting
+  subscription counts. With no top-up buckets, use `topup_credit_left_rate`.
+  Legacy plans use `five_hour_usage_left_rate`/`weekly_usage_left_rate` and
+  corresponding `*_reset_time` seconds. No billing-derived reset/window length,
+  organization quota, PAYG balance, or inference request. Sources: official
+  [console](https://platform.stepfun.ai/plan-subscribe),
+  [Step Code login renewal](https://github.com/stepfun-ai/Step-Code/blob/7b7c2d1dcee73752b29f0953ce56e4f1b514f4bf/packages/providers/src/step-provider/login-refresh.ts),
+  [protobuf/auth bundle](https://platform.stepfun.ai/_next/static/chunks/8300-80e7d8753e1d65ea.js),
+  and [quota UI bundle](https://platform.stepfun.ai/_next/static/chunks/5731-6a1cbb3d71daa6f0.js),
+  inspected 2026-10-27. An unauthenticated quota request confirmed HTTP 401 with
+  Connect `code: unauthenticated`; successful account data remains fixture-tested.
 
 - **MiniMax M Plan**: read-only `GET https://www.minimax.io/v1/token_plan/remains`
   with `Authorization: Bearer <global M Plan Subscription Key>`. Provider ID

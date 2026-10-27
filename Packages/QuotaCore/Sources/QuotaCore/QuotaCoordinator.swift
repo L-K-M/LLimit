@@ -35,7 +35,8 @@ public struct QuotaCoordinator: Sendable {
         ClineQuotaClient(httpClient: httpClient),
         JunieQuotaClient(httpClient: httpClient),
         MiniMaxQuotaClient(httpClient: httpClient),
-        MiMoQuotaClient(httpClient: httpClient)
+        MiMoQuotaClient(httpClient: httpClient),
+        StepFunQuotaClient(httpClient: httpClient)
       ]
     )
   }
@@ -164,7 +165,7 @@ private struct FailureMessagePolicy: Sendable {
 
   init(configurations: [ProviderRuntimeConfiguration]) {
     let hiddenSecretKeys: Set<String> = [CredentialField.openAIRefreshToken, CredentialField.kimiRefreshToken,
-                                       CredentialField.mimoBrowserSession]
+                                       CredentialField.mimoBrowserSession, CredentialField.stepFunBrowserSession]
     let values = configurations.flatMap { configuration in
       let keys = Set(configuration.provider.credentialFields.filter(\.isSecret).map(\.key))
         .union(hiddenSecretKeys)
@@ -174,6 +175,15 @@ private struct FailureMessagePolicy: Sendable {
       if let raw = configuration.credentials[CredentialField.mimoBrowserSession],
          let browser = try? MiMoBrowserSession(serialized: raw) {
         values += browser.secretValues
+      }
+      if let raw = configuration.credentials[CredentialField.stepFunBrowserSession],
+         let browser = try? StepFunBrowserSession(serialized: raw) {
+        values += browser.secretValues
+      }
+      if configuration.provider == .stepFun,
+         let compound = configuration.credentials[CredentialField.stepFunSessionToken] {
+        let pair = compound.components(separatedBy: "...")
+        if pair.count == 2 { values += pair.filter { !$0.isEmpty } }
       }
       return values
     }

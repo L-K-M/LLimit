@@ -345,7 +345,7 @@ public final class QuotaDaemon {
 
   public static func editableCredentialKeys(of account: ProviderAccount) -> Set<String> {
     Set(account.provider.credentialFields.map(\.key)).union(account.credentials.keys)
-      .subtracting([CredentialField.mimoBrowserSession])
+      .subtracting([CredentialField.mimoBrowserSession, CredentialField.stepFunBrowserSession, CredentialField.stepFunUserID])
   }
 
   // MARK: - Detect & import (convenience)
@@ -713,6 +713,12 @@ public final class QuotaDaemon {
       if account.provider == .xiaomiMiMo, let cookies = values[CredentialField.mimoSessionCookies],
          cookies != result[CredentialField.mimoSessionCookies] {
         result[CredentialField.mimoBrowserSession] = nil
+      }
+      if account.provider == .stepFun, [CredentialField.stepFunSessionToken, CredentialField.stepFunWebID].contains(where: {
+        values[$0] != nil && values[$0] != result[$0]
+      }) {
+        result[CredentialField.stepFunBrowserSession] = nil
+        result[CredentialField.stepFunUserID] = nil
       }
       return result.merging(values) { _, new in new }
     }

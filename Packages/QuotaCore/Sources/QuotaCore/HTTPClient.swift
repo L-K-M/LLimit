@@ -48,15 +48,17 @@ public struct URLSessionHTTPClient: HTTPClient {
       configuration.httpShouldSetCookies = false
       configuration.urlCache = nil
       configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-      transport = URLSession(configuration: configuration)
+      // FoundationNetworking does not reliably route redirects through the
+      // per-task delegate used by data(for:delegate:). A session delegate is
+      // required to prevent credential forwarding on Linux as well as macOS.
+      transport = URLSession(configuration: configuration, delegate: RefuseRedirects(), delegateQueue: nil)
     } else {
       transport = session
     }
     defer { if transport !== session { transport.finishTasksAndInvalidate() } }
 
     do {
-      let delegate: (any URLSessionTaskDelegate)? = redirects == .refuse ? RefuseRedirects() : nil
-      let (data, response) = try await transport.data(for: mutableRequest, delegate: delegate)
+      let (data, response) = try await transport.data(for: mutableRequest)
       guard let httpResponse = response as? HTTPURLResponse else {
         throw ProviderClientError(kind: .network, message: "Non-HTTP response")
       }

@@ -45,6 +45,8 @@ public func defaultRingMetrics(for usage: ProviderUsage) -> [UsageMetric] {
   case .minimax:
     // Keep the general bucket's short and long windows together.
     preferredIDs = ["general-interval", "general-weekly"]
+  case .stepFun:
+    preferredIDs = ["monthly-credits", "five-hour", "weekly", "topup-credits"]
   }
 
   var selected: [UsageMetric] = []

@@ -46,6 +46,11 @@ public enum CredentialField {
   public static let junieCreditAllowance = "junie.credit_allowance"
   public static let junieResetAt = "junie.reset_at"
 
+  public static let stepFunSessionToken = "stepfun.session_token"
+  public static let stepFunWebID = "stepfun.web_id"
+  public static let stepFunBrowserSession = "stepfun.browser_session"
+  public static let stepFunUserID = "stepfun.user_id"
+
   public static let copilotOAuthToken = "copilot.oauth_token"
   public static let copilotPATToken = "copilot.pat_token"
   public static let copilotUsername = "copilot.username"

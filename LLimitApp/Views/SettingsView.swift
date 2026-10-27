@@ -76,6 +76,10 @@ struct SettingsView: View {
       MiMoLoginView(session: session, onClose: { model.dismissMiMoLogin() })
         .interactiveDismissDisabled()
     }
+    .sheet(item: $model.stepFunLogin, onDismiss: { model.dismissStepFunLogin() }) { session in
+      StepFunLoginView(session: session, onClose: { model.dismissStepFunLogin() })
+        .interactiveDismissDisabled()
+    }
     .onChange(of: model.providerAccounts.map(\.id)) { _, accountIDs in
       if case .account(let accountID) = selection, !accountIDs.contains(accountID) {
         selection = .overview
@@ -93,6 +97,7 @@ struct SettingsView: View {
     .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { notification in
       guard let window = notification.object as? NSWindow, window === hostWindow.window else { return }
       model.dismissMiMoLogin()
+      model.dismissStepFunLogin()
       commitAccountDrafts()
     }
     // One last attempt on quit. A draft that is still rejected cannot be saved and
@@ -323,9 +328,10 @@ struct SettingsView: View {
               if providerToAdd == .anthropic { model.connectClaudeAccount(account.id) }
               if providerToAdd == .openAI { model.connectCodexAccount(account.id) }
               if providerToAdd == .xiaomiMiMo { model.connectMiMoAccount(account.id) }
+              if providerToAdd == .stepFun { model.connectStepFunAccount(account.id) }
             }
             .buttonStyle(.borderedProminent)
-            .disabled((providerToAdd == .anthropic || providerToAdd == .openAI || providerToAdd == .xiaomiMiMo) && model.isRefreshing)
+            .disabled((providerToAdd == .anthropic || providerToAdd == .openAI || providerToAdd == .xiaomiMiMo || providerToAdd == .stepFun) && model.isRefreshing)
           }
           if providerToAdd == .anthropic {
             Text("Sign in inside LLimit with Claude Code installed on this Mac. Add another Claude account to connect a second subscription. Credentials renew automatically.")
@@ -339,6 +345,10 @@ struct SettingsView: View {
               .fixedSize(horizontal: false, vertical: true)
           } else if providerToAdd == .xiaomiMiMo {
             Text("Sign in to the MiMo API Platform inside LLimit. LLimit stays signed in and renews automatically. Reconnect if Xiaomi asks for a new sign-in.")
+              .font(.caption).foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          } else if providerToAdd == .stepFun {
+            Text("Sign in to StepFun inside LLimit. LLimit keeps each account separately signed in and renews automatically when possible. Reconnect if StepFun requires it.")
               .font(.caption).foregroundStyle(.secondary)
               .fixedSize(horizontal: false, vertical: true)
           }
@@ -358,6 +368,7 @@ struct SettingsView: View {
     case .anthropic: return "Connect Claude"
     case .openAI: return "Connect OpenAI"
     case .xiaomiMiMo: return "Connect MiMo"
+    case .stepFun: return "Connect StepFun"
     default: return "Add Account"
     }
   }
@@ -1137,6 +1148,16 @@ struct SettingsView: View {
                   .fixedSize(horizontal: false, vertical: true)
                 mimoResetDateField(for: AccountFieldKey(accountID: account.id, field: .credential(CredentialField.mimoResetAt)))
                 DisclosureGroup("Manual setup") { manualCredentials(for: account, excludingFields: [CredentialField.mimoResetAt]) }
+              }
+            } else if account.provider == .stepFun {
+              VStack(alignment: .leading, spacing: 10) {
+                Button(account.hasRequiredCredentials ? "Reconnect StepFun" : "Connect StepFun") {
+                  commitAccountDrafts(); model.connectStepFunAccount(account.id)
+                }
+                .buttonStyle(.borderedProminent).disabled(model.isRefreshing)
+                Text("Sign in to StepFun inside LLimit. LLimit keeps each account separately signed in and renews automatically when possible. Reconnect if StepFun requires it.")
+                  .font(.caption).foregroundStyle(.secondary)
+                  .fixedSize(horizontal: false, vertical: true)
               }
             } else {
               manualCredentials(for: account)
