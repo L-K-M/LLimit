@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D76B83C8D0E649B8A2D48901 /* ProviderChooserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D76B83C8D0E649B8A2D48902 /* ProviderChooserView.swift */; };
 		8F59B7A976036C665A38D2DC /* StepFunLoginSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFF42DCC0209C486D291E987 /* StepFunLoginSession.swift */; };
 		7AABCCB20D86334628EF11AE /* StepFunLoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6251414FCBD6C85FD764087 /* StepFunLoginView.swift */; };
 		62237005EA4ADF03CFCB1D82 /* MiMoLoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72F66A1D7EC7A58D858631EA /* MiMoLoginView.swift */; };
@@ -63,6 +64,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		D76B83C8D0E649B8A2D48902 /* ProviderChooserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderChooserView.swift; sourceTree = "<group>"; };
 		DFF42DCC0209C486D291E987 /* StepFunLoginSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepFunLoginSession.swift; sourceTree = "<group>"; };
 		B6251414FCBD6C85FD764087 /* StepFunLoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepFunLoginView.swift; sourceTree = "<group>"; };
 		72F66A1D7EC7A58D858631EA /* MiMoLoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiMoLoginView.swift; sourceTree = "<group>"; };
@@ -144,6 +146,7 @@
 		52F914E8DE30DE6489408458 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				D76B83C8D0E649B8A2D48902 /* ProviderChooserView.swift */,
 				B6251414FCBD6C85FD764087 /* StepFunLoginView.swift */,
 				72F66A1D7EC7A58D858631EA /* MiMoLoginView.swift */,
 				0F28142772B4697E21774DC0 /* ClaudeTerminalView.swift */,
@@ -356,6 +359,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D76B83C8D0E649B8A2D48901 /* ProviderChooserView.swift in Sources */,
 				BCF52573CAD84156B1B5D45D /* AppModel.swift in Sources */,
 				ABD3522DD192E20D0D18A429 /* MiMoLoginSession.swift in Sources */,
 				8F59B7A976036C665A38D2DC /* StepFunLoginSession.swift in Sources */,
