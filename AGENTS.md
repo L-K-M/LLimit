@@ -158,10 +158,11 @@ Linux:
   Xiaomi may request interactive sign-in if its saved login expires, is revoked,
   or requires a challenge. Monthly manual purchase/reset settings remain preserved.
   Quota transport must refuse redirects and avoid shared cookie jars and caches.
-- Adding a `QuotaProvider` case is a breaking change for **six** exhaustive `switch`es:
+- Adding a `QuotaProvider` case is a breaking change for **seven** exhaustive `switch`es:
   `Models.displayName`, `Models.credentialFields`,
   `ProviderMetricSelection.defaultRingMetrics`, the widget's `compactProviderName`,
-  the widget's `ProviderTile.palette`, and `ProviderMark.symbolName`. `AppModel`'s
+  the widget's `ProviderTile.palette`, `ProviderMark.symbolName`, and
+  `ProviderCatalog.entry(for:)`. `AppModel`'s
   `defaultPrimaryKind(for:)` has a `default:` and needs a case only when the
   provider's longest window is not `.weekly`.
 - Provider APIs are undocumented and unstable. Fail gracefully (`ProviderFailure`) and

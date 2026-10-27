@@ -26,7 +26,6 @@ struct SettingsView: View {
 
   @ObservedObject var model: AppModel
   @State private var selection: SettingsItem? = .overview
-  @State private var providerToAdd: QuotaProvider = .openAI
   /// Uncommitted text of account name and credential fields. Saving a credential can
   /// clear a Venice account's history, so keystrokes stay here until the field commits:
   /// on Return, focus loss, leaving the field or account, window close, or quit.
@@ -305,53 +304,13 @@ struct SettingsView: View {
   private var addAccountDetail: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 24) {
-        VStack(alignment: .leading, spacing: 12) {
-          Text("Add Account")
-            .font(.title2.weight(.semibold))
-          Text("Connect an account, enter credentials, or import a login detected on this Mac. You can add the same provider more than once to track multiple subscriptions.")
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-
-          HStack(spacing: 10) {
-            Picker("Provider", selection: $providerToAdd) {
-              ForEach(QuotaProvider.allCases, id: \.self) { provider in
-                Text(provider.displayName).tag(provider)
-              }
-            }
-            .pickerStyle(.menu)
-            .frame(minWidth: 220, alignment: .leading)
-
-            Button(addAccountButtonTitle) {
-              let account = model.addProviderAccount(provider: providerToAdd)
-              selection = .account(account.id)
-              if providerToAdd == .anthropic { model.connectClaudeAccount(account.id) }
-              if providerToAdd == .openAI { model.connectCodexAccount(account.id) }
-              if providerToAdd == .xiaomiMiMo { model.connectMiMoAccount(account.id) }
-              if providerToAdd == .stepFun { model.connectStepFunAccount(account.id) }
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled((providerToAdd == .anthropic || providerToAdd == .openAI || providerToAdd == .xiaomiMiMo || providerToAdd == .stepFun) && model.isRefreshing)
-          }
-          if providerToAdd == .anthropic {
-            Text("Sign in inside LLimit with Claude Code installed on this Mac. Add another Claude account to connect a second subscription. Credentials renew automatically.")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-              .fixedSize(horizontal: false, vertical: true)
-          } else if providerToAdd == .openAI {
-            Text("Sign in with ChatGPT in your browser, using Codex installed on this Mac. Add another OpenAI account to connect a second subscription. Each account stays signed in separately.")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-              .fixedSize(horizontal: false, vertical: true)
-          } else if providerToAdd == .xiaomiMiMo {
-            Text("Sign in to the MiMo API Platform inside LLimit. LLimit stays signed in and renews automatically. Reconnect if Xiaomi asks for a new sign-in.")
-              .font(.caption).foregroundStyle(.secondary)
-              .fixedSize(horizontal: false, vertical: true)
-          } else if providerToAdd == .stepFun {
-            Text("Sign in to StepFun inside LLimit. LLimit keeps each account separately signed in and renews automatically when possible. Reconnect if StepFun requires it.")
-              .font(.caption).foregroundStyle(.secondary)
-              .fixedSize(horizontal: false, vertical: true)
-          }
+        ProviderChooserView(isRefreshing: model.isRefreshing) { provider in
+          let account = model.addProviderAccount(provider: provider)
+          selection = .account(account.id)
+          if provider == .anthropic { model.connectClaudeAccount(account.id) }
+          if provider == .openAI { model.connectCodexAccount(account.id) }
+          if provider == .xiaomiMiMo { model.connectMiMoAccount(account.id) }
+          if provider == .stepFun { model.connectStepFunAccount(account.id) }
         }
 
         Divider()
@@ -360,16 +319,6 @@ struct SettingsView: View {
       }
       .frame(maxWidth: .infinity, alignment: .leading)
       .padding(24)
-    }
-  }
-
-  private var addAccountButtonTitle: String {
-    switch providerToAdd {
-    case .anthropic: return "Connect Claude"
-    case .openAI: return "Connect OpenAI"
-    case .xiaomiMiMo: return "Connect MiMo"
-    case .stepFun: return "Connect StepFun"
-    default: return "Add Account"
     }
   }
 

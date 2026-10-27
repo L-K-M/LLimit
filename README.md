@@ -74,6 +74,13 @@ The same providers work on both platforms. Managed Claude Code and Codex connect
 and Claude Keychain import, are macOS-only. Linux Claude Code writes
 `~/.claude/.credentials.json` directly, which LLimit reads on both platforms.
 
+On macOS, **Settings → Add Account** shows a searchable provider catalog. Search
+by product, company, or plan, such as Codex, Cognition, or GLM. Each card shows
+the service and account type; the GLM choices distinguish **China (Zhipu AI /
+BigModel)** from **International (Z.ai)**. Choose a card to review its setup, then
+connect or add the account. Browsing the catalog does not create accounts.
+Detected logins remain available below the catalog as an optional import shortcut.
+
 | Provider | Credential it needs | One-click import from |
 | --- | --- | --- |
 | **Claude** (Anthropic) | OAuth access token | Claude Code (macOS Keychain / `~/.claude/.credentials.json`), OpenCode |
@@ -130,7 +137,7 @@ account API and never makes an inference request. Imported keys work without Cli
 running; because LLimit does not renew Cline sessions, an expired one needs a fresh
 import or a replacement key.
 
-For Junie, choose **Settings → Add Account → JetBrains Junie** and enter a key
+For Junie, choose **Settings → Add Account → Junie** and enter a key
 generated at [Junie CLI](https://junie.jetbrains.com/cli), or import a detected
 key. LLimit reads the JetBrains AI account balance without generating tokens.
 It shows credits or USD as reported by Junie. AI Ultimate uses the personal
