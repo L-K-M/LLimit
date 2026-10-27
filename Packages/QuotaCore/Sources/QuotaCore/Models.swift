@@ -284,6 +284,13 @@ public extension QuotaProvider {
           label: "Oasis-Webid",
           isRequired: false,
           help: "Optional with a compound console cookie; otherwise copy the matching Oasis-Webid cookie value."
+        ),
+        CredentialFieldDescriptor(
+          key: CredentialField.stepFunResetAt,
+          label: "Subscription purchase date",
+          isSecret: false,
+          isRequired: false,
+          help: "Optional purchase date anchoring monthly plan-credit resets in UTC when StepFun reports no reset. Use YYYY-MM-DD (midnight UTC) or an ISO 8601 date-time with a timezone. Server resets take precedence."
         )
       ]
     }
@@ -609,6 +616,7 @@ public struct ProviderAccount: Codable, Hashable, Identifiable, Sendable {
     switch provider {
     case .junie: retainedKeys = [CredentialField.junieCreditAllowance, CredentialField.junieResetAt]
     case .xiaomiMiMo: retainedKeys = [CredentialField.mimoResetAt]
+    case .stepFun: retainedKeys = [CredentialField.stepFunResetAt]
     default: return imported
     }
 

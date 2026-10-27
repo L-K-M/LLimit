@@ -965,9 +965,9 @@ final class AppModel: ObservableObject {
     let renewed = try await browser.renewed(httpClient: http)
     let client = StepFunQuotaClient(httpClient: http)
     var candidate = original.runtimeConfiguration()
-    candidate.credentials = try renewed.credentials(verifiedUserID: "")
+    candidate.credentials = original.credentialsForImport(try renewed.credentials(verifiedUserID: ""))
     let userID = try await client.verifyIdentity(configuration: candidate)
-    candidate.credentials = try renewed.credentials(verifiedUserID: userID)
+    candidate.credentials = original.credentialsForImport(try renewed.credentials(verifiedUserID: userID))
     _ = try await client.fetchUsage(configuration: candidate, now: Date())
     try Task.checkCancellation()
     guard !configurationLoadFailed, stepFunLogin?.id == attemptID,
@@ -1013,7 +1013,7 @@ final class AppModel: ObservableObject {
       let http = URLSessionHTTPClient()
       let renewed = try await browser.renewed(httpClient: http)
       var candidate = configuration
-      candidate.credentials = try renewed.credentials(verifiedUserID: userID)
+      candidate.credentials = current.credentialsForImport(try renewed.credentials(verifiedUserID: userID))
       guard try await StepFunQuotaClient(httpClient: http).verifyIdentity(configuration: candidate) == userID else { return false }
       try Task.checkCancellation()
       guard !configurationLoadFailed, let index = providerAccounts.firstIndex(where: { $0.id == original.id }),
@@ -1638,7 +1638,8 @@ final class AppModel: ObservableObject {
         if account.provider == .xiaomiMiMo && fieldKey == CredentialField.mimoSessionCookies {
           account.credentials[CredentialField.mimoBrowserSession] = nil
         }
-        if account.provider == .stepFun {
+        if account.provider == .stepFun,
+           [CredentialField.stepFunPlanKey, CredentialField.stepFunSessionToken, CredentialField.stepFunWebID].contains(fieldKey) {
           account.credentials[CredentialField.stepFunBrowserSession] = nil
           account.credentials[CredentialField.stepFunUserID] = nil
           if fieldKey == CredentialField.stepFunPlanKey {
@@ -1665,6 +1666,7 @@ final class AppModel: ObservableObject {
     switch provider {
     case .junie: return CredentialField.junieResetAt
     case .xiaomiMiMo: return CredentialField.mimoResetAt
+    case .stepFun: return CredentialField.stepFunResetAt
     default: return nil
     }
   }
@@ -2155,6 +2157,10 @@ final class AppModel: ObservableObject {
             from: previousAccount.credentials[CredentialField.mimoSessionCookies],
             to: updatedAccount.credentials[CredentialField.mimoSessionCookies])
         let stepFunIdentityChanged = previousAccount.provider == .stepFun
+          && [CredentialField.stepFunPlanKey, CredentialField.stepFunSessionToken, CredentialField.stepFunWebID,
+              CredentialField.stepFunBrowserSession, CredentialField.stepFunUserID].contains(where: {
+            previousAccount.credentials[$0] != updatedAccount.credentials[$0]
+          })
           && (previousAccount.credentials[CredentialField.stepFunUserID]?.isEmpty != false
             || previousAccount.credentials[CredentialField.stepFunUserID] != updatedAccount.credentials[CredentialField.stepFunUserID])
         if veniceKeyChanged || junieAllowanceChanged || mimoIdentityChanged || stepFunIdentityChanged {
@@ -2390,6 +2396,14 @@ final class AppModel: ObservableObject {
       guard let key = manualResetField(for: account.provider),
             let text = account.credentials[key], let cycle = MonthlyQuotaCycle(anchor: text) else { continue }
       guard let usage = snapshot.providers.first(where: { $0.accountID == account.id }) else { return true }
+      if account.provider == .stepFun {
+        // A configured fallback must not force fresh server resets onto the
+        // manual schedule or apply it to top-ups and coding windows.
+        if usage.metrics.contains(where: { metric in
+          metric.id == "monthly-credits" && (metric.resetAt.map { $0 <= now } ?? true)
+        }) { return true }
+        continue
+      }
       let metrics = usage.metrics.filter { $0.id != "plan-compensation_total_token" }
       if metrics.contains(where: { $0.resetAt != cycle.resetAt(after: now) }) { return true }
     }

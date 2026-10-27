@@ -201,6 +201,9 @@ public final class QuotaDaemon {
     if provider == .xiaomiMiMo {
       mergedCredentials = try MiMoSessionCookies.credentialsForStorage(mergedCredentials)
     }
+    if provider == .stepFun {
+      mergedCredentials = try Self.stepFunCredentialsForStorage(mergedCredentials)
+    }
 
     let name = displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
     let account = ProviderAccount(
@@ -245,6 +248,9 @@ public final class QuotaDaemon {
     if updated.provider == .xiaomiMiMo {
       updated.credentials = try MiMoSessionCookies.credentialsForStorage(updated.credentials)
     }
+    if updated.provider == .stepFun {
+      updated.credentials = try Self.stepFunCredentialsForStorage(updated.credentials)
+    }
     guard updated != previous else { return previous }
 
     if updated.credentials != previous.credentials {
@@ -259,7 +265,11 @@ public final class QuotaDaemon {
            to: updated.credentials[CredentialField.junieCreditAllowance])
       let mimoIdentityChanged = previous.provider == .xiaomiMiMo && MiMoSessionCookies.hasChangedIdentity(
         from: previous.credentials[CredentialField.mimoSessionCookies], to: updated.credentials[CredentialField.mimoSessionCookies])
-      let stepFunIdentityChanged = previous.provider == .stepFun
+      let stepFunAuthenticationChanged = [CredentialField.stepFunPlanKey, CredentialField.stepFunSessionToken,
+        CredentialField.stepFunWebID, CredentialField.stepFunBrowserSession, CredentialField.stepFunUserID].contains {
+          previous.credentials[$0] != updated.credentials[$0]
+        }
+      let stepFunIdentityChanged = previous.provider == .stepFun && stepFunAuthenticationChanged
         && (previous.credentials[CredentialField.stepFunUserID]?.isEmpty != false
           || previous.credentials[CredentialField.stepFunUserID] != updated.credentials[CredentialField.stepFunUserID])
       if junieAllowanceChanged || mimoIdentityChanged || stepFunIdentityChanged {
@@ -695,6 +705,18 @@ public final class QuotaDaemon {
       }
     }
     return result.reconciled(with: valid)
+  }
+
+  private static func stepFunCredentialsForStorage(_ credentials: [String: String]) throws -> [String: String] {
+    var normalized = credentials
+    let reset = credentials[CredentialField.stepFunResetAt]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if reset.isEmpty {
+      normalized[CredentialField.stepFunResetAt] = nil
+    } else if parseQuotaResetDate(reset) == nil {
+      throw ProviderClientError(kind: .notConfigured,
+        message: "Enter a valid StepFun purchase date as YYYY-MM-DD or an ISO 8601 date-time with a timezone.")
+    }
+    return normalized
   }
 
   private static func credentials(of account: ProviderAccount, applying change: CredentialChange) throws -> [String: String] {

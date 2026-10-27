@@ -259,6 +259,14 @@ revoked or expired sign-ins and interactive challenges can require reconnecting.
 This supports the global `platform.stepfun.ai` console and personal Step Plans;
 it does not query organization quotas or pay-as-you-go balances.
 
+When the server does not report a monthly subscription reset time, you can set
+a purchase date to anchor monthly resets (**Set a purchase date** in account
+settings). Local time is displayed; date-only `YYYY-MM-DD` means midnight UTC,
+and ISO date-times require a timezone. The schedule only applies to monthly
+subscription credits, never to top-up or 5-hour/weekly limits. A past date
+shows the current month window and pace; a future date counts down until the
+cycle starts. No quota refill occurs. The setting survives reimport and reconnect.
+
 ## How accounts work
 
 - **Settings → Accounts** (macOS) / **`llimit accounts …`** (Linux) is where you
