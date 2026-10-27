@@ -48,6 +48,8 @@ public enum CredentialField {
 
   public static let stepFunSessionToken = "stepfun.session_token"
   public static let stepFunWebID = "stepfun.web_id"
+  public static let stepFunBrowserSession = "stepfun.browser_session"
+  public static let stepFunUserID = "stepfun.user_id"
 
   public static let copilotOAuthToken = "copilot.oauth_token"
   public static let copilotPATToken = "copilot.pat_token"

@@ -63,6 +63,10 @@ jobs:
         timeout-minutes: 3
         run: scripts/test-mimo-login.sh --skip-build "$RUNNER_TEMP/LLimitBuild"
 
+      - name: Test StepFun browser isolation
+        timeout-minutes: 3
+        run: scripts/test-stepfun-login.sh --skip-build "$RUNNER_TEMP/LLimitBuild"
+
       - name: Test trend chart rendering
         run: scripts/test-trend-chart.sh --skip-build "$RUNNER_TEMP/LLimitBuild"
 

@@ -133,18 +133,19 @@ balances, not web-app message/image quotas.
 StepFun reads the global [Step Plan console](https://platform.stepfun.ai/plan-subscribe).
 Run `llimit accounts add --provider stepfun` and enter the console **Oasis-Token**
 at the secret prompt. To obtain it, sign in to that console, open your browser's
-Developer Tools → Network, reload the page, and select `QueryStepPlanRateLimit`.
-Copy the token from the request headers. The optional **Oasis-Webid** prompt can
-be left blank when the token contains `device_id`; otherwise copy its value from
-the same request. Avoid putting session credentials in shell history. API keys
+Developer Tools → Application/Storage → Cookies for `platform.stepfun.ai`.
+Copy the **Oasis-Token** cookie value and its matching **Oasis-Webid** value and
+enter both at the prompts. Avoid putting session credentials in shell history. API keys
 and CLI inference credentials do not authenticate this quota endpoint.
 
 Subscription credits and top-up credits remain separate; older Step Plans report
 5-hour and weekly limits. Server reset times are preserved, top-up expiry is text
 only, and no monthly cycle duration is invented. The daemon reads quota without
 generating tokens. Session credentials are stored only in local settings and need
-replacement after expiry. Automatic discovery and renewal, organization quotas,
-and pay-as-you-go balances are not supported.
+replacement after expiry. Linux does not renew these manual sessions or import
+StepFun CLI credentials. On macOS, **Connect StepFun** signs in inside LLimit and
+can renew its separate saved login automatically. No StepFun CLI is required.
+Organization quotas and pay-as-you-go balances are not supported.
 
 Cline tracks both billing modes. ClinePass, the monthly subscription, reports
 five-hour, weekly, and monthly window limits with reset times; Cline credits, the

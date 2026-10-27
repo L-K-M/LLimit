@@ -66,6 +66,7 @@ final class AppModel: ObservableObject {
 
   @Published var codexLogin: CodexLoginPresentation?
   @Published var mimoLogin: MiMoLoginSession?
+  @Published var stepFunLogin: StepFunLoginSession?
   @Published private(set) var codexAccountMessages: [String: String] = [:]
   @Published private var codexBusyAccounts: Set<String> = []
   private var signInSkippedAccountIDs: Set<String> = []
@@ -252,6 +253,7 @@ final class AppModel: ObservableObject {
 
   private var signingInAccountIDs: Set<String> {
     codexBusyAccounts.union(mimoLogin.map { [$0.accountID] } ?? [])
+      .union(stepFunLogin.map { [$0.accountID] } ?? [])
   }
 
   func refreshNow() async {
@@ -263,6 +265,7 @@ final class AppModel: ObservableObject {
     defer { isRefreshing = false }
 
     await refreshExpiringChatGPTTokens()
+    await refreshExpiringStepFunSessions()
     let preparation = await prepareClaudeAccounts()
     let claudeFailures = preparation.failures
     reloadAccountStatuses()
@@ -303,6 +306,13 @@ final class AppModel: ObservableObject {
                                                      provenance: provenance)
       var retryConfigurations = recovered.configurations
       var retryRevisions = recovered.credentialRevisions
+      for failure in refreshed.failures where failure.provider == .stepFun && failure.kind == .auth {
+        guard let current = account(withID: failure.accountID),
+              provenance.matchesQuery(current, credentialRevisions: credentialEditRevisions),
+              await renewStepFunAccount(current), let renewed = account(withID: current.id) else { continue }
+        retryConfigurations.append(renewed.runtimeConfiguration())
+        retryRevisions[renewed.id] = credentialEditRevisions[renewed.id]
+      }
       let renewedMiMo = await recoverFailedMiMoSessions(in: refreshed, provenance: provenance)
       provenance.recordQueries(renewedMiMo.configurations, credentialRevisions: renewedMiMo.credentialRevisions)
       let renewedSnapshot = QuotaSnapshot(generatedAt: Date(), providers: renewedMiMo.usages, failures: [])
@@ -523,6 +533,7 @@ final class AppModel: ObservableObject {
     guard !isRefreshing, !claudeAccountIsBusy(accountID), !codexAccountIsBusy(accountID),
           let removedAccount = account(withID: accountID) else { return }
     if mimoLogin?.accountID == accountID { dismissMiMoLogin() }
+    if stepFunLogin?.accountID == accountID { dismissStepFunLogin() }
     var updated = currentSettings()
     updated.accounts.removeAll { $0.id == accountID }
     updated.providerStyleSettings.removeAll { $0.accountID == accountID }
@@ -907,6 +918,101 @@ final class AppModel: ObservableObject {
   }
 
   // MARK: - Independent Codex accounts
+
+  func connectStepFunAccount(_ accountID: String) {
+    guard !isRefreshing, stepFunLogin == nil, !configurationLoadFailed,
+          account(withID: accountID)?.provider == .stepFun else { return }
+    signInSkippedAccountIDs.insert(accountID)
+    let revision = credentialEditRevisions[accountID]
+    stepFunLogin = StepFunLoginSession(accountID: accountID) { [weak self] attemptID, browser in
+      guard let self else { throw CancellationError() }
+      try await self.finishStepFunLogin(attemptID: attemptID, accountID: accountID,
+        originalRevision: revision, browser: browser)
+    }
+  }
+
+  func dismissStepFunLogin() {
+    guard let session = stepFunLogin else { return }
+    session.cancel()
+    stepFunLogin = nil
+    catchUpAfterSignIn(session.accountID)
+  }
+
+  private func finishStepFunLogin(attemptID: UUID, accountID: String, originalRevision: UUID?,
+                                 browser: StepFunBrowserSession) async throws {
+    guard stepFunLogin?.id == attemptID, let original = account(withID: accountID),
+          original.provider == .stepFun else { throw CancellationError() }
+    let http = URLSessionHTTPClient()
+    // Prove that the saved grant can renew before promising a durable login.
+    let renewed = try await browser.renewed(httpClient: http)
+    let client = StepFunQuotaClient(httpClient: http)
+    var candidate = original.runtimeConfiguration()
+    candidate.credentials = try renewed.credentials(verifiedUserID: "")
+    let userID = try await client.verifyIdentity(configuration: candidate)
+    candidate.credentials = try renewed.credentials(verifiedUserID: userID)
+    _ = try await client.fetchUsage(configuration: candidate, now: Date())
+    try Task.checkCancellation()
+    guard !configurationLoadFailed, stepFunLogin?.id == attemptID,
+          credentialEditRevisions[accountID] == originalRevision,
+          let index = providerAccounts.firstIndex(where: { $0.id == accountID && $0.provider == .stepFun }) else {
+      throw CancellationError()
+    }
+    let previous = providerAccounts[index]
+    if previous.credentials[CredentialField.stepFunUserID] != userID {
+      try invalidateAccountUsageAndHistory(for: previous)
+    } else { try invalidateAccountSnapshot(for: accountID) }
+    var settings = currentSettings()
+    settings.accounts[index].credentials = candidate.credentials
+    try settingsStore.save(settings)
+    providerAccounts[index].credentials = candidate.credentials
+    credentialEditRevisions[accountID] = UUID()
+    stepFunLogin?.webView.stopLoading()
+    stepFunLogin = nil
+    reloadAccountStatuses()
+    if syncSettingsToWidgetStore(currentSettings().redactedCredentials()) { reloadWidgetTimelines() }
+    catchUpAfterSignIn(accountID)
+  }
+
+  private func refreshExpiringStepFunSessions() async {
+    for original in providerAccounts where original.provider == .stepFun && original.isEnabled {
+      guard let raw = original.credentials[CredentialField.stepFunBrowserSession],
+            let browser = try? StepFunBrowserSession(serialized: raw), browser.needsRenewal() else { continue }
+      _ = await renewStepFunAccount(original)
+    }
+  }
+
+  private func renewStepFunAccount(_ original: ProviderAccount) async -> Bool {
+    guard !Task.isCancelled, !configurationLoadFailed, original.isEnabled,
+          stepFunLogin?.accountID != original.id,
+          let current = account(withID: original.id), current.isEnabled,
+          current.provider == .stepFun, current.credentials == original.credentials,
+          let userID = original.credentials[CredentialField.stepFunUserID], !userID.isEmpty,
+          let raw = original.credentials[CredentialField.stepFunBrowserSession],
+          let browser = try? StepFunBrowserSession(serialized: raw) else { return false }
+    let revision = credentialEditRevisions[original.id]
+    let configuration = original.runtimeConfiguration()
+    do {
+      let http = URLSessionHTTPClient()
+      let renewed = try await browser.renewed(httpClient: http)
+      var candidate = configuration
+      candidate.credentials = try renewed.credentials(verifiedUserID: userID)
+      guard try await StepFunQuotaClient(httpClient: http).verifyIdentity(configuration: candidate) == userID else { return false }
+      try Task.checkCancellation()
+      guard !configurationLoadFailed, let index = providerAccounts.firstIndex(where: { $0.id == original.id }),
+            configuration.matchesCurrentAccount(providerAccounts[index], expectedCredentialRevision: revision,
+              currentCredentialRevision: credentialEditRevisions[original.id]) else { return false }
+      var settings = currentSettings()
+      settings.accounts[index].credentials = candidate.credentials
+      try settingsStore.save(settings)
+      providerAccounts[index].credentials = candidate.credentials
+      credentialEditRevisions[original.id] = UUID()
+      return true
+    } catch {
+      // Browser and transport errors can carry secrets. Keep the saved login
+      // and last good reading; a later cycle or explicit reconnect can recover.
+      return false
+    }
+  }
 
   func connectMiMoAccount(_ accountID: String) {
     guard !isRefreshing, mimoLogin == nil, !configurationLoadFailed,
@@ -1487,6 +1593,7 @@ final class AppModel: ObservableObject {
       }
     case .credential(let fieldKey):
       if mimoLogin?.accountID == accountID { return .rejected(.signInInProgress) }
+      if stepFunLogin?.accountID == accountID { return .rejected(.signInInProgress) }
       if codexAccountIsBusy(accountID) { return .rejected(.signInInProgress) }
       // A connection owns every credential of its account, and Settings hides all
       // manual fields while connected. A draft committed now was typed before the
@@ -1512,6 +1619,10 @@ final class AppModel: ObservableObject {
         }
         if account.provider == .xiaomiMiMo && fieldKey == CredentialField.mimoSessionCookies {
           account.credentials[CredentialField.mimoBrowserSession] = nil
+        }
+        if account.provider == .stepFun {
+          account.credentials[CredentialField.stepFunBrowserSession] = nil
+          account.credentials[CredentialField.stepFunUserID] = nil
         }
         account.credentials[fieldKey] = credentialValue
       }

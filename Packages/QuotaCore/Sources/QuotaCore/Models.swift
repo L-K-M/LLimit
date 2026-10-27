@@ -270,13 +270,13 @@ public extension QuotaProvider {
         CredentialFieldDescriptor(
           key: CredentialField.stepFunSessionToken,
           label: "Console session token",
-          help: "Copy Oasis-Token from the Network QueryStepPlanRateLimit request at https://platform.stepfun.ai/plan-subscribe. API keys are not accepted."
+          help: "On Linux, copy the Oasis-Token cookie value from the StepFun platform's developer tools. On macOS, use Connect StepFun. API keys are not accepted."
         ),
         CredentialFieldDescriptor(
           key: CredentialField.stepFunWebID,
           label: "Oasis-Webid",
           isRequired: false,
-          help: "Leave blank to read the web ID from a compatible console token, or copy Oasis-Webid from the same request."
+          help: "Optional with a compound console cookie; otherwise copy the matching Oasis-Webid cookie value."
         )
       ]
     }
