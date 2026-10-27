@@ -53,6 +53,7 @@ final class AppModel: ObservableObject {
   @Published private(set) var isScanningCredentials = false
   @Published private(set) var hasScannedCredentials = false
   @Published private(set) var discoveryImportMessage: String?
+  @Published private(set) var credentialAutofillMessages: [String: String] = [:]
   private var discoveryRequestID = UUID()
   private var isExplicitDiscoveryRunning = false
 
@@ -570,6 +571,7 @@ final class AppModel: ObservableObject {
     codexAccountMessages[accountID] = nil
     codexUsageReceipts[accountID] = nil
     credentialEditRevisions[accountID] = nil
+    credentialAutofillMessages[accountID] = nil
     claudeSessions[accountID] = nil
     claudeAccountMessages[accountID] = nil
     claudeCredentialFailures.remove(accountID)
@@ -669,21 +671,31 @@ final class AppModel: ObservableObject {
   @discardableResult
   func autofillCredentials(forAccountID accountID: String) async -> Bool {
     guard let original = account(withID: accountID) else { return false }
+    credentialAutofillMessages[accountID] = nil
     let provider = original.provider
     let revision = credentialEditRevisions[accountID]
     guard acceptsCredentialAutofill(original) else { return false }
 
-    guard let result = await scanForDetectedCredentials(for: provider) else { return false }
+    guard let result = await scanForDetectedCredentials(for: provider) else {
+      credentialAutofillMessages[accountID] = "The import was interrupted. Try again."
+      return false
+    }
     // A scan can wait on permission while the user edits, removes, or reconnects
     // an account. Never apply that result to changed authentication or an old index.
     guard let index = providerAccounts.firstIndex(where: { $0.id == accountID }),
           providerAccounts[index].provider == provider,
           providerAccounts[index].credentials == original.credentials,
           credentialEditRevisions[accountID] == revision,
-          acceptsCredentialAutofill(providerAccounts[index]) else { return false }
+          acceptsCredentialAutofill(providerAccounts[index]) else {
+      credentialAutofillMessages[accountID] = "The account changed while scanning. Try again."
+      return false
+    }
 
     guard let match = result.credentials.first(where: { $0.provider == provider }) else {
       statusMessage = "No \(provider.displayName) login detected on this Mac. Sign in to a supported tool, or paste the credentials manually."
+      credentialAutofillMessages[accountID] = provider == .stepFun
+        ? "No global personal Step Plan login found. Sign in with Step Code (step), then try again."
+        : statusMessage
       return false
     }
 
@@ -692,9 +704,13 @@ final class AppModel: ObservableObject {
     let importedCredentials = providerAccounts[index].credentialsForImport(match.credentials)
     let outcome = updateAccount(accountID: accountID) { $0.credentials = importedCredentials }
     // Auto-fill uses the same committed replacement and revision boundary as typing.
-    if case .rejected(let rejection) = outcome { statusMessage = rejection.message }
+    if case .rejected(let rejection) = outcome {
+      statusMessage = rejection.message
+      credentialAutofillMessages[accountID] = rejection.message
+    }
     guard account(withID: accountID)?.credentials == importedCredentials else { return false }
     statusMessage = "Filled “\(providerAccounts[index].resolvedDisplayName)” from \(match.sourceLabel)."
+    credentialAutofillMessages[accountID] = statusMessage
     return true
   }
 

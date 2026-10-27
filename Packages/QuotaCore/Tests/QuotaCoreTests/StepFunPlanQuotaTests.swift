@@ -79,6 +79,26 @@ final class StepFunPlanQuotaTests: XCTestCase {
     XCTAssertEqual(usage.metrics.first?.remainingAmount, 400)
   }
 
+  func testEmptyAndExpiredTokenPlansReportNoActiveCredits() async throws {
+    let expired = token.replacingOccurrences(of: "\"expires_at_ms\":null", with: "\"expires_at_ms\":1600000000000")
+      .replacingOccurrences(of: "1800000000000", with: "1600000000000")
+    var emptyObject = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(token.utf8)) as? [String: Any])
+    var quota = try XCTUnwrap(emptyObject["quota"] as? [String: Any])
+    quota["credit_buckets"] = []
+    emptyObject["quota"] = quota
+    let empty = String(decoding: try JSONSerialization.data(withJSONObject: emptyObject), as: UTF8.self)
+    for body in [empty, expired] {
+      do {
+        _ = try await StepFunQuotaClient(httpClient: PlanHTTPStub(body: body))
+          .fetchUsage(configuration: configuration(), now: now)
+        XCTFail("Accepted a plan without active credits")
+      } catch let error as ProviderClientError {
+        XCTAssertEqual(error.kind, .api)
+        XCTAssertTrue(error.message.contains("no active"))
+      }
+    }
+  }
+
   func testInvalidSchemaAndInconsistentQuotasFailWithoutPublishingPartialMetrics() async throws {
     let invalid = [
       coding.replacingOccurrences(of: "\"schema_version\":1", with: "\"schema_version\":2"),

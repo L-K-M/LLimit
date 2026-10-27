@@ -1046,6 +1046,11 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.bordered)
                 .disabled(model.isRefreshing || autofillingAccountIDs.contains(account.id))
+                if let message = model.credentialAutofillMessages[account.id] {
+                  Text(message)
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
                 Text(account.credentials[CredentialField.stepFunPlanKey]?.isEmpty == false
                   ? "Uses your imported personal Step Plan key. Reimport or connect below if the key is revoked."
                   : "Import a global personal Plan login saved by Step Code (step), or sign in below.")

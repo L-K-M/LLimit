@@ -232,7 +232,7 @@ those used on Linux, require replacement when expired; see the
 See [Xiaomi's MiMo Code guide](https://mimo.mi.com/docs/en-US/tokenplan/integration/mimo-code)
 for the distinction between inference credentials and console usage.
 
-For StepFun, open **Settings → Add Account**. If you have signed in with Step Code,
+For StepFun on macOS, open **Settings → Add Account**. If you have signed in with Step Code,
 choose **Add** beside its detected login under **Found on this Mac**.
 Alternatively, choose **StepFun → Connect Account** to
 sign in to the [global Step Plan console](https://platform.stepfun.ai/plan-subscribe)
@@ -240,7 +240,7 @@ inside LLimit. An existing StepFun account can import a Step Code login with
 **Import Step Code login**. LLimit copies only the global personal Plan key and
 optional account ID into its local settings. No Step Code CLI is required after
 import, and the key is not renewed automatically; reimport or reconnect if
-revoked. Generic PAYG/gateway/inference API keys and China profile are excluded.
+revoked. Generic PAYG/gateway/inference API keys and the China profile are excluded.
 
 With **Connect StepFun**, LLimit verifies your account and quota before saving a
 separate sign-in for that account. It renews automatically when possible;

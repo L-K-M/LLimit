@@ -48,6 +48,9 @@ enum StepFunPlanQuotaDecoder {
     case "token":
       guard snapshot.quota.windows.isEmpty else { throw invalidResponse }
       metrics = try creditMetrics(buckets, now: now)
+      guard !metrics.isEmpty else {
+        throw ProviderClientError(kind: .api, message: "StepFun reports no active personal Step Plan credits for this account.")
+      }
     default:
       guard snapshot.quota.windows.isEmpty, buckets.isEmpty else { throw invalidResponse }
       throw ProviderClientError(kind: .api, message: "StepFun reports no personal Step Plan for this account.")
