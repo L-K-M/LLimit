@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		8BA4B535D24D4797BB6A0101 /* DetectedAccountsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BA4B535D24D4797BB6A0102 /* DetectedAccountsView.swift */; };
+		8BA4B535D24D4797BB6A0103 /* LocalCredentialScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BA4B535D24D4797BB6A0104 /* LocalCredentialScanner.swift */; };
 		D76B83C8D0E649B8A2D48901 /* ProviderChooserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D76B83C8D0E649B8A2D48902 /* ProviderChooserView.swift */; };
 		8F59B7A976036C665A38D2DC /* StepFunLoginSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFF42DCC0209C486D291E987 /* StepFunLoginSession.swift */; };
 		7AABCCB20D86334628EF11AE /* StepFunLoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6251414FCBD6C85FD764087 /* StepFunLoginView.swift */; };
@@ -64,6 +66,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		8BA4B535D24D4797BB6A0102 /* DetectedAccountsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetectedAccountsView.swift; sourceTree = "<group>"; };
+		8BA4B535D24D4797BB6A0104 /* LocalCredentialScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalCredentialScanner.swift; sourceTree = "<group>"; };
 		D76B83C8D0E649B8A2D48902 /* ProviderChooserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderChooserView.swift; sourceTree = "<group>"; };
 		DFF42DCC0209C486D291E987 /* StepFunLoginSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepFunLoginSession.swift; sourceTree = "<group>"; };
 		B6251414FCBD6C85FD764087 /* StepFunLoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepFunLoginView.swift; sourceTree = "<group>"; };
@@ -146,6 +150,7 @@
 		52F914E8DE30DE6489408458 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				8BA4B535D24D4797BB6A0102 /* DetectedAccountsView.swift */,
 				D76B83C8D0E649B8A2D48902 /* ProviderChooserView.swift */,
 				B6251414FCBD6C85FD764087 /* StepFunLoginView.swift */,
 				72F66A1D7EC7A58D858631EA /* MiMoLoginView.swift */,
@@ -204,6 +209,7 @@
 		AFE05ADAB087FC3F7B7E52D9 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				8BA4B535D24D4797BB6A0104 /* LocalCredentialScanner.swift */,
 				DFF42DCC0209C486D291E987 /* StepFunLoginSession.swift */,
 				BAC9788EA5B0B26ED62B0E74 /* MiMoLoginSession.swift */,
 				6B3F60D8AF12A17811395014 /* ClaudeProfileService.swift */,
@@ -359,6 +365,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				8BA4B535D24D4797BB6A0101 /* DetectedAccountsView.swift in Sources */,
+				8BA4B535D24D4797BB6A0103 /* LocalCredentialScanner.swift in Sources */,
 				D76B83C8D0E649B8A2D48901 /* ProviderChooserView.swift in Sources */,
 				BCF52573CAD84156B1B5D45D /* AppModel.swift in Sources */,
 				ABD3522DD192E20D0D18A429 /* MiMoLoginSession.swift in Sources */,

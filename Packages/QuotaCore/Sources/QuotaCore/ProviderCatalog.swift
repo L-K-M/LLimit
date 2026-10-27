@@ -9,10 +9,10 @@ public struct ProviderCatalogEntry: Identifiable, Equatable, Sendable {
   public let summary: String
   fileprivate let aliases: [String]
 
-  fileprivate func matches(_ query: String) -> Bool {
+  fileprivate func matches(_ query: String, additionalTerms: [String] = []) -> Bool {
     let words = query.split(whereSeparator: \.isWhitespace).map { Self.normalized(String($0)) }
       .filter { !$0.isEmpty }
-    let text = Self.normalized(([title, context, provider.displayName, provider.rawValue] + aliases).joined(separator: " "))
+    let text = Self.normalized(([title, context, provider.displayName, provider.rawValue] + aliases + additionalTerms).joined(separator: " "))
     return words.allSatisfy { text.contains($0) }
   }
 
@@ -29,6 +29,11 @@ public enum ProviderCatalog {
 
   public static func search(_ query: String) -> [ProviderCatalogEntry] {
     entries.filter { $0.matches(query) }
+  }
+
+  /// Search display metadata only. Authentication values never participate.
+  public static func search(_ query: String, credentials: [DiscoveredCredential]) -> [DiscoveredCredential] {
+    credentials.filter { entry(for: $0.provider).matches(query, additionalTerms: [$0.suggestedName, $0.sourceLabel]) }
   }
 
   public static func entry(for provider: QuotaProvider) -> ProviderCatalogEntry {

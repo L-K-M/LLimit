@@ -67,6 +67,9 @@ jobs:
         timeout-minutes: 3
         run: scripts/test-stepfun-login.sh --skip-build "$RUNNER_TEMP/LLimitBuild"
 
+      - name: Test automatic credential discovery policy
+        run: scripts/test-local-credential-scanner.sh --skip-build "$RUNNER_TEMP/LLimitBuild"
+
       - name: Test trend chart rendering
         run: scripts/test-trend-chart.sh --skip-build "$RUNNER_TEMP/LLimitBuild"
 

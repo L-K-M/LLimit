@@ -158,13 +158,20 @@ Linux:
   Xiaomi may request interactive sign-in if its saved login expires, is revoked,
   or requires a challenge. Monthly manual purchase/reset settings remain preserved.
   Quota transport must refuse redirects and avoid shared cookie jars and caches.
-- Adding a `QuotaProvider` case is a breaking change for **seven** exhaustive `switch`es:
+- Adding a `QuotaProvider` case is a breaking change for **eight** exhaustive `switch`es:
   `Models.displayName`, `Models.credentialFields`,
   `ProviderMetricSelection.defaultRingMetrics`, the widget's `compactProviderName`,
-  the widget's `ProviderTile.palette`, `ProviderMark.symbolName`, and
-  `ProviderCatalog.entry(for:)`. `AppModel`'s
+  the widget's `ProviderTile.palette`, `ProviderMark.symbolName`,
+  `ProviderCatalog.entry(for:)`, and `DiscoveredCredential.matchesStoredAccount`. `AppModel`'s
   `defaultPrimaryKind(for:)` has a `default:` and needs a case only when the
   provider's longest window is not `.weekly`.
+- Add Account automatically scans supported tool files off the main actor through
+  `LocalCredentialScanner`. Automatic scans must not read the legacy Claude Code
+  Keychain item: its dialogs do not honor `LAContext.interactionNotAllowed`.
+  Only explicit Scan Again or Claude Auto-fill may request that default item.
+  Never enumerate LLimit's private managed profiles. Match detected accounts by
+  primary authentication plus account/project/server context, never arbitrary
+  credential values. Commit an import to local settings before publishing Added.
 - Provider APIs are undocumented and unstable. Fail gracefully (`ProviderFailure`) and
   keep showing the last good snapshot.
 

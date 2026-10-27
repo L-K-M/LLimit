@@ -79,4 +79,16 @@ final class ProviderCatalogTests: XCTestCase {
     XCTAssertEqual(providers(matching: "jétBRáins jÚnie"), [.junie])
     XCTAssertEqual(providers(matching: "  gLm\tINTERNATIONAL\n"), [.zai])
   }
+
+  func testDetectedAccountSearchIncludesNamesAndSourcesButNeverSecrets() {
+    let candidate = DiscoveredCredential(stableID: "codex:fixture", provider: .openAI,
+      suggestedName: "Personal reader@example.test", sourceLabel: "Codex CLI (~/.codex)",
+      credentials: [CredentialField.openAIAccessToken: "never-searchable-secret-fixture"])
+    for query in ["OpenAI", "Codex reader", "PERSONAL", "~/.codex", ""] {
+      XCTAssertEqual(ProviderCatalog.search(query, credentials: [candidate]), [candidate], "Query: \(query)")
+    }
+    for query in ["Cognition", "never-searchable-secret-fixture"] {
+      XCTAssertTrue(ProviderCatalog.search(query, credentials: [candidate]).isEmpty)
+    }
+  }
 }

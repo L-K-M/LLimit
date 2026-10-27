@@ -303,109 +303,31 @@ struct SettingsView: View {
 
   private var addAccountDetail: some View {
     ScrollView {
-      VStack(alignment: .leading, spacing: 24) {
-        ProviderChooserView(isRefreshing: model.isRefreshing) { provider in
+      ProviderChooserView(isRefreshing: model.isRefreshing,
+        detectedCredentials: model.detectedCredentials,
+        addedCredentialIDs: Set(model.detectedCredentials.filter { model.isDetectedCredentialImported($0) }.map(\.stableID)),
+        accountCounts: Dictionary(grouping: model.providerAccounts, by: \.provider).mapValues(\.count),
+        isScanningCredentials: model.isScanningCredentials, hasScannedCredentials: model.hasScannedCredentials,
+        discoveryDiagnostics: model.discoveryDiagnostics, discoveryImportMessage: model.discoveryImportMessage,
+        onScan: { model.scanForDetectedCredentials() },
+        onImport: { _ = model.importAccount(from: $0) },
+        onOpen: { detected in
+          if let account = model.providerAccounts.first(where: { detected.matchesStoredAccount($0) }) {
+            selection = .account(account.id)
+          }
+        },
+        onAdd: { provider in
           let account = model.addProviderAccount(provider: provider)
           selection = .account(account.id)
           if provider == .anthropic { model.connectClaudeAccount(account.id) }
           if provider == .openAI { model.connectCodexAccount(account.id) }
           if provider == .xiaomiMiMo { model.connectMiMoAccount(account.id) }
           if provider == .stepFun { model.connectStepFunAccount(account.id) }
-        }
-
-        Divider()
-
-        detectedSourcesSection
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(24)
+        })
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(24)
     }
-  }
-
-  private var detectedSourcesSection: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      HStack {
-        Text("Detected on this Mac")
-          .font(.title3.weight(.semibold))
-        Spacer()
-        Button {
-          model.scanForDetectedCredentials()
-        } label: {
-          Label("Scan", systemImage: "arrow.clockwise")
-        }
-        .buttonStyle(.bordered)
-      }
-
-      Text("Optional shortcut: import a login from a tool you're already signed in to (Claude Code, Codex, GitHub Copilot, OpenCode) instead of pasting a token. Imported accounts are copied into LLimit. Connect Claude or Connect OpenAI gives each account its own login and automatic renewal. Claude imports need to be imported again when they expire.")
-        .font(.subheadline)
-        .foregroundStyle(.secondary)
-        .fixedSize(horizontal: false, vertical: true)
-
-      if model.detectedCredentials.isEmpty {
-        Text("Nothing detected yet. Sign in to a supported tool and tap Scan, or add an account manually above.")
-          .font(.subheadline)
-          .foregroundStyle(.secondary)
-          .frame(maxWidth: .infinity, alignment: .leading)
-          .padding(12)
-          .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-      } else {
-        VStack(alignment: .leading, spacing: 10) {
-          ForEach(model.detectedCredentials) { detected in
-            detectedSourceCard(detected)
-          }
-        }
-      }
-
-      if !model.discoveryDiagnostics.isEmpty {
-        DisclosureGroup("Scan details") {
-          VStack(alignment: .leading, spacing: 4) {
-            ForEach(model.discoveryDiagnostics.indices, id: \.self) { index in
-              Text(model.discoveryDiagnostics[index])
-                .font(.caption.monospaced())
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-          }
-          .padding(.top, 4)
-        }
-        .font(.subheadline)
-      }
-    }
-  }
-
-  private func detectedSourceCard(_ detected: DiscoveredCredential) -> some View {
-    let alreadyImported = model.isDetectedCredentialImported(detected)
-
-    return HStack(spacing: 12) {
-      Image(systemName: "sparkles")
-        .foregroundStyle(.secondary)
-
-      VStack(alignment: .leading, spacing: 3) {
-        Text(detected.suggestedName)
-          .font(.subheadline.weight(.semibold))
-        Text("\(detected.provider.displayName) · \(detected.sourceLabel)")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .lineLimit(2)
-      }
-
-      Spacer()
-
-      if alreadyImported {
-        Label("Added", systemImage: "checkmark.circle.fill")
-          .font(.caption)
-          .foregroundStyle(.green)
-      } else {
-        Button("Import") {
-          let account = model.importAccount(from: detected)
-          selection = .account(account.id)
-        }
-        .buttonStyle(.bordered)
-      }
-    }
-    .padding(12)
-    .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    .task { await model.scanForDetectedCredentialsAutomatically() }
   }
 
   // MARK: - General
@@ -1001,20 +923,22 @@ struct SettingsView: View {
 
   private func manualCredentials(for account: ProviderAccount, excludingFields: [String] = []) -> some View {
     VStack(alignment: .leading, spacing: 12) {
-      HStack(spacing: 10) {
-        Button {
-          // Auto-fill replaces every credential field at once; a draft committed
-          // later would overwrite it. A failed auto-fill keeps the drafts.
-          if model.autofillCredentials(forAccountID: account.id) {
-            discardCredentialDrafts(for: account.id)
+      if account.provider != .xiaomiMiMo && account.provider != .stepFun {
+        HStack(spacing: 10) {
+          Button {
+            // Auto-fill replaces every credential field at once; a draft committed
+            // later would overwrite it. A failed auto-fill keeps the drafts.
+            if model.autofillCredentials(forAccountID: account.id) {
+              discardCredentialDrafts(for: account.id)
+            }
+          } label: {
+            Label("Auto-fill from this Mac", systemImage: "sparkles")
           }
-        } label: {
-          Label("Auto-fill from this Mac", systemImage: "sparkles")
+          .buttonStyle(.bordered)
+          Text("Detects a \(account.provider.displayName) login from a local tool.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
-        .buttonStyle(.bordered)
-        Text("Detects a \(account.provider.displayName) login from a local tool.")
-          .font(.caption)
-          .foregroundStyle(.secondary)
       }
       ForEach(account.provider.credentialFields) { field in
         if !excludingFields.contains(field.key) {
