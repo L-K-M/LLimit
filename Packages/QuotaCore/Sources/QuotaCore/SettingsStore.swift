@@ -31,6 +31,11 @@ public final class SettingsStore: @unchecked Sendable {
     for index in settings.accounts.indices where settings.accounts[index].provider == .xiaomiMiMo {
       settings.accounts[index].credentials = try MiMoSessionCookies.credentialsForStorage(settings.accounts[index].credentials)
     }
+    for index in settings.accounts.indices where settings.accounts[index].provider == .stepFun {
+      if try configuredQuotaResetDate(settings.accounts[index].credentials[CredentialField.stepFunResetAt]) == nil {
+        settings.accounts[index].credentials[CredentialField.stepFunResetAt] = nil
+      }
+    }
     let data = try encoder.encode(settings)
     try writeOwnerOnlyAtomically(data, to: fileURL)
   }

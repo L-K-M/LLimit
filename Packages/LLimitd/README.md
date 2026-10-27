@@ -162,7 +162,13 @@ generating tokens. Credentials are stored only
 in local settings and need replacement after expiry. Linux does not renew manual
 sessions. On macOS, **Connect StepFun** signs in inside LLimit and can renew its
 separate saved login automatically. Organization quotas and pay-as-you-go balances
-are not supported.
+are not supported. When the server does not report a monthly subscription reset,
+anchor one with `llimit accounts update <id> --set stepfun.reset_at=2026-10-19T00:00:00Z`.
+Date-only `YYYY-MM-DD` means midnight UTC; date-times require a timezone.
+The schedule only applies to monthly subscription credits, never to top-up or
+5-hour/weekly limits. A past date shows the current month window and pace;
+a future date counts down until the cycle starts. Clear with
+`--set stepfun.reset_at=`. No quota refill occurs. The setting survives reimport.
 
 Cline tracks both billing modes. ClinePass, the monthly subscription, reports
 five-hour, weekly, and monthly window limits with reset times; Cline credits, the

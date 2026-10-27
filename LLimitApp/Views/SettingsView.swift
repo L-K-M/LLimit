@@ -1064,6 +1064,7 @@ struct SettingsView: View {
                 Text("Sign in to StepFun inside LLimit. LLimit keeps each account separately signed in and renews automatically when possible. Reconnect if StepFun requires it.")
                   .font(.caption).foregroundStyle(.secondary)
                   .fixedSize(horizontal: false, vertical: true)
+                stepFunResetDateField(for: AccountFieldKey(accountID: account.id, field: .credential(CredentialField.stepFunResetAt)))
               }
             } else {
               manualCredentials(for: account)
@@ -1211,6 +1212,9 @@ struct SettingsView: View {
       } else if field.key == CredentialField.mimoResetAt,
          model.account(withID: accountID)?.provider == .xiaomiMiMo {
         mimoResetDateField(for: key)
+      } else if field.key == CredentialField.stepFunResetAt,
+         model.account(withID: accountID)?.provider == .stepFun {
+        stepFunResetDateField(for: key)
       } else if field.isSecret {
         committingDraft(
           SecureField(field.label, text: draftBinding(for: key))
@@ -1228,6 +1232,7 @@ struct SettingsView: View {
       }
 
       if field.key != CredentialField.junieResetAt, field.key != CredentialField.mimoResetAt,
+         field.key != CredentialField.stepFunResetAt,
          let help = field.help, !help.isEmpty {
         Text(help)
           .font(.caption)
@@ -1319,6 +1324,15 @@ struct SettingsView: View {
       for: key,
       pickerLabel: "MiMo purchase date and time",
       helpText: "Enter when you bought the subscription. Plan-credit resets repeat every calendar month in UTC; the picker shows your local time. Shorter months use their last day. Leave off if unknown."
+    )
+  }
+
+  @ViewBuilder
+  private func stepFunResetDateField(for key: AccountFieldKey) -> some View {
+    resetDateField(
+      for: key,
+      pickerLabel: "StepFun purchase date and time",
+      helpText: "Enter when you bought the subscription. Monthly plan-credit resets use this date only when StepFun reports no reset. Resets repeat every calendar month in UTC; the picker shows your local time. Shorter months use their last day. Leave off if unknown."
     )
   }
 

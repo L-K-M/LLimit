@@ -251,6 +251,17 @@ Linux:
   reports used percentages and millisecond reset/expiry timestamps; convert to
   remaining on display and preserve null percentages as unavailable. Exact count
   strings are preserved. No monthly window is invented.
+  `stepfun.reset_at` is optional nonsecret account configuration for a monthly
+  subscription purchase anchor, with the same UTC Gregorian monthly behavior as
+  `junie.reset_at` and `mimo.reset_at`. It is a fallback only for the monthly
+  subscription credits metric (`monthly-credits`) when the server reports no
+  reset time; a server-reported reset always wins. Never assign the anchor to
+  top-up credits or 5-hour/weekly metrics. Cycles use the original anchor UTC
+  day/time, clamping in short months and restoring in longer ones, selecting the
+  next strictly future reset. Past anchors provide the current month window for
+  pace; future anchors supply a countdown until the cycle starts. No quota
+  refill occurs. Blank turns it off. Preserve through Step Code Auto-fill,
+  import/reimport, and browser reconnect/renewal.
   Sources: official [console](https://platform.stepfun.ai/plan-subscribe),
   [Step Code login renewal](https://github.com/stepfun-ai/Step-Code/blob/7b7c2d1dcee73752b29f0953ce56e4f1b514f4bf/packages/providers/src/step-provider/login-refresh.ts),
   [protobuf/auth bundle](https://platform.stepfun.ai/_next/static/chunks/8300-80e7d8753e1d65ea.js),

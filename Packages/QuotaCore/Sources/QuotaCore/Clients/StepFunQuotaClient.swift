@@ -13,6 +13,8 @@ public struct StepFunQuotaClient: QuotaProviderClient {
   public init(httpClient: any HTTPClient) { self.httpClient = httpClient }
 
   public func fetchUsage(configuration: ProviderRuntimeConfiguration, now: Date) async throws -> ProviderUsage {
+    let cycle = try configuredQuotaResetDate(configuration.credentials[CredentialField.stepFunResetAt])
+      .map { MonthlyQuotaCycle(anchor: $0) }
     let key = configuration.credentials[CredentialField.stepFunPlanKey]?
       .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     if !key.isEmpty {
@@ -30,10 +32,29 @@ public struct StepFunQuotaClient: QuotaProviderClient {
       guard data.count <= 256 * 1_024 else {
         throw ProviderClientError(kind: .decoding, message: "StepFun returned an oversized personal Plan usage response. Try again later.")
       }
-      return try StepFunPlanQuotaDecoder.decode(data, configuration: configuration, now: now)
+      let usage = try StepFunPlanQuotaDecoder.decode(data, configuration: configuration, now: now)
+      return applyingManualReset(to: usage, cycle: cycle, now: now)
     }
     let data = try await fetch("QueryStepPlanRateLimit", configuration: configuration, now: now)
-    return try StepFunQuotaDecoder.decode(data, configuration: configuration, now: now)
+    let usage = try StepFunQuotaDecoder.decode(data, configuration: configuration, now: now)
+    return applyingManualReset(to: usage, cycle: cycle, now: now)
+  }
+
+  private func applyingManualReset(to usage: ProviderUsage, cycle: MonthlyQuotaCycle?, now: Date) -> ProviderUsage {
+    guard let cycle else { return usage }
+    var usage = usage
+    let reset = cycle.resetAt(after: now)
+    for index in usage.metrics.indices where usage.metrics[index].id == "monthly-credits"
+      && usage.metrics[index].resetAt == nil {
+      // A user-owned monthly schedule supplies only absent subscription resets.
+      // Server dates, top-up expiry and coding windows keep their own meaning.
+      usage.metrics[index].resetAt = reset
+      usage.metrics[index].resetIn = formatResetCountdown(to: reset, now: now)
+      usage.metrics[index].windowSeconds = cycle.window(containing: now).map { Int($0.duration.rounded()) }
+      usage.metrics[index].detail = [usage.metrics[index].detail, "Uses your configured monthly reset in UTC."]
+        .compactMap { $0 }.joined(separator: " ")
+    }
+    return usage
   }
 
   public func verifyIdentity(configuration: ProviderRuntimeConfiguration, now: Date = Date()) async throws -> String {
