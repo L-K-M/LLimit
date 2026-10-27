@@ -4,8 +4,8 @@ import CoreFoundation
 import FoundationNetworking
 #endif
 
-/// Reads the global Step Plan console without making inference requests.
-/// Console sessions are kept separate from StepFun inference API keys.
+/// Reads global personal Step Plan quota without making inference requests.
+/// Step Code's Plan key and the console session use separate endpoints.
 public struct StepFunQuotaClient: QuotaProviderClient {
   public let provider: QuotaProvider = .stepFun
   private let httpClient: any HTTPClient
@@ -13,6 +13,25 @@ public struct StepFunQuotaClient: QuotaProviderClient {
   public init(httpClient: any HTTPClient) { self.httpClient = httpClient }
 
   public func fetchUsage(configuration: ProviderRuntimeConfiguration, now: Date) async throws -> ProviderUsage {
+    let key = configuration.credentials[CredentialField.stepFunPlanKey]?
+      .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if !key.isEmpty {
+      guard Self.validHeaderValue(key) else {
+        throw ProviderClientError(kind: .notConfigured, message: "Import a valid global personal Step Plan key from Step Code.")
+      }
+      let endpoint = URL(string: "https://api.stepfun.ai/step_plan/v1/usage")!
+      var request = URLRequest(url: endpoint)
+      request.httpMethod = "GET"
+      request.httpShouldHandleCookies = false
+      request.cachePolicy = .reloadIgnoringLocalCacheData
+      request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+      request.setValue("application/json", forHTTPHeaderField: "Accept")
+      let data = try await send(request, endpoint: endpoint, now: now, authenticationFailure: Self.planAuthenticationFailure)
+      guard data.count <= 256 * 1_024 else {
+        throw ProviderClientError(kind: .decoding, message: "StepFun returned an oversized personal Plan usage response. Try again later.")
+      }
+      return try StepFunPlanQuotaDecoder.decode(data, configuration: configuration, now: now)
+    }
     let data = try await fetch("QueryStepPlanRateLimit", configuration: configuration, now: now)
     return try StepFunQuotaDecoder.decode(data, configuration: configuration, now: now)
   }
@@ -40,7 +59,7 @@ public struct StepFunQuotaClient: QuotaProviderClient {
     let webID = explicitWebID.isEmpty ? Self.deviceID(from: token) ?? "" : explicitWebID
     guard Self.validHeaderValue(token), Self.validHeaderValue(webID) else {
       throw ProviderClientError(kind: .notConfigured,
-        message: "Enter the StepFun console Oasis-Token and its matching Oasis-Webid. API keys are not supported.")
+        message: "Import a personal Step Plan key, or enter the StepFun console Oasis-Token and its matching Oasis-Webid.")
     }
 
     let browser: StepFunBrowserSession?
@@ -76,6 +95,11 @@ public struct StepFunQuotaClient: QuotaProviderClient {
     request.setValue("application/json", forHTTPHeaderField: "Accept")
     request.setValue("LLimit/0.1", forHTTPHeaderField: "User-Agent")
 
+    return try await send(request, endpoint: endpoint, now: now, authenticationFailure: Self.authenticationFailure)
+  }
+
+  private func send(_ request: URLRequest, endpoint: URL, now: Date,
+                    authenticationFailure: ProviderClientError) async throws -> Data {
     let data: Data
     let response: HTTPURLResponse
     do {
@@ -86,7 +110,7 @@ public struct StepFunQuotaClient: QuotaProviderClient {
       throw ProviderClientError(kind: .network, message: "Could not reach StepFun. Check your connection and try again.")
     }
     if (300..<400).contains(response.statusCode) || [401, 403].contains(response.statusCode) {
-      throw Self.authenticationFailure
+      throw authenticationFailure
     }
     guard (200..<300).contains(response.statusCode) else {
       throw ProviderClientError(kind: response.statusCode == 429 ? .rateLimit : .api,
@@ -97,7 +121,7 @@ public struct StepFunQuotaClient: QuotaProviderClient {
     }
     guard response.url?.scheme == endpoint.scheme, response.url?.host == endpoint.host,
           response.url?.port == endpoint.port, response.url?.path == endpoint.path else {
-      throw Self.authenticationFailure
+      throw authenticationFailure
     }
     return data
   }
@@ -125,6 +149,9 @@ public struct StepFunQuotaClient: QuotaProviderClient {
 
   static var authenticationFailure: ProviderClientError {
     ProviderClientError(kind: .auth, message: "Your StepFun session expired or was rejected. Connect StepFun to sign in again, or replace manual credentials on Linux.")
+  }
+  private static var planAuthenticationFailure: ProviderClientError {
+    ProviderClientError(kind: .auth, message: "Your StepFun Plan key was rejected. Reimport your Step Code login or reconnect StepFun.")
   }
   private static var invalidIdentity: ProviderClientError {
     ProviderClientError(kind: .auth, message: "StepFun could not verify this account. Connect StepFun to sign in again.")

@@ -54,6 +54,10 @@ public struct CredentialDiscovery: Sendable {
   private let xdgConfigHome: String?
   private let junieHome: String?
   private let junieAPIKey: String?
+  private let stepCodeAuthPath: String?
+  private let stepCodeAgentDirectory: String?
+  private let stepCodeConfigDirectory: String?
+  private let stepCodePlanEndpoint: String?
 
   public init(
     homeDirectories: [URL]? = nil,
@@ -65,6 +69,10 @@ public struct CredentialDiscovery: Sendable {
     self.xdgConfigHome = environment["XDG_CONFIG_HOME"]
     self.junieHome = environment["JUNIE_HOME"]
     self.junieAPIKey = environment["JUNIE_API_KEY"]
+    self.stepCodeAuthPath = environment["STEPCODE_AUTH_PATH"]
+    self.stepCodeAgentDirectory = environment["STEP_CODING_AGENT_DIR"]
+    self.stepCodeConfigDirectory = environment["STEPCODE_CONFIG_DIR"]
+    self.stepCodePlanEndpoint = environment["STEPCODE_STEP_PLAN_API_OVERSEA_URL"]
     if let homeDirectories, !homeDirectories.isEmpty {
       self.homeDirectories = homeDirectories
     } else {
@@ -90,11 +98,75 @@ public struct CredentialDiscovery: Sendable {
     candidates += scanDevin(diagnostics: &diagnostics)
     candidates += scanMuse(diagnostics: &diagnostics)
     candidates += scanJunie(diagnostics: &diagnostics)
+    candidates += scanStepCode(diagnostics: &diagnostics)
 
     return CredentialDiscoveryResult(credentials: dedupe(candidates), diagnostics: diagnostics)
   }
 
   // MARK: - Sources
+
+  /// Step Code's global personal Plan key supports its read-only usage endpoint.
+  /// The CLI's optional Passport session is separate and is never imported.
+  private func scanStepCode(diagnostics: inout [String]) -> [DiscoveredCredential] {
+    if var endpoint = nonEmptyString(stepCodePlanEndpoint) {
+      while endpoint.hasSuffix("/") { endpoint.removeLast() }
+      guard endpoint == "https://api.stepfun.ai/step_plan" else {
+        diagnostics.append("Step Code: custom global Plan endpoint is not supported")
+        return []
+      }
+    }
+
+    let urls: [URL]
+    if let authPath = nonEmptyString(stepCodeAuthPath) {
+      guard authPath.hasPrefix("/") else {
+        diagnostics.append("Step Code: relative auth path is not supported")
+        return []
+      }
+      urls = [URL(fileURLWithPath: authPath).standardizedFileURL]
+    } else if let agentDirectory = nonEmptyString(stepCodeAgentDirectory) {
+      guard agentDirectory.hasPrefix("/") else {
+        diagnostics.append("Step Code: relative agent directory is not supported")
+        return []
+      }
+      // Step Code stores auth.json beside its agent directory, including when
+      // an embedding host isolates that directory from the ordinary CLI login.
+      urls = [URL(fileURLWithPath: agentDirectory, isDirectory: true).standardizedFileURL
+        .deletingLastPathComponent().appendingPathComponent("auth.json")]
+    } else {
+      // Relative process-path overrides cannot be resolved against LLimit's
+      // unrelated working directory. Config-directory names remain home-relative.
+      let directory = nonEmptyString(stepCodeConfigDirectory) ?? ".stepcode"
+      guard !directory.hasPrefix("/"), !directory.split(separator: "/").contains("..") else {
+        diagnostics.append("Step Code: unsupported config directory")
+        return []
+      }
+      urls = homeDirectories.map { path($0, directory, "auth.json") }
+    }
+
+    var results: [DiscoveredCredential] = []
+    for url in urls {
+      guard let object = readJSON(at: url, label: "Step Code", diagnostics: &diagnostics),
+            let step = object["step"] as? [String: Any],
+            step["type"] as? String == "oauth",
+            step["profile"] as? String == "step_plan_oversea",
+            let key = nonEmptyString(step["access"]), !key.isEnvironmentReference,
+            key.utf8.count <= 32_768,
+            key.utf8.allSatisfy({ (0x21...0x7e).contains($0) }) else { continue }
+
+      var credentials = [CredentialField.stepFunPlanKey: key]
+      if let uid = nonEmptyString(step["uid"]),
+         uid.utf8.allSatisfy({ (0x30...0x39).contains($0) }),
+         let number = Int64(uid), number > 0 {
+        credentials[CredentialField.stepFunUserID] = String(number)
+      }
+      results.append(DiscoveredCredential(
+        stableID: "stepfun:step-code", provider: .stepFun, suggestedName: "StepFun",
+        sourceLabel: "Step Code (\(shortPath(url)))", credentials: credentials
+      ))
+      diagnostics.append("Step Code: found global personal Plan key (\(shortPath(url)))")
+    }
+    return results
+  }
 
   /// Junie's fallback storage wraps its permanent key in a JSON-encoded
   /// `secret`. Account refresh grants and BYOK credentials are not imported.

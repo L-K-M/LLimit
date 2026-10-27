@@ -702,6 +702,7 @@ final class AppModel: ObservableObject {
     !CodexAccountProfile.isManaged(account.credentials)
       && account.credentials[CredentialField.anthropicCredentialSource] != ClaudeCodeCredentialSource.managedProfile.rawValue
       && !codexAccountIsBusy(account.id) && !claudeAccountIsBusy(account.id)
+      && stepFunLogin?.accountID != account.id
   }
 
   /// Creates a new LLimit-owned account pre-filled with a detected credential.
@@ -1624,6 +1625,12 @@ final class AppModel: ObservableObject {
         if account.provider == .stepFun {
           account.credentials[CredentialField.stepFunBrowserSession] = nil
           account.credentials[CredentialField.stepFunUserID] = nil
+          if fieldKey == CredentialField.stepFunPlanKey {
+            account.credentials[CredentialField.stepFunSessionToken] = nil
+            account.credentials[CredentialField.stepFunWebID] = nil
+          } else {
+            account.credentials[CredentialField.stepFunPlanKey] = nil
+          }
         }
         account.credentials[fieldKey] = credentialValue
       }

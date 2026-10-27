@@ -130,22 +130,39 @@ The bound survives daemon restarts; percentages are marked `≈` and metrics exp
 USD and bundled credits remain amounts without percentages. These are API
 balances, not web-app message/image quotas.
 
-StepFun reads the global [Step Plan console](https://platform.stepfun.ai/plan-subscribe).
-Run `llimit accounts add --provider stepfun` and enter the console **Oasis-Token**
-at the secret prompt. To obtain it, sign in to that console, open your browser's
-Developer Tools → Application/Storage → Cookies for `platform.stepfun.ai`.
-Copy the **Oasis-Token** cookie value and its matching **Oasis-Webid** value and
-enter both at the prompts. Avoid putting session credentials in shell history. API keys
-and CLI inference credentials do not authenticate this quota endpoint.
+StepFun accepts a Plan API key or manual console session credentials. Add a Plan
+key with `llimit accounts add --provider stepfun` — the command prompts for the
+key and saves it in local settings. Or import a Step Code login:
+
+```
+llimit accounts import
+```
+
+This scans `~/.stepcode/auth.json` for a global personal Plan key (profile
+`step_plan_oversea`) and optional numeric UID. The key is copied into LLimit's
+owned mode-600 settings; the Passport refresh grant, `step-login.json`, and CLI
+session state are never imported. No Step Code CLI runtime dependency is required
+after import. The imported key is not renewed by LLimit; reimport or replace if
+revoked. Generic PAYG/gateway/inference API keys and China profile are excluded.
+For an existing account, use `llimit accounts reimport <id>` to update from a
+changed Step Code login.
+
+Alternatively, enter manual console credentials: run
+`llimit accounts add --provider stepfun` and provide the **Oasis-Token** and
+matching **Oasis-Webid** from the [global Step Plan
+console](https://platform.stepfun.ai/plan-subscribe). To obtain them, sign in,
+open your browser's Developer Tools → Application/Storage → Cookies for
+`platform.stepfun.ai`, and copy both values. Avoid putting session credentials in
+shell history.
 
 Subscription credits and top-up credits remain separate; older Step Plans report
-5-hour and weekly limits. Server reset times are preserved, top-up expiry is text
-only, and no monthly cycle duration is invented. The daemon reads quota without
-generating tokens. Session credentials are stored only in local settings and need
-replacement after expiry. Linux does not renew these manual sessions or import
-StepFun CLI credentials. On macOS, **Connect StepFun** signs in inside LLimit and
-can renew its separate saved login automatically. No StepFun CLI is required.
-Organization quotas and pay-as-you-go balances are not supported.
+5-hour and weekly limits. Server resets are preserved, top-up expiry is text only,
+and no monthly cycle duration is invented. The daemon reads quota without
+generating tokens. Credentials are stored only
+in local settings and need replacement after expiry. Linux does not renew manual
+sessions. On macOS, **Connect StepFun** signs in inside LLimit and can renew its
+separate saved login automatically. Organization quotas and pay-as-you-go balances
+are not supported.
 
 Cline tracks both billing modes. ClinePass, the monthly subscription, reports
 five-hour, weekly, and monthly window limits with reset times; Cline credits, the

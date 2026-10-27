@@ -268,9 +268,16 @@ public extension QuotaProvider {
     case .stepFun:
       return [
         CredentialFieldDescriptor(
+          key: CredentialField.stepFunPlanKey,
+          label: "Personal Step Plan key",
+          isRequired: false,
+          help: "Import your global personal Plan login from Step Code (step). PAYG and gateway keys are not supported."
+        ),
+        CredentialFieldDescriptor(
           key: CredentialField.stepFunSessionToken,
           label: "Console session token",
-          help: "On Linux, copy the Oasis-Token cookie value from the StepFun platform's developer tools. On macOS, use Connect StepFun. API keys are not accepted."
+          isRequired: false,
+          help: "Alternative to a personal Plan key. On Linux, copy the Oasis-Token cookie from the StepFun platform. On macOS, use Connect StepFun."
         ),
         CredentialFieldDescriptor(
           key: CredentialField.stepFunWebID,
@@ -288,6 +295,10 @@ public extension QuotaProvider {
         && CodexAccountProfile.identity(from: credentials) != nil ? [] : ["Reconnect OpenAI"]
     }
     switch self {
+    case .stepFun:
+      return !trimmedCredential(credentials[CredentialField.stepFunPlanKey]).isEmpty
+        || !trimmedCredential(credentials[CredentialField.stepFunSessionToken]).isEmpty
+        ? [] : ["Personal Step Plan key or console session"]
     case .gitHubCopilot:
       let oauth = trimmedCredential(credentials[CredentialField.copilotOAuthToken])
       let pat = trimmedCredential(credentials[CredentialField.copilotPATToken])

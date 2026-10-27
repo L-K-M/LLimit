@@ -206,7 +206,7 @@ struct ProviderChooserView: View {
     case .xiaomiMiMo:
       return "Sign in to the MiMo API Platform inside LLimit. LLimit renews the saved login automatically when possible."
     case .stepFun:
-      return "Sign in to StepFun inside LLimit. LLimit renews the saved login automatically when possible."
+      return "Import a global personal Plan login from Step Code in Found on this Mac, or sign in to StepFun inside LLimit."
     default:
       return "Add the account, then enter its credentials. To use a detected login, go back to Found on this Mac."
     }
