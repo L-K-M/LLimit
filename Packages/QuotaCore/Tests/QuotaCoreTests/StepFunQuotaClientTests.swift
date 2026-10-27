@@ -171,6 +171,19 @@ final class StepFunQuotaClientTests: XCTestCase {
     XCTAssertNil(metric.totalDisplay)
   }
 
+  func testOmittedSubscriptionFractionWithResetOverridesContradictoryBucketCounts() async throws {
+    let body = #"{"status":"CODE_OK","plan_family":2,"plan_credit_rate_limit":{"subscription_credit_reset_time":"1700083200","credit_buckets":[{"type":1,"credit_total":"100","credit_residual":"25"}]}}"#
+    let usage = try await StepFunQuotaClient(httpClient: StepFunHTTPStub(body: body))
+      .fetchUsage(configuration: configuration(), now: now)
+
+    // Protobuf omits a zero float; a reported subscription reset establishes
+    // the exhausted subscription even if optional bucket detail disagrees.
+    let metric = try XCTUnwrap(usage.metrics.first)
+    XCTAssertEqual(metric.remainingPercent, 0)
+    XCTAssertNil(metric.usedDisplay)
+    XCTAssertNil(metric.totalDisplay)
+  }
+
   // MARK: - Legacy plan family (1 or absent)
 
   func testDecodesLegacyFiveHourAndWeeklyMetrics() async throws {
