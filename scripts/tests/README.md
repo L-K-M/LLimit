@@ -41,6 +41,8 @@ Keychain or showing a permission dialog. Check that detected logins show **Add**
 or **Added** accurately, adding a row keeps the chooser open, and repeated clicks
 do not create duplicates. A failed settings save must leave **Add** available and
 show an error. Search must filter detected names/sources as well as providers.
+If the App Group store is unavailable, a successful local import must still
+report widget sync as unavailable and retain the account after relaunch.
 
 Keychain prompts remain a separate manual check: **Scan Again** explicitly checks
 the ordinary Claude Code login and may ask for access. Auto-fill a non-Claude

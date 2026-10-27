@@ -730,8 +730,10 @@ final class AppModel: ObservableObject {
     providerStyleSettings[account.id] = style
     credentialEditRevisions[account.id] = UUID()
     reloadAccountStatuses()
-    if syncSettingsToWidgetStore(settings.redactedCredentials()) { reloadWidgetTimelines() }
-    statusMessage = "Added \(account.resolvedDisplayName)"
+    let widgetSyncReady = syncSettingsToWidgetStore(settings.redactedCredentials())
+    if widgetSyncReady { reloadWidgetTimelines() }
+    statusMessage = widgetSyncReady ? "Added \(account.resolvedDisplayName)"
+      : "Added \(account.resolvedDisplayName) locally. Widget sync unavailable."
     return account
   }
 
