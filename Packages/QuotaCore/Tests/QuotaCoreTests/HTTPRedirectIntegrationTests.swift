@@ -1,5 +1,10 @@
 import XCTest
 @testable import QuotaCore
+#if os(Linux)
+import Glibc
+#else
+import Darwin
+#endif
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
@@ -16,7 +21,9 @@ final class HTTPRedirectIntegrationTests: XCTestCase {
     process.standardOutput = Pipe()
     process.standardError = Pipe()
     try process.run()
-    defer { if process.isRunning { process.terminate() }; process.waitUntilExit() }
+    // Graceful fixture shutdown can hang under the asynchronous Linux runner.
+    // It has no state to preserve, so cleanup must not wait on SIGTERM.
+    defer { if process.isRunning { _ = kill(process.processIdentifier, SIGKILL) }; process.waitUntilExit() }
     let ready = folder.appendingPathComponent("port")
     let deadline = Date().addingTimeInterval(5)
     while !FileManager.default.fileExists(atPath: ready.path), process.isRunning, Date() < deadline {
