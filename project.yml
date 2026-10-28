@@ -41,7 +41,7 @@ targets:
         # The notices phase reads SwiftPM checkouts outside its declared inputs.
         ENABLE_USER_SCRIPT_SANDBOXING: NO
         CURRENT_PROJECT_VERSION: 44
-        MARKETING_VERSION: 1.2.0
+        MARKETING_VERSION: 1.3.0
     # Ship third-party license notices (SwiftTerm, Unicode data) inside the
     # app, before code signing; the generator fails on a missing license text.
     postBuildScripts:
@@ -96,7 +96,7 @@ targets:
         MACOSX_DEPLOYMENT_TARGET: 14.0
         SKIP_INSTALL: YES
         CURRENT_PROJECT_VERSION: 44
-        MARKETING_VERSION: 1.2.0
+        MARKETING_VERSION: 1.3.0
     info:
       path: LLimitWidgetExtension/Info.plist
       properties:
