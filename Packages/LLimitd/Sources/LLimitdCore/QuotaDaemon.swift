@@ -204,6 +204,9 @@ public final class QuotaDaemon {
     if provider == .stepFun {
       mergedCredentials = try Self.stepFunCredentialsForStorage(mergedCredentials)
     }
+    if provider == .mistral {
+      mergedCredentials = try MistralSessionCookies.credentialsForStorage(mergedCredentials)
+    }
 
     let name = displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
     let account = ProviderAccount(
@@ -251,6 +254,9 @@ public final class QuotaDaemon {
     if updated.provider == .stepFun {
       updated.credentials = try Self.stepFunCredentialsForStorage(updated.credentials)
     }
+    if updated.provider == .mistral {
+      updated.credentials = try MistralSessionCookies.credentialsForStorage(updated.credentials)
+    }
     guard updated != previous else { return previous }
 
     if updated.credentials != previous.credentials {
@@ -272,7 +278,15 @@ public final class QuotaDaemon {
       let stepFunIdentityChanged = previous.provider == .stepFun && stepFunAuthenticationChanged
         && (previous.credentials[CredentialField.stepFunUserID]?.isEmpty != false
           || previous.credentials[CredentialField.stepFunUserID] != updated.credentials[CredentialField.stepFunUserID])
-      if junieAllowanceChanged || mimoIdentityChanged || stepFunIdentityChanged {
+      let mistralAuthenticationChanged = [CredentialField.mistralSessionCookies, CredentialField.mistralBrowserSession,
+        CredentialField.mistralUserID, CredentialField.mistralOrganizationID].contains {
+          previous.credentials[$0] != updated.credentials[$0]
+        }
+      let mistralIdentityChanged = previous.provider == .mistral && mistralAuthenticationChanged
+        && [CredentialField.mistralUserID, CredentialField.mistralOrganizationID].contains {
+          previous.credentials[$0]?.isEmpty != false || previous.credentials[$0] != updated.credentials[$0]
+        }
+      if junieAllowanceChanged || mimoIdentityChanged || stepFunIdentityChanged || mistralIdentityChanged {
         // Different accounts or allowances must not share history.
         try historyStore.remove(accountIDs: [accountID])
       }
@@ -358,7 +372,8 @@ public final class QuotaDaemon {
 
   public static func editableCredentialKeys(of account: ProviderAccount) -> Set<String> {
     Set(account.provider.credentialFields.map(\.key)).union(account.credentials.keys)
-      .subtracting([CredentialField.mimoBrowserSession, CredentialField.stepFunBrowserSession, CredentialField.stepFunUserID])
+      .subtracting([CredentialField.mimoBrowserSession, CredentialField.stepFunBrowserSession, CredentialField.stepFunUserID,
+        CredentialField.mistralBrowserSession, CredentialField.mistralUserID, CredentialField.mistralOrganizationID])
   }
 
   // MARK: - Detect & import (convenience)
@@ -738,6 +753,14 @@ public final class QuotaDaemon {
       if account.provider == .xiaomiMiMo, let cookies = values[CredentialField.mimoSessionCookies],
          cookies != result[CredentialField.mimoSessionCookies] {
         result[CredentialField.mimoBrowserSession] = nil
+      }
+      if account.provider == .mistral, let cookies = values[CredentialField.mistralSessionCookies] {
+        let header = cookies.isEmpty ? "" : try MistralSessionCookies(header: cookies).header
+        if header != result[CredentialField.mistralSessionCookies] {
+          result[CredentialField.mistralBrowserSession] = nil
+          result[CredentialField.mistralUserID] = nil
+          result[CredentialField.mistralOrganizationID] = nil
+        }
       }
       if account.provider == .stepFun, [CredentialField.stepFunPlanKey, CredentialField.stepFunSessionToken, CredentialField.stepFunWebID].contains(where: {
         values[$0] != nil && values[$0] != result[$0]

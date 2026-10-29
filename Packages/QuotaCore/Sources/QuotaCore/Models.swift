@@ -17,6 +17,7 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
   case minimax = "minimax"
   case xiaomiMiMo = "xiaomi-mimo"
   case stepFun = "stepfun"
+  case mistral = "mistral"
 
   public var displayName: String {
     switch self {
@@ -52,6 +53,8 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
       return "Xiaomi MiMo"
     case .stepFun:
       return "StepFun"
+    case .mistral:
+      return "Mistral"
     }
   }
 }
@@ -291,6 +294,14 @@ public extension QuotaProvider {
           isSecret: false,
           isRequired: false,
           help: "Optional purchase date anchoring monthly plan-credit resets in UTC when StepFun reports no reset. Use YYYY-MM-DD (midnight UTC) or an ISO 8601 date-time with a timezone. Server resets take precedence."
+        )
+      ]
+    case .mistral:
+      return [
+        CredentialFieldDescriptor(
+          key: CredentialField.mistralSessionCookies,
+          label: "Session cookies",
+          help: "On macOS, use Connect Mistral. On Linux, paste the authentication Cookie header from admin.mistral.ai. Vibe and API keys cannot read this quota."
         )
       ]
     }

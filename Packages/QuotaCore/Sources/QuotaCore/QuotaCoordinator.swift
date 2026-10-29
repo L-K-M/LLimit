@@ -36,7 +36,8 @@ public struct QuotaCoordinator: Sendable {
         JunieQuotaClient(httpClient: httpClient),
         MiniMaxQuotaClient(httpClient: httpClient),
         MiMoQuotaClient(httpClient: httpClient),
-        StepFunQuotaClient(httpClient: httpClient)
+        StepFunQuotaClient(httpClient: httpClient),
+        MistralQuotaClient(httpClient: httpClient)
       ]
     )
   }
@@ -165,7 +166,8 @@ private struct FailureMessagePolicy: Sendable {
 
   init(configurations: [ProviderRuntimeConfiguration]) {
     let hiddenSecretKeys: Set<String> = [CredentialField.openAIRefreshToken, CredentialField.kimiRefreshToken,
-                                       CredentialField.mimoBrowserSession, CredentialField.stepFunBrowserSession]
+                                       CredentialField.mimoBrowserSession, CredentialField.stepFunBrowserSession,
+                                       CredentialField.mistralBrowserSession]
     let values = configurations.flatMap { configuration in
       let keys = Set(configuration.provider.credentialFields.filter(\.isSecret).map(\.key))
         .union(hiddenSecretKeys)
@@ -184,6 +186,14 @@ private struct FailureMessagePolicy: Sendable {
          let compound = configuration.credentials[CredentialField.stepFunSessionToken] {
         let pair = compound.components(separatedBy: "...")
         if pair.count == 2 { values += pair.filter { !$0.isEmpty } }
+      }
+      if let raw = configuration.credentials[CredentialField.mistralBrowserSession],
+         let browser = try? MistralBrowserSession(serialized: raw) {
+        values += browser.secretValues
+      }
+      if let raw = configuration.credentials[CredentialField.mistralSessionCookies],
+         let session = try? MistralSessionCookies(header: raw) {
+        values += session.secretValues
       }
       return values
     }

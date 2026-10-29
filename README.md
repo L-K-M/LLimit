@@ -107,6 +107,7 @@ MiMo, use their existing connection flows.
 | **Cline** | API key | Cline (`~/.cline/data/settings/providers.json`, legacy `secrets.json`) |
 | **JetBrains Junie** | Junie API key | `JUNIE_API_KEY`, Junie fallback file (`~/.junie/secure_credentials.json`) |
 | **MiniMax M Plan** | Global (`minimax.io`) Subscription Key | OpenCode (`minimax-coding-plan` in `auth.json`) |
+| **Mistral** | Included monthly Vibe Code and API allowances | Connect Mistral on macOS; manual Admin session on Linux |
 | **Xiaomi MiMo** | Personal Token Plan console session | Connect MiMo on macOS; manual console cookies on Linux |
 | **StepFun** | Global Step Plan API key or console session | Step Code (`~/.stepcode/auth.json`), Connect StepFun on macOS; manual console token on Linux |
 
@@ -182,6 +183,18 @@ grants and third-party provider keys are not imported. macOS Junie usually store
 its login in Keychain; generate and enter a Junie API key when the scan finds no
 key. Imported accounts work without Junie installed, and a revoked or expired
 key needs an explicit replacement or fresh import.
+
+For Mistral, choose **Settings → Add Account → Mistral → Connect Account**.
+Sign in to Mistral Admin, choose your organization, then click **Connect Account**.
+LLimit reports the separate included monthly **Vibe Code** and **API/Studio**
+allowances and their server-reported resets. This does not report chat-message
+limits, prepaid PAYG balances, or spending caps. Each account uses its own temporary
+browser and locally saved authentication; reconnect if Mistral expires the session.
+LLimit verifies the user and organization before saving and on every refresh.
+
+Vibe, `vibe-acp`, and `vibe-app-server` 3.0.3 expose plan and session information,
+but no remaining subscription quota. Their API keys cannot read the Admin budgets,
+so LLimit does not import Vibe credentials or require the CLI at runtime.
 
 For MiniMax M Plan, choose **Settings → Add Account → MiniMax** and enter your
 global (`minimax.io`) **Subscription Key** from

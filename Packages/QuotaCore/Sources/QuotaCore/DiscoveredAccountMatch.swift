@@ -68,6 +68,7 @@ public extension DiscoveredCredential {
       guard let detectedID = userID(detectedUID), let savedID = userID(savedUID) else { return false }
       return detectedID == savedID
     case .xiaomiMiMo: return false // Browser connections have no local-tool importer.
+    case .mistral: return false // Quota uses browser session; Vibe and API keys do not expose it.
     }
   }
 }
