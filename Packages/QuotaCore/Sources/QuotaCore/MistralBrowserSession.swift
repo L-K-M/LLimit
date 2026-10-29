@@ -126,6 +126,10 @@ public struct MistralBrowserSession: Sendable, Equatable {
 
 public enum MistralSignInPolicy {
   public static let startURL = URL(string: "https://admin.mistral.ai/subscription")!
+  public static func subscriptionRedirect(after url: URL) -> URL? {
+    allowsNavigation(to: url) && url.host?.lowercased() == "console.mistral.ai" ? startURL : nil
+  }
+
   public static func allowsNavigation(to url: URL) -> Bool {
     if url.absoluteString == "about:blank" { return true }
     return url.scheme == "https" && url.user == nil && url.password == nil

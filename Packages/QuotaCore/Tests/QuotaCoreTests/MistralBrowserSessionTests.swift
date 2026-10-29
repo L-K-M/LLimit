@@ -139,6 +139,33 @@ final class MistralBrowserSessionTests: XCTestCase {
     XCTAssertTrue(failure.message.contains("[redacted]"))
   }
 
+  func testSubscriptionRedirectReturnsOnlyExactSecureStudioOrigin() throws {
+    let startURL = MistralSignInPolicy.startURL
+    for raw in ["https://console.mistral.ai/", "https://console.mistral.ai/code",
+      "https://console.mistral.ai:443/?from=login", "https://CONSOLE.MISTRAL.AI/"] {
+      let url = try XCTUnwrap(URL(string: raw), raw)
+      XCTAssertEqual(MistralSignInPolicy.subscriptionRedirect(after: url), startURL, raw)
+    }
+    for raw in ["https://admin.mistral.ai/subscription",
+      "https://auth.mistral.ai/self-service/login/browser",
+      "https://v2.auth.mistral.ai/login",
+      "https://accounts.google.com/",
+      "https://appleid.apple.com/",
+      "https://login.microsoftonline.com/",
+      "https://login.live.com/",
+      "about:blank",
+      "http://console.mistral.ai/",
+      "https://console.mistral.ai.evil.test/",
+      "https://console.mistral.ai@evil.test/",
+      "https://user:password@console.mistral.ai/",
+      "https://console.mistral.ai:8443/",
+      "https://evil.test/",
+      "file:///tmp/login.html"] {
+      let url = try XCTUnwrap(URL(string: raw), raw)
+      XCTAssertNil(MistralSignInPolicy.subscriptionRedirect(after: url), raw)
+    }
+  }
+
   func testSignInPolicyAllowsKnownAuthHostsAndBlocksLookalikes() throws {
     for url in ["https://admin.mistral.ai/subscription", "https://auth.mistral.ai/self-service/login/browser",
       "https://v2.auth.mistral.ai/login", "https://accounts.google.com/", "https://appleid.apple.com/",

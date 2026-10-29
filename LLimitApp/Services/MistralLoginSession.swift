@@ -13,6 +13,7 @@ final class MistralLoginSession: NSObject, ObservableObject, Identifiable, WKNav
   @Published private(set) var message = "Sign in to Mistral, then choose Connect Account."
   private var connection: Task<Void, Never>?
   private var cancelled = false
+  private var hasRedirectedStudioSignIn = false
   private let onConnect: @MainActor (UUID, MistralBrowserSession) async throws -> Void
 
   init(accountID: String, startURL: URL = MistralSignInPolicy.startURL,
@@ -83,6 +84,15 @@ final class MistralLoginSession: NSObject, ObservableObject, Identifiable, WKNav
     guard let url = navigationAction.request.url, MistralSignInPolicy.allowsNavigation(to: url) else { return nil }
     webView.load(navigationAction.request)
     return nil
+  }
+
+  func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+    guard !cancelled, !hasRedirectedStudioSignIn, let url = webView.url,
+          let subscription = MistralSignInPolicy.subscriptionRedirect(after: url) else { return }
+    // Some sign-ins discard return_to and land in Studio. Return to the quota
+    // page once; an account without Admin access must not enter a redirect loop.
+    hasRedirectedStudioSignIn = true
+    webView.load(URLRequest(url: subscription))
   }
 
   func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {

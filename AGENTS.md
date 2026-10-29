@@ -203,7 +203,10 @@ Linux:
   session cookies (HttpOnly) plus optional CSRF at Admin-compatible scopes, with
   expiry, as secret `mistral.browser_session`; raw manual headers use secret
   `mistral.session_cookies`. Neither normal browser profiles nor Vibe credentials
-  are imported. Linux validates new manual sessions outside the settings lock
+  are imported. WebKit can retain quotes around the Ory session value: preserve
+  its wire form and redact both quoted and unquoted values. Successful sign-in
+  can land in Studio; return to Admin once without automatically saving a login.
+  Linux validates new manual sessions outside the settings lock
   before committing verified IDs. Refuse redirects, shared cookie jars, and
   caches; never expose individual cookie values or response HTML in errors.
   Expired sessions require reconnecting; no automatic renewal is promised.
@@ -213,6 +216,8 @@ Linux:
   [`whoami.py`](https://github.com/mistralai/mistral-vibe/blob/7bb48f213ac677f943d5c791199ed3dddf302f00/vibe/setup/auth/whoami.py).
   The installed `vibe`, `vibe-acp`, and `vibe-app-server` at that version expose
   plan/account and per-run statistics, but no remaining subscription quota.
+  An isolated WebKit login and two read-only Admin requests verified cookie
+  capture, local serialization, quota decoding, and an identity-pinned refresh.
 
 - **StepFun**: provider `stepfun`. Accepts either a Plan API key
   (`stepfun.plan_key`) or a console browser session (`stepfun.browser_session` /
