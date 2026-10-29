@@ -210,6 +210,20 @@ but excludes browser refresh grants and third-party provider keys.
 macOS Keychain-only logins require a manually entered Junie API key. Saved keys
 work without Junie running and need explicit replacement when revoked or expired.
 
+Mistral reports separate included monthly Vibe Code and API/Studio allowances from
+Mistral Admin. Run `llimit accounts add --provider mistral` and paste the
+authentication Cookie header from `admin.mistral.ai` at the hidden prompt.
+LLimit keeps only Ory session authentication and optional CSRF cookies, verifies
+the quota and user/organization before saving, and checks that identity on refresh.
+API keys, including Vibe CLI keys, cannot read these budgets. Chat-message limits,
+prepaid balances, and spending caps are not reported.
+
+When the session expires, replace it with
+`llimit accounts update <account-id> --set mistral.session_cookies` and use the
+hidden prompt. Validation happens before acquiring the settings lock; a concurrent
+credential edit causes the update to fail instead of overwriting the other edit.
+On macOS, **Connect Mistral** handles sign-in in a separate browser inside LLimit.
+
 MiniMax reports global (`minimax.io`) M Plan interval and weekly usage, including
 server reset times and any separate quota buckets. Add it with
 `llimit accounts add --provider minimax` and your M Plan **Subscription Key**.

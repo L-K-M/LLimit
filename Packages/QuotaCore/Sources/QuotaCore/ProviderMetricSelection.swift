@@ -47,6 +47,8 @@ public func defaultRingMetrics(for usage: ProviderUsage) -> [UsageMetric] {
     preferredIDs = ["general-interval", "general-weekly"]
   case .stepFun:
     preferredIDs = ["monthly-credits", "five-hour", "weekly", "topup-credits"]
+  case .mistral:
+    preferredIDs = ["vibe-monthly", "api-monthly"]
   }
 
   var selected: [UsageMetric] = []

@@ -80,6 +80,13 @@ final class ProviderCatalogTests: XCTestCase {
     XCTAssertEqual(providers(matching: "  gLm\tINTERNATIONAL\n"), [.zai])
   }
 
+  func testMistralSearchFindsProviderByTitleAndAliases() {
+    XCTAssertEqual(providers(matching: "Mistral"), [.mistral])
+    XCTAssertEqual(providers(matching: "Le Chat"), [.mistral])
+    XCTAssertEqual(providers(matching: "Vibe Code"), [.mistral])
+    XCTAssertEqual(providers(matching: "Vibe"), [.mistral])
+  }
+
   func testDetectedAccountSearchIncludesNamesAndSourcesButNeverSecrets() {
     let candidate = DiscoveredCredential(stableID: "codex:fixture", provider: .openAI,
       suggestedName: "Personal reader@example.test", sourceLabel: "Codex CLI (~/.codex)",

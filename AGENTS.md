@@ -32,7 +32,7 @@ settings. The user's normal Codex login and existing imported accounts stay sepa
 
 Providers: Claude (Anthropic), OpenAI/ChatGPT, GitHub Copilot, Zhipu, Z.ai, Kimi,
 Google Antigravity, Devin, Meta Muse, OpenCode Go, Venice, Cline, JetBrains Junie,
-MiniMax M Plan, Xiaomi MiMo personal Token Plan, StepFun Step Plan.
+MiniMax M Plan, Xiaomi MiMo personal Token Plan, StepFun Step Plan, Mistral.
 
 ## Layout
 
@@ -188,6 +188,31 @@ Linux:
 6. Add unit tests (discovery parsing + client decoding) — these run on Linux.
 
 ## Provider API notes
+
+- **Mistral**: provider `mistral`. Read-only `GET
+  https://admin.mistral.ai/subscription` with owned Admin session cookies, not an
+  API key. Parse JSON frames from `self.__next_f.push` and resolve the subscription
+  props' `user` Flight reference. Verify `user.uuid` plus `user.organization.uuid`
+  before saving a connection and on refresh. The props' `budget.api_budget` and
+  `budget.vibe_budget` each report `usage_percentage`, `initial_budget`, `currency`,
+  and `reset_at`; they are separate monthly API/Studio and Vibe Code allowances.
+  Ignore the parent aggregate budget, billing totals, PAYG credits, and spending
+  limits. Preserve server resets and unavailable percentages; do not invent a
+  window duration or infer subscription renewal from them. macOS uses one
+  nonpersistent WebKit session per attempt and saves only root-path Secure Ory
+  session cookies (HttpOnly) plus optional CSRF at Admin-compatible scopes, with
+  expiry, as secret `mistral.browser_session`; raw manual headers use secret
+  `mistral.session_cookies`. Neither normal browser profiles nor Vibe credentials
+  are imported. Linux validates new manual sessions outside the settings lock
+  before committing verified IDs. Refuse redirects, shared cookie jars, and
+  caches; never expose individual cookie values or response HTML in errors.
+  Expired sessions require reconnecting; no automatic renewal is promised.
+  Sources: official [subscription page](https://admin.mistral.ai/subscription)
+  inspected signed-in 2026-10-29, [subscription documentation](https://docs.mistral.ai/admin/billing-usage/subscriptions),
+  and Vibe 3.0.3 commit `7bb48f213ac677f943d5c791199ed3dddf302f00`
+  [`whoami.py`](https://github.com/mistralai/mistral-vibe/blob/7bb48f213ac677f943d5c791199ed3dddf302f00/vibe/setup/auth/whoami.py).
+  The installed `vibe`, `vibe-acp`, and `vibe-app-server` at that version expose
+  plan/account and per-run statistics, but no remaining subscription quota.
 
 - **StepFun**: provider `stepfun`. Accepts either a Plan API key
   (`stepfun.plan_key`) or a console browser session (`stepfun.browser_session` /

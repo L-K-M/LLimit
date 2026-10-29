@@ -70,6 +70,7 @@ final class AppModel: ObservableObject {
   @Published var codexLogin: CodexLoginPresentation?
   @Published var mimoLogin: MiMoLoginSession?
   @Published var stepFunLogin: StepFunLoginSession?
+  @Published var mistralLogin: MistralLoginSession?
   @Published private(set) var codexAccountMessages: [String: String] = [:]
   @Published private var codexBusyAccounts: Set<String> = []
   private var signInSkippedAccountIDs: Set<String> = []
@@ -257,6 +258,7 @@ final class AppModel: ObservableObject {
   private var signingInAccountIDs: Set<String> {
     codexBusyAccounts.union(mimoLogin.map { [$0.accountID] } ?? [])
       .union(stepFunLogin.map { [$0.accountID] } ?? [])
+      .union(mistralLogin.map { [$0.accountID] } ?? [])
   }
 
   func refreshNow() async {
@@ -537,6 +539,7 @@ final class AppModel: ObservableObject {
           let removedAccount = account(withID: accountID) else { return }
     if mimoLogin?.accountID == accountID { dismissMiMoLogin() }
     if stepFunLogin?.accountID == accountID { dismissStepFunLogin() }
+    if mistralLogin?.accountID == accountID { dismissMistralLogin() }
     var updated = currentSettings()
     updated.accounts.removeAll { $0.id == accountID }
     updated.providerStyleSettings.removeAll { $0.accountID == accountID }
@@ -719,6 +722,7 @@ final class AppModel: ObservableObject {
       && account.credentials[CredentialField.anthropicCredentialSource] != ClaudeCodeCredentialSource.managedProfile.rawValue
       && !codexAccountIsBusy(account.id) && !claudeAccountIsBusy(account.id)
       && stepFunLogin?.accountID != account.id
+      && mistralLogin?.accountID != account.id
   }
 
   /// Creates a new LLimit-owned account pre-filled with a detected credential.
@@ -936,6 +940,59 @@ final class AppModel: ObservableObject {
   }
 
   // MARK: - Independent Codex accounts
+
+  func connectMistralAccount(_ accountID: String) {
+    guard !isRefreshing, mistralLogin == nil, !configurationLoadFailed,
+          account(withID: accountID)?.provider == .mistral else { return }
+    signInSkippedAccountIDs.insert(accountID)
+    let revision = credentialEditRevisions[accountID]
+    mistralLogin = MistralLoginSession(accountID: accountID) { [weak self] attemptID, browser in
+      guard let self else { throw CancellationError() }
+      try await self.finishMistralLogin(attemptID: attemptID, accountID: accountID,
+        originalRevision: revision, browser: browser)
+    }
+  }
+
+  func dismissMistralLogin() {
+    guard let session = mistralLogin else { return }
+    session.cancel()
+    mistralLogin = nil
+    catchUpAfterSignIn(session.accountID)
+  }
+
+  private func finishMistralLogin(attemptID: UUID, accountID: String, originalRevision: UUID?,
+                                  browser: MistralBrowserSession) async throws {
+    guard mistralLogin?.id == attemptID, let original = account(withID: accountID),
+          original.provider == .mistral else { throw CancellationError() }
+    var candidate = original.runtimeConfiguration()
+    // Explicit reconnect can select another identity. The server must identify
+    // the user and active organization before this login replaces the old one.
+    candidate.credentials = try browser.credentials(userID: "", organizationID: "")
+    let connection = try await MistralQuotaClient(httpClient: URLSessionHTTPClient())
+      .verifiedConnection(configuration: candidate, now: Date())
+    let credentials = try browser.credentials(userID: connection.userID, organizationID: connection.organizationID)
+    try Task.checkCancellation()
+    guard !configurationLoadFailed, mistralLogin?.id == attemptID,
+          credentialEditRevisions[accountID] == originalRevision,
+          let index = providerAccounts.firstIndex(where: { $0.id == accountID && $0.provider == .mistral }) else {
+      throw CancellationError()
+    }
+    let previous = providerAccounts[index]
+    if previous.credentials[CredentialField.mistralUserID] != connection.userID
+      || previous.credentials[CredentialField.mistralOrganizationID] != connection.organizationID {
+      try invalidateAccountUsageAndHistory(for: previous)
+    } else { try invalidateAccountSnapshot(for: accountID) }
+    var settings = currentSettings()
+    settings.accounts[index].credentials = credentials
+    try settingsStore.save(settings)
+    providerAccounts[index].credentials = credentials
+    credentialEditRevisions[accountID] = UUID()
+    mistralLogin?.webView.stopLoading()
+    mistralLogin = nil
+    reloadAccountStatuses()
+    if syncSettingsToWidgetStore(currentSettings().redactedCredentials()) { reloadWidgetTimelines() }
+    catchUpAfterSignIn(accountID)
+  }
 
   func connectStepFunAccount(_ accountID: String) {
     guard !isRefreshing, stepFunLogin == nil, !configurationLoadFailed,
@@ -1612,6 +1669,7 @@ final class AppModel: ObservableObject {
     case .credential(let fieldKey):
       if mimoLogin?.accountID == accountID { return .rejected(.signInInProgress) }
       if stepFunLogin?.accountID == accountID { return .rejected(.signInInProgress) }
+      if mistralLogin?.accountID == accountID { return .rejected(.signInInProgress) }
       if codexAccountIsBusy(accountID) { return .rejected(.signInInProgress) }
       // A connection owns every credential of its account, and Settings hides all
       // manual fields while connected. A draft committed now was typed before the
@@ -1637,6 +1695,11 @@ final class AppModel: ObservableObject {
         }
         if account.provider == .xiaomiMiMo && fieldKey == CredentialField.mimoSessionCookies {
           account.credentials[CredentialField.mimoBrowserSession] = nil
+        }
+        if account.provider == .mistral, fieldKey == CredentialField.mistralSessionCookies {
+          account.credentials[CredentialField.mistralBrowserSession] = nil
+          account.credentials[CredentialField.mistralUserID] = nil
+          account.credentials[CredentialField.mistralOrganizationID] = nil
         }
         if account.provider == .stepFun,
            [CredentialField.stepFunPlanKey, CredentialField.stepFunSessionToken, CredentialField.stepFunWebID].contains(fieldKey) {
@@ -2055,7 +2118,7 @@ final class AppModel: ObservableObject {
     // ClinePass reports a five-hour, weekly and monthly window; monthly is the
     // longest, and it owns the account's primary color once usage is live.
     case .cline: return .monthly
-    case .stepFun: return .monthly
+    case .stepFun, .mistral: return .monthly
     default: return .weekly
     }
   }
@@ -2163,7 +2226,16 @@ final class AppModel: ObservableObject {
           })
           && (previousAccount.credentials[CredentialField.stepFunUserID]?.isEmpty != false
             || previousAccount.credentials[CredentialField.stepFunUserID] != updatedAccount.credentials[CredentialField.stepFunUserID])
-        if veniceKeyChanged || junieAllowanceChanged || mimoIdentityChanged || stepFunIdentityChanged {
+        let mistralIdentityChanged = previousAccount.provider == .mistral
+          && [CredentialField.mistralSessionCookies, CredentialField.mistralBrowserSession,
+              CredentialField.mistralUserID, CredentialField.mistralOrganizationID].contains(where: {
+            previousAccount.credentials[$0] != updatedAccount.credentials[$0]
+          })
+          && (previousAccount.credentials[CredentialField.mistralUserID]?.isEmpty != false
+            || previousAccount.credentials[CredentialField.mistralOrganizationID]?.isEmpty != false
+            || previousAccount.credentials[CredentialField.mistralUserID] != updatedAccount.credentials[CredentialField.mistralUserID]
+            || previousAccount.credentials[CredentialField.mistralOrganizationID] != updatedAccount.credentials[CredentialField.mistralOrganizationID])
+        if veniceKeyChanged || junieAllowanceChanged || mimoIdentityChanged || stepFunIdentityChanged || mistralIdentityChanged {
           // Different accounts or denominators cannot share a trend line.
           try invalidateAccountUsageAndHistory(for: previousAccount)
         } else {

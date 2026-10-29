@@ -78,7 +78,7 @@ func noteMissingCredentials(of account: ProviderAccount) {
 
 // MARK: - accounts
 
-func runAccounts(_ args: [String]) {
+func runAccounts(_ args: [String]) async {
   guard let subcommand = args.first else {
     printUsage()
     exit(1)
@@ -88,7 +88,7 @@ func runAccounts(_ args: [String]) {
   case "list":
     accountsList()
   case "add":
-    accountsAdd(Array(args.dropFirst()))
+    await accountsAdd(Array(args.dropFirst()))
   case "import":
     accountsImport(Array(args.dropFirst()))
   case "enable", "disable":
@@ -102,11 +102,11 @@ func runAccounts(_ args: [String]) {
     }
     accountsRemove(fragment)
   case "update":
-    accountsUpdate(Array(args.dropFirst()))
+    await accountsUpdate(Array(args.dropFirst()))
   case "rename":
     let rest = Array(args.dropFirst())
     guard rest.count >= 2 else { fail("accounts rename needs an account ID and a name") }
-    accountsUpdate([rest[0], "--name", rest.dropFirst().joined(separator: " ")])
+    await accountsUpdate([rest[0], "--name", rest.dropFirst().joined(separator: " ")])
   case "reimport":
     accountsReimport(Array(args.dropFirst()))
   default:
@@ -133,7 +133,7 @@ func accountsList() {
   }
 }
 
-func accountsAdd(_ args: [String]) {
+func accountsAdd(_ args: [String]) async {
   var providerID: String?
   var name: String?
   var presetCredentials: [String: String] = [:]
@@ -196,6 +196,15 @@ func accountsAdd(_ args: [String]) {
   // cannot silently drop the new account (and vice versa).
   let account: ProviderAccount
   do {
+    if provider == .mistral {
+      if let unknown = credentials.keys.first(where: { $0 != CredentialField.mistralSessionCookies }) {
+        throw DaemonError.unknownCredentialKey(unknown, provider: provider)
+      }
+      if let header = credentials[CredentialField.mistralSessionCookies], !header.isEmpty {
+        credentials = try await MistralQuotaClient(httpClient: URLSessionHTTPClient())
+          .verifiedManualCredentials(header: header)
+      }
+    }
     account = try daemon.editingSettings { transaction in
       try transaction.addAccount(provider: provider, displayName: name, credentials: credentials)
     }
@@ -505,7 +514,7 @@ guard let command = arguments.first else {
 
 switch command {
 case "accounts":
-  runAccounts(Array(arguments.dropFirst()))
+  await runAccounts(Array(arguments.dropFirst()))
 case "refresh":
   await runRefresh()
 case "status":

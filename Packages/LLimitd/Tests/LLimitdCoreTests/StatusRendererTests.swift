@@ -333,4 +333,37 @@ final class StatusRendererTests: XCTestCase {
   func testHumanReadableWithoutSnapshotExplainsNextStep() {
     XCTAssertTrue(StatusRenderer.humanReadable(snapshot: nil, now: now).contains("llimit refresh"))
   }
+
+  func testMistralTwoMonthlyMetrics() throws {
+    let usage = ProviderUsage(
+      accountID: "mistral-personal",
+      provider: .mistral,
+      title: "Mistral",
+      metrics: [
+        UsageMetric(id: "vibe-monthly", label: "Monthly Vibe credits", remainingPercent: 100, resetIn: "2d"),
+        UsageMetric(id: "api-monthly", label: "Monthly API credits", remainingPercent: 96, resetIn: "2d")
+      ],
+      fetchedAt: now
+    )
+    let snapshot = QuotaSnapshot(generatedAt: now, providers: [usage], failures: [])
+    let object = try decodedWaybar(snapshot)
+
+    XCTAssertEqual(object["text"] as? String, "Mistral 96%")
+    XCTAssertEqual(object["percentage"] as? Int, 96)
+    XCTAssertEqual(object["class"] as? String, "ok")
+
+    let account = try XCTUnwrap((object["accounts"] as? [[String: Any]])?.first)
+    let metrics = try XCTUnwrap(account["metrics"] as? [[String: Any]])
+    XCTAssertEqual(metrics.count, 2)
+    XCTAssertEqual(metrics[0]["label"] as? String, "Monthly Vibe credits")
+    XCTAssertEqual(metrics[0]["remainingPercent"] as? Int, 100)
+    XCTAssertEqual(metrics[1]["label"] as? String, "Monthly API credits")
+    XCTAssertEqual(metrics[1]["remainingPercent"] as? Int, 96)
+
+    let human = StatusRenderer.humanReadable(snapshot: snapshot, now: now)
+    XCTAssertTrue(human.contains("Monthly Vibe credits"))
+    XCTAssertTrue(human.contains("100%"))
+    XCTAssertTrue(human.contains("Monthly API credits"))
+    XCTAssertTrue(human.contains("96%"))
+  }
 }

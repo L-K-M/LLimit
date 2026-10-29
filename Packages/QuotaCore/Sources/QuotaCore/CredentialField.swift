@@ -57,4 +57,9 @@ public enum CredentialField {
   public static let copilotPATToken = "copilot.pat_token"
   public static let copilotUsername = "copilot.username"
   public static let copilotTier = "copilot.tier"
+
+  public static let mistralSessionCookies = "mistral.session_cookies"
+  public static let mistralBrowserSession = "mistral.browser_session"
+  public static let mistralUserID = "mistral.user_id"
+  public static let mistralOrganizationID = "mistral.organization_id"
 }

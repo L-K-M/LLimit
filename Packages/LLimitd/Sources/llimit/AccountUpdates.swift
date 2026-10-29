@@ -9,7 +9,7 @@ import Musl
 import Darwin
 #endif
 
-func accountsUpdate(_ args: [String]) {
+func accountsUpdate(_ args: [String]) async {
   guard let fragment = args.first else { fail("accounts update needs an account ID") }
   var name: String?
   var values: [String: String] = [:]
@@ -51,8 +51,20 @@ func accountsUpdate(_ args: [String]) {
       if !value.isEmpty { values[key] = value }
     }
     guard name != nil || !values.isEmpty else { print("No changes."); return }
+    var verifiedMistralCredentials: [String: String]?
+    if account.provider == .mistral, let header = values[CredentialField.mistralSessionCookies],
+       !header.isEmpty {
+      verifiedMistralCredentials = try await MistralQuotaClient(httpClient: URLSessionHTTPClient())
+        .verifiedManualCredentials(header: header)
+    }
     let updated = try daemon.editingSettings {
-      try $0.updateAccount(id, displayName: name, credentials: values.isEmpty ? .unchanged : .merging(values))
+      if let verifiedMistralCredentials {
+        guard daemon.settings.account(withID: id)?.credentials == account.credentials else {
+          throw ProviderClientError(kind: .api, message: "The account changed while Mistral was being verified. Try again.")
+        }
+        return try $0.updateAccount(id, displayName: name, credentials: .replacing(with: verifiedMistralCredentials))
+      }
+      return try $0.updateAccount(id, displayName: name, credentials: values.isEmpty ? .unchanged : .merging(values))
     }
     print("Updated \(updated.resolvedDisplayName) [\(updated.provider.rawValue)] — id \(updated.id)")
     noteMissingCredentials(of: updated)

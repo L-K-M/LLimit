@@ -1843,6 +1843,8 @@ private struct ProviderMark: View {
       return "sparkles"
     case .stepFun:
       return "stairs"
+    case .mistral:
+      return "terminal.fill"
     }
   }
 }
