@@ -50,8 +50,8 @@ final class QuotaPaceTests: XCTestCase {
     let anthropic = ["five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet", "five_hour_opus", "extra_usage", "sevenday"]
     XCTAssertEqual(anthropic.map { length(id: $0, provider: .anthropic) }, [18_000, 604_800, 604_800, 604_800, 18_000, nil, nil])
     XCTAssertEqual(["five_hour", "weekly", "monthly", "credit-balance"].map { length(id: $0, provider: .cline) }, [18_000, 604_800, nil, nil])
-    for (provider, id) in [(QuotaProvider.metaMuse, "weekly"), (.openCodeGo, "session-rolling"), (.openCodeGo, "weekly"),
-                           (.openCodeGo, "monthly"), (.gitHubCopilot, "premium"), (.devin, "five_hour")] {
+    for (provider, id) in [(QuotaProvider.kimi, "plan-weekly"), (.openCodeGo, "session-rolling"),
+                           (.cline, "monthly"), (.stepFun, "monthly-credits"), (.devin, "five_hour")] {
       XCTAssertNil(length(id: id, provider: provider))
     }
     XCTAssertEqual(QuotaPace.windowSeconds(for: metric(id: "five_hour", windowSeconds: 3_600), provider: .anthropic), 3_600)

@@ -10,6 +10,7 @@ public struct QuotaPace: Equatable, Sendable {
   private static let onPacePoints = 3
   private static let resetOvershootTolerance = 0.05
   private static let fiveHours: TimeInterval = 5 * 3_600
+  private static let oneDay: TimeInterval = 86_400
   private static let sevenDays: TimeInterval = 7 * 86_400
 
   public init?(metric: UsageMetric, provider: QuotaProvider, fetchedAt: Date, now: Date) {
@@ -40,10 +41,11 @@ public struct QuotaPace: Equatable, Sendable {
     if let reported = metric.windowSeconds {
       return reported > 0 ? TimeInterval(reported) : nil
     }
-    return documentedWindowSeconds(metricID: metric.id, provider: provider)
+    return documentedWindowSeconds(for: metric, provider: provider)
   }
 
-  private static func documentedWindowSeconds(metricID: String, provider: QuotaProvider) -> TimeInterval? {
+  private static func documentedWindowSeconds(for metric: UsageMetric, provider: QuotaProvider) -> TimeInterval? {
+    let metricID = metric.id
     switch provider {
     case .anthropic:
       if metricID == "five_hour" || metricID.hasPrefix("five_hour_") { return fiveHours }
@@ -55,8 +57,40 @@ public struct QuotaPace: Equatable, Sendable {
       case "weekly": return sevenDays
       default: return nil
       }
+    case .zhipu, .zai:
+      switch metricID {
+      case "tokens": return fiveHours
+      case "tokens-weekly": return sevenDays
+      default: return nil
+      }
+    case .venice:
+      return metricID == "daily-diem" ? oneDay : nil
+    case .devin:
+      switch metricID {
+      case "quota-daily": return oneDay
+      case "quota-weekly": return sevenDays
+      default: return nil
+      }
+    case .metaMuse:
+      return metricID == "weekly" ? sevenDays : nil
+    case .openCodeGo:
+      switch metricID {
+      case "weekly": return sevenDays
+      case "monthly": return metric.resetAt.flatMap(calendarMonthWindowSeconds)
+      default: return nil
+      }
+    case .mistral, .gitHubCopilot:
+      let monthlyIDs = provider == .mistral ? ["api-monthly", "vibe-monthly"] : ["premium", "chat", "completions"]
+      guard monthlyIDs.contains(metricID), let resetAt = metric.resetAt else { return nil }
+      var calendar = Calendar(identifier: .gregorian)
+      calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+      // These allowances reset at the UTC calendar boundary, independently of
+      // subscription renewal. A different server boundary needs re-verification.
+      guard resetAt.timeIntervalSinceReferenceDate.isFinite,
+            calendar.dateInterval(of: .month, for: resetAt)?.start == resetAt else { return nil }
+      return calendarMonthWindowSeconds(endingAt: resetAt)
     default:
-      // Monthly, rolling, and undocumented ids have no inferred duration.
+      // Labels and billing frequency do not establish a refill cycle.
       return nil
     }
   }
@@ -69,6 +103,21 @@ public struct QuotaPace: Equatable, Sendable {
     guard elapsed >= -resetOvershootTolerance else { return nil }
     return max(0, elapsed)
   }
+}
+
+/// Reconstruct a documented monthly cycle from an unambiguous server reset.
+/// A short month's last day could be a clamped 28th, 29th, 30th or 31st;
+/// without the original anchor, its preceding reset is unknown.
+private func calendarMonthWindowSeconds(endingAt resetAt: Date) -> TimeInterval? {
+  guard resetAt.timeIntervalSinceReferenceDate.isFinite else { return nil }
+  var calendar = Calendar(identifier: .gregorian)
+  calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+  guard let days = calendar.range(of: .day, in: .month, for: resetAt) else { return nil }
+  let day = calendar.component(.day, from: resetAt)
+  guard day != days.count || day == 31,
+        let start = calendar.date(byAdding: .month, value: -1, to: resetAt) else { return nil }
+  let seconds = resetAt.timeIntervalSince(start)
+  return seconds.isFinite && seconds > 0 ? seconds : nil
 }
 
 /// Reject nonpositive and overflowing durations from untrusted payloads.

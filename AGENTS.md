@@ -197,8 +197,11 @@ Linux:
   `budget.vibe_budget` each report `usage_percentage`, `initial_budget`, `currency`,
   and `reset_at`; they are separate monthly API/Studio and Vibe Code allowances.
   Ignore the parent aggregate budget, billing totals, PAYG credits, and spending
-  limits. Preserve server resets and unavailable percentages; do not invent a
-  window duration or infer subscription renewal from them. macOS uses one
+  limits. Preserve server resets and unavailable percentages. The official
+  Admin UI says both allowances reset on the first calendar day independently
+  of subscription renewal. For UTC-midnight first-day resets, QuotaPace uses the
+  actual preceding calendar month; never assume a fixed 30-day duration or infer
+  subscription renewal. macOS uses one
   nonpersistent WebKit session per attempt and saves only root-path Secure Ory
   session cookies (HttpOnly) plus optional CSRF at Admin-compatible scopes, with
   expiry, as secret `mistral.browser_session`; raw manual headers use secret
