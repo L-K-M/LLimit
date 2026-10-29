@@ -62,6 +62,7 @@ public struct MistralSessionCookies: Sendable {
 
 public struct MistralBrowserSession: Sendable, Equatable {
   public static let adminHost = "admin.mistral.ai"
+  private static let maximumSerializedBytes = 100_000
   private struct Cookie: Codable, Sendable, Equatable {
     let name: String
     let value: String
@@ -88,7 +89,7 @@ public struct MistralBrowserSession: Sendable, Equatable {
   }
 
   public init(serialized: String) throws {
-    guard serialized.utf8.count <= 100_000, let data = serialized.data(using: .utf8),
+    guard serialized.utf8.count <= Self.maximumSerializedBytes, let data = serialized.data(using: .utf8),
           let cookies = try? JSONDecoder().decode([Cookie].self, from: data) else { throw mistralReconnect }
     records = try Self.validated(cookies)
   }
@@ -96,7 +97,10 @@ public struct MistralBrowserSession: Sendable, Equatable {
   public func encoded() throws -> String {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys]
-    return String(decoding: try encoder.encode(records), as: UTF8.self)
+    let data = try encoder.encode(records)
+    // JSON escaping can expand a valid input. Never save a session we cannot reload.
+    guard data.count <= Self.maximumSerializedBytes else { throw mistralReconnect }
+    return String(decoding: data, as: UTF8.self)
   }
 
   public func isExpired(at now: Date = Date()) -> Bool {
@@ -109,6 +113,8 @@ public struct MistralBrowserSession: Sendable, Equatable {
   }
 
   private static func allowed(name: String, domain: String, path: String) -> Bool {
+    // Darwin keeps the leading dot for Domain cookies; a dotless apex cookie
+    // is host-only and must not be forwarded to the Admin subdomain.
     MistralSessionCookies.allowedName(name) && path == "/"
       && [adminHost, "." + adminHost, ".mistral.ai"].contains(domain.lowercased())
   }

@@ -754,11 +754,13 @@ public final class QuotaDaemon {
          cookies != result[CredentialField.mimoSessionCookies] {
         result[CredentialField.mimoBrowserSession] = nil
       }
-      if account.provider == .mistral, let cookies = values[CredentialField.mistralSessionCookies],
-         cookies != result[CredentialField.mistralSessionCookies] {
-        result[CredentialField.mistralBrowserSession] = nil
-        result[CredentialField.mistralUserID] = nil
-        result[CredentialField.mistralOrganizationID] = nil
+      if account.provider == .mistral, let cookies = values[CredentialField.mistralSessionCookies] {
+        let header = cookies.isEmpty ? "" : try MistralSessionCookies(header: cookies).header
+        if header != result[CredentialField.mistralSessionCookies] {
+          result[CredentialField.mistralBrowserSession] = nil
+          result[CredentialField.mistralUserID] = nil
+          result[CredentialField.mistralOrganizationID] = nil
+        }
       }
       if account.provider == .stepFun, [CredentialField.stepFunPlanKey, CredentialField.stepFunSessionToken, CredentialField.stepFunWebID].contains(where: {
         values[$0] != nil && values[$0] != result[$0]

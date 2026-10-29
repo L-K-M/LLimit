@@ -122,6 +122,32 @@ final class MistralAccountTests: XCTestCase {
     XCTAssertEqual(try Data(contentsOf: paths.historyFileURL), history)
   }
 
+  func testEquivalentFormattedHeaderPreservesBoundIdentityBrowserAndHistory() throws {
+    let daemon = daemon()
+    let cookies = try [
+      XCTUnwrap(HTTPCookie(properties: [.name: "ory_session_test", .value: "owned-session-fixture",
+        .domain: ".mistral.ai", .path: "/", .secure: "TRUE", HTTPCookiePropertyKey("HttpOnly"): "TRUE"])),
+      XCTUnwrap(HTTPCookie(properties: [.name: "csrftoken", .value: "csrf-fixture",
+        .domain: ".mistral.ai", .path: "/", .secure: "TRUE"]))
+    ]
+    let browser = try MistralBrowserSession(cookies: cookies, now: now)
+    let account = try add(daemon, credentials: browser.credentials(userID: "user-fixture", organizationID: "organization-fixture"))
+    _ = try seedUsage([account])
+    let history = try Data(contentsOf: paths.historyFileURL)
+    let updated = try daemon.editingSettings {
+      try $0.updateAccount(account.id, credentials: .merging([
+        CredentialField.mistralSessionCookies:
+          "  ory_session_test=owned-session-fixture;  _ga=analytics-fixture;  csrftoken=csrf-fixture  "
+      ]))
+    }
+    XCTAssertEqual(updated.credentials[CredentialField.mistralSessionCookies], browser.cookieHeader)
+    XCTAssertEqual(updated.credentials[CredentialField.mistralBrowserSession], account.credentials[CredentialField.mistralBrowserSession])
+    XCTAssertEqual(updated.credentials[CredentialField.mistralUserID], "user-fixture")
+    XCTAssertEqual(updated.credentials[CredentialField.mistralOrganizationID], "organization-fixture")
+    XCTAssertEqual(try Data(contentsOf: paths.historyFileURL), history)
+    XCTAssertEqual(try SettingsStore(fileURL: paths.settingsFileURL).load().account(withID: account.id)?.credentials, account.credentials)
+  }
+
   func testCLISetCannotInjectHiddenBrowserOrIdentityFields() throws {
     let daemon = daemon()
     let account = try add(daemon)

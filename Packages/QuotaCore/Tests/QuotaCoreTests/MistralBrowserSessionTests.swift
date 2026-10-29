@@ -166,6 +166,45 @@ final class MistralBrowserSessionTests: XCTestCase {
     }
   }
 
+  #if os(macOS)
+  func testApexDomainCookieParsingAndHostOnlyRejection() throws {
+    for domain in ["mistral.ai", ".mistral.ai"] {
+      let cookies = HTTPCookie.cookies(withResponseHeaderFields: [
+        "Set-Cookie": "ory_session_fixture=domain-fixture; Domain=\(domain); Path=/; Secure; HttpOnly"
+      ], for: MistralSignInPolicy.startURL)
+      XCTAssertEqual(cookies.count, 1)
+      XCTAssertEqual(try XCTUnwrap(cookies.first).domain, ".mistral.ai")
+      let session = try MistralBrowserSession(cookies: cookies, now: now)
+      XCTAssertEqual(session.cookieHeader, "ory_session_fixture=domain-fixture")
+    }
+    let apexURL = try XCTUnwrap(URL(string: "https://mistral.ai/"))
+    let hostOnly = HTTPCookie.cookies(withResponseHeaderFields: [
+      "Set-Cookie": "ory_session_fixture=hostonly-fixture; Path=/; Secure; HttpOnly"
+    ], for: apexURL)
+    XCTAssertEqual(hostOnly.count, 1)
+    XCTAssertEqual(try XCTUnwrap(hostOnly.first).domain, "mistral.ai")
+    XCTAssertThrowsError(try MistralBrowserSession(cookies: hostOnly, now: now))
+  }
+  #endif
+
+  func testEncodedSessionRoundTripsLargeSerializedRecordsWithinSizeBound() throws {
+    let fixtures = (0..<3).map { record("ory_session_fixture_\($0)", value: String(repeating: "x", count: 20_000)) }
+    let input = try encoded(fixtures)
+    XCTAssertLessThan(input.utf8.count, 100_000)
+    let session = try MistralBrowserSession(serialized: input)
+    let serialized = try session.encoded()
+    XCTAssertLessThan(serialized.utf8.count, 100_000)
+    XCTAssertEqual(try MistralBrowserSession(serialized: serialized), session)
+  }
+
+  func testEncodedSessionRejectsSlashEscapingBeyondSizeBound() throws {
+    let fixtures = (0..<3).map { record("ory_session_fixture_\($0)", value: String(repeating: "/", count: 20_000)) }
+    let data = try JSONSerialization.data(withJSONObject: fixtures, options: [.sortedKeys, .withoutEscapingSlashes])
+    XCTAssertLessThan(data.count, 100_000)
+    let session = try MistralBrowserSession(serialized: String(decoding: data, as: UTF8.self))
+    XCTAssertThrowsError(try session.encoded(), "JSONEncoder slash escaping must not produce an unrestorable saved session")
+  }
+
   func testSignInPolicyAllowsKnownAuthHostsAndBlocksLookalikes() throws {
     for url in ["https://admin.mistral.ai/subscription", "https://auth.mistral.ai/self-service/login/browser",
       "https://v2.auth.mistral.ai/login", "https://accounts.google.com/", "https://appleid.apple.com/",

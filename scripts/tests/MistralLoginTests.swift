@@ -18,6 +18,7 @@ struct MistralLoginTests {
     precondition(!firstStore.isPersistent && !secondStore.isPersistent)
     precondition(firstStore !== secondStore, "Each account must own a separate temporary browser")
     seed([cookie("ory_session_fixture", "first-session")], in: first)
+    loadFixture(in: first)
     var firstCookies: [HTTPCookie]?
     var secondCookies: [HTTPCookie]?
     firstStore.httpCookieStore.getAllCookies { firstCookies = $0 }
@@ -102,8 +103,10 @@ struct MistralLoginTests {
     // Cancellation while asynchronous verification awaits prevents a subsequent save.
     var asyncCallbacks = 0
     var saved = false
+    var finished = false
     let asyncCancelled = MistralLoginSession(accountID: "async-cancelled", startURL: blank) { _, _ in
       asyncCallbacks += 1
+      defer { finished = true }
       try await Task.sleep(for: .seconds(2))
       try Task.checkCancellation()
       saved = true
@@ -116,7 +119,7 @@ struct MistralLoginTests {
     asyncCancelled.connect()
     precondition(asyncCallbacks == 1, "Repeated clicks must not create concurrent connection attempts")
     asyncCancelled.cancel()
-    wait(until: { !asyncCancelled.isConnecting })
+    wait(until: { finished && !asyncCancelled.isConnecting })
     precondition(asyncCallbacks == 1 && !saved)
 
     var rejectedCallbacks = 0
