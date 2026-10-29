@@ -341,7 +341,12 @@ cycle starts. No quota refill occurs. The setting survives reimport and reconnec
   default window color. Other limits keep their existing colors.
 - Bars and provider rings mark even spending with a white tick. **Over pace**
   means faster consumption; **under pace** means slower. Pace uses the last
-  reading and a reported or documented duration, and disappears after reset.
+  reading and a reported, configured, or documented refill cycle, and disappears
+  after reset. Documented cycles include Z.ai/Zhipu's 5-hour and weekly token
+  limits, Venice's daily DIEM, Devin's daily/weekly limits, Muse's weekly limit,
+  and OpenCode Go's weekly/monthly limits. Mistral and Copilot use the actual
+  UTC calendar month, including February and leap years. Unknown cycle lengths
+  and ambiguous short-month subscription anniversaries have no tick.
 
 ## Requirements
 
