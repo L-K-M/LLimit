@@ -38,7 +38,7 @@ final class MistralQuotaClientTests: XCTestCase {
   private func page(budget: [String: Any]? = nil, user: String? = nil, organization: String? = nil,
                     reference: String = "$9:props:children:props:user", includeIdentity: Bool = true,
                     splitFrames: Bool = false, extraProps: [String: Any] = [:], textRecord: String? = nil,
-                    additionalBudget: [String: Any]? = nil) throws -> String {
+                    additionalBudget: [String: Any]? = nil, resourceHints: Bool = false) throws -> String {
     let identity: [String: Any] = ["uuid": user ?? userID,
       "organization": ["uuid": organization ?? organizationID]]
     let identityRecord: [Any] = ["$", "$Lx", NSNull(),
@@ -60,6 +60,9 @@ final class MistralQuotaClientTests: XCTestCase {
     }
     if let textRecord {
       stream = "f:T\(String(textRecord.utf8.count, radix: 16)),\(textRecord)" + stream
+    }
+    if resourceHints {
+      stream = ":HL[\"/_next/static/app.css\",\"style\"]\n3:I[42,[],\"default\"]\n" + stream
     }
     let chunks: [String]
     if splitFrames {
@@ -157,6 +160,12 @@ final class MistralQuotaClientTests: XCTestCase {
     let http = MistralHTTPStub(body: try page(splitFrames: true, extraProps: ["message": decoy]))
     let usage = try await MistralQuotaClient(httpClient: http).fetchUsage(configuration: configuration(), now: now)
     XCTAssertEqual(usage.metrics.count, 2)
+    XCTAssertEqual(usage.metrics.first { $0.id == "api-monthly" }?.remainingPercent, 96)
+  }
+
+  func testOfficialResourceHintRecordsDoNotHideSubscriptionData() async throws {
+    let http = MistralHTTPStub(body: try page(resourceHints: true))
+    let usage = try await MistralQuotaClient(httpClient: http).fetchUsage(configuration: configuration(), now: now)
     XCTAssertEqual(usage.metrics.first { $0.id == "api-monthly" }?.remainingPercent, 96)
   }
 

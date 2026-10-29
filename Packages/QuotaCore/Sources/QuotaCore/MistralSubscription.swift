@@ -126,8 +126,13 @@ struct MistralSubscription {
       while cursor < bytes.count, bytes[cursor] != 58, bytes[cursor] != 10 { cursor += 1 }
       guard cursor < bytes.count, bytes[cursor] == 58 else { throw invalid }
       let id = String(decoding: bytes[start..<cursor], as: UTF8.self)
-      guard !id.isEmpty, id.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else { throw invalid }
       cursor += 1
+      if id.isEmpty, cursor < bytes.count, bytes[cursor] == 72 {
+        // Resource hints such as :HL have no record id or subscription props.
+        while cursor < bytes.count, bytes[cursor] != 10 { cursor += 1 }
+        continue
+      }
+      guard !id.isEmpty, id.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else { throw invalid }
       if cursor < bytes.count, bytes[cursor] == 84 {
         // Flight's length-prefixed text records may contain newlines and JSON.
         // Skip their byte length so text cannot impersonate subscription props.
