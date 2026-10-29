@@ -29,7 +29,7 @@ class WidgetInstallTests(unittest.TestCase):
         binary = widget / "Contents/MacOS/LLimitWidgetExtension"
         binary.parent.mkdir(parents=True)
         kinds = ["LLimit Dashboard", "ch.lkmc.llimit.widget.trend", "QuotaTrendChartWidget"]
-        for slot in range(1, 13):
+        for slot in range(1, 16):
             kinds.extend([f"ch.lkmc.llimit.widget.provider-tile.slot{slot}", f"ProviderTileSlot{slot}Widget"])
         binary.write_text("\n".join(kinds))
 
