@@ -86,9 +86,9 @@ if [[ "$INSTALL" == true && -x "$LSREGISTER" && -d "$INSTALLED_APP" ]]; then
     echo "error: installed widget is missing the dashboard or trend chart" >&2
     exit 1
   fi
-  # Whole kinds only: a substring check for slot1 would also match slot10-12.
+  # Whole kinds only: a substring check for slot1 would also match slot10-15.
   TILE_KINDS=$(LC_ALL=C /usr/bin/grep -aoE 'ch\.lkmc\.llimit\.widget\.provider-tile\.slot[0-9]+' "$WIDGET_BINARY" || true)
-  for slot in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  for slot in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
     if ! /usr/bin/grep -Fxq "ch.lkmc.llimit.widget.provider-tile.slot$slot" <<<"$TILE_KINDS" \
       || ! /usr/bin/grep -aFq "ProviderTileSlot${slot}Widget" "$WIDGET_BINARY"; then
       echo "error: installed widget is missing provider tile slot$slot" >&2

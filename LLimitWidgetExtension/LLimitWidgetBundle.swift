@@ -4,7 +4,7 @@ import SwiftUI
 @main
 struct LLimitWidgetBundle: WidgetBundle {
   var body: some Widget {
-    // WidgetBundleBuilder accepts at most ten widgets per block, so the twelve
+    // WidgetBundleBuilder accepts at most ten widgets per block, so the fifteen
     // provider tiles live in nested bundles.
     LowerProviderTileBundle().body
     UpperProviderTileBundle().body
@@ -32,5 +32,8 @@ private struct UpperProviderTileBundle: WidgetBundle {
     ProviderTileSlot10Widget()
     ProviderTileSlot11Widget()
     ProviderTileSlot12Widget()
+    ProviderTileSlot13Widget()
+    ProviderTileSlot14Widget()
+    ProviderTileSlot15Widget()
   }
 }
