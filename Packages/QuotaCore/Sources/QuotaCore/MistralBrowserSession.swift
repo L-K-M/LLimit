@@ -26,7 +26,7 @@ public struct MistralSessionCookies: Sendable {
     }
     guard selected.keys.contains(where: Self.isSessionName), selected.count <= 8 else { throw mistralReconnect }
     self.header = selected.keys.sorted().map { "\($0)=\(selected[$0]!)" }.joined(separator: "; ")
-    secretValues = Array(selected.values)
+    secretValues = selected.values.flatMap { [$0, Self.unquoted($0)] }
   }
 
   public static func credentialsForStorage(_ credentials: [String: String]) throws -> [String: String] {
@@ -50,8 +50,13 @@ public struct MistralSessionCookies: Sendable {
 
   static func allowedName(_ name: String) -> Bool { isSessionName(name) || name == "csrftoken" }
   static func validValue(_ value: String) -> Bool {
-    !value.isEmpty && value.utf8.count <= 32_768
-      && value.utf8.allSatisfy { (33...126).contains($0) && ![34, 44, 59, 92].contains($0) }
+    let content = unquoted(value)
+    return !content.isEmpty && value.utf8.count <= 32_768
+      && content.utf8.allSatisfy { (33...126).contains($0) && ![34, 44, 59, 92].contains($0) }
+  }
+  static func unquoted(_ value: String) -> String {
+    value.hasPrefix("\"") && value.hasSuffix("\"") && value.count >= 2
+      ? String(value.dropFirst().dropLast()) : value
   }
 }
 
@@ -68,7 +73,7 @@ public struct MistralBrowserSession: Sendable, Equatable {
   }
   private let records: [Cookie]
   public var cookieHeader: String { records.map { "\($0.name)=\($0.value)" }.joined(separator: "; ") }
-  public var secretValues: [String] { records.map(\.value) }
+  public var secretValues: [String] { records.flatMap { [$0.value, MistralSessionCookies.unquoted($0.value)] } }
 
   public init(cookies: [HTTPCookie], now: Date = Date()) throws {
     let selected = cookies.filter {

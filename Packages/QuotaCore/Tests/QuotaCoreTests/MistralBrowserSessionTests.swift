@@ -107,6 +107,14 @@ final class MistralBrowserSessionTests: XCTestCase {
     }
   }
 
+  func testQuotedAuthenticationCookieRetainsItsWireValueAndRedactsUnquotedValue() throws {
+    let value = "\"owned-quoted-session-fixture\""
+    let browser = try MistralBrowserSession(cookies: [cookie("ory_session_test", value)], now: now)
+    XCTAssertEqual(browser.cookieHeader, "ory_session_test=" + value)
+    XCTAssertTrue(browser.secretValues.contains("owned-quoted-session-fixture"))
+    XCTAssertEqual(try MistralSessionCookies(header: browser.cookieHeader).header, browser.cookieHeader)
+  }
+
   func testCredentialsBindVerifiedIdentityAndSharedSettingsStripEverySecret() throws {
     let browser = try MistralBrowserSession(cookies: [cookie(), cookie("csrftoken", "csrf-fixture", httpOnly: false)], now: now)
     let credentials = try browser.credentials(userID: "verified-user-fixture", organizationID: "verified-org-fixture")
