@@ -12,7 +12,7 @@ struct LongcatLoginView: View {
         Spacer()
         Button("Cancel", action: onClose).keyboardShortcut(.cancelAction)
       }
-      Text("Sign in to the Longcat API Platform, then choose Connect Account. Any increase in remaining tokens becomes the ring’s new 100% baseline. Sign in again if Longcat expires the session.")
+      Text("Sign in to the Longcat API Platform, then choose Connect Account. Tracks your remaining token allowance and pack expiry. When no allowance is reported, each token increase sets a new estimated 100% baseline. Sign in again if Longcat expires the session.")
         .font(.caption).foregroundStyle(.secondary)
       LongcatBrowserView(webView: session.webView)
         .frame(minWidth: 720, minHeight: 500)

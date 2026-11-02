@@ -1052,7 +1052,7 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(model.isRefreshing)
-                Text("Tracks remaining tokens. Any token increase sets the ring’s new 100% baseline. A reset schedule is unavailable. Sign in again if Longcat expires the session.")
+                Text("Tracks your remaining token allowance and pack expiry. When no allowance is reported, each token increase sets a new estimated 100% baseline. Pack expiry does not imply a refill. Sign in again if Longcat expires the session.")
                   .font(.caption).foregroundStyle(.secondary)
                   .fixedSize(horizontal: false, vertical: true)
               }

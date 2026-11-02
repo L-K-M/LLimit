@@ -208,7 +208,7 @@ struct ProviderChooserView: View {
     case .mistral:
       return "Sign in to Mistral Admin inside LLimit. Tracks included monthly Vibe Code and API allowances. Sign in again if Mistral expires the session."
     case .longcat:
-      return "Sign in to the Longcat API Platform inside LLimit. Any token increase sets the ring’s new 100% baseline. Sign in again if Longcat expires the session."
+      return "Sign in to the Longcat API Platform inside LLimit. Tracks your remaining token allowance and pack expiry. Sign in again if Longcat expires the session."
     case .stepFun:
       return "Import a global personal Plan login from Step Code in Found on this Mac, or sign in to StepFun inside LLimit."
     default:

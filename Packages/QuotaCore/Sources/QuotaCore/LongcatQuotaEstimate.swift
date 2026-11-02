@@ -15,7 +15,8 @@ enum LongcatQuotaEstimate {
        prior.metrics.contains(where: { $0.estimateKeyHash == key }) { return prior }
     var result = usage
     result.metrics = usage.metrics.map { metric in
-      guard let amount = metric.remainingAmount, amount.isFinite, amount >= 0,
+      guard metric.remainingPercent == nil,
+            let amount = metric.remainingAmount, amount.isFinite, amount >= 0,
             let key = metric.estimateKeyHash, !key.isEmpty else { return metric }
       let old = prior?.metrics.first { $0.id == metric.id && $0.estimateKeyHash == key }
       let total: Double

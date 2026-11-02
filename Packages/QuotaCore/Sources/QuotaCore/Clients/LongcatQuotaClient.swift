@@ -8,8 +8,8 @@ public struct LongcatConnection: Sendable {
   public let usage: ProviderUsage
 }
 
-/// Reads owned console authentication, never an inference API key. Percentage
-/// baselines are applied by the coordinator after the live balance is decoded.
+/// Reads owned console authentication, never an inference API key. The coordinator
+/// estimates percentages only when the console supplies no allowance total.
 public struct LongcatQuotaClient: QuotaProviderClient {
   public let provider: QuotaProvider = .longcat
   private let httpClient: any HTTPClient
@@ -74,7 +74,7 @@ public struct LongcatQuotaClient: QuotaProviderClient {
     }
     let metrics: [UsageMetric]
     if let summary, summary.currentLot != nil || !summary.otherLots.isEmpty {
-      metrics = try summary.metrics(keyHash: keyHash)
+      metrics = try summary.metrics(keyHash: keyHash, now: now)
     } else {
       metrics = [try await legacyMetric(header: header, keyHash: keyHash, now: now)]
     }
@@ -86,7 +86,8 @@ public struct LongcatQuotaClient: QuotaProviderClient {
   private func legacyMetric(header: String, keyHash: String, now: Date) async throws -> UsageMetric {
     let legacy: Legacy = try await request("/api/lc-platform/v1/tokenUsage", header: header, now: now)
     let balance = try legacy.balance()
-    return Self.metric(id: "token-balance", label: "Tokens remaining", amount: balance, keyHash: keyHash)
+    return Self.metric(id: "token-balance", label: "Tokens remaining", amount: balance,
+      total: legacy.usage.totalToken.value, keyHash: keyHash)
   }
 
   private func request<T: Decodable>(_ path: String, post: Bool = false, header: String, now: Date) async throws -> T {
@@ -178,7 +179,10 @@ public struct LongcatQuotaClient: QuotaProviderClient {
       else { usage = try Usage(from: decoder) }
     }
     func balance() throws -> Double {
-      if let available = usage.availableToken { return available.value }
+      if let available = usage.availableToken {
+        guard available.value <= usage.totalToken.value else { throw invalid }
+        return available.value
+      }
       guard let used = usage.usedToken, used.value <= usage.totalToken.value else { throw invalid }
       return usage.totalToken.value - used.value
     }
@@ -188,20 +192,30 @@ public struct LongcatQuotaClient: QuotaProviderClient {
     let currentLot: Lot?
     let otherLots: [Lot]
 
-    func metrics(keyHash: String) throws -> [UsageMetric] {
+    func metrics(keyHash: String, now: Date) throws -> [UsageMetric] {
       let lots = [currentLot].compactMap { $0 } + otherLots
       var seen: Set<String> = []
-      var groups: [String: (models: [String], amount: Double)] = [:]
+      var groups: [String: (models: [String], amount: Double, total: Double?, expiry: Date?, count: Int)] = [:]
       for lot in lots {
         // A duplicated lot must not double the remaining balance.
         guard seen.insert(lot.lotId).inserted else { throw invalid }
         if let status = lot.status, status.uppercased() != "ACTIVE" { continue }
+        if let expiry = lot.expireTime, expiry.value <= now { continue }
         let models = try lot.models()
         let key = models.joined(separator: "\n")
-        let prior = groups[key]?.amount ?? 0
-        let amount = prior + lot.remainingToken.value
-        guard amount.isFinite else { throw invalid }
-        groups[key] = (models, amount)
+        var group = groups[key] ?? (models, 0, 0, nil, 0)
+        group.amount += lot.remainingToken.value
+        // A partial denominator cannot describe the whole scope. Missing totals
+        // keep this group on the observed-balance fallback.
+        if let total = group.total, let lotTotal = lot.totalToken {
+          group.total = total + lotTotal.value
+        } else { group.total = nil }
+        guard group.amount.isFinite, group.total?.isFinite != false else { throw invalid }
+        if let expiry = lot.expireTime?.value {
+          group.expiry = group.expiry.map { min($0, expiry) } ?? expiry
+        }
+        group.count += 1
+        groups[key] = group
       }
       guard !groups.isEmpty else {
         return [metric(id: "token-balance", label: "Tokens remaining", amount: 0, keyHash: keyHash)]
@@ -211,7 +225,8 @@ public struct LongcatQuotaClient: QuotaProviderClient {
         let allModels = group.models == ["ALL"]
         return metric(id: allModels ? "token-balance" : "token-balance-" + credentialFingerprint(key),
           label: allModels ? "Tokens remaining" : group.models.joined(separator: ", ") + " tokens remaining",
-          amount: group.amount, keyHash: keyHash)
+          amount: group.amount, total: group.total, expiry: group.expiry, multiplePacks: group.count > 1,
+          keyHash: keyHash)
       }
     }
   }
@@ -219,15 +234,20 @@ public struct LongcatQuotaClient: QuotaProviderClient {
   private struct Lot: Decodable {
     let lotId: String
     let remainingToken: Count
+    let totalToken: Count?
+    let expireTime: Expiry?
     let modelScope: String?
     let status: String?
-    enum CodingKeys: String, CodingKey { case lotId, remainingToken, modelScope, status }
+    enum CodingKeys: String, CodingKey { case lotId, remainingToken, totalToken, expireTime, modelScope, status }
     init(from decoder: Decoder) throws {
       let c = try decoder.container(keyedBy: CodingKeys.self)
       if let id = try? c.decode(String.self, forKey: .lotId) { lotId = id }
       else { lotId = try c.decode(Int64.self, forKey: .lotId).description }
       guard !lotId.isEmpty else { throw invalid }
       remainingToken = try c.decode(Count.self, forKey: .remainingToken)
+      totalToken = try c.decodeIfPresent(Count.self, forKey: .totalToken)
+      if let totalToken, remainingToken.value > totalToken.value { throw invalid }
+      expireTime = try c.decodeIfPresent(Expiry.self, forKey: .expireTime)
       modelScope = try c.decodeIfPresent(String.self, forKey: .modelScope)
       status = try c.decodeIfPresent(String.self, forKey: .status)
     }
@@ -242,14 +262,42 @@ public struct LongcatQuotaClient: QuotaProviderClient {
     }
   }
 
-  private static func metric(id: String, label: String, amount: Double, keyHash: String) -> UsageMetric {
+  /// The console passes numeric expireTime directly to JavaScript Date: milliseconds,
+  /// not a subscription reset or evidence of a recurring allowance.
+  private struct Expiry: Decodable {
+    let value: Date
+    init(from decoder: Decoder) throws {
+      let c = try decoder.singleValueContainer()
+      if let milliseconds = try? c.decode(Double.self), milliseconds.isFinite {
+        value = Date(timeIntervalSince1970: milliseconds / 1_000)
+      } else if let text = try? c.decode(String.self), let date = parseISO8601(text) {
+        value = date
+      } else { throw invalid }
+      guard value.timeIntervalSince1970 > 0, value.timeIntervalSince1970 < 253_402_300_800 else { throw invalid }
+    }
+  }
+
+  private static func metric(id: String, label: String, amount: Double, total: Double? = nil,
+                             expiry: Date? = nil, multiplePacks: Bool = false, keyHash: String) -> UsageMetric {
     let formatter = NumberFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")
     formatter.numberStyle = .decimal
+    formatter.usesGroupingSeparator = true
     formatter.maximumFractionDigits = 0
-    let display = formatter.string(from: NSNumber(value: amount)) ?? String(amount)
-    return UsageMetric(id: id, label: label, remainingAmount: amount, estimateKeyHash: keyHash,
-      usedDisplay: "\(display) tokens", detail: "Remaining token balance. No reset schedule is reported.")
+    func tokens(_ value: Double) -> String {
+      (formatter.string(from: NSNumber(value: value)) ?? String(value)) + " tokens"
+    }
+    let allowance = total.flatMap { $0 > 0 ? $0 : nil }
+    let percentage = allowance.map { Int((min(amount / $0, 1) * 100).rounded()) }
+    var detail = allowance == nil ? "Remaining token balance." : "Reported token allowance."
+    if let expiry {
+      let date = ISO8601DateFormatter().string(from: expiry)
+      detail += multiplePacks ? " Next token-pack expiry: \(date)." : " Expires \(date)."
+    }
+    detail += " No automatic reset schedule is reported."
+    return UsageMetric(id: id, label: label, remainingPercent: percentage, remainingAmount: amount,
+      totalAmount: allowance, estimateKeyHash: keyHash, usedDisplay: tokens(amount),
+      totalDisplay: allowance.map(tokens), detail: detail)
   }
 
   private static var reconnect: ProviderClientError {

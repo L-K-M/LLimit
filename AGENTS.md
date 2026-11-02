@@ -206,16 +206,21 @@ Linux:
   Never retain the response's `token` field. Read-only `POST
   /api/pay/quota/metering/token-packs/summary` with `{}` provides `currentLot`
   and `otherLots`; sum active `remainingToken` within each distinct `modelScope`.
+  Use the corresponding reported `totalToken` allowance for the ring when usable;
+  the console also reports `consumedToken` and `consumedRatio` (a used fraction).
+  Preserve `expireTime` as token-pack expiry information, never as a refill reset.
   When the summary is empty or HTTP 404, `GET /api/lc-platform/v1/tokenUsage`
   supplies `usage.availableToken`, or `totalToken - usedToken`. Other errors
   fail the refresh and preserve last good usage. No claim, purchase, or inference
-  requests. Refuse redirects and isolate cookies/caches. A first positive token
-  observation is 100%; every increase relative to the previous reading starts
-  a new 100% denominator, even below an earlier peak. Keep the estimate in the
-  snapshot, scoped to account, metric, console origin, verified user and authentication hash.
-  Initial zero remains amount-only; zero after a baseline is 0%. No reset,
-  window duration or pace is inferred from token-pack expiry. Reconnect expired
-  sessions; no automatic renewal is promised. Sources: official platform
+  requests. Refuse redirects and isolate cookies/caches. When no usable allowance
+  is reported, a first positive token observation is 100%; every increase relative
+  to the previous reading starts a new 100% denominator, even below an earlier
+  peak. Keep the estimate in the snapshot, scoped to account, metric, console
+  origin, verified user and authentication hash.
+  Initial zero without a reported allowance remains amount-only; zero after a
+  baseline is 0%. No reset, window duration or pace is inferred from token-pack
+  expiry. Reconnect expired sessions; no automatic renewal is promised.
+  Sources: official platform
   [usage page](https://longcat.ai/platform/usage) and its public bundles
   `index-dec5464e.c43fc0083a5a18d5bebb.js`,
   `index-6651bc05.799574a6805cbf5bec13.js`, and

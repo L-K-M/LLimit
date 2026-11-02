@@ -808,7 +808,7 @@ private struct ProviderTileRing: View {
 
   private var progress: CGFloat {
     if metric.isUnlimited { return 1 }
-    return CGFloat(max(0, min(100, metric.remainingPercent ?? 0))) / 100
+    return CGFloat(metric.remainingFraction ?? 0)
   }
 }
 
