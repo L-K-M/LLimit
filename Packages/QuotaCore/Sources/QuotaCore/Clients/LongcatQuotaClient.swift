@@ -192,18 +192,29 @@ public struct LongcatQuotaClient: QuotaProviderClient {
     let currentLot: Lot?
     let otherLots: [Lot]
 
+    private struct Group {
+      let models: [String]
+      var amount: Double = 0
+      var total: Double? = 0
+      var expiry: Expiry?
+      var count = 0
+      var expiryIsOrdered = true
+    }
+
     func metrics(keyHash: String, now: Date) throws -> [UsageMetric] {
       let lots = [currentLot].compactMap { $0 } + otherLots
       var seen: Set<String> = []
-      var groups: [String: (models: [String], amount: Double, total: Double?, expiry: Date?, count: Int)] = [:]
+      var groups: [String: Group] = [:]
       for lot in lots {
         // A duplicated lot must not double the remaining balance.
         guard seen.insert(lot.lotId).inserted else { throw invalid }
         if let status = lot.status, status.uppercased() != "ACTIVE" { continue }
-        if let expiry = lot.expireTime, expiry.value <= now { continue }
+        if let remaining = lot.remainSeconds, remaining.value <= 0 { continue }
+        let expiry = lot.expiry(at: now)
+        if let date = expiry?.value, date <= now { continue }
         let models = try lot.models()
         let key = models.joined(separator: "\n")
-        var group = groups[key] ?? (models, 0, 0, nil, 0)
+        var group = groups[key] ?? Group(models: models)
         group.amount += lot.remainingToken.value
         // A partial denominator cannot describe the whole scope. Missing totals
         // keep this group on the observed-balance fallback.
@@ -211,9 +222,10 @@ public struct LongcatQuotaClient: QuotaProviderClient {
           group.total = total + lotTotal.value
         } else { group.total = nil }
         guard group.amount.isFinite, group.total?.isFinite != false else { throw invalid }
-        if let expiry = lot.expireTime?.value {
-          group.expiry = group.expiry.map { min($0, expiry) } ?? expiry
+        if let expiry, group.expiry.map({ expiry.precedes($0) }) ?? true {
+          group.expiry = expiry
         }
+        group.expiryIsOrdered = group.expiryIsOrdered && expiry?.value != nil
         group.count += 1
         groups[key] = group
       }
@@ -223,9 +235,11 @@ public struct LongcatQuotaClient: QuotaProviderClient {
       return groups.keys.sorted().map { key in
         let group = groups[key]!
         let allModels = group.models == ["ALL"]
+        let expiryLabel = group.count > 1
+          ? (group.expiryIsOrdered ? "Next token-pack expiry:" : "Token-pack expiry:") : "Expires"
         return metric(id: allModels ? "token-balance" : "token-balance-" + credentialFingerprint(key),
           label: allModels ? "Tokens remaining" : group.models.joined(separator: ", ") + " tokens remaining",
-          amount: group.amount, total: group.total, expiry: group.expiry, multiplePacks: group.count > 1,
+          amount: group.amount, total: group.total, expiry: group.expiry, expiryLabel: expiryLabel,
           keyHash: keyHash)
       }
     }
@@ -236,9 +250,10 @@ public struct LongcatQuotaClient: QuotaProviderClient {
     let remainingToken: Count
     let totalToken: Count?
     let expireTime: Expiry?
+    let remainSeconds: RemainingTime?
     let modelScope: String?
     let status: String?
-    enum CodingKeys: String, CodingKey { case lotId, remainingToken, totalToken, expireTime, modelScope, status }
+    enum CodingKeys: String, CodingKey { case lotId, remainingToken, totalToken, expireTime, remainSeconds, modelScope, status }
     init(from decoder: Decoder) throws {
       let c = try decoder.container(keyedBy: CodingKeys.self)
       if let id = try? c.decode(String.self, forKey: .lotId) { lotId = id }
@@ -248,8 +263,19 @@ public struct LongcatQuotaClient: QuotaProviderClient {
       totalToken = try c.decodeIfPresent(Count.self, forKey: .totalToken)
       if let totalToken, remainingToken.value > totalToken.value { throw invalid }
       expireTime = try c.decodeIfPresent(Expiry.self, forKey: .expireTime)
+      remainSeconds = try c.decodeIfPresent(RemainingTime.self, forKey: .remainSeconds)
       modelScope = try c.decodeIfPresent(String.self, forKey: .modelScope)
       status = try c.decodeIfPresent(String.self, forKey: .status)
+    }
+    func expiry(at now: Date) -> Expiry? {
+      guard var expiry = expireTime else { return nil }
+      if let remaining = remainSeconds {
+        // The unzoned console string is display-only. The server countdown,
+        // rather than a guessed timezone, determines ordering and expiration.
+        if expiry.value == nil { expiry.value = now.addingTimeInterval(remaining.value) }
+        expiry.display += " (\(formatShortDuration(seconds: Int(max(0, remaining.value)))) remaining)"
+      }
+      return expiry
     }
     func models() throws -> [String] {
       guard let modelScope, !modelScope.isEmpty else { return ["ALL"] }
@@ -262,23 +288,56 @@ public struct LongcatQuotaClient: QuotaProviderClient {
     }
   }
 
+  private struct RemainingTime: Decodable {
+    let value: Double
+    init(from decoder: Decoder) throws {
+      let c = try decoder.singleValueContainer()
+      if let text = try? c.decode(String.self), let number = Double(text) { value = number }
+      else { value = try c.decode(Double.self) }
+      guard value.isFinite, abs(value) <= 253_402_300_800,
+            value.rounded(.towardZero) == value else { throw invalid }
+    }
+  }
+
   /// The console passes numeric expireTime directly to JavaScript Date: milliseconds,
   /// not a subscription reset or evidence of a recurring allowance.
   private struct Expiry: Decodable {
-    let value: Date
+    var value: Date?
+    var display: String
     init(from decoder: Decoder) throws {
       let c = try decoder.singleValueContainer()
       if let milliseconds = try? c.decode(Double.self), milliseconds.isFinite {
         value = Date(timeIntervalSince1970: milliseconds / 1_000)
-      } else if let text = try? c.decode(String.self), let date = parseISO8601(text) {
-        value = date
+      } else if let text = try? c.decode(String.self), text.count <= 35 {
+        if text.range(of: #"T.*(?:Z|[+-]\d{2}:\d{2})$"#, options: .regularExpression) != nil,
+           let date = parseISO8601(text) {
+          value = date
+        } else {
+          let validator = DateFormatter()
+          validator.locale = Locale(identifier: "en_US_POSIX")
+          validator.timeZone = TimeZone(secondsFromGMT: 0)
+          validator.dateFormat = "yyyy-MM-dd HH:mm:ss"
+          validator.isLenient = false
+          guard text.count == 19, let date = validator.date(from: text),
+                validator.string(from: date) == text else { throw invalid }
+          // A validation timezone does not establish the server's timezone.
+          value = nil
+          display = text
+          return
+        }
       } else { throw invalid }
-      guard value.timeIntervalSince1970 > 0, value.timeIntervalSince1970 < 253_402_300_800 else { throw invalid }
+      guard let value, value.timeIntervalSince1970 > 0,
+            value.timeIntervalSince1970 < 253_402_300_800 else { throw invalid }
+      display = ISO8601DateFormatter().string(from: value)
+    }
+    func precedes(_ other: Expiry) -> Bool {
+      if let value, let otherValue = other.value { return value < otherValue }
+      return false
     }
   }
 
   private static func metric(id: String, label: String, amount: Double, total: Double? = nil,
-                             expiry: Date? = nil, multiplePacks: Bool = false, keyHash: String) -> UsageMetric {
+                             expiry: Expiry? = nil, expiryLabel: String = "Expires", keyHash: String) -> UsageMetric {
     let formatter = NumberFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")
     formatter.numberStyle = .decimal
@@ -291,8 +350,7 @@ public struct LongcatQuotaClient: QuotaProviderClient {
     let percentage = allowance.map { Int((min(amount / $0, 1) * 100).rounded()) }
     var detail = allowance == nil ? "Remaining token balance." : "Reported token allowance."
     if let expiry {
-      let date = ISO8601DateFormatter().string(from: expiry)
-      detail += multiplePacks ? " Next token-pack expiry: \(date)." : " Expires \(date)."
+      detail += " \(expiryLabel) \(expiry.display)."
     }
     detail += " No automatic reset schedule is reported."
     return UsageMetric(id: id, label: label, remainingPercent: percentage, remainingAmount: amount,

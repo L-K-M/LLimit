@@ -209,6 +209,8 @@ Linux:
   Use the corresponding reported `totalToken` allowance for the ring when usable;
   the console also reports `consumedToken` and `consumedRatio` (a used fraction).
   Preserve `expireTime` as token-pack expiry information, never as a refill reset.
+  Live responses use unzoned `yyyy-MM-dd HH:mm:ss` expiry text; preserve it without
+  assigning a timezone. Use `remainSeconds` for the countdown and expiry ordering.
   When the summary is empty or HTTP 404, `GET /api/lc-platform/v1/tokenUsage`
   supplies `usage.availableToken`, or `totalToken - usedToken`. Other errors
   fail the refresh and preserve last good usage. No claim, purchase, or inference
@@ -225,8 +227,10 @@ Linux:
   `index-dec5464e.c43fc0083a5a18d5bebb.js`,
   `index-6651bc05.799574a6805cbf5bec13.js`, and
   `95047.97dc8938eb3b9b10c99d.js`, inspected 2026-11-02. Legacy fields were
-  cross-checked against CodexBar's LongCat plugin source. Authenticated decoding
-  and browser cookie capture are fixture-tested; live sign-in remains unverified.
+  cross-checked against CodexBar's LongCat plugin source. An identity-pinned,
+  read-only refresh with an owned international session verified live quota
+  decoding. Browser cookie capture is fixture-tested; interactive sign-in was
+  not exercised by automation.
 
 - **Mistral**: provider `mistral`. Read-only `GET
   https://admin.mistral.ai/subscription` with owned Admin session cookies, not an

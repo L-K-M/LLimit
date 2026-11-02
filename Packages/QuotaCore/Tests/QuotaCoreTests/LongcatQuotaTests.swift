@@ -81,6 +81,28 @@ final class LongcatQuotaTests: XCTestCase {
     XCTAssertEqual(metric.remainingFraction, 0.75)
   }
 
+  func testLiveConsoleExpiryPreservesUnzonedDateAndServerCountdown() async throws {
+    let body = #"{"code":0,"data":{"currentLot":{"lotId":123,"remainingToken":993207730,"totalToken":1000000000,"expireTime":"2026-12-03 01:02:29","remainSeconds":2573499},"otherLots":[]}}"#
+    let usage = try await LongcatQuotaClient(httpClient: LongcatHTTP(amount: 0, summary: body))
+      .fetchUsage(configuration: configuration(), now: now)
+    let metric = try XCTUnwrap(usage.metrics.first)
+    XCTAssertEqual(try XCTUnwrap(metric.remainingFraction), 0.99320773, accuracy: 0.00000001)
+    XCTAssertTrue(metric.detail?.contains("Expires 2026-12-03 01:02:29 (29d 18h 51m remaining)") == true)
+    XCTAssertNil(metric.resetAt)
+    XCTAssertNil(metric.windowSeconds)
+  }
+
+  func testUnzonedExpiryWithoutCountdownCannotClaimEarliestOrAssumeTimezone() async throws {
+    let body = #"{"code":0,"data":{"currentLot":{"lotId":"a","remainingToken":50,"totalToken":100,"expireTime":"2026-12-03 01:02:29"},"otherLots":[{"lotId":"b","remainingToken":50,"totalToken":100,"expireTime":"2026-12-01T00:00:00Z"},{"lotId":"expired","remainingToken":100,"totalToken":100,"expireTime":"2026-12-04 01:02:29","remainSeconds":-1}]}}"#
+    let usage = try await LongcatQuotaClient(httpClient: LongcatHTTP(amount: 0, summary: body))
+      .fetchUsage(configuration: configuration(), now: now)
+    let metric = try XCTUnwrap(usage.metrics.first)
+    XCTAssertEqual(metric.remainingAmount, 100)
+    XCTAssertEqual(metric.remainingPercent, 50)
+    XCTAssertTrue(metric.detail?.contains("Token-pack expiry: 2026-12-03 01:02:29") == true)
+    XCTAssertFalse(metric.detail?.contains("Next") == true)
+  }
+
   func testGroupedPacksUseSumOfTotalsAndEarliestLiveExpiry() async throws {
     let body = #"{"code":0,"data":{"currentLot":{"lotId":"a","remainingToken":20,"totalToken":100,"expireTime":"2026-12-03T00:00:00Z"},"otherLots":[{"lotId":"b","remainingToken":280,"totalToken":300,"expireTime":"2026-12-01T00:00:00Z"},{"lotId":"expired","remainingToken":100,"totalToken":100,"expireTime":"2020-01-01T00:00:00Z"},{"lotId":"inactive","status":"EXPIRED","remainingToken":100,"totalToken":100}]}}"#
     let usage = try await LongcatQuotaClient(httpClient: LongcatHTTP(amount: 0, summary: body))
