@@ -1764,6 +1764,7 @@ final class AppModel: ObservableObject {
         if account.provider == .longcat, fieldKey == CredentialField.longcatSessionCookies {
           account.credentials[CredentialField.longcatBrowserSession] = nil
           account.credentials[CredentialField.longcatUserID] = nil
+          account.credentials[CredentialField.longcatSessionOrigin] = nil
         }
         if account.provider == .stepFun,
            [CredentialField.stepFunPlanKey, CredentialField.stepFunSessionToken, CredentialField.stepFunWebID].contains(fieldKey) {
@@ -2301,7 +2302,7 @@ final class AppModel: ObservableObject {
             || previousAccount.credentials[CredentialField.mistralOrganizationID] != updatedAccount.credentials[CredentialField.mistralOrganizationID])
         let longcatAuthenticationChanged = previousAccount.provider == .longcat
           && [CredentialField.longcatSessionCookies, CredentialField.longcatBrowserSession,
-              CredentialField.longcatUserID].contains(where: {
+              CredentialField.longcatUserID, CredentialField.longcatSessionOrigin].contains(where: {
             previousAccount.credentials[$0] != updatedAccount.credentials[$0]
           })
         if veniceKeyChanged || junieAllowanceChanged || mimoIdentityChanged || stepFunIdentityChanged || mistralIdentityChanged || longcatAuthenticationChanged {

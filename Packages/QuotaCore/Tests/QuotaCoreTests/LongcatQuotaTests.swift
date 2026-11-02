@@ -11,7 +11,8 @@ final class LongcatQuotaTests: XCTestCase {
 
   private func configuration(id: String = "longcat-personal", header: String? = nil, user: String = "123") -> ProviderRuntimeConfiguration {
     ProviderRuntimeConfiguration(accountID: id, provider: .longcat, displayName: "Personal Longcat", isEnabled: true,
-      credentials: [CredentialField.longcatSessionCookies: header ?? self.header, CredentialField.longcatUserID: user])
+      credentials: [CredentialField.longcatSessionCookies: header ?? self.header, CredentialField.longcatUserID: user,
+        CredentialField.longcatSessionOrigin: "https://longcat.ai"])
   }
 
   private func snapshot(_ amount: Double, previous: QuotaSnapshot? = nil, offset: Double = 0,
@@ -108,7 +109,8 @@ final class LongcatQuotaTests: XCTestCase {
       header: header + "; _ga=analytics-fixture", now: now)
     XCTAssertEqual(saved[CredentialField.longcatSessionCookies], header)
     XCTAssertEqual(saved[CredentialField.longcatUserID], "123")
-    XCTAssertEqual(saved.count, 2)
+    XCTAssertEqual(saved[CredentialField.longcatSessionOrigin], "https://longcat.ai")
+    XCTAssertEqual(saved.count, 3)
     let requests = await http.requests
     XCTAssertEqual(requests.map { $0.url?.path }, ["/api/v1/user-current", "/api/pay/quota/metering/token-packs/summary"])
     XCTAssertEqual(requests.map(\.httpMethod), ["GET", "POST"])
@@ -116,6 +118,86 @@ final class LongcatQuotaTests: XCTestCase {
     XCTAssertTrue(requests.allSatisfy { !$0.httpShouldHandleCookies && $0.cachePolicy == .reloadIgnoringLocalCacheData })
     XCTAssertTrue(requests.allSatisfy { $0.value(forHTTPHeaderField: "Cookie") == header })
     XCTAssertTrue(requests.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == nil })
+  }
+
+  func testInternationalConsoleRequestsUseOnlyItsOwnOrigin() async throws {
+    let http = LongcatHTTP(amount: 42)
+    _ = try await LongcatQuotaClient(httpClient: http).fetchUsage(configuration: configuration(), now: now)
+    let requests = await http.requests
+    XCTAssertEqual(requests.count, 2)
+    for request in requests {
+      XCTAssertEqual(request.url?.host, "longcat.ai")
+      XCTAssertEqual(request.value(forHTTPHeaderField: "Origin"), "https://longcat.ai")
+      XCTAssertEqual(request.value(forHTTPHeaderField: "Referer"), "https://longcat.ai/platform/usage")
+    }
+  }
+
+  func testLegacyManualSessionRequiresReconnectBeforeSendingCookies() async {
+    var legacy = configuration()
+    legacy.credentials[CredentialField.longcatSessionOrigin] = nil
+    let http = LongcatHTTP(amount: 42)
+    do {
+      _ = try await LongcatQuotaClient(httpClient: http).fetchUsage(configuration: legacy, now: now)
+      XCTFail("A saved manual header without origin proof must require explicit replacement")
+    } catch let error as ProviderClientError { XCTAssertEqual(error.kind, .auth) }
+    catch { XCTFail("Unexpected error") }
+    let requests = await http.requests
+    XCTAssertTrue(requests.isEmpty)
+  }
+
+  func testForeignManualOriginsCannotSendCookies() async {
+    for origin in ["https://longcat.chat", "http://longcat.ai", "https://longcat.ai.evil.test", "https://evil.test"] {
+      var saved = configuration()
+      saved.credentials[CredentialField.longcatSessionOrigin] = origin
+      let http = LongcatHTTP(amount: 42)
+      do {
+        _ = try await LongcatQuotaClient(httpClient: http).fetchUsage(configuration: saved, now: now)
+        XCTFail("A different origin must not authorize sending these cookies")
+      } catch let error as ProviderClientError { XCTAssertEqual(error.kind, .auth) }
+      catch { XCTFail("Unexpected error") }
+      let requests = await http.requests
+      XCTAssertTrue(requests.isEmpty)
+    }
+  }
+
+  func testChineseBrowserSessionCannotBeForwardedToInternationalConsole() async {
+    var legacy = configuration()
+    // Version 46 stored China-scoped cookies. Even a new origin marker cannot
+    // authorize widening the serialized cookies' original domain scope.
+    legacy.credentials[CredentialField.longcatBrowserSession] = #"[{"name":"owned_session_fixture","value":"longcat-secret-fixture","domain":"longcat.chat","path":"/","secure":true,"httpOnly":true}]"#
+    let http = LongcatHTTP(amount: 42)
+    do {
+      _ = try await LongcatQuotaClient(httpClient: http).fetchUsage(configuration: legacy, now: now)
+      XCTFail("China-scoped browser cookies must require reconnecting")
+    } catch let error as ProviderClientError { XCTAssertEqual(error.kind, .auth) }
+    catch { XCTFail("Unexpected error") }
+    let requests = await http.requests
+    XCTAssertTrue(requests.isEmpty)
+  }
+
+  func testFreshInternationalBrowserCanVerifyBeforeIdentityIsSaved() async throws {
+    let cookie = try XCTUnwrap(HTTPCookie(properties: [.name: "owned_session_fixture", .value: "international-fixture",
+      .domain: "longcat.ai", .path: "/", .secure: "TRUE", HTTPCookiePropertyKey("HttpOnly"): "TRUE"]))
+    let browser = try LongcatBrowserSession(cookies: [cookie], now: now)
+    var candidate = configuration()
+    candidate.credentials = [CredentialField.longcatSessionCookies: browser.cookieHeader,
+      CredentialField.longcatBrowserSession: try browser.encoded()]
+    let http = LongcatHTTP(amount: 42)
+    let connection = try await LongcatQuotaClient(httpClient: http).verifiedConnection(configuration: candidate, now: now)
+    XCTAssertEqual(connection.userID, "123")
+    let saved = try browser.credentials(userID: connection.userID)
+    XCTAssertEqual(saved[CredentialField.longcatSessionOrigin], "https://longcat.ai")
+    let requests = await http.requests
+    XCTAssertEqual(requests.count, 2)
+    XCTAssertTrue(requests.allSatisfy { $0.url?.host == "longcat.ai" })
+  }
+
+  func testInternationalBalanceCannotInheritLegacyOriginBaseline() async {
+    var legacy = await snapshot(1_000)
+    legacy.providers[0].metrics[0].estimateKeyHash = credentialFingerprint("123\n" + header)
+    let international = await snapshot(400, previous: legacy, offset: 1)
+    XCTAssertEqual(international.providers.first?.metrics.first?.remainingPercent, 100)
+    XCTAssertEqual(international.providers.first?.metrics.first?.estimatedTotal, 400)
   }
 
   func testAnonymousOrWrongIdentityIsRejectedBeforeQuotaRequest() async throws {
@@ -211,7 +293,7 @@ final class LongcatQuotaTests: XCTestCase {
 
   func testFailurePolicyRedactsIndividualCookieValues() async throws {
     let cookie = try XCTUnwrap(HTTPCookie(properties: [.name: "owned_session_fixture", .value: "browser-secret-fixture",
-      .domain: "longcat.chat", .path: "/", .secure: "TRUE", HTTPCookiePropertyKey("HttpOnly"): "TRUE"]))
+      .domain: "longcat.ai", .path: "/", .secure: "TRUE", HTTPCookiePropertyKey("HttpOnly"): "TRUE"]))
     let browser = try LongcatBrowserSession(cookies: [cookie], now: now)
     let browserConfig = ProviderRuntimeConfiguration(accountID: "browser", provider: .longcat,
       displayName: "Longcat", isEnabled: true, credentials: try browser.credentials(userID: "123"))

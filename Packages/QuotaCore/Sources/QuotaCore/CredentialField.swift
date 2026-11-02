@@ -66,4 +66,5 @@ public enum CredentialField {
   public static let longcatSessionCookies = "longcat.session_cookies"
   public static let longcatBrowserSession = "longcat.browser_session"
   public static let longcatUserID = "longcat.user_id"
+  public static let longcatSessionOrigin = "longcat.session_origin"
 }

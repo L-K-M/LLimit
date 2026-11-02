@@ -48,7 +48,8 @@ struct LongcatLoginTests {
       cookie("visible_cookie", "excluded-script-readable", httpOnly: false),
       cookie("insecure_session", "excluded-insecure", secure: false),
       cookie("scoped_session", "excluded-platform-path", path: "/platform"),
-      cookie("subdomain_session", "excluded-subdomain", domain: "api.longcat.chat"),
+      cookie("subdomain_session", "excluded-subdomain", domain: "api.longcat.ai"),
+      cookie("china_cookie", "excluded-china-cookie", domain: ".longcat.chat"),
       cookie("passport_session", "excluded-auth-origin", domain: "passport.meituan.com"),
       cookie("sso_token", "excluded-sso", domain: "passport.mykeeta.com")
     ], in: signedIn)
@@ -146,7 +147,7 @@ struct LongcatLoginTests {
     print("Longcat WebKit isolation, cookie capture, origin, verification, and cancellation checks passed")
   }
 
-  private static func cookie(_ name: String, _ value: String, domain: String = ".longcat.chat",
+  private static func cookie(_ name: String, _ value: String, domain: String = ".longcat.ai",
                              path: String = "/", secure: Bool = true, httpOnly: Bool = true) -> HTTPCookie {
     var properties: [HTTPCookiePropertyKey: Any] = [
       .name: name, .value: value, .domain: domain, .path: path

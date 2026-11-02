@@ -25,11 +25,13 @@ final class LongcatAccountTests: XCTestCase {
     return daemon
   }
 
-  private func add(_ daemon: QuotaDaemon, token: String = "fixture-secret", user: String = "123") throws -> ProviderAccount {
-    try daemon.editingSettings {
-      try $0.addAccount(provider: .longcat, credentials: [
-        CredentialField.longcatSessionCookies: "owned_session_fixture=\(token)", CredentialField.longcatUserID: user
-      ])
+  private func add(_ daemon: QuotaDaemon, token: String = "fixture-secret", user: String = "123",
+                   origin: String? = "https://longcat.ai") throws -> ProviderAccount {
+    var credentials = [CredentialField.longcatSessionCookies: "owned_session_fixture=\(token)",
+      CredentialField.longcatUserID: user]
+    if let origin { credentials[CredentialField.longcatSessionOrigin] = origin }
+    return try daemon.editingSettings {
+      try $0.addAccount(provider: .longcat, credentials: credentials)
     }
   }
 
@@ -48,10 +50,12 @@ final class LongcatAccountTests: XCTestCase {
     let daemon = daemon()
     let account = try daemon.editingSettings {
       try $0.addAccount(provider: .longcat, credentials: [CredentialField.longcatSessionCookies:
-        " owned_session_fixture=fixture-secret; _ga=analytics-fixture ", CredentialField.longcatUserID: "123"])
+        " owned_session_fixture=fixture-secret; _ga=analytics-fixture ", CredentialField.longcatUserID: "123",
+        CredentialField.longcatSessionOrigin: "https://longcat.ai"])
     }
     XCTAssertEqual(account.credentials[CredentialField.longcatSessionCookies], "owned_session_fixture=fixture-secret")
     XCTAssertEqual(account.credentials[CredentialField.longcatUserID], "123")
+    XCTAssertEqual(account.credentials[CredentialField.longcatSessionOrigin], "https://longcat.ai")
     let saved = try SettingsStore(fileURL: paths.settingsFileURL).load().account(withID: account.id)
     XCTAssertEqual(saved?.credentials, account.credentials)
     XCTAssertFalse(String(decoding: try Data(contentsOf: paths.settingsFileURL), as: UTF8.self).contains("analytics-fixture"))
@@ -70,6 +74,7 @@ final class LongcatAccountTests: XCTestCase {
     }
     XCTAssertNil(updated.credentials[CredentialField.longcatUserID])
     XCTAssertNil(updated.credentials[CredentialField.longcatBrowserSession])
+    XCTAssertNil(updated.credentials[CredentialField.longcatSessionOrigin])
     XCTAssertEqual(updated.credentials[CredentialField.longcatSessionCookies], "owned_session_fixture=replacement-fixture-secret")
     XCTAssertEqual(try SnapshotStore(fileURL: paths.snapshotFileURL).load()?.providers.map(\.accountID), [peer.id])
     XCTAssertEqual(try QuotaHistoryStore(fileURL: paths.historyFileURL).load().flatMap(\.providers).map(\.accountID), [peer.id])
@@ -97,7 +102,7 @@ final class LongcatAccountTests: XCTestCase {
       let updated = try daemon.editingSettings {
         try $0.updateAccount(account.id, credentials: .replacing(with: [
           CredentialField.longcatSessionCookies: "owned_session_fixture=replacement-fixture-secret",
-          CredentialField.longcatUserID: user
+          CredentialField.longcatUserID: user, CredentialField.longcatSessionOrigin: "https://longcat.ai"
         ]))
       }
       XCTAssertEqual(updated.credentials[CredentialField.longcatUserID], user)
@@ -106,6 +111,36 @@ final class LongcatAccountTests: XCTestCase {
       XCTAssertEqual(history.contains { $0.accountID == account.id }, user == "123")
       try FileManager.default.removeItem(at: directory)
     }
+  }
+
+  func testSameVerifiedUserOnInternationalOriginDoesNotInheritLegacyHistory() throws {
+    let daemon = daemon()
+    let legacy = try add(daemon, origin: nil)
+    let peer = try add(daemon, token: "peer-fixture-secret", user: "456")
+    try seedUsage([legacy, peer])
+    let updated = try daemon.editingSettings {
+      try $0.updateAccount(legacy.id, credentials: .replacing(with: [
+        CredentialField.longcatSessionCookies: "owned_session_fixture=fixture-secret",
+        CredentialField.longcatUserID: "123", CredentialField.longcatSessionOrigin: "https://longcat.ai"
+      ]))
+    }
+    XCTAssertEqual(updated.credentials[CredentialField.longcatUserID], legacy.credentials[CredentialField.longcatUserID])
+    XCTAssertEqual(updated.credentials[CredentialField.longcatSessionOrigin], "https://longcat.ai")
+    XCTAssertEqual(try SnapshotStore(fileURL: paths.snapshotFileURL).load()?.providers.map(\.accountID), [peer.id])
+    XCTAssertEqual(try QuotaHistoryStore(fileURL: paths.historyFileURL).load().flatMap(\.providers).map(\.accountID), [peer.id])
+  }
+
+  func testLegacyManualHeaderRemainsUnscopedUntilExplicitReplacement() throws {
+    let daemon = daemon()
+    let legacy = try add(daemon, origin: nil)
+    XCTAssertNil(legacy.credentials[CredentialField.longcatSessionOrigin])
+    let renamed = try daemon.editingSettings {
+      try $0.updateAccount(legacy.id, displayName: "Legacy Longcat")
+    }
+    XCTAssertEqual(renamed.credentials, legacy.credentials)
+    let saved = try SettingsStore(fileURL: paths.settingsFileURL).load().account(withID: legacy.id)
+    XCTAssertNil(saved?.credentials[CredentialField.longcatSessionOrigin])
+    XCTAssertEqual(saved?.credentials[CredentialField.longcatSessionCookies], "owned_session_fixture=fixture-secret")
   }
 
   func testPendingAccountRetainsEmptyRequiredCookieFieldAndLocalSettingsMode600() throws {
@@ -124,7 +159,7 @@ final class LongcatAccountTests: XCTestCase {
     let account = try daemon.editingSettings { try $0.addAccount(provider: .longcat) }
     let before = try Data(contentsOf: paths.settingsFileURL)
     XCTAssertTrue(QuotaDaemon.editableCredentialKeys(of: account).contains(CredentialField.longcatSessionCookies))
-    for key in [CredentialField.longcatBrowserSession, CredentialField.longcatUserID] {
+    for key in [CredentialField.longcatBrowserSession, CredentialField.longcatUserID, CredentialField.longcatSessionOrigin] {
       XCTAssertFalse(QuotaDaemon.editableCredentialKeys(of: account).contains(key))
       XCTAssertThrowsError(try daemon.editingSettings {
         try $0.updateAccount(account.id, credentials: .merging([key: "injected-fixture"]))
