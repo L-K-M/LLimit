@@ -92,6 +92,10 @@ public enum ProviderCatalog {
       return ProviderCatalogEntry(provider: provider, title: "Mistral", context: "Mistral · Vibe Code and API allowance",
         summary: "Track the included monthly Vibe Code and API allowances shown in your Mistral subscription.",
         aliases: ["Le Chat", "Pro", "Team"])
+    case .longcat:
+      return ProviderCatalogEntry(provider: provider, title: "Longcat", context: "Longcat · Token balance",
+        summary: "Track remaining Longcat tokens. Ring percentages use the latest observed refill as 100%.",
+        aliases: ["LongCat", "Meituan"])
     }
   }
 }

@@ -108,6 +108,7 @@ MiMo, use their existing connection flows.
 | **JetBrains Junie** | Junie API key | `JUNIE_API_KEY`, Junie fallback file (`~/.junie/secure_credentials.json`) |
 | **MiniMax M Plan** | Global (`minimax.io`) Subscription Key | OpenCode (`minimax-coding-plan` in `auth.json`) |
 | **Mistral** | Included monthly Vibe Code and API allowances | Connect Mistral on macOS; manual Admin session on Linux |
+| **Longcat** | Remaining token balance with an observed refill baseline | Connect Longcat on macOS; manual platform session on Linux |
 | **Xiaomi MiMo** | Personal Token Plan console session | Connect MiMo on macOS; manual console cookies on Linux |
 | **StepFun** | Global Step Plan API key or console session | Step Code (`~/.stepcode/auth.json`), Connect StepFun on macOS; manual console token on Linux |
 
@@ -183,6 +184,17 @@ grants and third-party provider keys are not imported. macOS Junie usually store
 its login in Keychain; generate and enter a Junie API key when the scan finds no
 key. Imported accounts work without Junie installed, and a revoked or expired
 key needs an explicit replacement or fresh import.
+
+For Longcat, choose **Settings → Add Account → Longcat → Connect Account**.
+Sign in to the API Platform inside LLimit, then click **Connect Account**. LLimit
+verifies the account and token balance before saving its local session. Reconnect
+when Longcat expires the session. Inference API keys do not provide this quota.
+The first positive balance starts at 100%. Every later increase establishes a new
+100% baseline, even below an earlier peak: 1,000 → 400 → 600 → 300 tokens displays
+100% → 40% → 100% → 50%. The baseline survives restarts and stays separate for
+each account and model scope. Percentages are marked as estimates; no reset date
+or quota refill is invented. An initial zero remains amount-only until a positive
+balance is observed.
 
 For Mistral, choose **Settings → Add Account → Mistral → Connect Account**.
 Sign in to Mistral Admin, choose your organization, then click **Connect Account**.

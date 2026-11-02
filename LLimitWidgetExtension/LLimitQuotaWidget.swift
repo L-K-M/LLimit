@@ -882,6 +882,8 @@ private func compactProviderName(for provider: QuotaProvider) -> String {
     return "StepFun"
   case .mistral:
     return "Mistral"
+  case .longcat:
+    return "Longcat"
   }
 }
 

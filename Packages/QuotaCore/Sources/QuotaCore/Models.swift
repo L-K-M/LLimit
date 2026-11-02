@@ -18,6 +18,7 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
   case xiaomiMiMo = "xiaomi-mimo"
   case stepFun = "stepfun"
   case mistral = "mistral"
+  case longcat = "longcat"
 
   public var displayName: String {
     switch self {
@@ -55,6 +56,8 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
       return "StepFun"
     case .mistral:
       return "Mistral"
+    case .longcat:
+      return "Longcat"
     }
   }
 }
@@ -302,6 +305,14 @@ public extension QuotaProvider {
           key: CredentialField.mistralSessionCookies,
           label: "Session cookies",
           help: "On macOS, use Connect Mistral. On Linux, paste the authentication Cookie header from admin.mistral.ai. Vibe and API keys cannot read this quota."
+        )
+      ]
+    case .longcat:
+      return [
+        CredentialFieldDescriptor(
+          key: CredentialField.longcatSessionCookies,
+          label: "Session cookies",
+          help: "Paste the authentication Cookie header from longcat.chat/platform/usage. API keys cannot read this quota."
         )
       ]
     }

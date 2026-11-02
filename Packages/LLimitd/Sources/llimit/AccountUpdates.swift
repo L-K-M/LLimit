@@ -57,12 +57,24 @@ func accountsUpdate(_ args: [String]) async {
       verifiedMistralCredentials = try await MistralQuotaClient(httpClient: URLSessionHTTPClient())
         .verifiedManualCredentials(header: header)
     }
+    var verifiedLongcatCredentials: [String: String]?
+    if account.provider == .longcat, let header = values[CredentialField.longcatSessionCookies],
+       !header.isEmpty {
+      verifiedLongcatCredentials = try await LongcatQuotaClient(httpClient: URLSessionHTTPClient())
+        .verifiedManualCredentials(header: header)
+    }
     let updated = try daemon.editingSettings {
       if let verifiedMistralCredentials {
         guard daemon.settings.account(withID: id)?.credentials == account.credentials else {
           throw ProviderClientError(kind: .api, message: "The account changed while Mistral was being verified. Try again.")
         }
         return try $0.updateAccount(id, displayName: name, credentials: .replacing(with: verifiedMistralCredentials))
+      }
+      if let verifiedLongcatCredentials {
+        guard daemon.settings.account(withID: id)?.credentials == account.credentials else {
+          throw ProviderClientError(kind: .api, message: "The account changed while Longcat was being verified. Try again.")
+        }
+        return try $0.updateAccount(id, displayName: name, credentials: .replacing(with: verifiedLongcatCredentials))
       }
       return try $0.updateAccount(id, displayName: name, credentials: values.isEmpty ? .unchanged : .merging(values))
     }
