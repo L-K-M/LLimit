@@ -224,20 +224,21 @@ hidden prompt. Validation happens before acquiring the settings lock; a concurre
 credential edit causes the update to fail instead of overwriting the other edit.
 On macOS, **Connect Mistral** handles sign-in in a separate browser inside LLimit.
 
-Longcat reads remaining tokens from your authenticated Longcat platform session.
-Run `llimit accounts add --provider longcat` and paste the authentication Cookie
-header from `longcat.chat/platform/usage` at the hidden prompt. LLimit validates
-the account and token balance before saving. API keys cannot read this quota.
-The first positive balance sets the ring to 100%; every observed token increase
-sets a new 100% baseline, even below an older peak. Decreases show the fraction
-left against that baseline, which survives restarts. Percentages are marked as
-estimated; token-pack expiry is not a scheduled quota reset.
+Longcat reads remaining tokens from your authenticated Longcat international
+platform session. Run `llimit accounts add --provider longcat` and paste the
+authentication Cookie header from `longcat.ai/platform/usage` at the hidden prompt.
+LLimit validates the account and token balance before saving. API keys cannot read
+this quota. The first positive balance sets the ring to 100%; every observed token
+increase sets a new 100% baseline, even below an older peak. Decreases show the
+fraction left against that baseline, which survives restarts. Percentages are marked
+as estimated; token-pack expiry is not a scheduled quota reset.
 
 When the session expires, use
 `llimit accounts update <account-id> --set longcat.session_cookies` and the hidden
-prompt to replace it. Validation runs before taking the settings lock and refuses
-to overwrite a concurrent credential edit. On macOS, **Connect Longcat** uses a
-separate sign-in window inside LLimit.
+prompt to replace it explicitly. Old sessions scoped to `longcat.chat` will not be
+forwarded to the international platform. Validation runs before taking the settings
+lock and refuses to overwrite a concurrent credential edit. On macOS, **Connect
+Longcat** uses a separate sign-in window inside LLimit.
 
 MiniMax reports global (`minimax.io`) M Plan interval and weekly usage, including
 server reset times and any separate quota buckets. Add it with

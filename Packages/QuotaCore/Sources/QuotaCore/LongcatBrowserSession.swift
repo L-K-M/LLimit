@@ -33,12 +33,15 @@ public struct LongcatSessionCookies: Sendable {
 
   public static func credentialsForStorage(_ credentials: [String: String]) throws -> [String: String] {
     var normalized = credentials
+    if let origin = credentials[CredentialField.longcatSessionOrigin],
+       origin != LongcatSignInPolicy.consoleOrigin.absoluteString { throw longcatReconnect }
     let raw = credentials[CredentialField.longcatSessionCookies] ?? ""
     if !raw.isEmpty { normalized[CredentialField.longcatSessionCookies] = try Self(header: raw).header }
     if let saved = credentials[CredentialField.longcatBrowserSession], !saved.isEmpty {
       let browser = try LongcatBrowserSession(serialized: saved)
       if !raw.isEmpty, normalized[CredentialField.longcatSessionCookies] != browser.cookieHeader { throw longcatReconnect }
       normalized[CredentialField.longcatSessionCookies] = browser.cookieHeader
+      normalized[CredentialField.longcatSessionOrigin] = LongcatSignInPolicy.consoleOrigin.absoluteString
     }
     return normalized
   }
@@ -72,7 +75,7 @@ public struct LongcatSessionCookies: Sendable {
 /// the exact API authority. The official site's UUID cookies are optional context.
 /// No Passport-host cookies or browser profiles are imported.
 public struct LongcatBrowserSession: Sendable, Equatable {
-  public static let host = "longcat.chat"
+  public static let host = "longcat.ai"
   private static let maximumSerializedBytes = 100_000
   private struct Cookie: Codable, Sendable, Equatable {
     let name: String
@@ -125,7 +128,8 @@ public struct LongcatBrowserSession: Sendable, Equatable {
       throw longcatReconnect
     }
     return [CredentialField.longcatSessionCookies: cookieHeader, CredentialField.longcatBrowserSession: try encoded(),
-            CredentialField.longcatUserID: userID]
+            CredentialField.longcatUserID: userID,
+            CredentialField.longcatSessionOrigin: LongcatSignInPolicy.consoleOrigin.absoluteString]
   }
 
   private static func isContext(_ name: String) -> Bool { ["uuid", "passport_uuid"].contains(name) }
@@ -149,14 +153,13 @@ public struct LongcatBrowserSession: Sendable, Equatable {
 }
 
 public enum LongcatSignInPolicy {
-  public static let startURL = URL(string: "https://longcat.chat/platform/usage")!
+  public static let consoleOrigin = URL(string: "https://longcat.ai")!
+  public static let startURL = consoleOrigin.appendingPathComponent("platform/usage")
 
   public static func allowsNavigation(to url: URL) -> Bool {
     if url.absoluteString == "about:blank" { return true }
-    // Passport's official production Yoda host also serves secondary verification
-    // as a top-level /v2/web/general_page flow (its common.js + yoda.seed.js).
-    return isSecureOrigin(url) && ["longcat.chat", "passport.meituan.com", "passport.mykeeta.com",
-      "verify.meituan.com", "accounts.google.com", "www.facebook.com"].contains(url.host?.lowercased() ?? "")
+    return isSecureOrigin(url) && ["longcat.ai", "passport.mykeeta.com",
+      "accounts.google.com", "www.facebook.com"].contains(url.host?.lowercased() ?? "")
   }
 
   public static func allowsSubframeNavigation(to url: URL) -> Bool {
@@ -171,4 +174,4 @@ public enum LongcatSignInPolicy {
 }
 
 let longcatReconnect = ProviderClientError(kind: .auth,
-  message: "LongCat needs you to sign in again. Connect LongCat or replace the platform session cookies.")
+  message: "Reconnect Longcat on longcat.ai or replace the international platform session cookies.")

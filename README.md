@@ -186,9 +186,10 @@ key. Imported accounts work without Junie installed, and a revoked or expired
 key needs an explicit replacement or fresh import.
 
 For Longcat, choose **Settings → Add Account → Longcat → Connect Account**.
-Sign in to the API Platform inside LLimit, then click **Connect Account**. LLimit
-verifies the account and token balance before saving its local session. Reconnect
-when Longcat expires the session. Inference API keys do not provide this quota.
+Sign in to the [international API Platform](https://longcat.ai/platform/usage)
+inside LLimit, then click **Connect Account**. LLimit verifies the account and token
+balance before saving its local session. Reconnect existing Longcat accounts once
+to use the international site, and again when Longcat expires the session. Inference API keys do not provide this quota.
 The first positive balance starts at 100%. Every later increase establishes a new
 100% baseline, even below an earlier peak: 1,000 → 400 → 600 → 300 tokens displays
 100% → 40% → 100% → 50%. The baseline survives restarts and stays separate for

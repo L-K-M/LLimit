@@ -8,8 +8,16 @@ import FoundationNetworking
 final class LongcatBrowserSessionTests: XCTestCase {
   private let now = Date(timeIntervalSince1970: 1_793_232_000)
 
+  func testInternationalLoginDoesNotNavigateToChineseConsole() throws {
+    XCTAssertEqual(LongcatSignInPolicy.startURL.absoluteString, "https://longcat.ai/platform/usage")
+    XCTAssertTrue(LongcatSignInPolicy.allowsNavigation(to: try XCTUnwrap(URL(string: "https://longcat.ai/platform/usage"))))
+    for raw in ["https://longcat.chat/platform/usage", "https://passport.meituan.com/useraccount/login"] {
+      XCTAssertFalse(LongcatSignInPolicy.allowsNavigation(to: try XCTUnwrap(URL(string: raw))))
+    }
+  }
+
   private func cookie(_ name: String = "owned_session_fixture", _ value: String = "owned-secret-fixture",
-                      domain: String = "longcat.chat", path: String = "/", secure: Bool = true,
+                      domain: String = "longcat.ai", path: String = "/", secure: Bool = true,
                       httpOnly: Bool = true, expires: Date? = nil) throws -> HTTPCookie {
     var properties: [HTTPCookiePropertyKey: Any] = [.name: name, .value: value, .domain: domain, .path: path]
     if secure { properties[.secure] = "TRUE" }
@@ -19,7 +27,7 @@ final class LongcatBrowserSessionTests: XCTestCase {
   }
 
   private func record(_ name: String = "owned_session_fixture", value: String = "owned-secret-fixture") -> [String: Any] {
-    ["name": name, "value": value, "domain": "longcat.chat", "path": "/", "secure": true, "httpOnly": true]
+    ["name": name, "value": value, "domain": "longcat.ai", "path": "/", "secure": true, "httpOnly": true]
   }
 
   private func encoded(_ records: [[String: Any]]) throws -> String {
@@ -30,11 +38,12 @@ final class LongcatBrowserSessionTests: XCTestCase {
     let noise = try [cookie("_ga", "analytics-fixture"), cookie("_lxsdk_s", "analytics-session-fixture"),
       cookie("sso", "passport-secret-fixture", domain: "passport.meituan.com"),
       cookie("sso", "overseas-secret-fixture", domain: "passport.mykeeta.com"),
-      cookie("unrelated", "other-secret-fixture", domain: "www.longcat.chat"),
+      cookie("china_session", "china-secret-fixture", domain: ".longcat.chat"),
+      cookie("unrelated", "other-secret-fixture", domain: "www.longcat.ai"),
       cookie("preference", "theme-fixture", httpOnly: false),
       cookie("insecure", "insecure-secret-fixture", secure: false),
       cookie("endpoint_only", "narrow-secret-fixture", path: "/api/v1")]
-    for domain in ["longcat.chat", ".longcat.chat"] {
+    for domain in ["longcat.ai", ".longcat.ai"] {
       for path in ["/", "/api", "/api/"] {
         let browser = try LongcatBrowserSession(cookies: [cookie(domain: domain, path: path),
           cookie("passport_uuid", "browser-id-fixture", domain: domain, path: path, secure: false, httpOnly: false)] + noise, now: now)
@@ -42,7 +51,7 @@ final class LongcatBrowserSessionTests: XCTestCase {
         XCTAssertEqual(Set(browser.secretValues), ["owned-secret-fixture", "browser-id-fixture"])
         let serialized = try browser.encoded()
         for value in ["analytics-fixture", "analytics-session-fixture", "passport-secret-fixture", "overseas-secret-fixture",
-          "other-secret-fixture", "theme-fixture", "insecure-secret-fixture", "narrow-secret-fixture"] {
+          "other-secret-fixture", "theme-fixture", "insecure-secret-fixture", "narrow-secret-fixture", "china-secret-fixture"] {
           XCTAssertFalse(serialized.contains(value))
         }
         XCTAssertTrue(serialized.contains("\"secure\":true"))
@@ -56,14 +65,15 @@ final class LongcatBrowserSessionTests: XCTestCase {
     XCTAssertThrowsError(try LongcatBrowserSession(cookies: [cookie(httpOnly: false)], now: now))
     XCTAssertThrowsError(try LongcatBrowserSession(cookies: [cookie(secure: false)], now: now))
     XCTAssertThrowsError(try LongcatBrowserSession(cookies: [cookie("_ga", "analytics-only-fixture")], now: now))
-    for domain in ["longcat.chat.evil.test", ".chat", "www.longcat.chat", "api.longcat.chat", "passport.mykeeta.com"] {
+    for domain in ["longcat.ai.evil.test", ".ai", "www.longcat.ai", "api.longcat.ai", "passport.mykeeta.com",
+      "longcat.chat", ".longcat.chat"] {
       XCTAssertThrowsError(try LongcatBrowserSession(cookies: [cookie(domain: domain)], now: now), domain)
     }
     for path in ["/platform", "/api/v1", "/api/pay", "/ap", "/api-other"] {
       XCTAssertThrowsError(try LongcatBrowserSession(cookies: [cookie(path: path)], now: now), path)
     }
     XCTAssertThrowsError(try LongcatBrowserSession(cookies: [cookie(),
-      cookie("owned_session_fixture", "second-secret-fixture", domain: ".longcat.chat")], now: now))
+      cookie("owned_session_fixture", "second-secret-fixture", domain: ".longcat.ai")], now: now))
     XCTAssertThrowsError(try LongcatBrowserSession(cookies: [cookie(),
       cookie("owned_session_fixture", "second-secret-fixture", path: "/api")], now: now))
   }
@@ -117,6 +127,7 @@ final class LongcatBrowserSessionTests: XCTestCase {
     let credentials = try browser.credentials(userID: "verified-user-fixture")
     XCTAssertEqual(credentials[CredentialField.longcatSessionCookies], browser.cookieHeader)
     XCTAssertEqual(credentials[CredentialField.longcatUserID], "verified-user-fixture")
+    XCTAssertEqual(credentials[CredentialField.longcatSessionOrigin], "https://longcat.ai")
     XCTAssertEqual(try LongcatBrowserSession(serialized: XCTUnwrap(credentials[CredentialField.longcatBrowserSession])), browser)
     XCTAssertEqual(try LongcatSessionCookies.credentialsForStorage(credentials), credentials)
     XCTAssertEqual(try LongcatSessionCookies.credentialsForStorage([CredentialField.longcatSessionCookies: ""]),
@@ -127,24 +138,29 @@ final class LongcatBrowserSessionTests: XCTestCase {
       [CredentialField.longcatSessionCookies: "other_session=different-fixture"]) { _, new in new }))
     XCTAssertThrowsError(try browser.credentials(userID: ""))
     XCTAssertThrowsError(try browser.credentials(userID: "bad\nidentity"))
+    let legacy = try LongcatSessionCookies.credentialsForStorage([
+      CredentialField.longcatSessionCookies: "session=legacy-fixture", CredentialField.longcatUserID: "123"])
+    XCTAssertNil(legacy[CredentialField.longcatSessionOrigin], "Normalization cannot authorize forwarding an old raw header")
+    XCTAssertThrowsError(try LongcatSessionCookies.credentialsForStorage([
+      CredentialField.longcatSessionCookies: "session=legacy-fixture", CredentialField.longcatSessionOrigin: "https://longcat.chat"]))
     let settings = AppSettings(accounts: [ProviderAccount(provider: .longcat, credentials: credentials)])
     let shared = String(decoding: try JSONEncoder().encode(settings.redactedCredentials()), as: UTF8.self)
     for secret in browser.secretValues { XCTAssertFalse(shared.contains(secret)) }
   }
 
   func testSignInPolicyLimitsMainFramesToKnownHTTPSAuthorities() throws {
-    XCTAssertEqual(LongcatSignInPolicy.startURL.absoluteString, "https://longcat.chat/platform/usage")
-    for raw in ["https://longcat.chat/platform/usage", "https://passport.meituan.com/useraccount/login",
+    XCTAssertEqual(LongcatSignInPolicy.startURL.absoluteString, "https://longcat.ai/platform/usage")
+    for raw in ["https://longcat.ai/platform/usage",
       "https://passport.mykeeta.com/pc/login", "https://accounts.google.com/", "https://www.facebook.com/",
-      "https://verify.meituan.com/v2/web/general_page?requestCode=fixture",
-      "https://LONGCAT.CHAT:443/platform/usage", "about:blank"] {
+      "https://LONGCAT.AI:443/platform/usage", "about:blank"] {
       XCTAssertTrue(LongcatSignInPolicy.allowsNavigation(to: try XCTUnwrap(URL(string: raw))), raw)
     }
-    for raw in ["http://longcat.chat/", "https://longcat.chat.evil.test/", "https://longcat.chat@evil.test/",
-      "https://user:password@longcat.chat/", "https://longcat.chat:8443/", "https://evil.test/",
+    for raw in ["http://longcat.ai/", "https://longcat.ai.evil.test/", "https://longcat.ai@evil.test/",
+      "https://user:password@longcat.ai/", "https://longcat.ai:8443/", "https://evil.test/",
       "https://passport.mykeeta.com.evil.test/", "file:///tmp/login.html", "javascript:alert(1)",
       "https://verify.meituan.com.evil.test/", "https://verify.meituan.net/", "http://verify.meituan.com/",
-      "https://www.longcat.chat/", "https://longcat.ai/platform/usage"] {
+      "https://www.longcat.ai/", "https://longcat.chat/platform/usage",
+      "https://passport.meituan.com/useraccount/login"] {
       XCTAssertFalse(LongcatSignInPolicy.allowsNavigation(to: try XCTUnwrap(URL(string: raw))), raw)
       XCTAssertFalse(LongcatSignInPolicy.allowsSubframeNavigation(to: try XCTUnwrap(URL(string: raw))), raw)
     }
@@ -155,7 +171,7 @@ final class LongcatBrowserSessionTests: XCTestCase {
     XCTAssertFalse(LongcatSignInPolicy.allowsNavigation(to: challenge))
     XCTAssertTrue(LongcatSignInPolicy.allowsSubframeNavigation(to: challenge))
     let domesticChallenge = try XCTUnwrap(URL(string: "https://verify.meituan.com/challenge"))
-    XCTAssertTrue(LongcatSignInPolicy.allowsNavigation(to: domesticChallenge))
-    XCTAssertTrue(LongcatSignInPolicy.allowsSubframeNavigation(to: domesticChallenge))
+    XCTAssertFalse(LongcatSignInPolicy.allowsNavigation(to: domesticChallenge))
+    XCTAssertFalse(LongcatSignInPolicy.allowsSubframeNavigation(to: domesticChallenge))
   }
 }

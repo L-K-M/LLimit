@@ -293,12 +293,14 @@ public final class QuotaDaemon {
           previous.credentials[$0]?.isEmpty != false || previous.credentials[$0] != updated.credentials[$0]
         }
       let longcatAuthenticationChanged = previous.provider == .longcat
-        && [CredentialField.longcatSessionCookies, CredentialField.longcatBrowserSession, CredentialField.longcatUserID].contains {
+        && [CredentialField.longcatSessionCookies, CredentialField.longcatBrowserSession,
+            CredentialField.longcatUserID, CredentialField.longcatSessionOrigin].contains {
           previous.credentials[$0] != updated.credentials[$0]
         }
       let longcatIdentityChanged = longcatAuthenticationChanged
         && (previous.credentials[CredentialField.longcatUserID]?.isEmpty != false
-          || previous.credentials[CredentialField.longcatUserID] != updated.credentials[CredentialField.longcatUserID])
+          || previous.credentials[CredentialField.longcatUserID] != updated.credentials[CredentialField.longcatUserID]
+          || previous.credentials[CredentialField.longcatSessionOrigin] != updated.credentials[CredentialField.longcatSessionOrigin])
       if junieAllowanceChanged || mimoIdentityChanged || stepFunIdentityChanged || mistralIdentityChanged || longcatIdentityChanged {
         // Different accounts or allowances must not share history.
         try historyStore.remove(accountIDs: [accountID])
@@ -387,7 +389,7 @@ public final class QuotaDaemon {
     Set(account.provider.credentialFields.map(\.key)).union(account.credentials.keys)
       .subtracting([CredentialField.mimoBrowserSession, CredentialField.stepFunBrowserSession, CredentialField.stepFunUserID,
         CredentialField.mistralBrowserSession, CredentialField.mistralUserID, CredentialField.mistralOrganizationID,
-        CredentialField.longcatBrowserSession, CredentialField.longcatUserID])
+        CredentialField.longcatBrowserSession, CredentialField.longcatUserID, CredentialField.longcatSessionOrigin])
   }
 
   // MARK: - Detect & import (convenience)
@@ -781,6 +783,7 @@ public final class QuotaDaemon {
         if header != result[CredentialField.longcatSessionCookies] {
           result[CredentialField.longcatBrowserSession] = nil
           result[CredentialField.longcatUserID] = nil
+          result[CredentialField.longcatSessionOrigin] = nil
         }
       }
       if account.provider == .stepFun, [CredentialField.stepFunPlanKey, CredentialField.stepFunSessionToken, CredentialField.stepFunWebID].contains(where: {

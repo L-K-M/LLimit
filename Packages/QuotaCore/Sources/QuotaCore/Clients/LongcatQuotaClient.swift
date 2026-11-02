@@ -27,12 +27,16 @@ public struct LongcatQuotaClient: QuotaProviderClient {
   public func verifiedManualCredentials(header: String, now: Date = Date()) async throws -> [String: String] {
     let cookies = try LongcatSessionCookies(header: header)
     let configuration = ProviderRuntimeConfiguration(provider: .longcat, displayName: "Longcat", isEnabled: true,
-      credentials: [CredentialField.longcatSessionCookies: cookies.header])
+      credentials: [CredentialField.longcatSessionCookies: cookies.header,
+        CredentialField.longcatSessionOrigin: LongcatSignInPolicy.consoleOrigin.absoluteString])
     let connection = try await verifiedConnection(configuration: configuration, now: now)
-    return [CredentialField.longcatSessionCookies: cookies.header, CredentialField.longcatUserID: connection.userID]
+    return [CredentialField.longcatSessionCookies: cookies.header, CredentialField.longcatUserID: connection.userID,
+      CredentialField.longcatSessionOrigin: LongcatSignInPolicy.consoleOrigin.absoluteString]
   }
 
   public func verifiedConnection(configuration: ProviderRuntimeConfiguration, now: Date) async throws -> LongcatConnection {
+    if let origin = configuration.credentials[CredentialField.longcatSessionOrigin],
+       origin != LongcatSignInPolicy.consoleOrigin.absoluteString { throw Self.reconnect }
     let header: String
     if let raw = configuration.credentials[CredentialField.longcatBrowserSession], !raw.isEmpty {
       let browser = try LongcatBrowserSession(serialized: raw)
@@ -42,6 +46,10 @@ public struct LongcatQuotaClient: QuotaProviderClient {
       guard let raw = configuration.credentials[CredentialField.longcatSessionCookies], !raw.isEmpty else {
         throw ProviderClientError(kind: .notConfigured, message: "Connect Longcat or enter its console session cookies.")
       }
+      // Legacy manual headers carry no domain scope. Require explicit input
+      // and verification for the international origin instead of forwarding them.
+      guard configuration.credentials[CredentialField.longcatSessionOrigin]
+        == LongcatSignInPolicy.consoleOrigin.absoluteString else { throw Self.reconnect }
       header = try LongcatSessionCookies(header: raw).header
     }
 
@@ -54,7 +62,7 @@ public struct LongcatQuotaClient: QuotaProviderClient {
        expected != user.userID { throw Self.reconnect }
     // Both identity and authentication belong to the observation. Reconnecting
     // cannot measure a different login against the former account's baseline.
-    let keyHash = credentialFingerprint(user.userID + "\n" + header)
+    let keyHash = credentialFingerprint(LongcatSignInPolicy.consoleOrigin.absoluteString + "\n" + user.userID + "\n" + header)
     let summary: Summary?
     do {
       summary = try await request("/api/pay/quota/metering/token-packs/summary",
@@ -82,7 +90,7 @@ public struct LongcatQuotaClient: QuotaProviderClient {
   }
 
   private func request<T: Decodable>(_ path: String, post: Bool = false, header: String, now: Date) async throws -> T {
-    let url = URL(string: "https://longcat.chat" + path)!
+    let url = URL(string: LongcatSignInPolicy.consoleOrigin.absoluteString + path)!
     var request = URLRequest(url: url)
     request.httpMethod = post ? "POST" : "GET"
     if post {
@@ -94,7 +102,7 @@ public struct LongcatQuotaClient: QuotaProviderClient {
     request.setValue(header, forHTTPHeaderField: "Cookie")
     request.setValue("application/json", forHTTPHeaderField: "Accept")
     request.setValue("XMLHttpRequest", forHTTPHeaderField: "X-Requested-With")
-    request.setValue("https://longcat.chat", forHTTPHeaderField: "Origin")
+    request.setValue(LongcatSignInPolicy.consoleOrigin.absoluteString, forHTTPHeaderField: "Origin")
     request.setValue(LongcatSignInPolicy.startURL.absoluteString, forHTTPHeaderField: "Referer")
     let data: Data
     let response: HTTPURLResponse
@@ -245,7 +253,7 @@ public struct LongcatQuotaClient: QuotaProviderClient {
   }
 
   private static var reconnect: ProviderClientError {
-    ProviderClientError(kind: .auth, message: "Longcat needs you to sign in again. Connect Longcat or replace its console session cookies.")
+    longcatReconnect
   }
   private static var invalid: ProviderClientError {
     ProviderClientError(kind: .decoding, message: "Longcat returned incomplete or invalid token data. Try again later.")

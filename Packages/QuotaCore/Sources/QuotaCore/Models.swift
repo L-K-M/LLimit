@@ -312,7 +312,7 @@ public extension QuotaProvider {
         CredentialFieldDescriptor(
           key: CredentialField.longcatSessionCookies,
           label: "Session cookies",
-          help: "Paste the authentication Cookie header from longcat.chat/platform/usage. API keys cannot read this quota."
+          help: "Paste the authentication Cookie header from longcat.ai/platform/usage (international platform). API keys cannot read this quota."
         )
       ]
     }
