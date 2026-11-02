@@ -132,14 +132,14 @@ public struct QuotaCoordinator: Sendable {
       return lhs.accountID < rhs.accountID
     }
 
-    let previousByID = Dictionary(
-      (previousSnapshot?.providers ?? []).filter { $0.provider == .venice || $0.provider == .longcat }.map { ($0.accountID, $0) },
+    let previousByAccount = Dictionary(
+      (previousSnapshot?.providers ?? []).filter { $0.provider == .venice || $0.provider == .longcat }.map { ($0.accountKey, $0) },
       uniquingKeysWith: { $0.fetchedAt >= $1.fetchedAt ? $0 : $1 }
     )
-    var usages = ordered.compactMap(\.usage).map {
-      LongcatQuotaEstimate.applying(
-        to: VeniceQuotaEstimate.applying(to: $0, previous: previousByID[$0.accountID]),
-        previous: previousByID[$0.accountID])
+    var usages = ordered.compactMap(\.usage).map { usage in
+      let previous = previousByAccount[usage.accountKey]
+      return LongcatQuotaEstimate.applying(
+        to: VeniceQuotaEstimate.applying(to: usage, previous: previous), previous: previous)
     }
     var failures = ordered.compactMap(\.failure)
 

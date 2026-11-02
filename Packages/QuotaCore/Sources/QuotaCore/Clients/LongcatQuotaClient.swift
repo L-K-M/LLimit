@@ -55,18 +55,19 @@ public struct LongcatQuotaClient: QuotaProviderClient {
     // Both identity and authentication belong to the observation. Reconnecting
     // cannot measure a different login against the former account's baseline.
     let keyHash = credentialFingerprint(user.userID + "\n" + header)
-    let metrics: [UsageMetric]
+    let summary: Summary?
     do {
-      let summary: Summary = try await request("/api/pay/quota/metering/token-packs/summary",
+      summary = try await request("/api/pay/quota/metering/token-packs/summary",
         post: true, header: header, now: now)
-      if summary.currentLot == nil && summary.otherLots.isEmpty {
-        metrics = [try await legacyMetric(header: header, keyHash: keyHash, now: now)]
-      } else {
-        metrics = try summary.metrics(keyHash: keyHash)
-      }
     } catch let error as ProviderClientError where error.statusCode == 404 {
       // Older console deployments expose only the legacy aggregate. Auth,
       // transport and decoding failures must retain the last good snapshot.
+      summary = nil
+    }
+    let metrics: [UsageMetric]
+    if let summary, summary.currentLot != nil || !summary.otherLots.isEmpty {
+      metrics = try summary.metrics(keyHash: keyHash)
+    } else {
       metrics = [try await legacyMetric(header: header, keyHash: keyHash, now: now)]
     }
     return LongcatConnection(userID: user.userID,

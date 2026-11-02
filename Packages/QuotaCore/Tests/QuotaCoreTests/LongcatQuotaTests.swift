@@ -72,6 +72,18 @@ final class LongcatQuotaTests: XCTestCase {
     XCTAssertEqual(replaced.providers.first?.metrics.first?.estimatedTotal, 250)
   }
 
+  func testPreviousBalancesStaySeparateWhenProvidersShareAnAccountID() async {
+    let config = configuration(id: "shared-id")
+    var previous = await snapshot(1_000, configuration: config)
+    previous.providers.append(ProviderUsage(accountID: "shared-id", provider: .venice, title: "Venice",
+      metrics: [UsageMetric(id: "daily-diem", label: "Daily DIEM remaining", remainingPercent: 50,
+        remainingAmount: 5, estimatedTotal: 10)],
+      fetchedAt: now.addingTimeInterval(1)))
+    let next = await snapshot(500, previous: previous, offset: 2, configuration: config)
+    XCTAssertEqual(next.providers.first?.metrics.first?.remainingPercent, 50)
+    XCTAssertEqual(next.providers.first?.metrics.first?.estimatedTotal, 1_000)
+  }
+
   func testInitialZeroWaitsForPositiveBaseline() async {
     let zero = await snapshot(0)
     XCTAssertEqual(zero.providers.first?.metrics.first?.remainingAmount, 0)
@@ -168,6 +180,18 @@ final class LongcatQuotaTests: XCTestCase {
     }
   }
 
+  func testMissingLegacyEndpointIsRequestedOnlyOnceAfterEmptySummary() async {
+    let http = LongcatHTTP(amount: 0, summary: #"{"code":0,"data":{"currentLot":null,"otherLots":[]}}"#,
+      legacyStatus: 404)
+    do {
+      _ = try await LongcatQuotaClient(httpClient: http).fetchUsage(configuration: configuration(), now: now)
+      XCTFail("An unavailable legacy endpoint must fail the refresh")
+    } catch let error as ProviderClientError { XCTAssertEqual(error.statusCode, 404) }
+    catch { XCTFail("Unexpected error") }
+    let paths = await http.requests.map { $0.url!.path }
+    XCTAssertEqual(paths.filter { $0 == "/api/lc-platform/v1/tokenUsage" }.count, 1)
+  }
+
   func testAuthRateLimitsAndAPIFailuresDoNotLeakResponseTextOrFallback() async throws {
     for (status, code, expected) in [(200, 401, QuotaErrorKind.auth), (200, 429, .rateLimit), (429, 0, .rateLimit),
                                     (302, 0, .auth), (503, 0, .api)] {
@@ -218,10 +242,12 @@ private actor LongcatHTTP: HTTPClient {
   let summary: String?
   let status: Int
   let summaryStatus: Int
+  let legacyStatus: Int
   private(set) var requests: [URLRequest] = []
   init(amount: Double, user: String = #"{"loginStatus":1,"userId":"123","token":"never-publish-fixture"}"#,
-       summary: String? = nil, status: Int = 200, summaryStatus: Int = 200) {
+       summary: String? = nil, status: Int = 200, summaryStatus: Int = 200, legacyStatus: Int = 200) {
     self.amount = amount; self.user = user; self.summary = summary; self.status = status; self.summaryStatus = summaryStatus
+    self.legacyStatus = legacyStatus
   }
   func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
     XCTFail("Session transport must refuse redirects")
@@ -239,7 +265,7 @@ private actor LongcatHTTP: HTTPClient {
       httpStatus = summaryStatus
     case "/api/lc-platform/v1/tokenUsage":
       body = #"{"code":0,"data":{"usage":{"totalToken":1000,"availableToken":\#(amount),"usedToken":1}}}"#
-      httpStatus = 200
+      httpStatus = legacyStatus
     default: throw URLError(.badURL)
     }
     return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: httpStatus,
