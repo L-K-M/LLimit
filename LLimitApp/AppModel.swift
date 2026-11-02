@@ -71,6 +71,7 @@ final class AppModel: ObservableObject {
   @Published var mimoLogin: MiMoLoginSession?
   @Published var stepFunLogin: StepFunLoginSession?
   @Published var mistralLogin: MistralLoginSession?
+  @Published var longcatLogin: LongcatLoginSession?
   @Published private(set) var codexAccountMessages: [String: String] = [:]
   @Published private var codexBusyAccounts: Set<String> = []
   private var signInSkippedAccountIDs: Set<String> = []
@@ -259,6 +260,7 @@ final class AppModel: ObservableObject {
     codexBusyAccounts.union(mimoLogin.map { [$0.accountID] } ?? [])
       .union(stepFunLogin.map { [$0.accountID] } ?? [])
       .union(mistralLogin.map { [$0.accountID] } ?? [])
+      .union(longcatLogin.map { [$0.accountID] } ?? [])
   }
 
   func refreshNow() async {
@@ -540,6 +542,7 @@ final class AppModel: ObservableObject {
     if mimoLogin?.accountID == accountID { dismissMiMoLogin() }
     if stepFunLogin?.accountID == accountID { dismissStepFunLogin() }
     if mistralLogin?.accountID == accountID { dismissMistralLogin() }
+    if longcatLogin?.accountID == accountID { dismissLongcatLogin() }
     var updated = currentSettings()
     updated.accounts.removeAll { $0.id == accountID }
     updated.providerStyleSettings.removeAll { $0.accountID == accountID }
@@ -723,6 +726,7 @@ final class AppModel: ObservableObject {
       && !codexAccountIsBusy(account.id) && !claudeAccountIsBusy(account.id)
       && stepFunLogin?.accountID != account.id
       && mistralLogin?.accountID != account.id
+      && longcatLogin?.accountID != account.id
   }
 
   /// Creates a new LLimit-owned account pre-filled with a detected credential.
@@ -940,6 +944,61 @@ final class AppModel: ObservableObject {
   }
 
   // MARK: - Independent Codex accounts
+
+  func connectLongcatAccount(_ accountID: String) {
+    guard !isRefreshing, longcatLogin == nil, !configurationLoadFailed,
+          account(withID: accountID)?.provider == .longcat else { return }
+    signInSkippedAccountIDs.insert(accountID)
+    let revision = credentialEditRevisions[accountID]
+    longcatLogin = LongcatLoginSession(accountID: accountID) { [weak self] attemptID, browser in
+      guard let self else { throw CancellationError() }
+      try await self.finishLongcatLogin(attemptID: attemptID, accountID: accountID,
+        originalRevision: revision, browser: browser)
+    }
+  }
+
+  func dismissLongcatLogin() {
+    guard let session = longcatLogin else { return }
+    session.cancel()
+    longcatLogin = nil
+    catchUpAfterSignIn(session.accountID)
+  }
+
+  private func finishLongcatLogin(attemptID: UUID, accountID: String, originalRevision: UUID?,
+                                  browser: LongcatBrowserSession) async throws {
+    guard longcatLogin?.id == attemptID, let original = account(withID: accountID),
+          original.provider == .longcat else { throw CancellationError() }
+    var candidate = original.runtimeConfiguration()
+    // An explicit reconnect may select another account. Verify the server's
+    // identity before this temporary browser replaces the stored connection.
+    candidate.credentials = [CredentialField.longcatSessionCookies: browser.cookieHeader,
+      CredentialField.longcatBrowserSession: try browser.encoded()]
+    let connection = try await LongcatQuotaClient(httpClient: URLSessionHTTPClient())
+      .verifiedConnection(configuration: candidate, now: Date())
+    let credentials = try browser.credentials(userID: connection.userID)
+    try Task.checkCancellation()
+    guard !configurationLoadFailed, longcatLogin?.id == attemptID,
+          credentialEditRevisions[accountID] == originalRevision,
+          let index = providerAccounts.firstIndex(where: { $0.id == accountID && $0.provider == .longcat }) else {
+      throw CancellationError()
+    }
+    let previous = providerAccounts[index]
+    if previous.credentials != credentials {
+      // The observed denominator is bound to this authentication. Keep an old
+      // login's baseline and trend from carrying over to its replacement.
+      try invalidateAccountUsageAndHistory(for: previous)
+    } else { try invalidateAccountSnapshot(for: accountID) }
+    var settings = currentSettings()
+    settings.accounts[index].credentials = credentials
+    try settingsStore.save(settings)
+    providerAccounts[index].credentials = credentials
+    credentialEditRevisions[accountID] = UUID()
+    longcatLogin?.webView.stopLoading()
+    longcatLogin = nil
+    reloadAccountStatuses()
+    if syncSettingsToWidgetStore(currentSettings().redactedCredentials()) { reloadWidgetTimelines() }
+    catchUpAfterSignIn(accountID)
+  }
 
   func connectMistralAccount(_ accountID: String) {
     guard !isRefreshing, mistralLogin == nil, !configurationLoadFailed,
@@ -1670,6 +1729,7 @@ final class AppModel: ObservableObject {
       if mimoLogin?.accountID == accountID { return .rejected(.signInInProgress) }
       if stepFunLogin?.accountID == accountID { return .rejected(.signInInProgress) }
       if mistralLogin?.accountID == accountID { return .rejected(.signInInProgress) }
+      if longcatLogin?.accountID == accountID { return .rejected(.signInInProgress) }
       if codexAccountIsBusy(accountID) { return .rejected(.signInInProgress) }
       // A connection owns every credential of its account, and Settings hides all
       // manual fields while connected. A draft committed now was typed before the
@@ -1700,6 +1760,10 @@ final class AppModel: ObservableObject {
           account.credentials[CredentialField.mistralBrowserSession] = nil
           account.credentials[CredentialField.mistralUserID] = nil
           account.credentials[CredentialField.mistralOrganizationID] = nil
+        }
+        if account.provider == .longcat, fieldKey == CredentialField.longcatSessionCookies {
+          account.credentials[CredentialField.longcatBrowserSession] = nil
+          account.credentials[CredentialField.longcatUserID] = nil
         }
         if account.provider == .stepFun,
            [CredentialField.stepFunPlanKey, CredentialField.stepFunSessionToken, CredentialField.stepFunWebID].contains(fieldKey) {
@@ -2113,7 +2177,7 @@ final class AppModel: ObservableObject {
     case .gitHubCopilot, .zhipu, .zai: return .monthly
     case .googleAntigravity: return .other
     case .junie: return .monthly
-    case .xiaomiMiMo: return .other
+    case .xiaomiMiMo, .longcat: return .other
     case .venice: return .daily
     // ClinePass reports a five-hour, weekly and monthly window; monthly is the
     // longest, and it owns the account's primary color once usage is live.
@@ -2235,7 +2299,12 @@ final class AppModel: ObservableObject {
             || previousAccount.credentials[CredentialField.mistralOrganizationID]?.isEmpty != false
             || previousAccount.credentials[CredentialField.mistralUserID] != updatedAccount.credentials[CredentialField.mistralUserID]
             || previousAccount.credentials[CredentialField.mistralOrganizationID] != updatedAccount.credentials[CredentialField.mistralOrganizationID])
-        if veniceKeyChanged || junieAllowanceChanged || mimoIdentityChanged || stepFunIdentityChanged || mistralIdentityChanged {
+        let longcatAuthenticationChanged = previousAccount.provider == .longcat
+          && [CredentialField.longcatSessionCookies, CredentialField.longcatBrowserSession,
+              CredentialField.longcatUserID].contains(where: {
+            previousAccount.credentials[$0] != updatedAccount.credentials[$0]
+          })
+        if veniceKeyChanged || junieAllowanceChanged || mimoIdentityChanged || stepFunIdentityChanged || mistralIdentityChanged || longcatAuthenticationChanged {
           // Different accounts or denominators cannot share a trend line.
           try invalidateAccountUsageAndHistory(for: previousAccount)
         } else {

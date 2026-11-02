@@ -194,7 +194,7 @@ struct ProviderChooserView: View {
   }
 
   private func usesSignIn(_ provider: QuotaProvider) -> Bool {
-    [.anthropic, .openAI, .xiaomiMiMo, .stepFun, .mistral].contains(provider)
+    [.anthropic, .openAI, .xiaomiMiMo, .stepFun, .mistral, .longcat].contains(provider)
   }
 
   private func connectionHelp(for provider: QuotaProvider) -> String {
@@ -207,6 +207,8 @@ struct ProviderChooserView: View {
       return "Sign in to the MiMo API Platform inside LLimit. LLimit renews the saved login automatically when possible."
     case .mistral:
       return "Sign in to Mistral Admin inside LLimit. Tracks included monthly Vibe Code and API allowances. Sign in again if Mistral expires the session."
+    case .longcat:
+      return "Sign in to the Longcat API Platform inside LLimit. Any token increase sets the ring’s new 100% baseline. Sign in again if Longcat expires the session."
     case .stepFun:
       return "Import a global personal Plan login from Step Code in Found on this Mac, or sign in to StepFun inside LLimit."
     default:

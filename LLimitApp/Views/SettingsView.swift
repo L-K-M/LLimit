@@ -84,6 +84,10 @@ struct SettingsView: View {
       MistralLoginView(session: session, onClose: { model.dismissMistralLogin() })
         .interactiveDismissDisabled()
     }
+    .sheet(item: $model.longcatLogin, onDismiss: { model.dismissLongcatLogin() }) { session in
+      LongcatLoginView(session: session, onClose: { model.dismissLongcatLogin() })
+        .interactiveDismissDisabled()
+    }
     .onChange(of: model.providerAccounts.map(\.id)) { _, accountIDs in
       if case .account(let accountID) = selection, !accountIDs.contains(accountID) {
         selection = .overview
@@ -108,6 +112,7 @@ struct SettingsView: View {
       model.dismissMiMoLogin()
       model.dismissStepFunLogin()
       model.dismissMistralLogin()
+      model.dismissLongcatLogin()
       commitAccountDrafts()
     }
     // One last attempt on quit. A draft that is still rejected cannot be saved and
@@ -335,6 +340,7 @@ struct SettingsView: View {
           if provider == .xiaomiMiMo { model.connectMiMoAccount(account.id) }
           if provider == .stepFun { model.connectStepFunAccount(account.id) }
           if provider == .mistral { model.connectMistralAccount(account.id) }
+          if provider == .longcat { model.connectLongcatAccount(account.id) }
         })
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(24)
@@ -935,7 +941,7 @@ struct SettingsView: View {
 
   private func manualCredentials(for account: ProviderAccount, excludingFields: [String] = []) -> some View {
     VStack(alignment: .leading, spacing: 12) {
-      if account.provider != .xiaomiMiMo && account.provider != .stepFun && account.provider != .mistral {
+      if account.provider != .xiaomiMiMo && account.provider != .stepFun && account.provider != .mistral && account.provider != .longcat {
         HStack(spacing: 10) {
           Button {
             // Auto-fill replaces every credential field at once; a draft committed
@@ -1038,6 +1044,17 @@ struct SettingsView: View {
                   .fixedSize(horizontal: false, vertical: true)
                 mimoResetDateField(for: AccountFieldKey(accountID: account.id, field: .credential(CredentialField.mimoResetAt)))
                 DisclosureGroup("Manual setup") { manualCredentials(for: account, excludingFields: [CredentialField.mimoResetAt]) }
+              }
+            } else if account.provider == .longcat {
+              VStack(alignment: .leading, spacing: 10) {
+                Button(account.hasRequiredCredentials ? "Reconnect Longcat" : "Connect Longcat") {
+                  commitAccountDrafts(); model.connectLongcatAccount(account.id)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.isRefreshing)
+                Text("Tracks remaining tokens. Any token increase sets the ring’s new 100% baseline. A reset schedule is unavailable. Sign in again if Longcat expires the session.")
+                  .font(.caption).foregroundStyle(.secondary)
+                  .fixedSize(horizontal: false, vertical: true)
               }
             } else if account.provider == .mistral {
               VStack(alignment: .leading, spacing: 10) {

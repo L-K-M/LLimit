@@ -37,7 +37,8 @@ public struct QuotaCoordinator: Sendable {
         MiniMaxQuotaClient(httpClient: httpClient),
         MiMoQuotaClient(httpClient: httpClient),
         StepFunQuotaClient(httpClient: httpClient),
-        MistralQuotaClient(httpClient: httpClient)
+        MistralQuotaClient(httpClient: httpClient),
+        LongcatQuotaClient(httpClient: httpClient)
       ]
     )
   }
@@ -132,11 +133,13 @@ public struct QuotaCoordinator: Sendable {
     }
 
     let previousByID = Dictionary(
-      (previousSnapshot?.providers ?? []).filter { $0.provider == .venice }.map { ($0.accountID, $0) },
+      (previousSnapshot?.providers ?? []).filter { $0.provider == .venice || $0.provider == .longcat }.map { ($0.accountID, $0) },
       uniquingKeysWith: { $0.fetchedAt >= $1.fetchedAt ? $0 : $1 }
     )
     var usages = ordered.compactMap(\.usage).map {
-      VeniceQuotaEstimate.applying(to: $0, previous: previousByID[$0.accountID])
+      LongcatQuotaEstimate.applying(
+        to: VeniceQuotaEstimate.applying(to: $0, previous: previousByID[$0.accountID]),
+        previous: previousByID[$0.accountID])
     }
     var failures = ordered.compactMap(\.failure)
 
@@ -167,7 +170,7 @@ private struct FailureMessagePolicy: Sendable {
   init(configurations: [ProviderRuntimeConfiguration]) {
     let hiddenSecretKeys: Set<String> = [CredentialField.openAIRefreshToken, CredentialField.kimiRefreshToken,
                                        CredentialField.mimoBrowserSession, CredentialField.stepFunBrowserSession,
-                                       CredentialField.mistralBrowserSession]
+                                       CredentialField.mistralBrowserSession, CredentialField.longcatBrowserSession]
     let values = configurations.flatMap { configuration in
       let keys = Set(configuration.provider.credentialFields.filter(\.isSecret).map(\.key))
         .union(hiddenSecretKeys)
@@ -193,6 +196,14 @@ private struct FailureMessagePolicy: Sendable {
       }
       if let raw = configuration.credentials[CredentialField.mistralSessionCookies],
          let session = try? MistralSessionCookies(header: raw) {
+        values += session.secretValues
+      }
+      if let raw = configuration.credentials[CredentialField.longcatBrowserSession],
+         let browser = try? LongcatBrowserSession(serialized: raw) {
+        values += browser.secretValues
+      }
+      if let raw = configuration.credentials[CredentialField.longcatSessionCookies],
+         let session = try? LongcatSessionCookies(header: raw) {
         values += session.secretValues
       }
       return values

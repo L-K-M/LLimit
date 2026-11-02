@@ -1845,6 +1845,8 @@ private struct ProviderMark: View {
       return "stairs"
     case .mistral:
       return "terminal.fill"
+    case .longcat:
+      return "cat.fill"
     }
   }
 }

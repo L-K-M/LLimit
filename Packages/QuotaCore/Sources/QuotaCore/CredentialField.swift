@@ -62,4 +62,8 @@ public enum CredentialField {
   public static let mistralBrowserSession = "mistral.browser_session"
   public static let mistralUserID = "mistral.user_id"
   public static let mistralOrganizationID = "mistral.organization_id"
+
+  public static let longcatSessionCookies = "longcat.session_cookies"
+  public static let longcatBrowserSession = "longcat.browser_session"
+  public static let longcatUserID = "longcat.user_id"
 }

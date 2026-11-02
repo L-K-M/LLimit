@@ -207,6 +207,9 @@ public final class QuotaDaemon {
     if provider == .mistral {
       mergedCredentials = try MistralSessionCookies.credentialsForStorage(mergedCredentials)
     }
+    if provider == .longcat {
+      mergedCredentials = try LongcatSessionCookies.credentialsForStorage(mergedCredentials)
+    }
 
     let name = displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
     let account = ProviderAccount(
@@ -257,6 +260,9 @@ public final class QuotaDaemon {
     if updated.provider == .mistral {
       updated.credentials = try MistralSessionCookies.credentialsForStorage(updated.credentials)
     }
+    if updated.provider == .longcat {
+      updated.credentials = try LongcatSessionCookies.credentialsForStorage(updated.credentials)
+    }
     guard updated != previous else { return previous }
 
     if updated.credentials != previous.credentials {
@@ -286,7 +292,14 @@ public final class QuotaDaemon {
         && [CredentialField.mistralUserID, CredentialField.mistralOrganizationID].contains {
           previous.credentials[$0]?.isEmpty != false || previous.credentials[$0] != updated.credentials[$0]
         }
-      if junieAllowanceChanged || mimoIdentityChanged || stepFunIdentityChanged || mistralIdentityChanged {
+      let longcatAuthenticationChanged = previous.provider == .longcat
+        && [CredentialField.longcatSessionCookies, CredentialField.longcatBrowserSession, CredentialField.longcatUserID].contains {
+          previous.credentials[$0] != updated.credentials[$0]
+        }
+      let longcatIdentityChanged = longcatAuthenticationChanged
+        && (previous.credentials[CredentialField.longcatUserID]?.isEmpty != false
+          || previous.credentials[CredentialField.longcatUserID] != updated.credentials[CredentialField.longcatUserID])
+      if junieAllowanceChanged || mimoIdentityChanged || stepFunIdentityChanged || mistralIdentityChanged || longcatIdentityChanged {
         // Different accounts or allowances must not share history.
         try historyStore.remove(accountIDs: [accountID])
       }
@@ -373,7 +386,8 @@ public final class QuotaDaemon {
   public static func editableCredentialKeys(of account: ProviderAccount) -> Set<String> {
     Set(account.provider.credentialFields.map(\.key)).union(account.credentials.keys)
       .subtracting([CredentialField.mimoBrowserSession, CredentialField.stepFunBrowserSession, CredentialField.stepFunUserID,
-        CredentialField.mistralBrowserSession, CredentialField.mistralUserID, CredentialField.mistralOrganizationID])
+        CredentialField.mistralBrowserSession, CredentialField.mistralUserID, CredentialField.mistralOrganizationID,
+        CredentialField.longcatBrowserSession, CredentialField.longcatUserID])
   }
 
   // MARK: - Detect & import (convenience)
@@ -760,6 +774,13 @@ public final class QuotaDaemon {
           result[CredentialField.mistralBrowserSession] = nil
           result[CredentialField.mistralUserID] = nil
           result[CredentialField.mistralOrganizationID] = nil
+        }
+      }
+      if account.provider == .longcat, let cookies = values[CredentialField.longcatSessionCookies] {
+        let header = cookies.isEmpty ? "" : try LongcatSessionCookies(header: cookies).header
+        if header != result[CredentialField.longcatSessionCookies] {
+          result[CredentialField.longcatBrowserSession] = nil
+          result[CredentialField.longcatUserID] = nil
         }
       }
       if account.provider == .stepFun, [CredentialField.stepFunPlanKey, CredentialField.stepFunSessionToken, CredentialField.stepFunWebID].contains(where: {

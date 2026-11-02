@@ -205,6 +205,15 @@ func accountsAdd(_ args: [String]) async {
           .verifiedManualCredentials(header: header)
       }
     }
+    if provider == .longcat {
+      if let unknown = credentials.keys.first(where: { $0 != CredentialField.longcatSessionCookies }) {
+        throw DaemonError.unknownCredentialKey(unknown, provider: provider)
+      }
+      if let header = credentials[CredentialField.longcatSessionCookies], !header.isEmpty {
+        credentials = try await LongcatQuotaClient(httpClient: URLSessionHTTPClient())
+          .verifiedManualCredentials(header: header)
+      }
+    }
     account = try daemon.editingSettings { transaction in
       try transaction.addAccount(provider: provider, displayName: name, credentials: credentials)
     }
