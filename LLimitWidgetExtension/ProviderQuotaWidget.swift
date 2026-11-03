@@ -443,6 +443,8 @@ private struct ProviderQuotaTileView: View {
   private func loadedContent(account: ProviderTileSelection, usage: ProviderUsage) -> some View {
     let metrics = defaultRingMetrics(for: usage)
     let tints = ringTints(for: metrics, in: usage)
+    let paces = metrics.map { pace(for: $0, in: usage) }
+    let showsTokenQuota = usage.provider == .longcat
 
     return VStack(spacing: 5) {
       if metrics.isEmpty {
@@ -453,12 +455,20 @@ private struct ProviderQuotaTileView: View {
           metrics: metrics,
           name: account.displayName,
           tints: tints,
-          paces: metrics.map { pace(for: $0, in: usage) },
-          showsTokenQuota: usage.provider == .longcat
+          paces: paces,
+          showsTokenQuota: showsTokenQuota
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-        quotaFooter(metrics: metrics, tints: tints, showsTokenQuota: usage.provider == .longcat)
+        VStack(spacing: 2) {
+          quotaFooter(metrics: metrics, tints: tints, showsTokenQuota: showsTokenQuota)
+          if showsTokenQuota, metrics.count == 1, let pace = paces.first ?? nil {
+            Text(pace.phrase.capitalized)
+              .font(.caption2.weight(.semibold))
+              .foregroundStyle(.white.opacity(0.72))
+              .lineLimit(1)
+          }
+        }
       }
     }
     .padding(.horizontal, 14)
@@ -516,6 +526,12 @@ private struct ProviderQuotaTileView: View {
             .monospacedDigit()
             .lineLimit(1)
             .minimumScaleFactor(0.7)
+          if let expiry = expirySummary(for: metric, showsCountdown: false) {
+            Text(expiry)
+              .font(.caption2)
+              .foregroundStyle(.white.opacity(0.72))
+              .lineLimit(1)
+          }
         }
       }
     }
@@ -596,7 +612,7 @@ private struct ProviderQuotaTileView: View {
     return layout {
       ForEach(Array(metrics.prefix(2).enumerated()), id: \.offset) { index, metric in
         let label = showsTokenQuota
-          ? ([metrics.count > 1 ? tokenPercentage(metric) : nil, expirySummary(for: metric)]
+          ? ([stacked ? tokenPercentage(metric) : nil, expirySummary(for: metric, showsCountdown: !stacked)]
               .compactMap { $0 }.joined(separator: " "))
           : resetSummary(for: metric)
         if !label.isEmpty {
@@ -714,14 +730,15 @@ private struct ProviderQuotaTileView: View {
     return "\(account.displayName). \(metricSummary). \(freshness)\(failureState)\(warningState)"
   }
 
-  private func expirySummary(for metric: UsageMetric, expanded: Bool = false) -> String? {
-    if let expiry = metric.expiresAt {
-      let interval = expiry.timeIntervalSince(entry.date)
-      guard interval.isFinite, interval > 0 else { return "Expired" }
-      let countdown = compactCountdown(interval)
-      return expanded ? "expires in \(countdown)" : "Exp. \(countdown)"
-    }
-    return metric.expiryDateLabel.map { expanded ? "expires on \($0)" : "Exp. \($0)" }
+  private func expirySummary(for metric: UsageMetric, expanded: Bool = false, showsCountdown: Bool = true) -> String? {
+    let date = metric.expiryDateLabel ?? metric.expiresAt?.formatted(.dateTime.month(.abbreviated).day())
+    guard let date else { return nil }
+    let label = expanded ? "expires on \(date)" : "Exp. \(date)"
+    guard let interval = metric.expiresAt?.timeIntervalSince(entry.date) else { return label }
+    guard interval.isFinite, interval > 0 else { return "Expired" }
+    guard showsCountdown else { return label }
+    let countdown = compactCountdown(interval)
+    return expanded ? "\(label), in \(countdown)" : "\(label) · \(countdown)"
   }
 
   private func compactCountdown(_ interval: TimeInterval) -> String {

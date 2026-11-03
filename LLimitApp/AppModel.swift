@@ -2535,6 +2535,15 @@ final class AppModel: ObservableObject {
     // Upgrade cached one-off/30-day schedules without waiting for their normal
     // refresh interval. Account settings remain local; widgets receive usage only.
     for account in providerAccounts where account.isEnabled && account.hasRequiredCredentials {
+      if account.provider == .longcat,
+         let usage = snapshot.providers.first(where: { $0.accountID == account.id && $0.provider == .longcat }),
+         usage.metrics.contains(where: { metric in
+           // Older builds wrote the console's unzoned date only in the detail.
+           // Refresh it from the provider so the widget gets a structured date.
+           metric.expiryDateLabel == nil && metric.detail?.range(
+             of: #"(?:Expires|expiry:) \d{4}-\d{2}-\d{2} "#, options: .regularExpression
+           ) != nil
+         }) { return true }
       guard let key = manualResetField(for: account.provider),
             let text = account.credentials[key], let cycle = MonthlyQuotaCycle(anchor: text) else { continue }
       guard let usage = snapshot.providers.first(where: { $0.accountID == account.id }) else { return true }

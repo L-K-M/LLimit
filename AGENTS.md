@@ -210,7 +210,12 @@ Linux:
   the console also reports `consumedToken` and `consumedRatio` (a used fraction).
   Preserve `expireTime` as token-pack expiry information, never as a refill reset.
   Live responses use unzoned `yyyy-MM-dd HH:mm:ss` expiry text; preserve it without
-  assigning a timezone. Use `remainSeconds` for the countdown and expiry ordering.
+  assigning a timezone. Keep the console's calendar date alongside the instant
+  derived from `remainSeconds` so the widget shows both the date and countdown.
+  An active scope with one pack and a reported allowance can show even-spending
+  pace when `effectiveTime` and `expireTime` provide a valid duration and the
+  expiry instant is known. Compare unzoned endpoints as wall times on the same
+  calendar. Skip pace for aggregated packs or incomparable timestamps.
   When the summary is empty or HTTP 404, `GET /api/lc-platform/v1/tokenUsage`
   supplies `usage.availableToken`, or `totalToken - usedToken`. Other errors
   fail the refresh and preserve last good usage. No claim, purchase, or inference
@@ -220,8 +225,8 @@ Linux:
   peak. Keep the estimate in the snapshot, scoped to account, metric, console
   origin, verified user and authentication hash.
   Initial zero without a reported allowance remains amount-only; zero after a
-  baseline is 0%. No reset, window duration or pace is inferred from token-pack
-  expiry. Reconnect expired sessions; no automatic renewal is promised.
+  baseline is 0%. An expiry alone does not supply a window duration, pace, or
+  reset. Reconnect expired sessions; no automatic renewal is promised.
   Sources: official platform
   [usage page](https://longcat.ai/platform/usage) and its public bundles
   `index-dec5464e.c43fc0083a5a18d5bebb.js`,
