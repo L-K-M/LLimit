@@ -591,30 +591,34 @@ private struct ProviderQuotaTileView: View {
   }
 
   private func quotaFooter(metrics: [UsageMetric], tints: [Color], showsTokenQuota: Bool) -> some View {
-    HStack(spacing: 6) {
+    let stacked = showsTokenQuota && metrics.count > 1
+    let layout = stacked ? AnyLayout(VStackLayout(spacing: 2)) : AnyLayout(HStackLayout(spacing: 6))
+    return layout {
       ForEach(Array(metrics.prefix(2).enumerated()), id: \.offset) { index, metric in
         let label = showsTokenQuota
           ? ([metrics.count > 1 ? tokenPercentage(metric) : nil, expirySummary(for: metric)]
               .compactMap { $0 }.joined(separator: " "))
           : resetSummary(for: metric)
         if !label.isEmpty {
-          if index > 0 {
+          if index > 0 && !stacked {
             Text("•")
               .foregroundStyle(.white.opacity(0.42))
           }
-          Image(systemName: index == 0 ? "circle" : "smallcircle.filled.circle")
-            .font(.system(size: 7, weight: .bold))
-            .foregroundStyle(index < tints.count ? tints[index] : .white)
-          Text(label)
-            .font(.caption2.weight(.semibold))
-            .monospacedDigit()
-            .lineLimit(1)
-            .minimumScaleFactor(0.75)
+          HStack(spacing: 6) {
+            Image(systemName: index == 0 ? "circle" : "smallcircle.filled.circle")
+              .font(.system(size: 7, weight: .bold))
+              .foregroundStyle(index < tints.count ? tints[index] : .white)
+            Text(label)
+              .font(.caption2.weight(.semibold))
+              .monospacedDigit()
+              .lineLimit(1)
+              .minimumScaleFactor(0.75)
+          }
         }
       }
     }
     .foregroundStyle(.white.opacity(0.72))
-    .frame(height: 13)
+    .frame(height: stacked ? 28 : 13)
   }
 
   /// Each ring wears its metric's limit-kind identity color, resolved against
