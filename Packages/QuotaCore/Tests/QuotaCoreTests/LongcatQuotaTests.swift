@@ -67,7 +67,7 @@ final class LongcatQuotaTests: XCTestCase {
     XCTAssertEqual(metric.totalDisplay, "1,000,000,000 tokens")
     XCTAssertTrue(metric.detail?.contains("Expires 2026-12-03T00:00:00Z") == true)
     XCTAssertEqual(metric.expiresAt, Date(timeIntervalSince1970: 1_796_256_000))
-    XCTAssertNil(metric.expiryDateLabel)
+    XCTAssertEqual(metric.expiryDateLabel, "2026-12-03")
     XCTAssertNil(metric.resetAt)
     XCTAssertNil(metric.windowSeconds)
     XCTAssertNil(QuotaPace(metric: metric, provider: .longcat, fetchedAt: now, now: now))
@@ -87,16 +87,35 @@ final class LongcatQuotaTests: XCTestCase {
   }
 
   func testLiveConsoleExpiryPreservesUnzonedDateAndServerCountdown() async throws {
-    let body = #"{"code":0,"data":{"currentLot":{"lotId":123,"remainingToken":993207730,"totalToken":1000000000,"expireTime":"2026-12-03 01:02:29","remainSeconds":2573499},"otherLots":[]}}"#
+    let body = #"{"code":0,"data":{"currentLot":{"lotId":123,"remainingToken":993207730,"totalToken":1000000000,"effectiveTime":"2026-11-03 01:02:29","expireTime":"2026-12-03 01:02:29","remainSeconds":2573499},"otherLots":[]}}"#
     let usage = try await LongcatQuotaClient(httpClient: LongcatHTTP(amount: 0, summary: body))
       .fetchUsage(configuration: configuration(), now: now)
     let metric = try XCTUnwrap(usage.metrics.first)
     XCTAssertEqual(try XCTUnwrap(metric.remainingFraction), 0.99320773, accuracy: 0.00000001)
     XCTAssertTrue(metric.detail?.contains("Expires 2026-12-03 01:02:29 (29d 18h 51m remaining)") == true)
-    XCTAssertNil(metric.expiryDateLabel)
+    XCTAssertEqual(metric.expiryDateLabel, "2026-12-03")
     XCTAssertEqual(metric.expiresAt, now.addingTimeInterval(2_573_499))
     XCTAssertNil(metric.resetAt)
-    XCTAssertNil(metric.windowSeconds)
+    XCTAssertEqual(metric.windowSeconds, 2_592_000)
+    let pace = try XCTUnwrap(QuotaPace(metric: metric, provider: .longcat, fetchedAt: now, now: now))
+    XCTAssertEqual(pace.evenPaceRemainingFraction, 2_573_499.0 / 2_592_000, accuracy: 0.00000001)
+    XCTAssertEqual(pace.delta, (1 - 0.99320773 - pace.elapsedFraction) * 100, accuracy: 0.000001)
+    XCTAssertNil(QuotaPace(metric: metric, provider: .longcat, fetchedAt: now, now: try XCTUnwrap(metric.expiresAt)))
+  }
+
+  func testPackPaceRequiresMatchingTimestampFormatsAndAReportedTotal() async throws {
+    for (start, total, window) in [("2026-11-01T00:00:00Z", "100", 2_764_800 as Int?),
+                                  ("2026-11-01 00:00:00", "100", nil),
+                                  ("invalid-start", "100", nil),
+                                  ("2026-11-01T00:00:00Z", "null", nil)] {
+      let body = #"{"code":0,"data":{"currentLot":{"lotId":"a","remainingToken":50,"totalToken":\#(total),"effectiveTime":"\#(start)","expireTime":"2026-12-03T00:00:00Z"},"otherLots":[]}}"#
+      let usage = try await LongcatQuotaClient(httpClient: LongcatHTTP(amount: 0, summary: body))
+        .fetchUsage(configuration: configuration(), now: now)
+      let metric = try XCTUnwrap(usage.metrics.first)
+      XCTAssertEqual(metric.windowSeconds, window)
+      XCTAssertEqual(QuotaPace(metric: metric, provider: .longcat, fetchedAt: now, now: now) != nil, window != nil)
+      XCTAssertNil(metric.resetAt)
+    }
   }
 
   func testUnzonedExpiryWithoutCountdownCannotClaimEarliestOrAssumeTimezone() async throws {
@@ -113,7 +132,7 @@ final class LongcatQuotaTests: XCTestCase {
   }
 
   func testGroupedPacksUseSumOfTotalsAndEarliestLiveExpiry() async throws {
-    let body = #"{"code":0,"data":{"currentLot":{"lotId":"a","remainingToken":20,"totalToken":100,"expireTime":"2026-12-03T00:00:00Z"},"otherLots":[{"lotId":"b","remainingToken":280,"totalToken":300,"expireTime":"2026-12-01T00:00:00Z"},{"lotId":"expired","remainingToken":100,"totalToken":100,"expireTime":"2020-01-01T00:00:00Z"},{"lotId":"inactive","status":"EXPIRED","remainingToken":100,"totalToken":100}]}}"#
+    let body = #"{"code":0,"data":{"currentLot":{"lotId":"a","remainingToken":20,"totalToken":100,"effectiveTime":"2026-11-01T00:00:00Z","expireTime":"2026-12-03T00:00:00Z"},"otherLots":[{"lotId":"b","remainingToken":280,"totalToken":300,"effectiveTime":"2026-11-01T00:00:00Z","expireTime":"2026-12-01T00:00:00Z"},{"lotId":"expired","remainingToken":100,"totalToken":100,"expireTime":"2020-01-01T00:00:00Z"},{"lotId":"inactive","status":"EXPIRED","remainingToken":100,"totalToken":100}]}}"#
     let usage = try await LongcatQuotaClient(httpClient: LongcatHTTP(amount: 0, summary: body))
       .fetchUsage(configuration: configuration(), now: now)
     let metric = try XCTUnwrap(usage.metrics.first)
@@ -122,7 +141,10 @@ final class LongcatQuotaTests: XCTestCase {
     XCTAssertEqual(metric.totalDisplay, "400 tokens")
     XCTAssertTrue(metric.detail?.contains("Next token-pack expiry: 2026-12-01T00:00:00Z") == true)
     XCTAssertEqual(metric.expiresAt, Date(timeIntervalSince1970: 1_796_083_200))
-    XCTAssertNil(metric.expiryDateLabel)
+    XCTAssertEqual(metric.expiryDateLabel, "2026-12-01")
+    XCTAssertNil(metric.resetAt)
+    XCTAssertNil(metric.windowSeconds)
+    XCTAssertNil(QuotaPace(metric: metric, provider: .longcat, fetchedAt: now, now: now))
   }
 
   func testPartiallyMissingTotalsKeepWholeScopeOnHighTideFallback() async throws {

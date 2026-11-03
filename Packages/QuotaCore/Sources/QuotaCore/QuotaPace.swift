@@ -1,6 +1,6 @@
 import Foundation
 
-/// Consumption relative to even spending through a window's reset.
+/// Consumption relative to even spending through a window's end.
 /// Duration comes from reported data or stable API ids, never label text.
 public struct QuotaPace: Equatable, Sendable {
   public let elapsedFraction: Double
@@ -14,19 +14,24 @@ public struct QuotaPace: Equatable, Sendable {
   private static let sevenDays: TimeInterval = 7 * 86_400
 
   public init?(metric: UsageMetric, provider: QuotaProvider, fetchedAt: Date, now: Date) {
+    let windowEnd = provider == .longcat ? metric.expiresAt : metric.resetAt
+    let usedPercent = provider == .longcat
+      ? metric.remainingFraction.map { (1 - $0) * 100 }
+      : metric.remainingPercent.map { Double(100 - clampPercent($0)) }
     guard
       !metric.isUnlimited,
-      let remainingPercent = metric.remainingPercent,
-      let resetAt = metric.resetAt,
-      resetAt > now,
+      let usedPercent,
+      let windowEnd,
+      windowEnd > now,
       let windowSeconds = Self.windowSeconds(for: metric, provider: provider),
-      let elapsedFraction = Self.elapsedFraction(resetAt: resetAt, windowSeconds: windowSeconds, at: fetchedAt)
+      provider != .longcat || windowEnd.timeIntervalSince(fetchedAt) <= windowSeconds,
+      let elapsedFraction = Self.elapsedFraction(endingAt: windowEnd, windowSeconds: windowSeconds, at: fetchedAt)
     else { return nil }
 
     // Compare consumption and elapsed time at the same reading. Display time
-    // only invalidates readings whose window has since reset.
+    // only invalidates readings whose window has since ended.
     self.elapsedFraction = elapsedFraction
-    delta = Double(100 - clampPercent(remainingPercent)) - elapsedFraction * 100
+    delta = usedPercent - elapsedFraction * 100
   }
 
   public var evenPaceRemainingFraction: Double { 1 - elapsedFraction }
@@ -95,8 +100,8 @@ public struct QuotaPace: Equatable, Sendable {
     }
   }
 
-  private static func elapsedFraction(resetAt: Date, windowSeconds: TimeInterval, at date: Date) -> Double? {
-    let remaining = resetAt.timeIntervalSince(date)
+  private static func elapsedFraction(endingAt windowEnd: Date, windowSeconds: TimeInterval, at date: Date) -> Double? {
+    let remaining = windowEnd.timeIntervalSince(date)
     guard remaining.isFinite, remaining > 0, windowSeconds.isFinite, windowSeconds > 0 else { return nil }
 
     let elapsed = 1 - remaining / windowSeconds

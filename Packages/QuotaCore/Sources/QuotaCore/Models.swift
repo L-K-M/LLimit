@@ -385,7 +385,7 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
   public var resetIn: String?
   /// Expiration of the reported allowance, independent of any refill schedule.
   public var expiresAt: Date?
-  /// Provider's calendar date when the expiry does not specify a timezone.
+  /// Reported expiry date for display, independent of the countdown's time zone.
   public var expiryDateLabel: String?
   /// Reported or explicitly configured duration, never inferred from a display label.
   public var windowSeconds: Int?
