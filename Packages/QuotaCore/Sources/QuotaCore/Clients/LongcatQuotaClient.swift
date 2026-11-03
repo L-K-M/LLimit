@@ -304,6 +304,8 @@ public struct LongcatQuotaClient: QuotaProviderClient {
   private struct Expiry: Decodable {
     var value: Date?
     var display: String
+    let dateLabel: String?
+
     init(from decoder: Decoder) throws {
       let c = try decoder.singleValueContainer()
       if let milliseconds = try? c.decode(Double.self), milliseconds.isFinite {
@@ -323,12 +325,14 @@ public struct LongcatQuotaClient: QuotaProviderClient {
           // A validation timezone does not establish the server's timezone.
           value = nil
           display = text
+          dateLabel = String(text.prefix(10))
           return
         }
       } else { throw invalid }
       guard let value, value.timeIntervalSince1970 > 0,
             value.timeIntervalSince1970 < 253_402_300_800 else { throw invalid }
       display = ISO8601DateFormatter().string(from: value)
+      dateLabel = nil
     }
     func precedes(_ other: Expiry) -> Bool {
       if let value, let otherValue = other.value { return value < otherValue }
@@ -355,7 +359,9 @@ public struct LongcatQuotaClient: QuotaProviderClient {
     detail += " No automatic reset schedule is reported."
     return UsageMetric(id: id, label: label, remainingPercent: percentage, remainingAmount: amount,
       totalAmount: allowance, estimateKeyHash: keyHash, usedDisplay: tokens(amount),
-      totalDisplay: allowance.map(tokens), detail: detail)
+      totalDisplay: allowance.map(tokens), expiresAt: expiry?.value,
+      expiryDateLabel: expiry?.value == nil ? expiry?.dateLabel : nil,
+      detail: detail)
   }
 
   private static var reconnect: ProviderClientError {

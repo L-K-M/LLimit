@@ -383,6 +383,10 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
   public var totalDisplay: String?
   public var resetAt: Date?
   public var resetIn: String?
+  /// Expiration of the reported allowance, independent of any refill schedule.
+  public var expiresAt: Date?
+  /// Provider's calendar date when the expiry does not specify a timezone.
+  public var expiryDateLabel: String?
   /// Reported or explicitly configured duration, never inferred from a display label.
   public var windowSeconds: Int?
   public var isUnlimited: Bool
@@ -402,6 +406,8 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
     totalDisplay: String? = nil,
     resetAt: Date? = nil,
     resetIn: String? = nil,
+    expiresAt: Date? = nil,
+    expiryDateLabel: String? = nil,
     windowSeconds: Int? = nil,
     isUnlimited: Bool = false,
     detail: String? = nil,
@@ -418,6 +424,8 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
     self.totalDisplay = totalDisplay
     self.resetAt = resetAt
     self.resetIn = resetIn
+    self.expiresAt = expiresAt
+    self.expiryDateLabel = expiryDateLabel
     self.windowSeconds = windowSeconds
     self.isUnlimited = isUnlimited
     self.detail = detail

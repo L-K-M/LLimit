@@ -205,10 +205,12 @@ struct ProviderTileTimelineProvider: TimelineProvider {
       offset += 5 * 60
     }
     if let usage = entry.usage {
-      for resetAt in defaultRingMetrics(for: usage).compactMap(\.resetAt)
-        where resetAt > now && resetAt < nextRefresh
-      {
-        entryDates.insert(resetAt)
+      for metric in defaultRingMetrics(for: usage) {
+        for boundary in [metric.resetAt, metric.expiresAt].compactMap({ $0 })
+          where boundary > now && boundary < nextRefresh
+        {
+          entryDates.insert(boundary)
+        }
       }
     }
 
@@ -451,11 +453,12 @@ private struct ProviderQuotaTileView: View {
           metrics: metrics,
           name: account.displayName,
           tints: tints,
-          paces: metrics.map { pace(for: $0, in: usage) }
+          paces: metrics.map { pace(for: $0, in: usage) },
+          showsTokenQuota: usage.provider == .longcat
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-        resetFooter(metrics: metrics, tints: tints)
+        quotaFooter(metrics: metrics, tints: tints, showsTokenQuota: usage.provider == .longcat)
       }
     }
     .padding(.horizontal, 14)
@@ -587,20 +590,27 @@ private struct ProviderQuotaTileView: View {
     .padding(16)
   }
 
-  private func resetFooter(metrics: [UsageMetric], tints: [Color]) -> some View {
+  private func quotaFooter(metrics: [UsageMetric], tints: [Color], showsTokenQuota: Bool) -> some View {
     HStack(spacing: 6) {
       ForEach(Array(metrics.prefix(2).enumerated()), id: \.offset) { index, metric in
-        if index > 0 {
-          Text("•")
-            .foregroundStyle(.white.opacity(0.42))
+        let label = showsTokenQuota
+          ? ([metrics.count > 1 ? tokenPercentage(metric) : nil, expirySummary(for: metric)]
+              .compactMap { $0 }.joined(separator: " "))
+          : resetSummary(for: metric)
+        if !label.isEmpty {
+          if index > 0 {
+            Text("•")
+              .foregroundStyle(.white.opacity(0.42))
+          }
+          Image(systemName: index == 0 ? "circle" : "smallcircle.filled.circle")
+            .font(.system(size: 7, weight: .bold))
+            .foregroundStyle(index < tints.count ? tints[index] : .white)
+          Text(label)
+            .font(.caption2.weight(.semibold))
+            .monospacedDigit()
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
         }
-        Image(systemName: index == 0 ? "circle" : "smallcircle.filled.circle")
-          .font(.system(size: 7, weight: .bold))
-          .foregroundStyle(index < tints.count ? tints[index] : .white)
-        Text(resetSummary(for: metric))
-          .font(.caption2.weight(.semibold))
-          .monospacedDigit()
-          .lineLimit(1)
       }
     }
     .foregroundStyle(.white.opacity(0.72))
@@ -635,8 +645,7 @@ private struct ProviderQuotaTileView: View {
     let rings = defaultRingMetrics(for: usage)
     let displayedMetrics = rings.isEmpty ? usage.metrics : rings
     if displayedMetrics.contains(where: { metric in
-      guard let resetAt = metric.resetAt else { return false }
-      return resetAt <= entry.date
+      [metric.resetAt, metric.expiresAt].compactMap { $0 }.contains { $0 <= entry.date }
     }) {
       return true
     }
@@ -681,6 +690,8 @@ private struct ProviderQuotaTileView: View {
       let quota: String
       if metric.isUnlimited {
         quota = "unlimited"
+      } else if usage.provider == .longcat, let percent = tokenPercentage(metric) {
+        quota = "\(percent) remaining"
       } else if let remaining = metric.remainingPercent {
         quota = "\(metric.isPercentageEstimated ? "estimated " : "")\(remaining) percent remaining"
       } else {
@@ -689,7 +700,8 @@ private struct ProviderQuotaTileView: View {
       let paceSummary = pace(for: metric, in: usage).map { ", \($0.phrase)" } ?? ""
       let reset = metric.resetAt != nil || metric.resetIn != nil
         ? ", \(resetSummary(for: metric, expanded: true))" : ""
-      return "\(metric.label), \(quota)\(paceSummary)\(reset)"
+      let expiry = expirySummary(for: metric, expanded: true).map { ", \($0)" } ?? ""
+      return "\(metric.label), \(quota)\(paceSummary)\(reset)\(expiry)"
     }.joined(separator: ". ")
 
     let freshness = isStale(usage) ? "Data is stale." : "Data is current."
@@ -698,23 +710,31 @@ private struct ProviderQuotaTileView: View {
     return "\(account.displayName). \(metricSummary). \(freshness)\(failureState)\(warningState)"
   }
 
+  private func expirySummary(for metric: UsageMetric, expanded: Bool = false) -> String? {
+    if let expiry = metric.expiresAt {
+      let interval = expiry.timeIntervalSince(entry.date)
+      guard interval.isFinite, interval > 0 else { return "Expired" }
+      let countdown = compactCountdown(interval)
+      return expanded ? "expires in \(countdown)" : "Exp. \(countdown)"
+    }
+    return metric.expiryDateLabel.map { expanded ? "expires on \($0)" : "Exp. \($0)" }
+  }
+
+  private func compactCountdown(_ interval: TimeInterval) -> String {
+    let totalMinutes = Int(min(interval / 60, 525_600))
+    let days = totalMinutes / 1_440
+    let hours = (totalMinutes % 1_440) / 60
+    let minutes = totalMinutes % 60
+    if days > 0 { return hours > 0 ? "\(days)d \(hours)h" : "\(days)d" }
+    if hours > 0 { return minutes > 0 ? "\(hours)h \(minutes)m" : "\(hours)h" }
+    return "\(minutes)m"
+  }
+
   private func resetSummary(for metric: UsageMetric, expanded: Bool = false) -> String {
     if let resetAt = metric.resetAt {
       let interval = resetAt.timeIntervalSince(entry.date)
       guard interval.isFinite, interval > 0 else { return expanded ? "reset due" : "now" }
-      let totalMinutes = Int(min(interval / 60, 525_600))
-      let days = totalMinutes / 1_440
-      let hours = (totalMinutes % 1_440) / 60
-      let minutes = totalMinutes % 60
-
-      let compact: String
-      if days > 0 {
-        compact = hours > 0 ? "\(days)d \(hours)h" : "\(days)d"
-      } else if hours > 0 {
-        compact = minutes > 0 ? "\(hours)h \(minutes)m" : "\(hours)h"
-      } else {
-        compact = "\(minutes)m"
-      }
+      let compact = compactCountdown(interval)
       return expanded ? "resets in \(compact)" : compact
     }
 
@@ -726,11 +746,18 @@ private struct ProviderQuotaTileView: View {
   }
 }
 
+private func tokenPercentage(_ metric: UsageMetric) -> String? {
+  guard let fraction = metric.remainingFraction else { return nil }
+  let percent = fraction.formatted(.percent.precision(.fractionLength(0...1)))
+  return metric.isPercentageEstimated ? "≈\(percent)" : percent
+}
+
 private struct ProviderConcentricRings: View {
   let metrics: [UsageMetric]
   let name: String
   let tints: [Color]
   let paces: [QuotaPace?]
+  let showsTokenQuota: Bool
 
   var body: some View {
     GeometryReader { proxy in
@@ -744,7 +771,8 @@ private struct ProviderConcentricRings: View {
             metric: outer,
             color: tints.first ?? .white,
             lineWidth: max(9, side * 0.095),
-            pace: paces.first ?? nil
+            pace: paces.first ?? nil,
+            hasFlatCaps: showsTokenQuota
           )
           .frame(width: side, height: side)
         }
@@ -754,19 +782,30 @@ private struct ProviderConcentricRings: View {
             metric: inner,
             color: tints.dropFirst().first ?? .white,
             lineWidth: max(7, side * 0.08),
-            pace: paces.dropFirst().first ?? nil
+            pace: paces.dropFirst().first ?? nil,
+            hasFlatCaps: showsTokenQuota
           )
           .frame(width: side * 0.62, height: side * 0.62)
         }
 
-        Text(name)
-          .font(.subheadline.weight(.bold))
-          .foregroundStyle(.white)
-          .shadow(color: .black.opacity(0.35), radius: 2)
-          .lineLimit(2)
-          .minimumScaleFactor(0.68)
-          .multilineTextAlignment(.center)
-          .frame(width: side * (inner == nil ? 0.56 : 0.48))
+        VStack(spacing: 2) {
+          Text(name)
+            .font(.subheadline.weight(.bold))
+            .foregroundStyle(.white)
+            .shadow(color: .black.opacity(0.35), radius: 2)
+            .lineLimit(2)
+            .minimumScaleFactor(0.68)
+            .multilineTextAlignment(.center)
+          if showsTokenQuota, inner == nil, let outer, let percent = tokenPercentage(outer) {
+            Text("\(percent) left")
+              .font(.caption.weight(.semibold))
+              .monospacedDigit()
+              .foregroundStyle(.white.opacity(0.85))
+              .lineLimit(1)
+              .minimumScaleFactor(0.75)
+          }
+        }
+        .frame(width: side * (inner == nil ? 0.56 : 0.48))
       }
       .frame(width: side, height: side)
       .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
@@ -779,6 +818,7 @@ private struct ProviderTileRing: View {
   let color: Color
   let lineWidth: CGFloat
   let pace: QuotaPace?
+  let hasFlatCaps: Bool
 
   var body: some View {
     ZStack {
@@ -794,7 +834,7 @@ private struct ProviderTileRing: View {
               startAngle: .degrees(0),
               endAngle: .degrees(360 * progress)
             ),
-            style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round)
+            style: StrokeStyle(lineWidth: lineWidth, lineCap: hasFlatCaps ? .butt : .round, lineJoin: .round)
           )
           .rotationEffect(.degrees(-90))
           .shadow(color: color.opacity(0.45), radius: 2.5)

@@ -66,11 +66,14 @@ final class LongcatQuotaTests: XCTestCase {
     XCTAssertEqual(metric.totalAmount, 1_000_000_000)
     XCTAssertEqual(metric.totalDisplay, "1,000,000,000 tokens")
     XCTAssertTrue(metric.detail?.contains("Expires 2026-12-03T00:00:00Z") == true)
+    XCTAssertEqual(metric.expiresAt, Date(timeIntervalSince1970: 1_796_256_000))
+    XCTAssertNil(metric.expiryDateLabel)
     XCTAssertNil(metric.resetAt)
     XCTAssertNil(metric.windowSeconds)
     XCTAssertNil(QuotaPace(metric: metric, provider: .longcat, fetchedAt: now, now: now))
     let restored = try JSONDecoder().decode(UsageMetric.self, from: JSONEncoder().encode(metric))
     XCTAssertEqual(try XCTUnwrap(restored.remainingFraction), 0.99596, accuracy: 0.0000001)
+    XCTAssertEqual(restored.expiresAt, metric.expiresAt)
     XCTAssertFalse(restored.isPercentageEstimated)
   }
 
@@ -78,6 +81,8 @@ final class LongcatQuotaTests: XCTestCase {
     let old = Data(#"{"id":"token-balance","label":"Tokens remaining","remainingPercent":75,"isUnlimited":false}"#.utf8)
     let metric = try JSONDecoder().decode(UsageMetric.self, from: old)
     XCTAssertNil(metric.totalAmount)
+    XCTAssertNil(metric.expiresAt)
+    XCTAssertNil(metric.expiryDateLabel)
     XCTAssertEqual(metric.remainingFraction, 0.75)
   }
 
@@ -88,6 +93,8 @@ final class LongcatQuotaTests: XCTestCase {
     let metric = try XCTUnwrap(usage.metrics.first)
     XCTAssertEqual(try XCTUnwrap(metric.remainingFraction), 0.99320773, accuracy: 0.00000001)
     XCTAssertTrue(metric.detail?.contains("Expires 2026-12-03 01:02:29 (29d 18h 51m remaining)") == true)
+    XCTAssertNil(metric.expiryDateLabel)
+    XCTAssertEqual(metric.expiresAt, now.addingTimeInterval(2_573_499))
     XCTAssertNil(metric.resetAt)
     XCTAssertNil(metric.windowSeconds)
   }
@@ -101,6 +108,8 @@ final class LongcatQuotaTests: XCTestCase {
     XCTAssertEqual(metric.remainingPercent, 50)
     XCTAssertTrue(metric.detail?.contains("Token-pack expiry: 2026-12-03 01:02:29") == true)
     XCTAssertFalse(metric.detail?.contains("Next") == true)
+    XCTAssertEqual(metric.expiryDateLabel, "2026-12-03")
+    XCTAssertNil(metric.expiresAt)
   }
 
   func testGroupedPacksUseSumOfTotalsAndEarliestLiveExpiry() async throws {
@@ -112,6 +121,8 @@ final class LongcatQuotaTests: XCTestCase {
     XCTAssertEqual(metric.remainingPercent, 75)
     XCTAssertEqual(metric.totalDisplay, "400 tokens")
     XCTAssertTrue(metric.detail?.contains("Next token-pack expiry: 2026-12-01T00:00:00Z") == true)
+    XCTAssertEqual(metric.expiresAt, Date(timeIntervalSince1970: 1_796_083_200))
+    XCTAssertNil(metric.expiryDateLabel)
   }
 
   func testPartiallyMissingTotalsKeepWholeScopeOnHighTideFallback() async throws {
