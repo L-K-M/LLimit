@@ -371,6 +371,8 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
   public var remainingPercent: Int?
   /// Raw remaining units, independent of rounded display text.
   public var remainingAmount: Double?
+  /// Allowance reported by the provider, in the same units as remainingAmount.
+  public var totalAmount: Double?
   /// An observed balance used as the denominator when the server supplies no total.
   public var estimatedTotal: Double?
   /// Fingerprint of the credential that produced this reading, so an estimate
@@ -381,6 +383,10 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
   public var totalDisplay: String?
   public var resetAt: Date?
   public var resetIn: String?
+  /// Expiration of the reported allowance, independent of any refill schedule.
+  public var expiresAt: Date?
+  /// Provider's calendar date when the expiry does not specify a timezone.
+  public var expiryDateLabel: String?
   /// Reported or explicitly configured duration, never inferred from a display label.
   public var windowSeconds: Int?
   public var isUnlimited: Bool
@@ -393,12 +399,15 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
     label: String,
     remainingPercent: Int? = nil,
     remainingAmount: Double? = nil,
+    totalAmount: Double? = nil,
     estimatedTotal: Double? = nil,
     estimateKeyHash: String? = nil,
     usedDisplay: String? = nil,
     totalDisplay: String? = nil,
     resetAt: Date? = nil,
     resetIn: String? = nil,
+    expiresAt: Date? = nil,
+    expiryDateLabel: String? = nil,
     windowSeconds: Int? = nil,
     isUnlimited: Bool = false,
     detail: String? = nil,
@@ -408,12 +417,15 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
     self.label = label
     self.remainingPercent = remainingPercent
     self.remainingAmount = remainingAmount
+    self.totalAmount = totalAmount
     self.estimatedTotal = estimatedTotal
     self.estimateKeyHash = estimateKeyHash
     self.usedDisplay = usedDisplay
     self.totalDisplay = totalDisplay
     self.resetAt = resetAt
     self.resetIn = resetIn
+    self.expiresAt = expiresAt
+    self.expiryDateLabel = expiryDateLabel
     self.windowSeconds = windowSeconds
     self.isUnlimited = isUnlimited
     self.detail = detail
@@ -437,6 +449,16 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
 
   public var isPercentageEstimated: Bool {
     remainingPercent != nil && estimatedTotal != nil
+  }
+
+  /// Keep small amounts of consumption visible when a whole-percent label rounds
+  /// to 100. Older snapshots and percentage-only providers retain their geometry.
+  public var remainingFraction: Double? {
+    if let amount = remainingAmount, amount.isFinite, amount >= 0,
+       let total = totalAmount ?? estimatedTotal, total.isFinite, total > 0 {
+      return min(1, amount / total)
+    }
+    return remainingPercent.map { Double(clampPercent($0)) / 100 }
   }
 }
 

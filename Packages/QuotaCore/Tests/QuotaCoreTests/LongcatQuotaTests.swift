@@ -42,6 +42,109 @@ final class LongcatQuotaTests: XCTestCase {
     XCTAssertEqual(spentAgain.providers.first?.maxUsagePercent, 50)
   }
 
+  func testReportedAllowanceWinsOverObservedBaselineAndRefills() async throws {
+    let baseline = await snapshot(1_000)
+    for (amount, percentage) in [(400, 40), (600, 60), (0, 0)] {
+      let body = #"{"code":0,"data":{"currentLot":{"lotId":"pack","remainingToken":\#(amount),"totalToken":"1000","consumedRatio":0},"otherLots":[]}}"#
+      let result = await QuotaCoordinator.live(httpClient: LongcatHTTP(amount: 0, summary: body)).refresh(
+        configurations: [configuration()], now: now.addingTimeInterval(1), previousSnapshot: baseline)
+      let metric = try XCTUnwrap(result.providers.first?.metrics.first)
+      XCTAssertEqual(metric.remainingPercent, percentage)
+      XCTAssertNil(metric.estimatedTotal)
+      XCTAssertFalse(metric.isPercentageEstimated)
+      XCTAssertFalse(metric.detail?.contains("baseline") == true)
+    }
+  }
+
+  func testReportedPackRetainsPreciseFractionAndExpiryWithoutReset() async throws {
+    let body = #"{"code":0,"data":{"currentLot":{"lotId":"pack","remainingToken":"995960000","totalToken":"1000000000","consumedToken":"4040000","consumedRatio":0.00404,"expireTime":1796256000000},"otherLots":[]}}"#
+    let usage = try await LongcatQuotaClient(httpClient: LongcatHTTP(amount: 0, summary: body))
+      .fetchUsage(configuration: configuration(), now: now)
+    let metric = try XCTUnwrap(usage.metrics.first)
+    XCTAssertEqual(metric.remainingPercent, 100)
+    XCTAssertEqual(try XCTUnwrap(metric.remainingFraction), 0.99596, accuracy: 0.0000001)
+    XCTAssertEqual(metric.totalAmount, 1_000_000_000)
+    XCTAssertEqual(metric.totalDisplay, "1,000,000,000 tokens")
+    XCTAssertTrue(metric.detail?.contains("Expires 2026-12-03T00:00:00Z") == true)
+    XCTAssertEqual(metric.expiresAt, Date(timeIntervalSince1970: 1_796_256_000))
+    XCTAssertNil(metric.expiryDateLabel)
+    XCTAssertNil(metric.resetAt)
+    XCTAssertNil(metric.windowSeconds)
+    XCTAssertNil(QuotaPace(metric: metric, provider: .longcat, fetchedAt: now, now: now))
+    let restored = try JSONDecoder().decode(UsageMetric.self, from: JSONEncoder().encode(metric))
+    XCTAssertEqual(try XCTUnwrap(restored.remainingFraction), 0.99596, accuracy: 0.0000001)
+    XCTAssertEqual(restored.expiresAt, metric.expiresAt)
+    XCTAssertFalse(restored.isPercentageEstimated)
+  }
+
+  func testOlderSnapshotsRetainPercentageGeometryWithoutReportedTotal() throws {
+    let old = Data(#"{"id":"token-balance","label":"Tokens remaining","remainingPercent":75,"isUnlimited":false}"#.utf8)
+    let metric = try JSONDecoder().decode(UsageMetric.self, from: old)
+    XCTAssertNil(metric.totalAmount)
+    XCTAssertNil(metric.expiresAt)
+    XCTAssertNil(metric.expiryDateLabel)
+    XCTAssertEqual(metric.remainingFraction, 0.75)
+  }
+
+  func testLiveConsoleExpiryPreservesUnzonedDateAndServerCountdown() async throws {
+    let body = #"{"code":0,"data":{"currentLot":{"lotId":123,"remainingToken":993207730,"totalToken":1000000000,"expireTime":"2026-12-03 01:02:29","remainSeconds":2573499},"otherLots":[]}}"#
+    let usage = try await LongcatQuotaClient(httpClient: LongcatHTTP(amount: 0, summary: body))
+      .fetchUsage(configuration: configuration(), now: now)
+    let metric = try XCTUnwrap(usage.metrics.first)
+    XCTAssertEqual(try XCTUnwrap(metric.remainingFraction), 0.99320773, accuracy: 0.00000001)
+    XCTAssertTrue(metric.detail?.contains("Expires 2026-12-03 01:02:29 (29d 18h 51m remaining)") == true)
+    XCTAssertNil(metric.expiryDateLabel)
+    XCTAssertEqual(metric.expiresAt, now.addingTimeInterval(2_573_499))
+    XCTAssertNil(metric.resetAt)
+    XCTAssertNil(metric.windowSeconds)
+  }
+
+  func testUnzonedExpiryWithoutCountdownCannotClaimEarliestOrAssumeTimezone() async throws {
+    let body = #"{"code":0,"data":{"currentLot":{"lotId":"a","remainingToken":50,"totalToken":100,"expireTime":"2026-12-03 01:02:29"},"otherLots":[{"lotId":"b","remainingToken":50,"totalToken":100,"expireTime":"2026-12-01T00:00:00Z"},{"lotId":"expired","remainingToken":100,"totalToken":100,"expireTime":"2026-12-04 01:02:29","remainSeconds":-1}]}}"#
+    let usage = try await LongcatQuotaClient(httpClient: LongcatHTTP(amount: 0, summary: body))
+      .fetchUsage(configuration: configuration(), now: now)
+    let metric = try XCTUnwrap(usage.metrics.first)
+    XCTAssertEqual(metric.remainingAmount, 100)
+    XCTAssertEqual(metric.remainingPercent, 50)
+    XCTAssertTrue(metric.detail?.contains("Token-pack expiry: 2026-12-03 01:02:29") == true)
+    XCTAssertFalse(metric.detail?.contains("Next") == true)
+    XCTAssertEqual(metric.expiryDateLabel, "2026-12-03")
+    XCTAssertNil(metric.expiresAt)
+  }
+
+  func testGroupedPacksUseSumOfTotalsAndEarliestLiveExpiry() async throws {
+    let body = #"{"code":0,"data":{"currentLot":{"lotId":"a","remainingToken":20,"totalToken":100,"expireTime":"2026-12-03T00:00:00Z"},"otherLots":[{"lotId":"b","remainingToken":280,"totalToken":300,"expireTime":"2026-12-01T00:00:00Z"},{"lotId":"expired","remainingToken":100,"totalToken":100,"expireTime":"2020-01-01T00:00:00Z"},{"lotId":"inactive","status":"EXPIRED","remainingToken":100,"totalToken":100}]}}"#
+    let usage = try await LongcatQuotaClient(httpClient: LongcatHTTP(amount: 0, summary: body))
+      .fetchUsage(configuration: configuration(), now: now)
+    let metric = try XCTUnwrap(usage.metrics.first)
+    XCTAssertEqual(metric.remainingAmount, 300)
+    XCTAssertEqual(metric.remainingPercent, 75)
+    XCTAssertEqual(metric.totalDisplay, "400 tokens")
+    XCTAssertTrue(metric.detail?.contains("Next token-pack expiry: 2026-12-01T00:00:00Z") == true)
+    XCTAssertEqual(metric.expiresAt, Date(timeIntervalSince1970: 1_796_083_200))
+    XCTAssertNil(metric.expiryDateLabel)
+  }
+
+  func testPartiallyMissingTotalsKeepWholeScopeOnHighTideFallback() async throws {
+    let body = #"{"code":0,"data":{"currentLot":{"lotId":"a","remainingToken":20,"totalToken":100},"otherLots":[{"lotId":"b","remainingToken":80}]}}"#
+    let result = await QuotaCoordinator.live(httpClient: LongcatHTTP(amount: 0, summary: body)).refresh(
+      configurations: [configuration()], now: now)
+    let metric = try XCTUnwrap(result.providers.first?.metrics.first)
+    XCTAssertEqual(metric.remainingAmount, 100)
+    XCTAssertEqual(metric.remainingPercent, 100)
+    XCTAssertEqual(metric.estimatedTotal, 100)
+    XCTAssertNil(metric.totalDisplay)
+  }
+
+  func testReportedReadingCannotBecomeAFallbackBaseline() async throws {
+    let body = #"{"code":0,"data":{"currentLot":{"lotId":"pack","remainingToken":400,"totalToken":1000},"otherLots":[]}}"#
+    let reported = await QuotaCoordinator.live(httpClient: LongcatHTTP(amount: 0, summary: body)).refresh(
+      configurations: [configuration()], now: now)
+    let fallback = await snapshot(200, previous: reported, offset: 1)
+    XCTAssertEqual(fallback.providers.first?.metrics.first?.remainingPercent, 100)
+    XCTAssertEqual(fallback.providers.first?.metrics.first?.estimatedTotal, 200)
+  }
+
   func testBaselineSurvivesSnapshotStoreRestartAndFailedRefresh() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
@@ -214,15 +317,17 @@ final class LongcatQuotaTests: XCTestCase {
 
   func testSummaryScopesRemainSeparateAndLotOrderDoesNotChangeMetricIDs() async throws {
     let scope = #"{\"models\":[\"Longcat-2.5\"]}"#
-    let current = #"{"lotId":"one","status":"ACTIVE","remainingToken":"100","modelScope":"\#(scope)"}"#
-    let other = #"{"lotId":"two","status":"ACTIVE","remainingToken":50,"modelScope":"\#(scope)"},{"lotId":"all","remainingToken":25}"#
+    let current = #"{"lotId":"one","status":"ACTIVE","remainingToken":"100","totalToken":200,"modelScope":"\#(scope)"}"#
+    let other = #"{"lotId":"two","status":"ACTIVE","remainingToken":50,"totalToken":100,"modelScope":"\#(scope)"},{"lotId":"all","remainingToken":25,"totalToken":100}"#
     let body = #"{"code":0,"data":{"currentLot":\#(current),"otherLots":[\#(other)]}}"#
     let usage = try await LongcatQuotaClient(httpClient: LongcatHTTP(amount: 0, summary: body))
       .fetchUsage(configuration: configuration(), now: now)
     XCTAssertEqual(usage.metrics.count, 2)
     XCTAssertEqual(usage.metrics.first { $0.id == "token-balance" }?.remainingAmount, 25)
     XCTAssertEqual(usage.metrics.first { $0.id != "token-balance" }?.remainingAmount, 150)
-    XCTAssertTrue(usage.metrics.allSatisfy { $0.remainingPercent == nil && $0.estimatedTotal == nil })
+    XCTAssertEqual(usage.metrics.first { $0.id == "token-balance" }?.remainingPercent, 25)
+    XCTAssertEqual(usage.metrics.first { $0.id != "token-balance" }?.remainingPercent, 50)
+    XCTAssertTrue(usage.metrics.allSatisfy { $0.estimatedTotal == nil })
   }
 
   func testMissingOrEmptyModelListsMeanAllModels() async throws {
@@ -240,6 +345,9 @@ final class LongcatQuotaTests: XCTestCase {
       #"{"currentLot":{"lotId":"a","remainingToken":true},"otherLots":[]}"#,
       #"{"currentLot":{"lotId":"a","remainingToken":-1},"otherLots":[]}"#,
       #"{"currentLot":{"lotId":"a","remainingToken":"NaN"},"otherLots":[]}"#,
+      #"{"currentLot":{"lotId":"a","remainingToken":101,"totalToken":100},"otherLots":[]}"#,
+      #"{"currentLot":{"lotId":"a","remainingToken":1,"totalToken":-1},"otherLots":[]}"#,
+      #"{"currentLot":{"lotId":"a","remainingToken":1,"expireTime":"invalid"},"otherLots":[]}"#,
       #"{"currentLot":{"lotId":"a","remainingToken":3}}"#,
       #"{"currentLot":{"lotId":"a","remainingToken":3},"otherLots":[{"lotId":"a","remainingToken":3}]}"#
     ] {
@@ -257,6 +365,8 @@ final class LongcatQuotaTests: XCTestCase {
         summaryStatus: missing ? 404 : 200)
       let usage = try await LongcatQuotaClient(httpClient: http).fetchUsage(configuration: configuration(), now: now)
       XCTAssertEqual(usage.metrics.first?.remainingAmount, 80)
+      XCTAssertEqual(usage.metrics.first?.remainingPercent, 8)
+      XCTAssertEqual(usage.metrics.first?.totalDisplay, "1,000 tokens")
       let paths = await http.requests.map { $0.url!.path }
       XCTAssertEqual(paths.last, "/api/lc-platform/v1/tokenUsage")
     }

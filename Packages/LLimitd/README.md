@@ -228,10 +228,12 @@ Longcat reads remaining tokens from your authenticated Longcat international
 platform session. Run `llimit accounts add --provider longcat` and paste the
 authentication Cookie header from `longcat.ai/platform/usage` at the hidden prompt.
 LLimit validates the account and token balance before saving. API keys cannot read
-this quota. The first positive balance sets the ring to 100%; every observed token
-increase sets a new 100% baseline, even below an older peak. Decreases show the
-fraction left against that baseline, which survives restarts. Percentages are marked
-as estimated; token-pack expiry is not a scheduled quota reset.
+this quota. Percentages use Longcat's reported total allowance when available.
+Token-pack expiry appears in the quota details and does not imply an automatic
+refill or reset. When no usable allowance is reported, the first positive balance
+sets the ring to 100%; every observed token increase sets a new 100% baseline,
+even below an older peak. Decreases show the fraction left against that baseline,
+which survives restarts. These fallback percentages are marked as estimated.
 
 When the session expires, use
 `llimit accounts update <account-id> --set longcat.session_cookies` and the hidden

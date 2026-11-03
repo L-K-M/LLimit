@@ -481,13 +481,14 @@ private struct GlossRing: View {
   let remaining: Int?
   let unlimited: Bool
   let tint: Color
+  var remainingFraction: Double? = nil
   var isEstimated: Bool = false
   var diameter: CGFloat = 46
   var lineWidth: CGFloat = 5
 
   private var progress: Double {
     if unlimited { return 1 }
-    return Double(max(0, min(100, remaining ?? 0))) / 100
+    return remainingFraction ?? Double(max(0, min(100, remaining ?? 0))) / 100
   }
 
   private var innerDiameter: CGFloat { diameter - lineWidth * 2 }
@@ -1444,6 +1445,7 @@ private struct OverviewCard: View {
                       step: accountColorStep(forAccountID: provider.accountID, in: accounts),
                       primaryHexColor: primaryColors[provider.accountID]
                     ),
+                    remainingFraction: metric?.remainingFraction,
                     isEstimated: MenuBarQuotaStyling.isPercentageEstimated(for: provider),
                     diameter: 40,
                     lineWidth: 4.5
@@ -1716,6 +1718,7 @@ private struct ProviderQuotaCard: View {
             remaining: MenuBarQuotaStyling.remainingPercent(for: usage),
             unlimited: usage.metrics.allSatisfy(\.isUnlimited) && !usage.metrics.isEmpty,
             tint: accent,
+            remainingFraction: MenuBarQuotaStyling.constrainingMetric(for: usage)?.remainingFraction,
             isEstimated: MenuBarQuotaStyling.isPercentageEstimated(for: usage)
           )
         }
@@ -1961,7 +1964,7 @@ private struct MetricQuotaRow: View {
 
   private var barProgress: Double {
     if metric.isUnlimited { return 1 }
-    return Double(remaining ?? 0) / 100
+    return metric.remainingFraction ?? 0
   }
 
   private var resetCountdown: String? {
