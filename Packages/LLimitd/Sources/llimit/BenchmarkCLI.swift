@@ -121,9 +121,11 @@ private func benchmarkModels(_ arguments: [String]) async {
   if executable == nil {
     let parent = ProcessInfo.processInfo.environment
     let home = FileManager.default.homeDirectoryForCurrentUser
-    let directories = (harness == .opencode ? [home.appendingPathComponent(".opencode/bin").path] : [])
-      + [home.appendingPathComponent(".local/bin").path, "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]
-      + (parent["PATH"] ?? "").split(separator: ":").map(String.init)
+    var directories: [String] = []
+    if harness == .opencode { directories.append(home.appendingPathComponent(".opencode/bin").path) }
+    directories.append(contentsOf: [home.appendingPathComponent(".local/bin").path, "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"])
+    let searchPath = (parent["PATH"] ?? "").split(separator: ":").map { String($0) }
+    directories.append(contentsOf: searchPath)
     executable = directories.filter { $0.hasPrefix("/") }.map {
       URL(fileURLWithPath: $0).appendingPathComponent(harness.rawValue).path
     }.first { FileManager.default.isExecutableFile(atPath: $0) }
