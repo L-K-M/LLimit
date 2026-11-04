@@ -5,6 +5,31 @@ import XCTest
 final class BenchmarkRunnerTests: XCTestCase {
   private let acceptedVerdict = #"{"accepted":true,"score":8.5,"explanation":"The supplied patch satisfies the task and acceptance evidence."}"#
 
+  func testAccountPriceSuppliesCostAndManualAllocationStillWins() async throws {
+    let fixture = try Fixture()
+    defer { fixture.remove() }
+    var automatic = candidate(name: "Automatic", script: "printf done", account: "automatic")
+    automatic.allowanceCost = nil
+    automatic.subscriptionPricing = SubscriptionPricing(amount: 200)
+    var manual = candidate(name: "Manual", script: "printf done", account: "manual")
+    manual.allowanceCost = 10
+    manual.subscriptionPricing = SubscriptionPricing(amount: 200)
+    let quota = QuotaFixture()
+    let plan = makePlan(fixture: fixture, candidates: [automatic, manual])
+    let report = try await BenchmarkRunner().run(plan: plan, directory: fixture.reports, quotaReader: { id in
+      var usage = try await quota.read(id)
+      usage.metrics[0].windowSeconds = 604_800
+      return usage
+    })
+    let automaticRun = try XCTUnwrap(report.runs.first { $0.candidateID == automatic.id })
+    XCTAssertEqual(try XCTUnwrap(automaticRun.estimatedCost), 200 * 12 * 7 / 365.2425 * 0.02, accuracy: 0.000001)
+    XCTAssertTrue(automaticRun.costBasis?.contains("Account subscription") == true)
+    let manualRun = try XCTUnwrap(report.runs.first { $0.candidateID == manual.id })
+    XCTAssertEqual(try XCTUnwrap(manualRun.estimatedCost), 0.2, accuracy: 0.000001)
+    XCTAssertEqual(manualRun.costBasis, "Manual allocation for the selected quota window.")
+    XCTAssertEqual(report.plan.candidates.first?.subscriptionPricing?.amount, 200)
+  }
+
   func testCodexJudgeUsesFinalResponseAfterCommentary() {
     let judge = UUID()
     let output = #"""

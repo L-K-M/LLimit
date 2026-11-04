@@ -28,15 +28,18 @@ public struct BenchmarkCandidate: Codable, Hashable, Identifiable, Sendable {
   public var quotaMetricID: String?
   /// User-allocated cost of the selected metric's complete allowance, in the plan currency.
   public var allowanceCost: Double?
+  /// Account price frozen at the start of the benchmark; a manual allocation wins.
+  public var subscriptionPricing: SubscriptionPricing?
 
   public init(id: UUID = UUID(), name: String, command: BenchmarkCommand, accountID: String? = nil,
-              quotaMetricID: String? = nil, allowanceCost: Double? = nil) {
+              quotaMetricID: String? = nil, allowanceCost: Double? = nil, subscriptionPricing: SubscriptionPricing? = nil) {
     self.id = id
     self.name = name
     self.command = command
     self.accountID = accountID
     self.quotaMetricID = quotaMetricID
     self.allowanceCost = allowanceCost
+    self.subscriptionPricing = subscriptionPricing
   }
 }
 
@@ -122,6 +125,7 @@ public struct BenchmarkPlan: Codable, Hashable, Sendable {
                   "The acceptance command must be nonblank, contain no NUL characters and fit within 16 KiB.")
     }
     for candidate in candidates {
+      if let price = candidate.subscriptionPricing { _ = try price.validated() }
       try require(nonblank(candidate.name) && candidate.name.count <= 200, "Enter an agent setup name of at most 200 characters.")
       try validateCommand(candidate.command)
       if let allowanceCost = candidate.allowanceCost {
@@ -275,13 +279,14 @@ public struct BenchmarkRun: Codable, Hashable, Identifiable, Sendable {
   public var acceptancePassed: Bool?
   public var quotaChanges: [BenchmarkQuotaChange]
   public var estimatedCost: Double?
+  public var costBasis: String?
   public var tokenUsage: BenchmarkTokenUsage?
   public var evaluations: [BenchmarkEvaluation]
 
   public init(id: UUID = UUID(), candidateID: UUID, repetition: Int, startedAt: Date = Date(),
               durationSeconds: Double = 0, outcome: BenchmarkOutcome = .completed, output: String = "", patch: String = "",
               acceptancePassed: Bool? = nil, quotaChanges: [BenchmarkQuotaChange] = [], estimatedCost: Double? = nil,
-              tokenUsage: BenchmarkTokenUsage? = nil, evaluations: [BenchmarkEvaluation] = []) {
+              tokenUsage: BenchmarkTokenUsage? = nil, evaluations: [BenchmarkEvaluation] = [], costBasis: String? = nil) {
     self.id = id
     self.candidateID = candidateID
     self.repetition = repetition
@@ -293,6 +298,7 @@ public struct BenchmarkRun: Codable, Hashable, Identifiable, Sendable {
     self.acceptancePassed = acceptancePassed
     self.quotaChanges = quotaChanges
     self.estimatedCost = estimatedCost
+    self.costBasis = costBasis
     self.tokenUsage = tokenUsage
     self.evaluations = evaluations
   }

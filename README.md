@@ -90,10 +90,19 @@ authentication, rather than verified model entitlement. Project settings come fr
 the same committed repository snapshot used by trials. Configured extensions/plugins
 are optional and use the same setting during discovery and execution.
 
-Cost is optional and explicitly allocated: supply the cost of a complete selected
-quota allowance, and LLimit multiplies it by the measured fraction consumed.
-That estimate is separate from provider charges. Missing measurements, resets,
-quota increases and changes below percentage resolution stay unavailable.
+Set an account's optional price, currency and monthly/yearly billing period in
+**Settings → Accounts → Subscription cost**. Benchmarks can allocate that price
+across all available quota in the selected window: yearly prices are divided by
+12, monthly windows of 28–31 days use the monthly equivalent, and other known
+durations are prorated using a 365.2425-day average year. Automatic estimates
+require matching account/report currencies and a known window duration.
+Overlapping windows are never added together. A full-window cost override
+(`allowanceCost` in CLI plans) takes precedence over the account price.
+
+Task cost is the selected window's allocated cost multiplied by its measured
+fraction consumed: estimated subscription value, not an extra charge or exact
+money spent. Missing measurements, resets, quota increases and changes below
+percentage resolution stay unavailable.
 Prompts, patches and reports remain in a private local benchmark directory and
 are excluded from widgets and normal quota history. Judges run after candidate
 measurements, with their elapsed time reported separately.

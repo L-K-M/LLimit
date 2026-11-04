@@ -76,7 +76,12 @@ final class BenchmarkViewModel: ObservableObject {
     }
     let revisions = Dictionary(uniqueKeysWithValues: selected.map { ($0, model.benchmarkRevision(accountID: $0)) })
     let redactor = BenchmarkRedactor(configurations: model.providerAccounts.map { $0.runtimeConfiguration() })
-    let frozen = plan
+    var pricedPlan = plan
+    for index in pricedPlan.candidates.indices {
+      let id = pricedPlan.candidates[index].accountID
+      pricedPlan.candidates[index].subscriptionPricing = model.providerAccounts.first { $0.id == id }?.subscriptionPricing
+    }
+    let frozen = pricedPlan
     isRunning = true
     errorMessage = nil
     progress = "Preparing benchmark"

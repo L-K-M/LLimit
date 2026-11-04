@@ -355,12 +355,34 @@ edits or token renewals; changed credentials invalidate a reading.
 
 For each candidate, optional `accountID` selects a full ID from `accounts list`.
 `quotaMetricID` selects a metric ID from that account's `status --json` entry.
-`allowanceCost` is an allocation you supply for 100% of that metric's allowance,
-in the plan's three-letter `currency` (default `USD`). For example, allocating
-USD 10 to a complete weekly allowance and measuring a 2 percentage-point drop
-estimates USD 0.20 for the trial. A monthly subscription price is not
-automatically the price of a shorter quota window. Overlapping window costs are
-never added together. Without a usable measurement, the cost stays unavailable.
+Save an account's subscription price, three-letter currency and billing period
+with:
+
+```bash
+llimit accounts update ID --subscription-cost 200 --subscription-currency USD --subscription-period monthly
+llimit accounts update ID --subscription-cost off
+```
+
+Use `yearly` for annual billing; `off` clears the saved price. On macOS, the same
+settings are under **Settings → Accounts → Subscription cost**. Zero represents
+a free subscription. Saved prices are retained when credentials are reimported.
+
+Automatic estimates allocate the fee across all available quota in the selected
+window. Yearly prices are divided by 12 to obtain their monthly equivalent.
+Monthly windows of 28–31 days use that monthly equivalent; other known durations
+are prorated using a 365.2425-day average year. The account currency must match
+the plan's `currency` (default `USD`), and the selected metric must report a
+usable duration. Currencies are not converted. Only the selected window is
+used; overlapping window costs are never added together.
+
+The window's allocated cost is multiplied by the measured fraction consumed.
+For example, a USD 200 monthly subscription and a 2 percentage-point drop in a
+weekly allowance estimates `200 × 12 × 7 / 365.2425 × 0.02`, about USD 0.92.
+Optional `allowanceCost` overrides the automatic allocation with your own cost
+for 100% of the selected metric's allowance, in the plan currency. An override
+of USD 10 and the same drop estimates USD 0.20. These are estimates of allocated
+subscription value, not extra provider charges or exact money spent. Without a
+usable measurement, the cost stays unavailable.
 
 `settleSeconds` adds a reporting delay before the after reading; increase it
 for providers with delayed reporting. The runner spaces Anthropic measurements

@@ -355,6 +355,7 @@ public struct BenchmarkRedactor: Sendable {
       var run = $0
       run.output = redact($0.output)
       run.patch = redact($0.patch)
+      run.costBasis = $0.costBasis.map(redact)
       run.quotaChanges = $0.quotaChanges.map {
         var change = $0
         change.label = redact($0.label)

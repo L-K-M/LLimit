@@ -123,6 +123,52 @@ class BenchmarkCLITests(unittest.TestCase):
         self.assertIn("--exclusive-accounts", result.stderr)
         self.assertFalse((self.root / "data").exists())
 
+    def subscription_account(self):
+        self.cli("accounts", "add", "--provider", "junie", "--name", "Offline account",
+                 "--set", "junie.api_key=inert-offline-fixture")
+        path = self.root / "config" / "LLimit" / "quota-settings.json"
+        account = json.loads(path.read_text())["accounts"][0]
+        return path, account
+
+    def test_subscription_price_updates_preserve_credentials_and_allow_clearing(self):
+        path, original = self.subscription_account()
+        account_id = original["id"]
+        self.cli("accounts", "update", account_id, "--subscription-cost", "240",
+                 "--subscription-currency", "CHF", "--subscription-period", "yearly")
+        account = json.loads(path.read_text())["accounts"][0]
+        self.assertEqual(account["subscriptionPricing"],
+                         {"amount": 240, "currency": "CHF", "billingPeriod": "yearly"})
+        self.assertEqual(account["credentials"], original["credentials"])
+        self.cli("accounts", "update", account_id, "--subscription-cost", "0",
+                 "--name", "Free account")
+        account = json.loads(path.read_text())["accounts"][0]
+        self.assertEqual(account["subscriptionPricing"],
+                         {"amount": 0, "currency": "CHF", "billingPeriod": "yearly"})
+        self.assertEqual(account["displayName"], "Free account")
+        self.cli("accounts", "update", account_id, "--subscription-currency", "USD")
+        self.assertEqual(json.loads(path.read_text())["accounts"][0]["subscriptionPricing"]["currency"], "USD")
+        self.cli("accounts", "update", account_id, "--subscription-cost", "off")
+        account = json.loads(path.read_text())["accounts"][0]
+        self.assertIsNone(account.get("subscriptionPricing"))
+        self.assertEqual(account["credentials"], original["credentials"])
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+    def test_invalid_subscription_prices_leave_settings_unchanged(self):
+        path, account = self.subscription_account()
+        original = path.read_bytes()
+        for arguments in [
+            ["--subscription-cost", "-1"], ["--subscription-cost", "nan"],
+            ["--subscription-cost", "inf"], ["--subscription-cost", "10", "--subscription-currency", "usd"],
+            ["--subscription-cost", "10", "--subscription-period", "weekly"],
+            ["--subscription-currency", "USD"],
+            ["--subscription-cost", "off", "--subscription-period", "monthly"],
+        ]:
+            with self.subTest(arguments=arguments):
+                result = self.cli("accounts", "update", account["id"], "--name", "Must not save",
+                                  *arguments, check=False)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(path.read_bytes(), original)
+
     def test_offline_trials_preserve_repository_and_round_trip_reports(self):
         plan = self.plan()
         (self.repository / "fixture.txt").write_text("uncommitted edit")

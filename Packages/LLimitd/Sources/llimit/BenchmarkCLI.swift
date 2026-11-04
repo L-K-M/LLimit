@@ -15,7 +15,7 @@ func runBench(_ arguments: [String]) async {
     guard arguments.count == 3, arguments[2] == "--exclusive-accounts" else {
       fail("use bench run <plan.json> --exclusive-accounts; this confirms each CLI uses its selected quota account and no other work uses that account during measurement")
     }
-    let plan: BenchmarkPlan
+    var plan: BenchmarkPlan
     do {
       let data = try Data(contentsOf: URL(fileURLWithPath: arguments[1]))
       guard data.count <= 2 * 1_024 * 1_024 else { fail("benchmark plans must be no larger than 2 MiB") }
@@ -29,12 +29,14 @@ func runBench(_ arguments: [String]) async {
     let redactor: BenchmarkRedactor
     do {
       redactor = try await accounts.prepare(plan: plan)
+      plan = await accounts.withSubscriptionPrices(plan)
     } catch {
       fail("a selected quota account is missing, disabled, incomplete or managed by the macOS app; check accounts list and use the full account ID")
     }
     let runner = BenchmarkRunner()
+    let frozenPlan = plan
     let task = Task {
-      try await runner.run(plan: plan, directory: directory, redactor: redactor,
+      try await runner.run(plan: frozenPlan, directory: directory, redactor: redactor,
                            credentialSource: { await accounts.currentRedactor() },
                            quotaReader: { id in try await accounts.read(id: id) },
                            update: { _, message in benchmarkProgress(message) })
@@ -251,6 +253,15 @@ private actor BenchmarkCLIAccounts {
           let usage = result.providers.first(where: { $0.accountID == id && $0.provider == account.provider }),
           usage.fetchedAt >= began else { throw BenchmarkError.unavailableAccount }
     return usage
+  }
+
+  func withSubscriptionPrices(_ plan: BenchmarkPlan) -> BenchmarkPlan {
+    var copy = plan
+    for index in copy.candidates.indices where copy.candidates[index].subscriptionPricing == nil {
+      let id = copy.candidates[index].accountID
+      copy.candidates[index].subscriptionPricing = daemon.settings.accounts.first { $0.id == id }?.subscriptionPricing
+    }
+    return copy
   }
 
   func currentRedactor() -> BenchmarkRedactor {

@@ -32,6 +32,8 @@ func printUsage() {
       llimit accounts disable <account-id>
       llimit accounts remove <account-id>
       llimit accounts update <account-id> [--name <name>] [--set key[=value] …]
+                            [--subscription-cost <amount|off>] [--subscription-currency <code>]
+                            [--subscription-period monthly|yearly]
       llimit accounts rename <account-id> <name>
       llimit accounts reimport <account-id> [--from <stable-id>]
       llimit refresh

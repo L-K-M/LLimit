@@ -3,6 +3,17 @@ import XCTest
 @testable import QuotaCore
 
 final class BenchmarkHarnessTests: XCTestCase {
+  func testPiUpdatedCatalogSupportsOpenRouterTildeAliases() throws {
+    let response = #"{"id":"llimit-models","type":"response","command":"get_available_models","success":true,"data":{"models":[{"provider":"openai-codex","id":"regular-model","name":"Regular model"},{"provider":"openrouter","id":"~anthropic/claude-sonnet-latest","name":"Sonnet alias"}]}}"#
+    let models = try BenchmarkHarnessDiscovery.decodeModels(response, harness: .pi)
+    XCTAssertEqual(models.count, 2)
+    let alias = try XCTUnwrap(models.first { $0.provider == "openrouter" })
+    XCTAssertEqual(alias.modelID, "~anthropic/claude-sonnet-latest")
+    XCTAssertTrue(alias.command(executable: "/bin/pi", judge: false).arguments.contains("~anthropic/claude-sonnet-latest"))
+    XCTAssertEqual(try BenchmarkHarnessDiscovery.decodeModels("openrouter/~anthropic/claude-sonnet-latest\n", harness: .opencode).first?.modelID,
+                   "~anthropic/claude-sonnet-latest")
+  }
+
   func testPiCatalogKeepsOnlyPublicMetadataAndStableSortedIdentifiers() throws {
     let response = #"{"id":"llimit-models","type":"response","command":"get_available_models","success":true,"data":{"models":[{"provider":"z-provider","id":"model/with/slashes","name":"Z model","headers":{"Authorization":"private-token"},"baseUrl":"https://private-endpoint.invalid","cost":{"input":1}},{"provider":"a-provider","id":"model-b","name":"B model"},{"provider":"a-provider","id":"model-b","name":"Duplicate"}]}}"#
     let models = try BenchmarkHarnessDiscovery.decodeModels(response, harness: .pi)

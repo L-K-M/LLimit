@@ -611,19 +611,22 @@ public struct ProviderAccount: Codable, Hashable, Identifiable, Sendable {
   public var displayName: String
   public var isEnabled: Bool
   public var credentials: [String: String]
+  public var subscriptionPricing: SubscriptionPricing?
 
   public init(
     id: String = UUID().uuidString,
     provider: QuotaProvider,
     displayName: String? = nil,
     isEnabled: Bool = true,
-    credentials: [String: String] = [:]
+    credentials: [String: String] = [:],
+    subscriptionPricing: SubscriptionPricing? = nil
   ) {
     self.id = id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? UUID().uuidString : id
     self.provider = provider
     self.displayName = ProviderAccount.normalizedDisplayName(displayName, provider: provider)
     self.isEnabled = isEnabled
     self.credentials = credentials
+    self.subscriptionPricing = subscriptionPricing
   }
 
   public var resolvedDisplayName: String {
@@ -677,7 +680,8 @@ public struct ProviderAccount: Codable, Hashable, Identifiable, Sendable {
       provider: provider,
       displayName: displayName,
       isEnabled: isEnabled,
-      credentials: [:]
+      credentials: [:],
+      subscriptionPricing: subscriptionPricing
     )
   }
 
