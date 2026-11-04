@@ -68,6 +68,32 @@ private (0600), atomically replaced and fsynced.
 Integrated from [#110](https://github.com/L-K-M/LLimit/pull/110) (events/Linux hooks)
 and [#100](https://github.com/L-K-M/LLimit/pull/100) (macOS settings/native notifications).
 
+## Agent benchmarks
+
+Use **Settings → Benchmarks** on macOS, or `llimit bench` on Linux, to compare
+agent setups on your own coding tasks. Choose a committed Git repository, task,
+evaluation criteria, repetitions, agent commands and two judges. Every trial
+starts from the same commit in its own workspace. Results include elapsed time,
+acceptance checks, independent judge scores and disagreements, and optional
+before/after quota measurements. Failed trials count toward cost per accepted task.
+
+Agents use their own CLI login. Match it to the quota account you select and keep
+that account idle elsewhere throughout the measurement. LLimit does not give
+its credentials or private managed profiles to benchmark commands. Codex, Claude
+Code and Junie presets are available in the app; custom executable arguments
+support other installed agents. Model selection belongs to each command.
+
+Cost is optional and explicitly allocated: supply the cost of a complete selected
+quota allowance, and LLimit multiplies it by the measured fraction consumed.
+That estimate is separate from provider charges. Missing measurements, resets,
+quota increases and changes below percentage resolution stay unavailable.
+Prompts, patches and reports remain in a private local benchmark directory and
+are excluded from widgets and normal quota history. Judges run after candidate
+measurements, with their elapsed time reported separately.
+
+See the [CLI benchmark guide](Packages/LLimitd/README.md#agent-benchmarks) for
+configuration and offline verification commands.
+
 ## Supported providers
 
 The same providers work on both platforms. Managed Claude Code and Codex connections,

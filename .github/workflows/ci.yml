@@ -127,6 +127,9 @@ jobs:
         working-directory: Packages/LLimitd
         run: swift test
 
+      - name: Test benchmark CLI with offline agents
+        run: python3 scripts/tests/test_benchmark_cli.py Packages/LLimitd/.build/debug/llimit -v
+
   linux-static:
     name: Linux (static .deb)
     # Mirrors the release-linux job in release.yml, which builds the shipped

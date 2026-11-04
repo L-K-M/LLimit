@@ -26,6 +26,8 @@ struct CodexLoginPresentation: Identifiable {
 
 @MainActor
 final class AppModel: ObservableObject {
+  lazy var benchmarks = BenchmarkViewModel(model: self)
+  private var benchmarkQuotaAttempts: [String: Date] = [:]
   @Published var refreshIntervalMinutes: Int = 30
   @Published var alertSettings: QuotaAlertSettings = QuotaAlertSettings()
   @Published var widgetStyle: WidgetStyleSettings = .default
@@ -263,7 +265,34 @@ final class AppModel: ObservableObject {
       .union(longcatLogin.map { [$0.accountID] } ?? [])
   }
 
+  func benchmarkRevision(accountID: String) -> UUID? {
+    credentialEditRevisions[accountID]
+  }
+
+  func benchmarkUsage(accountID: String) async throws -> ProviderUsage {
+    guard !isRefreshing else { throw BenchmarkError.busy }
+    isRefreshing = true
+    defer { isRefreshing = false }
+    guard let selected = providerAccounts.first(where: { $0.id == accountID }) else { throw BenchmarkError.unavailableAccount }
+    let lastObservation = snapshot?.providers.first(where: { $0.accountID == accountID && $0.provider == selected.provider })?.fetchedAt
+    let delay = BenchmarkQuotaCadence.delay(provider: selected.provider, lastAttempt: benchmarkQuotaAttempts[accountID], lastObservation: lastObservation)
+    if delay > 0 { try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
+    await refreshExpiringChatGPTTokens()
+    await refreshExpiringStepFunSessions()
+    let preparation = await prepareClaudeAccounts()
+    guard let account = providerAccounts.first(where: { $0.id == accountID }), account.isEnabled,
+          !signingInAccountIDs.contains(accountID),
+          !preparation.failures.contains(where: { $0.accountID == accountID }) else { throw BenchmarkError.unavailableAccount }
+    // Benchmark measurements must not poll other providers, some of which charge
+    // for a quota probe. They also stay out of the shared dashboard history.
+    benchmarkQuotaAttempts[accountID] = Date()
+    let measurement = await QuotaCoordinator.live(managedOpenAI: codexAccounts).refresh(configurations: [account.runtimeConfiguration()], previousSnapshot: snapshot)
+    guard measurement.failures.isEmpty, let usage = measurement.providers.first else { throw BenchmarkError.unavailableAccount }
+    return usage
+  }
+
   func refreshNow() async {
+    guard !benchmarks.isRunning else { return }
     guard !isRefreshing else {
       return
     }

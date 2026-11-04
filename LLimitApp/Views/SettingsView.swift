@@ -5,6 +5,7 @@ import QuotaCore
 struct SettingsView: View {
   private enum SettingsItem: Hashable {
     case overview
+    case benchmarks
     case general
     case appearance
     case widgets
@@ -132,6 +133,8 @@ struct SettingsView: View {
       Section {
         Label("Overview", systemImage: "gauge.with.dots.needle.bottom.50percent")
           .tag(SettingsItem.overview)
+        Label("Benchmarks", systemImage: "chart.bar.xaxis")
+          .tag(SettingsItem.benchmarks)
       }
 
       Section("Accounts") {
@@ -239,6 +242,8 @@ struct SettingsView: View {
     switch selection ?? .overview {
     case .overview:
       overviewDetail
+    case .benchmarks:
+      BenchmarksView(model: model)
     case .general:
       scrollSection { generalSettingsSection }
     case .appearance:

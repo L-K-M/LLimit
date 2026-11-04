@@ -43,6 +43,8 @@ func printUsage() {
       llimit resets [--json] [--days N]
       llimit export [--format csv|json] [--days N]
       llimit trend [--days <n>] [--account <prefix>]
+      llimit bench template|list|show <report-UUID>
+      llimit bench run <plan.json> --exclusive-accounts
       llimit daemon
       llimit daemon [--notify] [--on-event <cmd>] [--thresholds 20,5]
       llimit paths
@@ -538,6 +540,8 @@ case "export":
   runExport(Array(arguments.dropFirst()))
 case "trend":
   runTrend(Array(arguments.dropFirst()))
+case "bench":
+  await runBench(Array(arguments.dropFirst()))
 case "daemon":
   await runDaemon(Array(arguments.dropFirst()))
 case "paths":
