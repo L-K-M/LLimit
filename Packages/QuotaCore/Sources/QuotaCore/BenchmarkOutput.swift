@@ -42,6 +42,219 @@ public struct BenchmarkOutput: Sendable {
       }
       return BenchmarkOutput(text: finalResponse ?? "", tokenUsage: usage,
                              succeeded: completed && !failed && finalResponse?.isEmpty == false)
+    case .piJSON:
+      return decodePi(output)
+    case .opencodeJSON:
+      return decodeOpenCode(output)
+    }
+  }
+
+  private static func decodePi(_ output: String) -> BenchmarkOutput {
+    guard let events = nativeEvents(output) else { return BenchmarkOutput(text: "", tokenUsage: nil, succeeded: false) }
+    var completedMessages: [[String: Any]]?
+    var failed = false
+    for event in events {
+      guard let type = event["type"] as? String else { failed = true; continue }
+      switch type {
+      case "agent_start": completedMessages = nil
+      case "agent_end": completedMessages = event["messages"] as? [[String: Any]]
+      case "error", "extension_error": failed = true
+      default: break
+      }
+    }
+    let assistants = (completedMessages ?? []).filter { $0["role"] as? String == "assistant" }
+    guard let final = assistants.last else { return BenchmarkOutput(text: "", tokenUsage: nil, succeeded: false) }
+    let text = (final["content"] as? [[String: Any]] ?? []).compactMap { block -> String? in
+      block["type"] as? String == "text" ? block["text"] as? String : nil
+    }.joined(separator: "\n")
+    let succeeded = !failed && final["stopReason"] as? String == "stop" && !text.isEmpty
+    var usage = NativeTokenUsage()
+    // agent_end is authoritative; message_end repeats these same messages.
+    for message in assistants {
+      if let counts = message["usage"] as? [String: Any] {
+        usage.add(input: counts["input"], cached: counts["cacheRead"], output: counts["output"])
+      }
+    }
+    return BenchmarkOutput(text: text, tokenUsage: succeeded ? usage.reported : nil, succeeded: succeeded)
+  }
+
+  private static func decodeOpenCode(_ output: String) -> BenchmarkOutput {
+    guard let events = nativeEvents(output) else { return BenchmarkOutput(text: "", tokenUsage: nil, succeeded: false) }
+    var messageOrder: [String] = []
+    var knownMessages: Set<String> = []
+    var textOrder: [String: [String]] = [:]
+    var texts: [String: [String: String]] = [:]
+    var finishReasons: [String: String] = [:]
+    var seenFinishes: Set<String> = []
+    var seenSteps: Set<String> = []
+    var usage = NativeTokenUsage()
+    var failed = false
+    for event in events {
+      guard let type = event["type"] as? String else { failed = true; continue }
+      if type == "error" { failed = true; continue }
+      guard ["text", "step_start", "step_finish", "tool_use", "reasoning"].contains(type) else { continue }
+      guard let part = event["part"] as? [String: Any],
+            let messageID = part["messageID"] as? String, !messageID.isEmpty else { failed = true; continue }
+      if knownMessages.insert(messageID).inserted { messageOrder.append(messageID) }
+      let partID = part["id"] as? String
+      let identity = partID.flatMap { $0.isEmpty ? nil : $0 }
+        ?? (try? JSONSerialization.data(withJSONObject: part, options: [.sortedKeys])).map { String(decoding: $0, as: UTF8.self) }
+        ?? "missing"
+      let key = messageID + "\u{1f}" + identity
+      switch type {
+      case "text":
+        guard let text = part["text"] as? String else { failed = true; continue }
+        if texts[messageID]?[identity] == nil { textOrder[messageID, default: []].append(identity) }
+        texts[messageID, default: [:]][identity] = text
+      case "step_start", "tool_use":
+        if seenSteps.insert(type + "\u{1f}" + key).inserted {
+          finishReasons[messageID] = nil
+          if type == "step_start" {
+            textOrder[messageID] = nil
+            texts[messageID] = nil
+          }
+        }
+      case "step_finish":
+        guard seenFinishes.insert(key).inserted else { continue }
+        guard let reason = part["reason"] as? String else { failed = true; continue }
+        finishReasons[messageID] = reason
+        if let counts = part["tokens"] as? [String: Any] {
+          let cache = counts["cache"] as? [String: Any]
+          // OpenCode's output already reports the output count. Reasoning and
+          // cache writes are separate fields, not extra output tokens.
+          usage.add(input: counts["input"], cached: cache?["read"], output: counts["output"])
+        }
+      default: break
+      }
+    }
+    guard let final = messageOrder.last else { return BenchmarkOutput(text: "", tokenUsage: nil, succeeded: false) }
+    let text = (textOrder[final] ?? []).compactMap { texts[final]?[$0] }.joined(separator: "\n")
+    let succeeded = !failed && finishReasons[final] == "stop" && !text.isEmpty
+    return BenchmarkOutput(text: text, tokenUsage: succeeded ? usage.reported : nil, succeeded: succeeded)
+  }
+
+  /// A fresh run can omit its final stream event. Only recover the exact,
+  /// unambiguous session named by its own structured events, never "latest".
+  public static func openCodeSessionForRecovery(_ output: String) -> String? {
+    guard let events = nativeEvents(output), !events.isEmpty else { return nil }
+    var sessions: Set<String> = []
+    for event in events {
+      guard let type = event["type"] as? String, type != "error" else { return nil }
+      if let error = event["error"], !(error is NSNull) { return nil }
+      for value in [event["sessionID"], (event["part"] as? [String: Any])?["sessionID"]].compactMap({ $0 }) {
+        guard let id = value as? String, validOpenCodeSessionID(id) else { return nil }
+        sessions.insert(id)
+      }
+    }
+    return sessions.count == 1 ? sessions.first : nil
+  }
+
+  /// Reads only terminal assistant text and usage from an in-memory export.
+  /// Session titles, paths, prompts, tool results and provider errors are ignored.
+  public static func decodeOpenCodeExport(_ output: String, expectedSessionID: String? = nil) -> BenchmarkOutput {
+    let failure = BenchmarkOutput(text: "", tokenUsage: nil, succeeded: false)
+    guard let data = output.data(using: .utf8),
+          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let session = object["info"] as? [String: Any], let sessionID = session["id"] as? String,
+          validOpenCodeSessionID(sessionID), expectedSessionID == nil || expectedSessionID == sessionID,
+          let messages = object["messages"] as? [[String: Any]], !messages.isEmpty else { return failure }
+    var order: [String] = []
+    var byID: [String: [String: Any]] = [:]
+    for message in messages {
+      guard let info = message["info"] as? [String: Any],
+            info["sessionID"] as? String == sessionID,
+            let id = info["id"] as? String, !id.isEmpty,
+            let role = info["role"] as? String, ["user", "assistant"].contains(role),
+            let parts = message["parts"] as? [[String: Any]] else { return failure }
+      for part in parts {
+        if let value = part["sessionID"], value as? String != sessionID { return failure }
+        if let value = part["messageID"], value as? String != id { return failure }
+      }
+      if byID[id] == nil { order.append(id) }
+      byID[id] = message
+    }
+    guard let finalID = order.last, let final = byID[finalID],
+          let info = final["info"] as? [String: Any], info["role"] as? String == "assistant",
+          info["finish"] as? String == "stop", info["summary"] as? Bool != true else { return failure }
+    if let error = info["error"], !(error is NSNull) { return failure }
+    if let value = info["time"] {
+      guard let time = value as? [String: Any] else { return failure }
+      if let completed = time["completed"] {
+        guard let number = completed as? NSNumber, String(cString: number.objCType) != "c",
+              number.doubleValue.isFinite, number.doubleValue > 0 else { return failure }
+      }
+    }
+    var textOrder: [String] = []
+    var texts: [String: String] = [:]
+    var seenSteps: Set<String> = []
+    for part in final["parts"] as? [[String: Any]] ?? [] {
+      let identity = (part["id"] as? String)
+        ?? (try? JSONSerialization.data(withJSONObject: part, options: [.sortedKeys])).map { String(decoding: $0, as: UTF8.self) }
+        ?? "missing"
+      if part["type"] as? String == "step-start", seenSteps.insert(identity).inserted {
+        textOrder = []
+        texts = [:]
+      }
+      if part["type"] as? String == "tool", let state = part["state"] as? [String: Any],
+         ["pending", "running"].contains(state["status"] as? String ?? "") { return failure }
+      guard part["type"] as? String == "text", part["ignored"] as? Bool != true,
+            part["synthetic"] as? Bool != true, let text = part["text"] as? String else { continue }
+      if texts[identity] == nil { textOrder.append(identity) }
+      texts[identity] = text
+    }
+    let text = textOrder.compactMap { texts[$0] }.joined(separator: "\n")
+    guard !text.isEmpty else { return failure }
+    var usage = NativeTokenUsage()
+    for id in order {
+      guard let info = byID[id]?["info"] as? [String: Any], info["role"] as? String == "assistant",
+            let counts = info["tokens"] as? [String: Any] else { continue }
+      let cache = counts["cache"] as? [String: Any]
+      usage.add(input: counts["input"], cached: cache?["read"], output: counts["output"])
+    }
+    return BenchmarkOutput(text: text, tokenUsage: usage.reported, succeeded: true)
+  }
+
+  private static func validOpenCodeSessionID(_ id: String) -> Bool {
+    id.hasPrefix("ses_") && (5...128).contains(id.utf8.count) && id.utf8.dropFirst(4).allSatisfy {
+      (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || $0 == 45 || $0 == 95
+    }
+  }
+
+  private static func nativeEvents(_ output: String) -> [[String: Any]]? {
+    var events: [[String: Any]] = []
+    // Split on LF only: JSON strings may contain Unicode line separators.
+    // Foundation accepts the optional CR remaining from CRLF framing.
+    for line in output.components(separatedBy: "\n") where !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      guard let data = line.data(using: .utf8),
+            let event = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+      events.append(event)
+    }
+    return events
+  }
+
+  private struct NativeTokenUsage {
+    private static let limit = 1_000_000_000_000
+    private var input = 0
+    private var cached = 0
+    private var output = 0
+    private var hasReportedUsage = false
+
+    mutating func add(input: Any?, cached: Any?, output: Any?) {
+      hasReportedUsage = true
+      self.input = min(Self.limit, self.input + Self.count(input))
+      self.cached = min(Self.limit, self.cached + Self.count(cached))
+      self.output = min(Self.limit, self.output + Self.count(output))
+    }
+
+    var reported: BenchmarkTokenUsage? {
+      hasReportedUsage ? BenchmarkTokenUsage(inputTokens: input, cachedInputTokens: cached, outputTokens: output) : nil
+    }
+
+    private static func count(_ value: Any?) -> Int {
+      guard let number = value as? NSNumber else { return 0 }
+      let count = number.doubleValue
+      guard count.isFinite, count >= 0 else { return 0 }
+      return Int(min(Double(limit), count).rounded(.towardZero))
     }
   }
 

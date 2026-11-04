@@ -4,6 +4,7 @@
 import json
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -73,6 +74,48 @@ class BenchmarkCLITests(unittest.TestCase):
         self.assertTrue(all(Path(item["command"]["executable"]).is_absolute()
                             for item in plan["candidates"] + plan["judges"]))
         self.assertFalse((self.root / "config").exists())
+
+    def test_models_returns_only_public_metadata_without_inference_or_accounts(self):
+        fixture_catalog = {
+            "id": "llimit-models", "type": "response", "command": "get_available_models",
+            "success": True, "data": {"models": [{
+                "provider": "fixture", "id": "offline-model", "name": "Offline model",
+                "apiKey": "private-catalog-secret", "baseUrl": "https://private.invalid",
+                "headers": {"Authorization": "private-catalog-secret"},
+                "options": {"credential": "private-catalog-secret"},
+            }]},
+        }
+        for harness in ("pi", "opencode"):
+            with self.subTest(harness=harness):
+                executable = self.root / ("fake-" + harness)
+                if harness == "pi":
+                    script = (
+                        'test "$1" = --mode && test "$2" = rpc || exit 40\n'
+                        'IFS= read -r request\n'
+                        'test "$request" = \'{"id":"llimit-models","type":"get_available_models"}\' || exit 41\n'
+                        "printf '%s\\n' " + shlex.quote(json.dumps(fixture_catalog)) + "\n"
+                    )
+                else:
+                    script = (
+                        'test "$#" = 2 && test "$1" = models && test "$2" = --pure || exit 42\n'
+                        'test "$OPENCODE_DISABLE_MODELS_FETCH" = 1 || exit 43\n'
+                        'test "$OPENCODE_DISABLE_AUTOUPDATE" = 1 || exit 44\n'
+                        "printf '%s\\n' fixture/offline-model\n"
+                    )
+                executable.write_text("#!/bin/sh\nset -eu\n" + script)
+                executable.chmod(0o700)
+                result = self.cli("bench", "models", harness, "--executable", str(executable))
+                models = json.loads(result.stdout)
+                self.assertEqual(len(models), 1)
+                self.assertEqual(set(models[0]), {"harness", "provider", "modelID", "displayName", "pluginPolicy"})
+                self.assertEqual(models[0]["harness"], harness)
+                self.assertEqual(models[0]["provider"], "fixture")
+                self.assertEqual(models[0]["modelID"], "offline-model")
+                self.assertEqual(models[0]["pluginPolicy"], "disabled")
+                self.assertNotIn("private-catalog-secret", result.stdout + result.stderr)
+                self.assertNotIn("private.invalid", result.stdout + result.stderr)
+        self.assertFalse((self.root / "config").exists())
+        self.assertFalse((self.root / "data").exists())
 
     def test_exclusive_account_confirmation_is_required(self):
         result = self.cli("bench", "run", str(self.write_plan(self.plan())), check=False)

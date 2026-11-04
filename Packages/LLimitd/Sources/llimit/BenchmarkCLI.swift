@@ -6,6 +6,8 @@ func runBench(_ arguments: [String]) async {
   let directory = LinuxPaths().dataDirectory.appendingPathComponent("Benchmarks", isDirectory: true)
   guard let command = arguments.first else { benchmarkUsage(); return }
   switch command {
+  case "models":
+    await benchmarkModels(Array(arguments.dropFirst()))
   case "template":
     guard arguments.count == 1 else { fail("bench template takes no arguments") }
     benchmarkPrintJSON(benchmarkTemplate())
@@ -76,6 +78,7 @@ private func benchmarkUsage() {
   print("""
   Usage:
     llimit bench template
+    llimit bench models pi|opencode [--executable <path>] [--repository <path>] [--plugins]
     llimit bench run <plan.json> --exclusive-accounts
     llimit bench list
     llimit bench show <report-UUID>
@@ -90,6 +93,47 @@ private func benchmarkUsage() {
   quota windows are kept separate. Set settleSeconds for reporting delays.
   Reports and trial workspaces stay in the local private Benchmarks directory.
   """)
+}
+
+private func benchmarkModels(_ arguments: [String]) async {
+  guard let first = arguments.first, let harness = BenchmarkHarness(rawValue: first) else {
+    fail("bench models needs pi or opencode")
+  }
+  var executable: String?
+  var repository: URL?
+  var plugins = BenchmarkHarnessPluginPolicy.disabled
+  var index = 1
+  while index < arguments.count {
+    switch arguments[index] {
+    case "--plugins": plugins = .configured
+    case "--executable", "--repository":
+      let option = arguments[index]
+      guard index + 1 < arguments.count else { fail("\(option) needs a path") }
+      index += 1
+      if option == "--executable" { executable = arguments[index] }
+      else { repository = URL(fileURLWithPath: arguments[index], isDirectory: true) }
+    default: fail("unknown bench models option")
+    }
+    index += 1
+  }
+  if executable == nil {
+    let parent = ProcessInfo.processInfo.environment
+    let home = FileManager.default.homeDirectoryForCurrentUser
+    let directories = (harness == .opencode ? [home.appendingPathComponent(".opencode/bin").path] : [])
+      + [home.appendingPathComponent(".local/bin").path, "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]
+      + (parent["PATH"] ?? "").split(separator: ":").map(String.init)
+    executable = directories.filter { $0.hasPrefix("/") }.map {
+      URL(fileURLWithPath: $0).appendingPathComponent(harness.rawValue).path
+    }.first { FileManager.default.isExecutableFile(atPath: $0) }
+  }
+  guard let executable, executable.hasPrefix("/") else { fail("choose the installed harness with --executable <absolute-path>") }
+  do {
+    let models = try await BenchmarkHarnessDiscovery().models(for: harness,
+      executable: URL(fileURLWithPath: executable), repository: repository, plugins: plugins)
+    benchmarkPrintJSON(models)
+  } catch is CancellationError { fail("model discovery cancelled") }
+  catch let error as BenchmarkHarnessError { fail(error.localizedDescription) }
+  catch { fail("could not list models; check the harness and committed repository") }
 }
 
 private func benchmarkTemplate() -> BenchmarkPlan {

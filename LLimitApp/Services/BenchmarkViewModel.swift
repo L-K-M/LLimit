@@ -15,6 +15,7 @@ final class BenchmarkViewModel: ObservableObject {
   private weak var model: AppModel?
   private let directory: URL
   private let runner = BenchmarkRunner()
+  private let harnessDiscovery = BenchmarkHarnessDiscovery()
   private var task: Task<Void, Never>?
 
   init(model: AppModel) {
@@ -40,11 +41,22 @@ final class BenchmarkViewModel: ObservableObject {
     case "codex": candidates = ManagedCLI.codex.candidates(environment: environment)
     case "claude": candidates = ManagedCLI.claude.candidates(environment: environment)
     default:
-      let paths = [FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin").path,
+      let home = FileManager.default.homeDirectoryForCurrentUser
+      let harnessPaths = name == "opencode" ? [home.appendingPathComponent(".opencode/bin").path] : []
+      let paths = harnessPaths + [home.appendingPathComponent(".local/bin").path,
                    "/opt/homebrew/bin", "/usr/local/bin"] + (environment["PATH"] ?? "").split(separator: ":").map(String.init)
       candidates = paths.filter { $0.hasPrefix("/") }.map { URL(fileURLWithPath: $0).appendingPathComponent(name) }
     }
     return candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0.path) })?.path ?? "/usr/local/bin/\(name)"
+  }
+
+  func discoverHarnessModels(harness: BenchmarkHarness, executable: String,
+                             plugins: BenchmarkHarnessPluginPolicy, repositoryPath: String) async throws -> [BenchmarkHarnessModel] {
+    guard executable.hasPrefix("/"), !executable.contains("\0") else { throw BenchmarkHarnessError.invalidExecutable }
+    let repository = repositoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard repository.isEmpty || repository.hasPrefix("/") else { throw BenchmarkError.invalidRepository }
+    return try await harnessDiscovery.models(for: harness, executable: URL(fileURLWithPath: executable),
+      repository: repository.isEmpty ? nil : URL(fileURLWithPath: repository, isDirectory: true), plugins: plugins)
   }
 
   private static func codexCommand(judge: Bool) -> BenchmarkCommand {
