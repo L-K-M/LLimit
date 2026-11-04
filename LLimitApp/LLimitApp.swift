@@ -738,6 +738,102 @@ private struct ResetChip: View {
 
 // MARK: - Dashboard
 
+private struct QuotaWeatherBadge: View {
+  let explanation: QuotaWeatherExplanation
+  let tint: Color
+  @State private var showingDetails = false
+  @State private var badgeHovered = false
+  @State private var detailsHovered = false
+  @State private var hoverTask: Task<Void, Never>?
+
+  var body: some View {
+    Button {
+      hoverTask?.cancel()
+      showingDetails.toggle()
+    } label: {
+      Label(explanation.weather.rawValue, systemImage: explanation.weather.iconName)
+        .font(.system(size: 10, weight: .semibold))
+        .foregroundStyle(tint)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(tint.opacity(0.12), in: Capsule())
+        .contentShape(Capsule())
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel(explanation.accessibilityDescription)
+    .accessibilityHint("Show quota weather details")
+    .onHover { hovered in
+      badgeHovered = hovered
+      scheduleDetails(opening: hovered)
+    }
+    .popover(isPresented: $showingDetails, arrowEdge: .bottom) {
+      details
+        .onHover { hovered in
+          detailsHovered = hovered
+          if hovered { hoverTask?.cancel() } else { scheduleDetails(opening: false) }
+        }
+        .onDisappear { detailsHovered = false }
+    }
+    .onDisappear { hoverTask?.cancel() }
+  }
+
+  private var details: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      HStack {
+        Label("Quota weather: \(explanation.weather.rawValue)", systemImage: explanation.weather.iconName)
+          .font(.headline)
+        Spacer(minLength: 8)
+        Button { showingDetails = false } label: { Image(systemName: "xmark") }
+          .buttonStyle(.plain)
+          .accessibilityLabel("Close quota weather details")
+      }
+
+      ScrollView {
+        VStack(alignment: .leading, spacing: 12) {
+          Text(explanation.summary).fixedSize(horizontal: false, vertical: true)
+          Divider()
+          Text("Why this badge appears").font(.subheadline.weight(.semibold))
+          ForEach(Array(explanation.reasons.enumerated()), id: \.offset) { _, reason in
+            Text(reason).fixedSize(horizontal: false, vertical: true)
+          }
+          Text(explanation.guidance)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+          Divider()
+          Text("What the labels mean").font(.subheadline.weight(.semibold))
+          ForEach(Array(explanation.legend.enumerated()), id: \.offset) { _, line in
+            Text(line)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+      }
+      .frame(height: min(440, max(160, (NSScreen.main?.visibleFrame.height ?? 720) - 160)))
+    }
+    .font(.callout)
+    .padding(16)
+    .frame(width: 370, alignment: .leading)
+    .foregroundStyle(Color.primary)
+    .textSelection(.enabled)
+  }
+
+  private func scheduleDetails(opening: Bool) {
+    hoverTask?.cancel()
+    hoverTask = Task { @MainActor in
+      do { try await Task.sleep(nanoseconds: opening ? 450_000_000 : 400_000_000) }
+      catch { return }
+      if opening && badgeHovered {
+        showingDetails = true
+      } else if !badgeHovered && !detailsHovered {
+        showingDetails = false
+      }
+    }
+  }
+}
+
 private struct MenuBarContent: View {
   @ObservedObject var model: AppModel
   let presentation: DashboardPresentation
@@ -948,18 +1044,10 @@ private struct MenuBarContent: View {
       } else {
         let weather = QuotaWeather.forSnapshot(current, now: now,
           staleAfter: QuotaFreshness.maxAge(refreshIntervalMinutes: model.refreshIntervalMinutes))
-        let issues = current?.failures.count ?? 0
-        let description = "Quota weather: \(weather.rawValue). " +
-          QuotaDisplayText.countPhrase(issues, singular: "account issue", plural: "account issues")
-
-        Label(weather.rawValue, systemImage: weather.iconName)
-          .font(.system(size: 10, weight: .semibold))
-          .foregroundStyle(weatherTint(weather))
-          .padding(.horizontal, 7)
-          .padding(.vertical, 3)
-          .background(weatherTint(weather).opacity(0.12), in: Capsule())
-          .help(description)
-          .accessibilityLabel(description)
+        QuotaWeatherBadge(
+          explanation: QuotaWeather.explanation(for: current, now: now,
+            staleAfter: QuotaFreshness.maxAge(refreshIntervalMinutes: model.refreshIntervalMinutes)),
+          tint: weatherTint(weather))
       }
 
       if presentation == .menuBar {
