@@ -14,6 +14,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     GlobalHotkeyService.shared.stop()
   }
 
+  func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    guard AppModel.shared.benchmarks.isRunning else { return .terminateNow }
+    Task { @MainActor in
+      await AppModel.shared.benchmarks.stopAndWait()
+      sender.reply(toApplicationShouldTerminate: true)
+    }
+    return .terminateLater
+  }
+
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
     false
   }

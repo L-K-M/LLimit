@@ -282,6 +282,84 @@ Team/project quotas and MiMo Desktop memberships
 are not supported. See [Xiaomi's MiMo Code guide](https://mimo.mi.com/docs/en-US/tokenplan/integration/mimo-code)
 for inference-key setup and its separate console usage page.
 
+## Agent benchmarks
+
+`llimit bench` runs repeatable coding tasks through installed agent CLIs and
+compares their results with two independently configured judges. It uses the
+repository's committed `HEAD`; uncommitted, ignored and untracked files are not
+included. Each trial gets a fresh local workspace, preserving your checkout.
+The task's instructions and acceptance command execute in that workspace.
+
+```bash
+umask 077
+llimit bench template > benchmark-plan.json
+# Edit the task, rubric, repositoryPath, executable paths, model arguments,
+# account IDs and optional cost configuration before running.
+llimit accounts list
+llimit refresh
+llimit status --json
+llimit bench run benchmark-plan.json --exclusive-accounts > benchmark-result.json
+llimit bench list
+llimit bench show <report-UUID>
+```
+
+The template contains Codex and Claude Code commands and two judges. Their
+configured default models are used until you add explicit model arguments.
+Any executable with noninteractive input/output can be configured: `executable`
+must be an absolute path, `arguments` is a JSON array, and `outputFormat` is
+`text`, `codexJSON` or `claudeJSON`. A literal `{prompt}` in an argument receives
+the task or judge prompt; otherwise it arrives on standard input. Arguments
+are passed directly, without a shell. An optional `acceptanceCommand` is a shell
+command, such as `swift test`, and must exit zero to pass.
+
+The `--exclusive-accounts` flag confirms two conditions: each agent CLI is signed
+in to its selected `accountID`, and no other work consumes that account while
+its quota is being measured. Commands use their own stored CLI authentication;
+LLimit does not inject account credentials, inherit provider API-key variables,
+or reuse its private managed Claude/Codex profiles. CLI quota measurement accepts
+enabled manual/imported LLimit accounts. Run `llimit refresh` before a benchmark
+when quota credentials need renewal; expired credentials fail the trial's
+measurement rather than falling back to cached usage. Avoid concurrent account
+edits or token renewals; changed credentials invalidate a reading.
+
+For each candidate, optional `accountID` selects a full ID from `accounts list`.
+`quotaMetricID` selects a metric ID from that account's `status --json` entry.
+`allowanceCost` is an allocation you supply for 100% of that metric's allowance,
+in the plan's three-letter `currency` (default `USD`). For example, allocating
+USD 10 to a complete weekly allowance and measuring a 2 percentage-point drop
+estimates USD 0.20 for the trial. A monthly subscription price is not
+automatically the price of a shorter quota window. Overlapping window costs are
+never added together. Without a usable measurement, the cost stays unavailable.
+
+`settleSeconds` adds a reporting delay before the after reading; increase it
+for providers with delayed reporting. The runner spaces Anthropic measurements
+by at least 180 seconds to respect its quota endpoint's polling limits. Pause
+quota polling by other LLimit processes during a benchmark, especially for providers whose quota probe
+itself consumes usage. Candidate measurements finish before either judge runs.
+
+`repetitions` accepts 1–20, `timeoutSeconds` accepts 1–3,600 per agent or check,
+and `settleSeconds` accepts 0–300. Ctrl-C/SIGTERM cancels work and preserves
+recorded trials. The report records timeouts, failures and missing measurements;
+they are not silently removed from the comparison. Both judges must return
+valid, agreeing acceptance votes for a trial to count as accepted. Disagreement
+or a missing verdict requires review. Objective acceptance failure always wins.
+The headline cost per accepted task includes measured costs from failed trials.
+
+`run` and `show` write JSON with `report` and computed `summaries`; progress goes
+to stderr. `list` writes report metadata and summaries. Reports are written with
+mode 0600 in the mode-0700 `$XDG_DATA_HOME/LLimit/Benchmarks` directory, alongside
+the isolated trial workspaces. They are private local artifacts rather than
+part of the status-bar contract, shared snapshots or ordinary quota history.
+Known LLimit credentials are redacted from reports; review a report before
+sharing it because task and repository content may itself be confidential.
+
+No live providers are needed to verify the runner's CLI integration:
+
+```bash
+swift build --package-path Packages/LLimitd
+python3 scripts/tests/test_benchmark_cli.py Packages/LLimitd/.build/debug/llimit -v
+```
+
 ## systemd
 
 ```
