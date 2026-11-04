@@ -28,7 +28,7 @@ public actor BenchmarkProcess {
   ) async throws -> BenchmarkProcessResult {
     try Task.checkCancellation()
     guard executable.isFileURL, executable.path.hasPrefix("/"),
-          directory.isFileURL, timeout.isFinite, timeout > 0, timeout <= 3_600,
+          directory.isFileURL, timeout.isFinite, timeout > 0, timeout <= BenchmarkPlan.maximumTimeoutSeconds,
           (input?.utf8.count ?? 0) <= Self.inputLimit,
           !arguments.contains(where: { $0.utf8.contains(0) }),
           !executable.path.utf8.contains(0), !directory.path.utf8.contains(0) else {

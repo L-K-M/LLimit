@@ -14,15 +14,23 @@ final class BenchmarkViewModel: ObservableObject {
   @Published private(set) var errorMessage: String?
   private weak var model: AppModel?
   private let directory: URL
+  private let draftStore: BenchmarkDraftStore
   private let runner = BenchmarkRunner()
   private let harnessDiscovery = BenchmarkHarnessDiscovery()
   private var task: Task<Void, Never>?
+  private var draftSubscriptions: Set<AnyCancellable> = []
+  private var draftNeedsSaving = false
+  private static let draftLoadError = "Could not load the saved benchmark setup. The draft has been left unchanged."
+  private static let draftSaveError = "Could not save the benchmark setup. Check LLimit's local storage permissions."
 
   init(model: AppModel) {
     self.model = model
     let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
       ?? FileManager.default.temporaryDirectory
     directory = support.appendingPathComponent("LLimit/Benchmarks", isDirectory: true)
+    // Reports are redacted for display; the private draft preserves exact model
+    // identifiers, task text and incomplete edits independently of that history.
+    draftStore = BenchmarkDraftStore(fileURL: support.appendingPathComponent("LLimit/benchmark-draft.json"))
     plan = BenchmarkPlan(taskPrompt: "", rubric: "The solution meets all task requirements, passes the acceptance check, and makes focused, maintainable changes.",
       repositoryPath: "", candidates: [BenchmarkCandidate(name: "Codex", command: Self.codexCommand(judge: false))],
       judges: [BenchmarkJudge(name: "Codex judge", command: Self.codexCommand(judge: true)),
@@ -30,8 +38,21 @@ final class BenchmarkViewModel: ObservableObject {
                  arguments: ["-p", "--output-format", "json", "--tools", ""], outputFormat: .claudeJSON))])
     do {
       reports = try BenchmarkReportStore(directory: directory).list()
-      if let latest = reports.first { plan = latest.plan; report = latest }
+      if let latest = reports.first { report = latest }
     } catch { errorMessage = "Could not load saved benchmarks. Check the benchmark folder's permissions." }
+    do {
+      if let draft = try draftStore.load() { plan = draft }
+      else if let latest = reports.first { plan = latest.plan }
+    } catch { errorMessage = Self.draftLoadError }
+
+    $plan.removeDuplicates().dropFirst()
+      .handleEvents(receiveOutput: { [weak self] _ in self?.draftNeedsSaving = true })
+      .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
+      .sink { [weak self] _ in self?.saveDraftIfNeeded() }
+      .store(in: &draftSubscriptions)
+    NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)
+      .sink { [weak self] _ in self?.saveDraftIfNeeded() }
+      .store(in: &draftSubscriptions)
   }
 
   static func defaultExecutable(named name: String) -> String {
@@ -42,9 +63,11 @@ final class BenchmarkViewModel: ObservableObject {
     case "claude": candidates = ManagedCLI.claude.candidates(environment: environment)
     default:
       let home = FileManager.default.homeDirectoryForCurrentUser
-      let harnessPaths = name == "opencode" ? [home.appendingPathComponent(".opencode/bin").path] : []
-      let paths = harnessPaths + [home.appendingPathComponent(".local/bin").path,
-                   "/opt/homebrew/bin", "/usr/local/bin"] + (environment["PATH"] ?? "").split(separator: ":").map(String.init)
+      var paths: [String] = []
+      if name == "opencode" { paths.append(home.appendingPathComponent(".opencode/bin").path) }
+      paths.append(contentsOf: [home.appendingPathComponent(".local/bin").path, "/opt/homebrew/bin", "/usr/local/bin"])
+      let searchPath = (environment["PATH"] ?? "").split(separator: ":").map { String($0) }
+      paths.append(contentsOf: searchPath)
       candidates = paths.filter { $0.hasPrefix("/") }.map { URL(fileURLWithPath: $0).appendingPathComponent(name) }
     }
     return candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0.path) })?.path ?? "/usr/local/bin/\(name)"
@@ -74,6 +97,7 @@ final class BenchmarkViewModel: ObservableObject {
       errorMessage = "Enable and connect each selected quota account before starting."
       return
     }
+    guard saveDraftIfNeeded(force: true) else { return }
     let revisions = Dictionary(uniqueKeysWithValues: selected.map { ($0, model.benchmarkRevision(accountID: $0)) })
     let redactor = BenchmarkRedactor(configurations: model.providerAccounts.map { $0.runtimeConfiguration() })
     var pricedPlan = plan
@@ -117,7 +141,25 @@ final class BenchmarkViewModel: ObservableObject {
 
   func cancel() { task?.cancel(); progress = "Stopping benchmark" }
 
-  func stopAndWait() async { task?.cancel(); await task?.value }
+  func stopAndWait() async {
+    saveDraftIfNeeded()
+    task?.cancel()
+    await task?.value
+  }
+
+  @discardableResult
+  private func saveDraftIfNeeded(force: Bool = false) -> Bool {
+    guard force || draftNeedsSaving else { return true }
+    do {
+      try draftStore.save(plan)
+      draftNeedsSaving = false
+      if errorMessage == Self.draftSaveError || errorMessage == Self.draftLoadError { errorMessage = nil }
+      return true
+    } catch {
+      errorMessage = Self.draftSaveError
+      return false
+    }
+  }
 
   func loadReport(_ report: BenchmarkReport) {
     guard !isRunning else { return }

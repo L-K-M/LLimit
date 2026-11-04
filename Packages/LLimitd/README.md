@@ -411,7 +411,7 @@ by at least 180 seconds to respect its quota endpoint's polling limits. Pause
 quota polling by other LLimit processes during a benchmark, especially for providers whose quota probe
 itself consumes usage. Candidate measurements finish before either judge runs.
 
-`repetitions` accepts 1–20, `timeoutSeconds` accepts 1–3,600 per agent or check,
+`repetitions` accepts 1–20, `timeoutSeconds` accepts 1–86,400 (24 hours) per agent or check,
 and `settleSeconds` accepts 0–300. Ctrl-C/SIGTERM cancels work and preserves
 recorded trials. The report records timeouts, failures and missing measurements;
 they are not silently removed from the comparison. Both judges must return

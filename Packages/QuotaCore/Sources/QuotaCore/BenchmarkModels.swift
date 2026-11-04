@@ -65,6 +65,8 @@ public enum BenchmarkValidationError: LocalizedError, Equatable {
 }
 
 public struct BenchmarkPlan: Codable, Hashable, Sendable {
+  public static let maximumTimeoutSeconds: Double = 86_400
+
   public var taskPrompt: String
   public var rubric: String
   public var repositoryPath: String
@@ -110,8 +112,8 @@ public struct BenchmarkPlan: Codable, Hashable, Sendable {
     try require(repositoryPath.hasPrefix("/") && !repositoryPath.contains("\0"),
                 "Choose an absolute repository path.")
     try require((1...20).contains(repetitions), "Repetitions must be between 1 and 20.")
-    try require(timeoutSeconds.isFinite && (1...3_600).contains(timeoutSeconds),
-                "The run timeout must be between 1 and 3,600 seconds.")
+    try require(timeoutSeconds.isFinite && timeoutSeconds >= 1 && timeoutSeconds <= Self.maximumTimeoutSeconds,
+                "The run timeout must be between 1 and 86,400 seconds (24 hours).")
     try require(settleSeconds.isFinite && (0...300).contains(settleSeconds),
                 "Quota reporting delay must be between 0 and 300 seconds.")
     try require((1...10).contains(candidates.count), "Choose between 1 and 10 agent setups.")
