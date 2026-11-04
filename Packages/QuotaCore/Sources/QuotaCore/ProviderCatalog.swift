@@ -96,6 +96,10 @@ public enum ProviderCatalog {
       return ProviderCatalogEntry(provider: provider, title: "Longcat", context: "Longcat · Token balance",
         summary: "Track remaining Longcat tokens. Ring percentages use the latest observed refill as 100%.",
         aliases: ["LongCat", "Meituan"])
+    case .commandCode:
+      return ProviderCatalogEntry(provider: provider, title: "Command Code", context: "Command Code · Credits and subscription limits",
+        summary: "Track your Command Code credit balances and subscription usage limits.",
+        aliases: ["CommandCode", "commandcode.ai", "cmd"])
     }
   }
 }

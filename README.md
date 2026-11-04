@@ -147,6 +147,7 @@ MiMo, use their existing connection flows.
 | **OpenCode Go** | API key for a Go subscription | OpenCode (`opencode-go` in `auth.json`) |
 | **Venice** | API key; Admin key for reported daily DIEM allocation | Venice CLI (`~/.venice/config.json`), OpenCode (`venice` in `auth.json`) |
 | **Cline** | API key | Cline (`~/.cline/data/settings/providers.json`, legacy `secrets.json`) |
+| **Command Code** | Command Code API key | Command Code CLI (`~/.commandcode/auth.json`) |
 | **JetBrains Junie** | Junie API key | `JUNIE_API_KEY`, Junie fallback file (`~/.junie/secure_credentials.json`) |
 | **MiniMax M Plan** | Global (`minimax.io`) Subscription Key | OpenCode (`minimax-coding-plan` in `auth.json`) |
 | **Mistral** | Included monthly Vibe Code and API allowances | Connect Mistral on macOS; manual Admin session on Linux |
@@ -190,6 +191,22 @@ the monthly window takes the account's primary color. Polling only reads the
 account API and never makes an inference request. Imported keys work without Cline
 running; because LLimit does not renew Cline sessions, an expired one needs a fresh
 import or a replacement key.
+
+For Command Code, choose **Settings → Add Account → Command Code** and enter a
+key from [Studio → API Keys](https://commandcode.ai/docs/studio#api-keys), or use
+**Found on this Mac** or **Auto-fill** after signing in with `cmd login`.
+LLimit copies only the saved Command Code API key from `~/.commandcode/auth.json`;
+imported accounts work without the CLI installed or running. Replace the key or
+reimport if it is revoked; LLimit does not renew it automatically.
+
+LLimit shows the reported 5-hour and weekly subscription limits with reset times,
+plus separate monthly plan, purchased, and free credit balances. Credits represent
+model usage value and are not a USD cash balance. Monthly credits remain an amount
+because the API supplies no total allowance. A server-reported monthly subscription
+period can supply a monthly reset; annual periods and canceled subscriptions do
+not imply a monthly refill. Purchased and free balances have no inferred reset.
+Polling only reads account and billing data, without generating tokens.
+See the [official usage limits](https://commandcode.ai/docs/resources/usage-limits).
 
 For Junie, choose **Settings → Add Account → Junie** and enter a key
 generated at [Junie CLI](https://junie.jetbrains.com/cli), or import a detected

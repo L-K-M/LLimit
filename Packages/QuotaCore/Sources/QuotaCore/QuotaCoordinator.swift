@@ -38,7 +38,8 @@ public struct QuotaCoordinator: Sendable {
         MiMoQuotaClient(httpClient: httpClient),
         StepFunQuotaClient(httpClient: httpClient),
         MistralQuotaClient(httpClient: httpClient),
-        LongcatQuotaClient(httpClient: httpClient)
+        LongcatQuotaClient(httpClient: httpClient),
+        CommandCodeQuotaClient(httpClient: httpClient)
       ]
     )
   }

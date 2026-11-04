@@ -1947,6 +1947,8 @@ private struct ProviderMark: View {
       return "terminal.fill"
     case .longcat:
       return "cat.fill"
+    case .commandCode:
+      return "command"
     }
   }
 }

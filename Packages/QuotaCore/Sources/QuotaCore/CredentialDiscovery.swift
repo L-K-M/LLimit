@@ -92,6 +92,7 @@ public struct CredentialDiscovery: Sendable {
       candidates += scanAntigravity(home: home, diagnostics: &diagnostics)
       candidates += scanVenice(home: home, diagnostics: &diagnostics)
       candidates += scanCline(home: home, diagnostics: &diagnostics)
+      candidates += scanCommandCode(home: home, diagnostics: &diagnostics)
       candidates += scanOpenCode(home: home, diagnostics: &diagnostics)
     }
 
@@ -104,6 +105,27 @@ public struct CredentialDiscovery: Sendable {
   }
 
   // MARK: - Sources
+
+  /// The production CLI login stores its permanent Command Code API key at
+  /// ~/.commandcode/auth.json. Other provider sessions in that file stay with
+  /// the CLI; imported accounts own only this key and need no tool at runtime.
+  private func scanCommandCode(home: URL, diagnostics: inout [String]) -> [DiscoveredCredential] {
+    let url = path(home, ".commandcode", "auth.json")
+    guard let object = readJSON(at: url, label: "Command Code", diagnostics: &diagnostics),
+          let key = object["apiKey"] as? String,
+          !key.isEmpty, !key.isEnvironmentReference, key.utf8.count <= 32_768,
+          !key.hasPrefix("$"), !key.hasPrefix("{env:"), !key.hasPrefix("!"),
+          key.utf8.allSatisfy({ (0x21...0x7e).contains($0) }) else { return [] }
+
+    diagnostics.append("Command Code: found API key (\(shortPath(url)))")
+    return [DiscoveredCredential(
+      stableID: "command-code:cli",
+      provider: .commandCode,
+      suggestedName: "Command Code",
+      sourceLabel: "Command Code (~/.commandcode/auth.json)",
+      credentials: [CredentialField.commandCodeAPIKey: key]
+    )]
+  }
 
   /// Step Code's global personal Plan key supports its read-only usage endpoint.
   /// The CLI's optional Passport session is separate and is never imported.

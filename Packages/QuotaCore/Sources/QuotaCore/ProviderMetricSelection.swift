@@ -51,6 +51,8 @@ public func defaultRingMetrics(for usage: ProviderUsage) -> [UsageMetric] {
     preferredIDs = ["vibe-monthly", "api-monthly"]
   case .longcat:
     preferredIDs = ["token-balance"]
+  case .commandCode:
+    preferredIDs = ["five-hour", "weekly"]
   }
 
   var selected: [UsageMetric] = []

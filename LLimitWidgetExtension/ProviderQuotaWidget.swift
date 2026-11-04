@@ -993,6 +993,8 @@ private struct ProviderTileBackground: View {
       return [Color(red: 0.78, green: 0.45, blue: 0.18), Color(red: 0.45, green: 0.22, blue: 0.08)]
     case .longcat:
       return [Color(red: 0.45, green: 0.45, blue: 0.50), Color(red: 0.22, green: 0.22, blue: 0.28)]
+    case .commandCode:
+      return [Color(red: 0.35, green: 0.36, blue: 0.39), Color(red: 0.13, green: 0.14, blue: 0.16)]
     case nil:
       return [Color(red: 0.32, green: 0.39, blue: 0.52), Color(red: 0.16, green: 0.2, blue: 0.29)]
     }
