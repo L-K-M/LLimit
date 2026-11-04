@@ -83,6 +83,13 @@ its credentials or private managed profiles to benchmark commands. Codex, Claude
 Code and Junie presets are available in the app; custom executable arguments
 support other installed agents. Model selection belongs to each command.
 
+Pi and OpenCode also support native provider/model discovery. Choose their preset,
+then **Discover models**, a provider and a model for an agent or judge. Listing
+models does not submit a task. The list reflects CLI configuration and available
+authentication, rather than verified model entitlement. Project settings come from
+the same committed repository snapshot used by trials. Configured extensions/plugins
+are optional and use the same setting during discovery and execution.
+
 Cost is optional and explicitly allocated: supply the cost of a complete selected
 quota allowance, and LLimit multiplies it by the measured fraction consumed.
 That estimate is separate from provider charges. Missing measurements, resets,

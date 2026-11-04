@@ -44,6 +44,7 @@ func printUsage() {
       llimit export [--format csv|json] [--days N]
       llimit trend [--days <n>] [--account <prefix>]
       llimit bench template|list|show <report-UUID>
+      llimit bench models pi|opencode [--executable <path>] [--repository <path>] [--plugins]
       llimit bench run <plan.json> --exclusive-accounts
       llimit daemon
       llimit daemon [--notify] [--on-event <cmd>] [--thresholds 20,5]

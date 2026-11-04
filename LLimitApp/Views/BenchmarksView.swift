@@ -115,6 +115,8 @@ struct BenchmarksView: View {
           ForEach($benchmark.plan.candidates, id: \.id) { $candidate in
             BenchmarkCandidateEditor(
               candidate: $candidate,
+              benchmark: benchmark,
+              repositoryPath: benchmark.plan.repositoryPath,
               accounts: model.providerAccounts,
               usages: model.snapshot?.providers ?? [],
               onValidity: { setValidity(candidate.id, valid: $0) },
@@ -156,13 +158,14 @@ struct BenchmarksView: View {
                   }
                 }
               }
-              BenchmarkCommandEditor(command: $judge.command) {
+              BenchmarkCommandEditor(command: $judge.command, benchmark: benchmark,
+                                     repositoryPath: benchmark.plan.repositoryPath, judge: true) {
                 setValidity(judge.id, valid: $0)
               }
             }
             if judge.id != benchmark.plan.judges.last?.id { Divider() }
           }
-          Text("Choose the models through each CLI's arguments. Judge time is reported separately from agent execution.")
+          Text("Pi and OpenCode can list configured providers and models. Other CLIs use their model arguments. Judge time is reported separately from agent execution.")
             .font(.caption).foregroundStyle(.secondary)
         }
         .padding(8)
@@ -371,6 +374,8 @@ struct BenchmarksView: View {
 
 private struct BenchmarkCandidateEditor: View {
   @Binding var candidate: BenchmarkCandidate
+  @ObservedObject var benchmark: BenchmarkViewModel
+  let repositoryPath: String
   let accounts: [ProviderAccount]
   let usages: [ProviderUsage]
   let onValidity: (Bool) -> Void
@@ -397,7 +402,8 @@ private struct BenchmarkCandidateEditor: View {
         }
         .help("Remove agent")
       }
-      BenchmarkCommandEditor(command: $candidate.command) { valid in
+      BenchmarkCommandEditor(command: $candidate.command, benchmark: benchmark,
+                             repositoryPath: repositoryPath, judge: false) { valid in
         commandValid = valid
         reportValidity()
       }
@@ -473,9 +479,15 @@ private struct BenchmarkCandidateEditor: View {
 
 private struct BenchmarkCommandEditor: View {
   @Binding var command: BenchmarkCommand
+  @ObservedObject var benchmark: BenchmarkViewModel
+  let repositoryPath: String
+  let judge: Bool
   let onValidity: (Bool) -> Void
   @State private var argumentDraft = ""
   @State private var argumentError: String?
+  @State private var nativeValid = true
+
+  private var isNative: Bool { command.outputFormat == .piJSON || command.outputFormat == .opencodeJSON }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -484,44 +496,61 @@ private struct BenchmarkCommandEditor: View {
           .font(.system(.callout, design: .monospaced))
         Button("Choose…") { chooseExecutable() }
       }
-      TextField("Arguments as a JSON array", text: $argumentDraft, axis: .vertical)
-        .font(.system(.callout, design: .monospaced))
-        .lineLimit(2...5)
-        .onChange(of: argumentDraft) { _, new in updateArguments(new) }
-      if let argumentError {
-        Text(argumentError).font(.caption).foregroundStyle(.red)
-      }
-      HStack {
-        Picker("Output", selection: $command.outputFormat) {
-          Text("Plain text").tag(BenchmarkOutputFormat.text)
-          Text("Codex JSON").tag(BenchmarkOutputFormat.codexJSON)
-          Text("Claude JSON").tag(BenchmarkOutputFormat.claudeJSON)
+      if isNative {
+        BenchmarkHarnessPicker(command: $command, benchmark: benchmark,
+                               repositoryPath: repositoryPath, judge: judge) { valid in
+          nativeValid = valid
+          reportValidity()
         }
-        Spacer()
       }
-      Text("Use {prompt} in an argument, or the prompt is sent on standard input. Arguments are passed directly to the executable. Keep credentials in the CLI's login store.")
-        .font(.caption).foregroundStyle(.secondary)
+      DisclosureGroup("Advanced command") {
+        TextField("Arguments as a JSON array", text: $argumentDraft, axis: .vertical)
+          .font(.system(.callout, design: .monospaced))
+          .lineLimit(2...5)
+          .onChange(of: argumentDraft) { _, new in updateArguments(new) }
+        if let argumentError {
+          Text(argumentError).font(.caption).foregroundStyle(.red)
+        }
+        HStack {
+          Picker("Output", selection: $command.outputFormat) {
+            Text("Plain text").tag(BenchmarkOutputFormat.text)
+            Text("Codex JSON").tag(BenchmarkOutputFormat.codexJSON)
+            Text("Claude JSON").tag(BenchmarkOutputFormat.claudeJSON)
+            Text("Pi JSON").tag(BenchmarkOutputFormat.piJSON)
+            Text("OpenCode JSON").tag(BenchmarkOutputFormat.opencodeJSON)
+          }
+          Spacer()
+        }
+        Text("Use {prompt} in an argument, or the prompt is sent on standard input. Arguments are passed directly to the executable. Keep credentials in the CLI's login store.")
+          .font(.caption).foregroundStyle(.secondary)
+      }
     }
     .onAppear { argumentDraft = encodedArguments(command.arguments) }
     .onChange(of: command.arguments) { _, new in
       if decodedArguments(argumentDraft) != new {
         argumentDraft = encodedArguments(new)
         argumentError = nil
-        onValidity(true)
+        reportValidity()
       }
+    }
+    .onChange(of: command.outputFormat) { _, _ in
+      nativeValid = true
+      reportValidity()
     }
   }
 
   private func updateArguments(_ text: String) {
     guard let arguments = decodedArguments(text) else {
       argumentError = "Enter a JSON array of strings, for example [\"exec\", \"{prompt}\"]."
-      onValidity(false)
+      reportValidity()
       return
     }
     command.arguments = arguments
     argumentError = nil
-    onValidity(true)
+    reportValidity()
   }
+
+  private func reportValidity() { onValidity(argumentError == nil && nativeValid) }
 
   private func decodedArguments(_ text: String) -> [String]? {
     try? JSONDecoder().decode([String].self, from: Data(text.utf8))
@@ -542,12 +571,224 @@ private struct BenchmarkCommandEditor: View {
   }
 }
 
+private struct BenchmarkHarnessPicker: View {
+  @Binding var command: BenchmarkCommand
+  @ObservedObject var benchmark: BenchmarkViewModel
+  let repositoryPath: String
+  let judge: Bool
+  let onValidity: (Bool) -> Void
+  @State private var models: [BenchmarkHarnessModel] = []
+  @State private var selectedProvider = ""
+  @State private var selectedModel = ""
+  @State private var loadPlugins = false
+  @State private var isLoading = false
+  @State private var requiresSelection = false
+  @State private var errorMessage: String?
+  @State private var lookup: Task<Void, Never>?
+  @State private var requestID = UUID()
+
+  private var harness: BenchmarkHarness {
+    command.outputFormat == .piJSON ? .pi : .opencode
+  }
+
+  private var providers: [String] { Array(Set(models.map(\.provider))).sorted() }
+
+  private var commandSelection: (provider: String?, model: String?) {
+    func argument(_ names: [String]) -> String? {
+      guard let index = command.arguments.lastIndex(where: { names.contains($0) }),
+            command.arguments.indices.contains(index + 1) else { return nil }
+      return command.arguments[index + 1]
+    }
+    if harness == .pi { return (argument(["--provider"]), argument(["--model"])) }
+    guard let selected = argument(["--model", "-m"]) else { return (nil, nil) }
+    let parts = selected.split(separator: "/", maxSplits: 1).map(String.init)
+    return parts.count == 2 ? (parts[0], parts[1]) : (nil, selected)
+  }
+
+  private var modelSummary: String {
+    guard let model = commandSelection.model else { return "Model: CLI-configured default" }
+    if let provider = commandSelection.provider { return "Model: \(provider)/\(model)" }
+    return "Model: \(model) · Provider: CLI-configured default"
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text(modelSummary)
+        .font(.callout)
+        .textSelection(.enabled)
+        .fixedSize(horizontal: false, vertical: true)
+      HStack {
+        Button(models.isEmpty ? "Discover models" : "Refresh models") { discover() }
+          .disabled(isLoading || command.executable.isEmpty)
+        if isLoading {
+          ProgressView().controlSize(.small)
+          Text("Reading \(harness.displayName) configuration…")
+            .font(.caption).foregroundStyle(.secondary)
+          Button("Cancel") { invalidate() }
+        } else if !models.isEmpty {
+          Text("\(models.count) models · \(providers.count) providers")
+            .font(.caption).foregroundStyle(.secondary)
+        }
+      }
+      Toggle("Load configured extensions/plugins", isOn: Binding(
+        get: { loadPlugins }, set: updatePlugins))
+        .toggleStyle(.checkbox)
+        .font(.caption)
+      if !models.isEmpty {
+        Picker("Provider", selection: Binding(get: { selectedProvider }, set: selectProvider)) {
+          Text("Choose provider").tag("")
+          ForEach(providers, id: \.self) { Text($0).tag($0) }
+        }
+        if !selectedProvider.isEmpty {
+          Picker("Model", selection: Binding(get: { selectedModel }, set: selectModel)) {
+            Text("Choose model").tag("")
+            ForEach(models.filter { $0.provider == selectedProvider }) { model in
+              Text(model.displayName == model.modelID ? model.modelID : "\(model.displayName) (\(model.modelID))")
+                .tag(model.id)
+            }
+          }
+        }
+      }
+      if let errorMessage {
+        Text(errorMessage).font(.caption).foregroundStyle(.red)
+      }
+      if requiresSelection {
+        Text("Discover and select a model, or use the CLI's configured default.")
+          .font(.caption).foregroundStyle(.secondary)
+      }
+      Button("Use configured default") { useDefault() }
+        .font(.caption)
+      Text("Discovery reads configured providers and models without sending a task. Availability does not verify access or remaining quota. Select a model for a reproducible comparison; the current command is used until you select one.")
+        .font(.caption).foregroundStyle(.secondary)
+      Text("The same extensions/plugins setting is used for discovery and execution. Repository settings come from committed HEAD.")
+        .font(.caption).foregroundStyle(.secondary)
+    }
+    .onAppear { loadPlugins = configuredPlugins; reportValidity() }
+    .onDisappear { lookup?.cancel() }
+    .onChange(of: command.executable) { _, _ in invalidate(requireSelection: true) }
+    .onChange(of: command.outputFormat) { _, _ in invalidate(); loadPlugins = configuredPlugins }
+    .onChange(of: repositoryPath) { _, _ in invalidate(requireSelection: true) }
+    .onChange(of: command.arguments) { _, _ in synchronizeSelection() }
+  }
+
+  private var configuredPlugins: Bool {
+    !command.arguments.contains(harness == .pi ? "--no-extensions" : "--pure")
+  }
+
+  private func updatePlugins(_ enabled: Bool) {
+    loadPlugins = enabled
+    invalidate(requireSelection: true)
+    let flag = harness == .pi ? "--no-extensions" : "--pure"
+    command.arguments.removeAll { $0 == flag }
+    if !enabled { command.arguments.append(flag) }
+  }
+
+  private func selectProvider(_ provider: String) {
+    selectedProvider = provider
+    selectedModel = ""
+    requiresSelection = true
+    reportValidity()
+  }
+
+  private func selectModel(_ id: String) {
+    selectedModel = id
+    guard let model = models.first(where: { $0.id == id }) else {
+      requiresSelection = true
+      reportValidity()
+      return
+    }
+    command = model.command(executable: command.executable, judge: judge)
+    requiresSelection = false
+    reportValidity()
+  }
+
+  private func discover() {
+    lookup?.cancel()
+    requiresSelection = requiresSelection || !selectedModel.isEmpty
+    models = []
+    selectedProvider = ""
+    selectedModel = ""
+    let id = UUID()
+    requestID = id
+    let kind = harness
+    let executable = command.executable
+    let repository = repositoryPath
+    let plugins: BenchmarkHarnessPluginPolicy = loadPlugins ? .configured : .disabled
+    isLoading = true
+    errorMessage = nil
+    reportValidity()
+    lookup = Task { @MainActor in
+      do {
+        let found = try await benchmark.discoverHarnessModels(harness: kind, executable: executable,
+          plugins: plugins, repositoryPath: repository)
+        guard !Task.isCancelled, requestID == id, harness == kind,
+              command.executable == executable, repositoryPath == repository else { return }
+        models = found
+        isLoading = false
+        lookup = nil
+        if found.isEmpty {
+          errorMessage = "No configured models were returned. Check the CLI login, provider settings, and extensions/plugins option."
+        }
+        synchronizeSelection()
+        reportValidity()
+      } catch {
+        guard !Task.isCancelled, requestID == id else { return }
+        isLoading = false
+        lookup = nil
+        errorMessage = error.localizedDescription
+        reportValidity()
+      }
+    }
+  }
+
+  private func invalidate(requireSelection: Bool = false) {
+    lookup?.cancel()
+    lookup = nil
+    requestID = UUID()
+    isLoading = false
+    models = []
+    selectedProvider = ""
+    selectedModel = ""
+    requiresSelection = requireSelection
+    errorMessage = nil
+    reportValidity()
+  }
+
+  private func synchronizeSelection() {
+    guard !models.isEmpty else { reportValidity(); return }
+    let selection = commandSelection
+    if let model = models.first(where: { $0.provider == selection.provider && $0.modelID == selection.model }) {
+      selectedProvider = model.provider
+      selectedModel = model.id
+      requiresSelection = false
+    } else {
+      selectedProvider = ""
+      selectedModel = ""
+      if selection.model != nil { requiresSelection = true }
+    }
+    reportValidity()
+  }
+
+  private func useDefault() {
+    let executable = command.executable
+    invalidate()
+    command = (harness == .pi ? BenchmarkCLIPreset.pi : .opencode).command(judge: judge)
+    command.executable = executable
+    if loadPlugins { command.arguments.removeAll { $0 == "--pure" || $0 == "--no-extensions" } }
+    reportValidity()
+  }
+
+  private func reportValidity() { onValidity(!isLoading && !requiresSelection) }
+}
+
 private enum BenchmarkCLIPreset: String, CaseIterable, Identifiable {
-  case codex, claude, junie, custom
+  case pi, opencode, codex, claude, junie, custom
   var id: String { rawValue }
 
   var title: String {
     switch self {
+    case .pi: return "Pi"
+    case .opencode: return "OpenCode"
     case .codex: return "Codex"
     case .claude: return "Claude Code"
     case .junie: return "Junie Lite"
@@ -558,6 +799,14 @@ private enum BenchmarkCLIPreset: String, CaseIterable, Identifiable {
   @MainActor
   func command(judge: Bool) -> BenchmarkCommand {
     switch self {
+    case .pi:
+      return BenchmarkCommand(executable: BenchmarkViewModel.defaultExecutable(named: "pi"),
+        arguments: ["--mode", "json", "--print", "--no-session", "--offline", "--no-extensions"] +
+          (judge ? ["--no-tools", "--no-skills", "--no-context-files", "--no-prompt-templates"] : []), outputFormat: .piJSON)
+    case .opencode:
+      return BenchmarkCommand(executable: BenchmarkViewModel.defaultExecutable(named: "opencode"),
+        arguments: ["run", "--format", "json", "--pure"] +
+          (judge ? ["--agent", BenchmarkHarness.makeJudgeAgentName()] : []), outputFormat: .opencodeJSON)
     case .codex:
       return BenchmarkCommand(
         executable: BenchmarkViewModel.defaultExecutable(named: "codex"),

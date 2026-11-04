@@ -312,6 +312,37 @@ the task or judge prompt; otherwise it arrives on standard input. Arguments
 are passed directly, without a shell. An optional `acceptanceCommand` is a shell
 command, such as `swift test`, and must exit zero to pass.
 
+Pi and OpenCode have native model discovery without inference:
+
+```bash
+llimit bench models pi
+llimit bench models opencode --repository /absolute/path/to/repository
+```
+
+The JSON list contains provider IDs, model IDs and display names. Use
+`--executable /absolute/path/to/cli` for a custom installation, and `--plugins`
+to load the CLI's configured Pi extensions or OpenCode plugins. External plugins
+are disabled by default. Without `--repository`, discovery uses global CLI
+configuration; with it, discovery uses a disposable committed snapshot, matching
+trial settings. A listed model is configured, not proof of entitlement or a
+working login. Credentials, endpoint headers and raw model objects are excluded.
+
+For Pi commands use `outputFormat: "piJSON"`, arguments
+`["--mode","json","--print","--no-session","--offline","--no-extensions","--provider","PROVIDER","--model","MODEL"]`,
+and stdin prompts. Add `--no-tools` for judges. OpenCode uses
+`outputFormat: "opencodeJSON"` and
+`["run","--format","json","--pure","--model","PROVIDER/MODEL"]`.
+For an OpenCode judge add `--agent llimit-benchmark-judge-<UUID>`, using a unique
+UUID. LLimit supplies that private runtime agent with all tools denied. Omit
+`--no-extensions` or `--pure` when using plugin models, consistently with discovery.
+Runs start fresh sessions. The app builds these commands for selected models.
+
+Native outputs preserve final assistant text and reported token counts, excluding
+tool traces. An incomplete/error event is not a successful result. Some OpenCode
+versions can omit the final completion event. LLimit then checks a bounded,
+read-only export of that exact session, retaining only final assistant text and
+token counts. If completion cannot be verified, the run remains unconfirmed.
+
 The `--exclusive-accounts` flag confirms two conditions: each agent CLI is signed
 in to its selected `accountID`, and no other work consumes that account while
 its quota is being measured. Commands use their own stored CLI authentication;

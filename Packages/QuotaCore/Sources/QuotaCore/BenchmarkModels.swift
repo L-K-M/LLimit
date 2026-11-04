@@ -4,6 +4,8 @@ public enum BenchmarkOutputFormat: String, Codable, CaseIterable, Sendable {
   case text
   case codexJSON
   case claudeJSON
+  case piJSON
+  case opencodeJSON
 }
 
 public struct BenchmarkCommand: Codable, Hashable, Sendable {
