@@ -78,6 +78,7 @@ final class AppModel: ObservableObject {
   @Published private var codexBusyAccounts: Set<String> = []
   private var signInSkippedAccountIDs: Set<String> = []
   private var credentialEditRevisions: [String: UUID] = [:]
+  private var benchmarkCredentialRevisions: [String: BenchmarkCredentialRevision] = [:]
   private var codexLoginHandles: [UUID: CodexLoginHandle] = [:]
   private var codexLoginIDs: [String: UUID] = [:]
   private var codexUsageReceipts: [String: (profile: UUID, fetchedAt: Date)] = [:]
@@ -266,7 +267,16 @@ final class AppModel: ObservableObject {
   }
 
   func benchmarkRevision(accountID: String) -> UUID? {
-    credentialEditRevisions[accountID]
+    let current = credentialEditRevisions[accountID]
+    if let tracker = benchmarkCredentialRevisions[accountID] {
+      return tracker.ownership(of: current)
+    }
+    return current
+  }
+
+  private func recordBenchmarkVerifiedRenewal(accountID: String, from previous: UUID?, to next: UUID) {
+    benchmarkCredentialRevisions[accountID, default: BenchmarkCredentialRevision()]
+      .recordVerifiedRenewal(from: previous, to: next)
   }
 
   func benchmarkUsage(accountID: String) async throws -> ProviderUsage {
@@ -606,6 +616,7 @@ final class AppModel: ObservableObject {
     codexAccountMessages[accountID] = nil
     codexUsageReceipts[accountID] = nil
     credentialEditRevisions[accountID] = nil
+    benchmarkCredentialRevisions[accountID] = nil
     credentialAutofillMessages[accountID] = nil
     claudeSessions[accountID] = nil
     claudeAccountMessages[accountID] = nil
@@ -1168,7 +1179,9 @@ final class AppModel: ObservableObject {
       settings.accounts[index].credentials = candidate.credentials
       try settingsStore.save(settings)
       providerAccounts[index].credentials = candidate.credentials
-      credentialEditRevisions[original.id] = UUID()
+      let renewedRevision = UUID()
+      recordBenchmarkVerifiedRenewal(accountID: original.id, from: revision, to: renewedRevision)
+      credentialEditRevisions[original.id] = renewedRevision
       return true
     } catch {
       // Browser and transport errors can carry secrets. Keep the saved login
@@ -1268,6 +1281,7 @@ final class AppModel: ObservableObject {
         try settingsStore.save(settings)
         providerAccounts[index].credentials = credentials
         let renewedRevision = UUID()
+        recordBenchmarkVerifiedRenewal(accountID: original.id, from: revision, to: renewedRevision)
         credentialEditRevisions[original.id] = renewedRevision
         configurations.append(providerAccounts[index].runtimeConfiguration())
         revisions[original.id] = renewedRevision

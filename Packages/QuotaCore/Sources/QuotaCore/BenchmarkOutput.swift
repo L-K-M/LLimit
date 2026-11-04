@@ -22,7 +22,7 @@ public struct BenchmarkOutput: Sendable {
       return BenchmarkOutput(text: text, tokenUsage: usage.map(tokens),
                              succeeded: object["is_error"] as? Bool == false)
     case .codexJSON:
-      var messages: [String] = []
+      var finalResponse: String?
       var usage: BenchmarkTokenUsage?
       var completed = false
       var failed = false
@@ -32,7 +32,7 @@ public struct BenchmarkOutput: Sendable {
         switch event["type"] as? String {
         case "item.completed":
           if let item = event["item"] as? [String: Any], item["type"] as? String == "agent_message",
-             let text = item["text"] as? String { messages.append(text) }
+             let text = item["text"] as? String { finalResponse = text }
         case "turn.completed":
           completed = true
           if let counts = event["usage"] as? [String: Any] { usage = tokens(counts) }
@@ -40,8 +40,8 @@ public struct BenchmarkOutput: Sendable {
         default: break
         }
       }
-      return BenchmarkOutput(text: messages.joined(separator: "\n\n"), tokenUsage: usage,
-                             succeeded: completed && !failed && !messages.isEmpty)
+      return BenchmarkOutput(text: finalResponse ?? "", tokenUsage: usage,
+                             succeeded: completed && !failed && finalResponse?.isEmpty == false)
     }
   }
 
@@ -51,7 +51,8 @@ public struct BenchmarkOutput: Sendable {
                                outputTokens: count("output_tokens"))
   }
 
-  public static func evaluation(_ text: String, judgeID: UUID) -> BenchmarkEvaluation {
+  public static func evaluation(_ text: String, judgeID: UUID,
+                                redactor: BenchmarkRedactor = BenchmarkRedactor(configurations: [])) -> BenchmarkEvaluation {
     struct Verdict: Decodable { let accepted: Bool; let score: Double; let explanation: String }
     // A single fenced JSON object is common even when the prompt requests JSON only.
     var json = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -64,7 +65,7 @@ public struct BenchmarkOutput: Sendable {
       return BenchmarkEvaluation(judgeID: judgeID, explanation: "", error: "The judge did not return a valid verdict.")
     }
     return BenchmarkEvaluation(judgeID: judgeID, accepted: verdict.accepted, score: verdict.score,
-                               explanation: String(verdict.explanation.prefix(12_000)))
+                               explanation: String(redactor.redact(verdict.explanation).prefix(12_000)))
   }
 }
 

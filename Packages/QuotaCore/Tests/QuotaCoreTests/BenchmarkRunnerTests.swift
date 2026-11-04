@@ -5,6 +5,52 @@ import XCTest
 final class BenchmarkRunnerTests: XCTestCase {
   private let acceptedVerdict = #"{"accepted":true,"score":8.5,"explanation":"The supplied patch satisfies the task and acceptance evidence."}"#
 
+  func testCodexJudgeUsesFinalResponseAfterCommentary() {
+    let judge = UUID()
+    let output = #"""
+    {"type":"item.completed","item":{"type":"agent_message","text":"I will inspect the supplied changes."}}
+    {"type":"item.completed","item":{"type":"agent_message","text":"{\"accepted\":true,\"score\":8,\"explanation\":\"The change meets the requirements.\"}"}}
+    {"type":"turn.completed","usage":{"input_tokens":100,"output_tokens":20}}
+    """#
+    let decoded = BenchmarkOutput.decode(output, format: .codexJSON)
+    XCTAssertTrue(decoded.succeeded)
+    XCTAssertFalse(decoded.text.contains("I will inspect"))
+    XCTAssertTrue(BenchmarkOutput.evaluation(decoded.text, judgeID: judge).isValid)
+  }
+
+  func testJudgeScoreIsParsedBeforeShortSecretRedaction() async throws {
+    let fixture = try Fixture()
+    defer { fixture.remove() }
+    let verdict = #"{"accepted":true,"score":10,"explanation":"Requirement 1 passed."}"#
+    let judges = ["First", "Second"].map {
+      BenchmarkJudge(name: $0, command: shellCommand("cat >/dev/null; printf '%s\\n' \(shellQuote(verdict))"))
+    }
+    let configuration = ProviderRuntimeConfiguration(provider: .junie, isEnabled: true,
+      credentials: [CredentialField.junieAPIKey: "1"])
+    let report = try await BenchmarkRunner().run(
+      plan: makePlan(fixture: fixture, candidates: [candidate(script: "printf done")], judges: judges),
+      directory: fixture.reports, redactor: BenchmarkRedactor(configurations: [configuration]),
+      quotaReader: { _ in throw BenchmarkError.unavailableAccount })
+    let run = try XCTUnwrap(report.runs.first)
+    XCTAssertEqual(run.isAccepted, true)
+    XCTAssertEqual(run.evaluations.map(\.score), [10, 10])
+    XCTAssertTrue(run.evaluations.allSatisfy { $0.explanation == "Requirement [redacted] passed." })
+  }
+
+  func testJudgeExplanationRedactsBeforeTruncation() throws {
+    let secret = "private-token-straddling-the-length-boundary"
+    let explanation = String(repeating: "a", count: 11_995) + secret
+    let json: [String: Any] = ["accepted": true, "score": 10, "explanation": explanation]
+    let text = String(decoding: try JSONSerialization.data(withJSONObject: json), as: UTF8.self)
+    let configuration = ProviderRuntimeConfiguration(provider: .junie, isEnabled: true,
+      credentials: [CredentialField.junieAPIKey: secret])
+    let result = BenchmarkOutput.evaluation(text, judgeID: UUID(), redactor: BenchmarkRedactor(configurations: [configuration]))
+    XCTAssertTrue(result.isValid)
+    XCTAssertEqual(result.explanation.count, 12_000)
+    XCTAssertFalse(result.explanation.contains("priva"))
+    XCTAssertTrue(result.explanation.hasSuffix("[reda"))
+  }
+
   func testRepeatedTrialsUsePinnedCommitAndMeasureBeforeIndependentBlindJudging() async throws {
     let fixture = try Fixture()
     defer { fixture.remove() }

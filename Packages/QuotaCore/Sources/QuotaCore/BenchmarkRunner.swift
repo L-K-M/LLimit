@@ -164,7 +164,7 @@ public actor BenchmarkRunner {
             let result = try await execute(judge.command, prompt: prompt, directory: judgeDirectory, timeout: plan.timeoutSeconds)
             let decoded = BenchmarkOutput.decode(result.stdout, format: judge.command.outputFormat)
             if result.status == 0 && !result.timedOut && decoded.succeeded && !result.stderr.contains("[Output truncated") {
-              evaluation = BenchmarkOutput.evaluation(redactor.redact(decoded.text), judgeID: judge.id)
+              evaluation = BenchmarkOutput.evaluation(decoded.text, judgeID: judge.id, redactor: redactor)
             }
           } catch is CancellationError { cancelled = true }
           catch { /* Keep a fixed error; CLI diagnostics may contain credentials. */ }
