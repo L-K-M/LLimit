@@ -77,6 +77,10 @@ starts from the same commit in its own workspace. Results include elapsed time,
 acceptance checks, independent judge scores and disagreements, and optional
 before/after quota measurements. Failed trials count toward cost per accepted task.
 
+The macOS setup saves privately as you edit, including unfinished plans. Run lists
+any missing setup beside the button. Attempts can run for up to 24 hours each;
+the live results section shows progress while work and evaluations are pending.
+
 Agents use their own CLI login. Match it to the quota account you select and keep
 that account idle elsewhere throughout the measurement. LLimit does not give
 its credentials or private managed profiles to benchmark commands. Codex, Claude

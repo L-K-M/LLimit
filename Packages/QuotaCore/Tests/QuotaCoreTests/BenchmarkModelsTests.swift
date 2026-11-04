@@ -198,7 +198,7 @@ final class BenchmarkModelsTests: XCTestCase {
       spec.repetitions = repetitions
       XCTAssertThrowsError(try spec.validated())
     }
-    for timeout in [0, 3_601, .infinity, .nan] {
+    for timeout in [0, 86_401, .infinity, .nan] {
       var spec = plan()
       spec.timeoutSeconds = timeout
       XCTAssertThrowsError(try spec.validated())

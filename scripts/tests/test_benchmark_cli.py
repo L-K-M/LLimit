@@ -218,6 +218,17 @@ class BenchmarkCLITests(unittest.TestCase):
         history = json.loads(self.cli("bench", "list").stdout)
         self.assertEqual(history[0]["summaries"][0]["acceptedCount"], 0)
 
+    def test_three_hour_timeout_runs_short_tasks_normally(self):
+        plan = self.plan()
+        plan["repetitions"] = 1
+        plan["timeoutSeconds"] = 10_800
+        result = self.cli("bench", "run", str(self.write_plan(plan)), "--exclusive-accounts", check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)["report"]
+        self.assertEqual(report["runs"][0]["outcome"], "completed")
+        self.assertTrue(report["runs"][0]["acceptancePassed"])
+        self.assertEqual(len(report["runs"][0]["evaluations"]), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

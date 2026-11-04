@@ -8,6 +8,10 @@ struct BenchmarksView: View {
   @State private var accountsConfirmed = false
   @State private var invalidEditors: Set<UUID> = []
 
+  private var readiness: BenchmarkReadiness {
+    BenchmarkReadiness(plan: benchmark.plan, accountUseConfirmed: accountsConfirmed, invalidEditorIDs: invalidEditors)
+  }
+
   init(model: AppModel) {
     self.model = model
     self.benchmark = model.benchmarks
@@ -93,6 +97,8 @@ struct BenchmarksView: View {
             TextField("600", value: $benchmark.plan.timeoutSeconds, format: .number)
               .frame(width: 85)
           }
+          Text("Each attempt may run for up to 24 hours (86,400 seconds).")
+            .font(.caption).foregroundStyle(.secondary)
           LabeledContent("Quota reporting delay (seconds)") {
             TextField("0", value: $benchmark.plan.settleSeconds, format: .number)
               .frame(width: 85)
@@ -177,6 +183,15 @@ struct BenchmarksView: View {
       Toggle("The CLI logins match the selected accounts, and these accounts are idle elsewhere.", isOn: $accountsConfirmed)
         .toggleStyle(.checkbox)
         .font(.callout)
+      if !benchmark.isRunning, !readiness.isReady {
+        VStack(alignment: .leading, spacing: 6) {
+          ForEach(Array(readiness.reasons.enumerated()), id: \.offset) { _, reason in
+            Label(reason, systemImage: "exclamationmark.circle")
+              .font(.caption).foregroundStyle(.orange)
+              .fixedSize(horizontal: false, vertical: true)
+          }
+        }
+      }
       HStack {
         Button {
           accountsConfirmed = false
@@ -185,7 +200,8 @@ struct BenchmarksView: View {
           Label("Run benchmark", systemImage: "play.fill")
         }
         .buttonStyle(.borderedProminent)
-        .disabled(!accountsConfirmed || !invalidEditors.isEmpty || benchmark.plan.candidates.isEmpty)
+        .disabled(!readiness.isReady)
+        .help(readiness.reasons.first ?? "Run the configured benchmark.")
         Text("Runs agents and judges using their configured subscriptions or API accounts.")
           .font(.caption).foregroundStyle(.secondary)
       }
@@ -197,14 +213,27 @@ struct BenchmarksView: View {
     VStack(alignment: .leading, spacing: 14) {
       Divider()
       HStack {
-        Text("Results").font(.title3.weight(.semibold))
+        Text(benchmark.isRunning ? "Live results" : "Results").font(.title3.weight(.semibold))
         Spacer()
         Button("Export JSON…") { benchmark.exportReport() }
         Button("Show files") { benchmark.revealArtifacts() }
       }
       Text("\(report.startedAt.formatted(date: .abbreviated, time: .shortened)) · commit \(report.baselineCommit.prefix(12))")
         .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-      comparison(report)
+      if benchmark.isRunning {
+        HStack(spacing: 10) {
+          ProgressView().controlSize(.small)
+          Text(benchmark.progress).font(.callout)
+        }
+        Text("Attempts are still running. Results appear as they finish; quality scores follow the judge evaluations.")
+          .font(.caption).foregroundStyle(.secondary)
+      }
+      if report.runs.isEmpty {
+        Text(benchmark.isRunning ? "No attempts have finished yet." : "No attempts were recorded.")
+          .foregroundStyle(.secondary)
+      } else {
+        comparison(report)
+      }
       Text("Costs are allocated estimates from the price you assigned to a quota window, rather than additional charges. Unknown costs remain unavailable. Failed attempts are included in cost per accepted result.")
         .font(.caption).foregroundStyle(.secondary)
       Text("Judge time: \(duration(report.judgeDurationSeconds)). Acceptance requires both judges to accept the result and any acceptance command to pass.")
