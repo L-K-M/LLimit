@@ -7,6 +7,7 @@ struct BenchmarksView: View {
   @ObservedObject private var benchmark: BenchmarkViewModel
   @State private var accountsConfirmed = false
   @State private var invalidEditors: Set<UUID> = []
+  @State private var isSetupExpanded = true
 
   private var readiness: BenchmarkReadiness {
     BenchmarkReadiness(plan: benchmark.plan, accountUseConfirmed: accountsConfirmed, invalidEditorIDs: invalidEditors)
@@ -18,33 +19,96 @@ struct BenchmarksView: View {
   }
 
   var body: some View {
-    ScrollView {
-      VStack(alignment: .leading, spacing: 20) {
-        header
-        if let error = benchmark.errorMessage {
-          Label(error, systemImage: "exclamationmark.triangle")
-            .foregroundStyle(.red)
-            .textSelection(.enabled)
+    VStack(spacing: 0) {
+      if benchmark.isRunning || benchmark.executionProgress != nil {
+        progressPanel
+          .padding(20)
+          .background(.bar)
+        Divider()
+      }
+      ScrollView {
+        VStack(alignment: .leading, spacing: 20) {
+          header
+          if let error = benchmark.errorMessage {
+            Label(error, systemImage: "exclamationmark.triangle")
+              .foregroundStyle(.red)
+              .textSelection(.enabled)
+          }
+          DisclosureGroup("Benchmark setup", isExpanded: $isSetupExpanded) {
+            setup.disabled(benchmark.isRunning)
+              .padding(.top, 12)
+          }
+          if let report = benchmark.report {
+            reportSection(report)
+          }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(24)
+      }
+    }
+    .onAppear { if benchmark.isRunning { isSetupExpanded = false } }
+    .onChange(of: benchmark.isRunning) { _, running in
+      if running { isSetupExpanded = false }
+    }
+  }
+
+  private var progressPanel: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      HStack {
+        Text(progressTitle).font(.headline)
+        Spacer()
+        if let state = benchmark.executionProgress {
+          TimelineView(.periodic(from: .now, by: 1)) { context in
+            let end = benchmark.report?.finishedAt ?? benchmark.executionEndedAt ?? context.date
+            Text("Elapsed \(elapsed(end.timeIntervalSince(state.startedAt)))")
+              .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+          }
         }
         if benchmark.isRunning {
-          HStack(spacing: 10) {
-            ProgressView().controlSize(.small)
-            Text(benchmark.progress).font(.callout)
-            Spacer()
-            Button("Cancel", role: .cancel) { benchmark.cancel() }
-          }
-          .padding(12)
-          .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
-        }
-        setup
-          .disabled(benchmark.isRunning)
-        if let report = benchmark.report {
-          reportSection(report)
+          Button("Cancel", role: .cancel) { benchmark.cancel() }
+            .disabled(benchmark.progress == "Stopping benchmark")
         }
       }
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(24)
+      Text(benchmark.progress).font(.callout)
+      if let state = benchmark.executionProgress {
+        ProgressView(value: state.attemptFraction)
+          .accessibilityLabel("Attempts completed")
+          .accessibilityValue("\(state.completedAttempts) of \(state.totalAttempts)")
+        Text("\(state.completedAttempts) of \(state.totalAttempts) attempts finished")
+          .font(.caption).foregroundStyle(.secondary)
+        if state.phase == .evaluating || state.completedEvaluations > 0 || state.isTerminal && state.totalEvaluations > 0 {
+          ProgressView(value: state.evaluationFraction)
+            .accessibilityLabel("Evaluations completed")
+            .accessibilityValue("\(state.completedEvaluations) of \(state.totalEvaluations)")
+          Text("\(state.completedEvaluations) of \(state.totalEvaluations) evaluations finished")
+            .font(.caption).foregroundStyle(.secondary)
+        }
+      } else {
+        ProgressView().progressViewStyle(.linear)
+      }
+      if benchmark.isRunning {
+        Text("The benchmark keeps running when this window closes. Reopen Benchmarks from the menu bar to check it.")
+          .font(.caption).foregroundStyle(.secondary)
+      }
     }
+  }
+
+  private var progressTitle: String {
+    if !benchmark.isRunning, let state = benchmark.executionProgress, !state.isTerminal { return "Benchmark stopped" }
+    switch benchmark.executionProgress?.phase {
+    case .preparing, nil: return "Preparing benchmark"
+    case .runningTrial: return "Running agents"
+    case .waitingForQuota: return "Measuring quota"
+    case .checkingAcceptance: return "Checking acceptance"
+    case .evaluating: return "Evaluating results"
+    case .completed: return "Benchmark complete"
+    case .cancelled: return "Benchmark cancelled"
+    }
+  }
+
+  private func elapsed(_ seconds: TimeInterval) -> String {
+    let total = Int(max(0, seconds))
+    return String(format: "%d:%02d:%02d", total / 3_600, total / 60 % 60, total % 60)
   }
 
   private var header: some View {
@@ -221,10 +285,6 @@ struct BenchmarksView: View {
       Text("\(report.startedAt.formatted(date: .abbreviated, time: .shortened)) · commit \(report.baselineCommit.prefix(12))")
         .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
       if benchmark.isRunning {
-        HStack(spacing: 10) {
-          ProgressView().controlSize(.small)
-          Text(benchmark.progress).font(.callout)
-        }
         Text("Attempts are still running. Results appear as they finish; quality scores follow the judge evaluations.")
           .font(.caption).foregroundStyle(.secondary)
       }

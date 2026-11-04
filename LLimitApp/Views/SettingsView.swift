@@ -5,7 +5,6 @@ import QuotaCore
 struct SettingsView: View {
   private enum SettingsItem: Hashable {
     case overview
-    case benchmarks
     case general
     case appearance
     case widgets
@@ -63,7 +62,7 @@ struct SettingsView: View {
       window.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
       hostWindow.window = window
     })
-    .navigationTitle("LLimit")
+    .navigationTitle("LLimit Settings")
     .sheet(item: $model.claudeTerminalSession) { session in
       ClaudeTerminalSheet(
         session: session, title: "Connect Claude",
@@ -133,8 +132,15 @@ struct SettingsView: View {
       Section {
         Label("Overview", systemImage: "gauge.with.dots.needle.bottom.50percent")
           .tag(SettingsItem.overview)
-        Label("Benchmarks", systemImage: "chart.bar.xaxis")
-          .tag(SettingsItem.benchmarks)
+        Button {
+          commitAccountDrafts()
+          BenchmarkWindowController.shared.show(model: model)
+        } label: {
+          Label("Benchmarks…", systemImage: "chart.bar.xaxis")
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .help("Open the benchmark window.")
       }
 
       Section("Accounts") {
@@ -242,8 +248,6 @@ struct SettingsView: View {
     switch selection ?? .overview {
     case .overview:
       overviewDetail
-    case .benchmarks:
-      BenchmarksView(model: model)
     case .general:
       scrollSection { generalSettingsSection }
     case .appearance:

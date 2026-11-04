@@ -5,6 +5,35 @@ import XCTest
 final class BenchmarkRunnerTests: XCTestCase {
   private let acceptedVerdict = #"{"accepted":true,"score":8.5,"explanation":"The supplied patch satisfies the task and acceptance evidence."}"#
 
+  func testStructuredProgressTracksTrialsQuotaAcceptanceAndEligibleEvaluations() async throws {
+    let fixture = try Fixture()
+    defer { fixture.remove() }
+    let quota = QuotaFixture()
+    let events = ProgressEvents()
+    var plan = makePlan(fixture: fixture, candidates: [
+      candidate(name: "Successful", script: "printf done", account: "fixture"),
+      candidate(name: "Failed", script: "exit 1")
+    ])
+    plan.acceptanceCommand = "/usr/bin/true"
+    _ = try await BenchmarkRunner().run(plan: plan, directory: fixture.reports,
+      quotaReader: { try await quota.read($0) }, progress: { await events.append($0) })
+    let values = await events.values
+    XCTAssertEqual(values.first?.phase, .preparing)
+    for phase in [BenchmarkProgress.Phase.runningTrial, .waitingForQuota, .checkingAcceptance, .evaluating] {
+      XCTAssertTrue(values.contains { $0.phase == phase })
+    }
+    let evaluations = values.filter { $0.phase == .evaluating }
+    XCTAssertTrue(evaluations.allSatisfy { $0.completedAttempts == 2 && $0.totalEvaluations == 2 })
+    let final = try XCTUnwrap(values.last)
+    XCTAssertEqual(final.phase, .completed)
+    XCTAssertEqual(final.completedAttempts, 2)
+    XCTAssertEqual(final.totalAttempts, 2)
+    XCTAssertEqual(final.completedEvaluations, 2)
+    XCTAssertEqual(final.totalEvaluations, 2)
+    XCTAssertEqual(final.attemptFraction, 1)
+    XCTAssertEqual(final.evaluationFraction, 1)
+  }
+
   func testAccountPriceSuppliesCostAndManualAllocationStillWins() async throws {
     let fixture = try Fixture()
     defer { fixture.remove() }
@@ -213,10 +242,11 @@ final class BenchmarkRunnerTests: XCTestCase {
     let fixture = try Fixture()
     defer { fixture.remove() }
     let plan = makePlan(fixture: fixture, candidates: [candidate(script: "printf '%s\\n' done")], repetitions: 3)
+    let progress = ProgressEvents()
     let work = Task {
       try await BenchmarkRunner().run(plan: plan, directory: fixture.reports, quotaReader: { _ in
         throw BenchmarkError.unavailableAccount
-      }, update: { report, message in
+      }, progress: { await progress.append($0) }, update: { report, message in
         if message == "Trial recorded", report.runs.count == 1 {
           withUnsafeCurrentTask { $0?.cancel() }
         }
@@ -231,6 +261,10 @@ final class BenchmarkRunnerTests: XCTestCase {
     let stored = try XCTUnwrap(BenchmarkReportStore(directory: fixture.reports).load(id: report.id))
     XCTAssertEqual(stored.runs.count, 1)
     XCTAssertEqual(stored.warnings, report.warnings)
+    let finalProgress = await progress.values.last
+    XCTAssertEqual(finalProgress?.phase, .cancelled)
+    XCTAssertEqual(finalProgress?.completedAttempts, 1)
+    XCTAssertEqual(finalProgress?.totalAttempts, 3)
   }
 
   func testCodexParserKeepsMessagesAndUsageButDiscardsToolTraces() throws {
@@ -433,6 +467,11 @@ final class BenchmarkRunnerTests: XCTestCase {
   private func shellQuote(_ text: String) -> String {
     "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
   }
+}
+
+private actor ProgressEvents {
+  var values: [BenchmarkProgress] = []
+  func append(_ progress: BenchmarkProgress) { values.append(progress) }
 }
 
 private actor QuotaFixture {

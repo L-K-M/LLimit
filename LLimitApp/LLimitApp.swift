@@ -28,7 +28,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-    !SettingsWindowController.shared.restoreOpenWindow()
+    if AppModel.shared.benchmarks.isRunning {
+      BenchmarkWindowController.shared.show(model: AppModel.shared)
+      return false
+    }
+    return !(SettingsWindowController.shared.restoreOpenWindow()
+      || BenchmarkWindowController.shared.restoreOpenWindow())
   }
 }
 
@@ -69,6 +74,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
   static let shared = SettingsWindowController()
   private var window: NSWindow?
   private var isOpen = false
+  fileprivate var hasOpenWindow: Bool { isOpen }
 
   func show(model: AppModel) {
     if window == nil {
@@ -76,7 +82,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
       hosting.sizingOptions = []
 
       let window = NSWindow(contentViewController: hosting)
-      window.title = "LLimit"
+      window.title = "LLimit Settings"
       window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
       window.isReleasedWhenClosed = false
       window.delegate = self
@@ -96,7 +102,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
   @discardableResult
   func restoreOpenWindow() -> Bool {
     guard isOpen, let window else { return false }
-    NSApp.setActivationPolicy(.regular)
+    updateAppWindowActivationPolicy()
     if window.isMiniaturized {
       window.deminiaturize(nil)
     }
@@ -108,8 +114,64 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
   func windowWillClose(_ notification: Notification) {
     guard let closedWindow = notification.object as? NSWindow, closedWindow === window else { return }
     isOpen = false
-    NSApp.setActivationPolicy(.accessory)
+    updateAppWindowActivationPolicy()
   }
+}
+
+/// The model owns benchmark execution, so this window can close and reopen
+/// without cancelling a trial or creating a second benchmark owner.
+@MainActor
+final class BenchmarkWindowController: NSObject, NSWindowDelegate {
+  static let shared = BenchmarkWindowController()
+  private var window: NSWindow?
+  private var isOpen = false
+  fileprivate var hasOpenWindow: Bool { isOpen }
+
+  func show(model: AppModel) {
+    if window == nil {
+      let hosting = NSHostingController(rootView: BenchmarksView(model: model))
+      hosting.sizingOptions = []
+
+      let window = NSWindow(contentViewController: hosting)
+      window.title = "LLimit Benchmarks"
+      window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+      window.isReleasedWhenClosed = false
+      window.delegate = self
+      window.setContentSize(NSSize(width: 1100, height: 760))
+      window.contentMinSize = NSSize(width: 880, height: 600)
+      if !window.setFrameUsingName("LLimitBenchmarksWindow") { window.center() }
+      window.setFrameAutosaveName("LLimitBenchmarksWindow")
+      self.window = window
+    }
+
+    isOpen = true
+    restoreOpenWindow()
+  }
+
+  @discardableResult
+  func restoreOpenWindow() -> Bool {
+    guard isOpen, let window else { return false }
+    updateAppWindowActivationPolicy()
+    if window.isMiniaturized { window.deminiaturize(nil) }
+    NSApp.activate(ignoringOtherApps: true)
+    window.makeKeyAndOrderFront(nil)
+    return true
+  }
+
+  func windowWillClose(_ notification: Notification) {
+    guard let closedWindow = notification.object as? NSWindow, closedWindow === window else { return }
+    isOpen = false
+    updateAppWindowActivationPolicy()
+  }
+}
+
+/// Either ordinary window keeps LLimit available in the Dock and Cmd-Tab.
+/// The floating dashboard retains its existing accessory-app behavior.
+@MainActor
+private func updateAppWindowActivationPolicy() {
+  let hasOpenWindow = SettingsWindowController.shared.hasOpenWindow
+    || BenchmarkWindowController.shared.hasOpenWindow
+  NSApp.setActivationPolicy(hasOpenWindow ? .regular : .accessory)
 }
 
 extension AppModel {
@@ -1150,6 +1212,13 @@ private struct MenuBarContent: View {
       .help(model.refreshAvailability.help)
 
       Spacer()
+
+      ActionBarButton(
+        title: "Benchmarks",
+        systemImage: "chart.bar.xaxis"
+      ) {
+        BenchmarkWindowController.shared.show(model: model)
+      }
 
       ActionBarButton(
         title: "Settings",
