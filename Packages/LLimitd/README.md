@@ -68,6 +68,7 @@ llimit accounts add --provider anthropic        # prompts for that provider's fi
 llimit accounts add --provider opencode-go      # prompts for your OpenCode Go API key
 llimit accounts add --provider venice           # prompts for your Venice API key
 llimit accounts add --provider cline            # prompts for your Cline API key
+llimit accounts add --provider command-code     # prompts for your Command Code API key
 llimit accounts add --provider junie            # prompts for your Junie API key
 llimit accounts add --provider minimax          # prompts for your global M Plan Subscription Key
 llimit accounts add --provider xiaomi-mimo      # prompts for console session cookies
@@ -179,6 +180,26 @@ without a percentage. Add it with `--provider cline`, or import a Cline login fr
 (`clineApiKey`). Only the access token is imported: LLimit does not renew Cline
 sessions, so an expired one needs a fresh import. No Cline process is required
 after import, and polling reads the account API without making inference requests.
+
+Command Code reads its account and billing API without generating tokens. Run
+`llimit accounts add --provider command-code` and enter a key from
+[Studio → API Keys](https://commandcode.ai/docs/studio#api-keys) at the hidden prompt.
+After `cmd login`, `llimit accounts import --id command-code:cli` can instead copy
+the production CLI's top-level API key from `~/.commandcode/auth.json`. Other
+provider OAuth sessions and CLI metadata stay with Command Code. The imported
+account does not require the CLI at runtime. Replace a revoked key with
+`llimit accounts update <account-id> --set commandcode.api_key` at the hidden
+prompt, or reimport explicitly; LLimit does not renew Command Code keys.
+
+The 5-hour and weekly subscription meters use reported consumption and caps, with
+their server reset times. Monthly plan, purchased, and free credits remain separate
+amounts. Credits are usage-value units whose value varies by model, not USD cash.
+No monthly percentage is invented from plan names or prices. An active or trialing,
+renewing subscription with a reported 28–31-day period supplies the monthly reset
+and cycle length; annual, canceled, and unknown periods do not imply a monthly
+refill. Purchased and free credits have no inferred reset. Organization billing
+requests use the organization resolved by the API key's authenticated identity.
+See [Command Code usage limits](https://commandcode.ai/docs/resources/usage-limits).
 
 Junie reads your JetBrains AI balance as credits or USD without generating tokens.
 Add it with `--provider junie` and a key from

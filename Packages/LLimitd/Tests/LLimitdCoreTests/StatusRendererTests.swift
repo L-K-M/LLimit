@@ -133,6 +133,37 @@ final class StatusRendererTests: XCTestCase {
       .contains("Daily DIEM remaining 12.50 DIEM · USD balance $3.25"))
   }
 
+  func testCommandCodeBalancesStayVisibleWithAndWithoutSubscriptionWindows() throws {
+    let balances = [
+      UsageMetric(id: "monthly-credits", label: "Monthly plan credits", remainingAmount: 50, usedDisplay: "50 credits left"),
+      UsageMetric(id: "purchased-credits", label: "Purchased credits", remainingAmount: 5, usedDisplay: "5 credits left"),
+      UsageMetric(id: "free-credits", label: "Free credits", remainingAmount: 2, usedDisplay: "2 credits left")
+    ]
+    for hasWindows in [false, true] {
+      let windows = hasWindows ? [UsageMetric(id: "five-hour", label: "5-hour plan credits", remainingPercent: 75),
+                                 UsageMetric(id: "weekly", label: "Weekly plan credits", remainingPercent: 80)] : []
+      let usage = ProviderUsage(accountID: "command-code", provider: .commandCode, title: "Command Code",
+        metrics: windows + balances, fetchedAt: now)
+      let snapshot = QuotaSnapshot(generatedAt: now, providers: [usage], failures: [])
+      let object = try decodedWaybar(snapshot)
+      let account = try XCTUnwrap((object["accounts"] as? [[String: Any]])?.first)
+      let metrics = try XCTUnwrap(account["metrics"] as? [[String: Any]])
+      XCTAssertEqual(metrics.count, hasWindows ? 5 : 3)
+      for (id, line) in [("monthly-credits", "50 credits left"), ("purchased-credits", "5 credits left"), ("free-credits", "2 credits left")] {
+        let metric = try XCTUnwrap(metrics.first { $0["id"] as? String == id })
+        XCTAssertNil(metric["remainingPercent"])
+        XCTAssertEqual(metric["usageLine"] as? String, line)
+        XCTAssertTrue(StatusRenderer.humanReadable(snapshot: snapshot, now: now).contains(line))
+      }
+      if hasWindows {
+        XCTAssertEqual(object["percentage"] as? Int, 75)
+      } else {
+        XCTAssertNil(object["percentage"])
+        XCTAssertTrue((object["text"] as? String)?.contains("50 credits left") == true)
+      }
+    }
+  }
+
   func testEstimatedDailyBalanceIsMarkedInTextAndJSON() throws {
     let usage = ProviderUsage(
       accountID: "estimated-account", provider: .venice, title: "Venice",

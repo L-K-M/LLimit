@@ -19,6 +19,7 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
   case stepFun = "stepfun"
   case mistral = "mistral"
   case longcat = "longcat"
+  case commandCode = "command-code"
 
   public var displayName: String {
     switch self {
@@ -58,6 +59,8 @@ public enum QuotaProvider: String, CaseIterable, Codable, Sendable {
       return "Mistral"
     case .longcat:
       return "Longcat"
+    case .commandCode:
+      return "Command Code"
     }
   }
 }
@@ -313,6 +316,14 @@ public extension QuotaProvider {
           key: CredentialField.longcatSessionCookies,
           label: "Session cookies",
           help: "Paste the authentication Cookie header from longcat.ai/platform/usage (international platform). API keys cannot read this quota."
+        )
+      ]
+    case .commandCode:
+      return [
+        CredentialFieldDescriptor(
+          key: CredentialField.commandCodeAPIKey,
+          label: "API key",
+          help: "Use a Command Code API key from Studio → API Keys at commandcode.ai. You can also import the login saved by cmd login in ~/.commandcode/auth.json."
         )
       ]
     }

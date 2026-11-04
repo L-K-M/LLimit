@@ -13,8 +13,8 @@ CLI for login and renewal, with a private profile for each account.
 
 `CredentialDiscovery` exists only as an *optional import shortcut* — it can detect a
 login from a locally installed tool (Claude Code, Codex, Copilot, Antigravity,
-OpenCode, Devin CLI, Muse Code, Venice CLI, Cline, Junie, Step Code) so the
-user can one-click create a pre-filled account instead of pasting a token. Once
+OpenCode, Devin CLI, Muse Code, Venice CLI, Cline, Junie, Step Code, Command Code)
+so the user can one-click create a pre-filled account instead of pasting a token. Once
 imported, the account is copied into and owned by LLimit.
 
 Managed Claude connections use the embedded terminal and an account-specific
@@ -32,7 +32,8 @@ settings. The user's normal Codex login and existing imported accounts stay sepa
 
 Providers: Claude (Anthropic), OpenAI/ChatGPT, GitHub Copilot, Zhipu, Z.ai, Kimi,
 Google Antigravity, Devin, Meta Muse, OpenCode Go, Venice, Cline, JetBrains Junie,
-MiniMax M Plan, Xiaomi MiMo personal Token Plan, StepFun Step Plan, Mistral, Longcat.
+MiniMax M Plan, Xiaomi MiMo personal Token Plan, StepFun Step Plan, Mistral, Longcat,
+Command Code.
 
 ## Layout
 
@@ -138,8 +139,8 @@ Linux:
 - The host app is **not sandboxed** (the import shortcut reads `~/.claude`, `~/.codex`,
   `~/.config/github-copilot`, `~/.kimi`, `~/.kimi-code`, `~/.gemini`,
   `~/.local/share/opencode`, `~/.local/share/devin`, `~/.config/muse`, `~/.venice`,
-  `~/.cline`, `~/.junie`, `~/.stepcode`, and the Keychain). The widget extension **stays sandboxed**; it only reads the App
-  Group container.
+  `~/.cline`, `~/.junie`, `~/.stepcode`, `~/.commandcode`, and the Keychain).
+  The widget extension **stays sandboxed**; it only reads the App Group container.
 - MiMo console cookies are owned by LLimit, stored only in local settings under
   `mimo.session_cookies`, and redacted like other credentials. macOS keeps an
   isolated per-account saved Xiaomi Account login, authentication cookies only,
@@ -188,6 +189,38 @@ Linux:
 6. Add unit tests (discovery parsing + client decoding) — these run on Linux.
 
 ## Provider API notes
+
+- **Command Code**: provider `command-code`, secret `commandcode.api_key`.
+  Read-only `GET https://api.commandcode.ai/alpha/whoami?limits=1` with
+  `Authorization: Bearer` validates the key's user/organization identity. Use only
+  the returned `org.id` as `orgId` for `GET /alpha/billing/credits` and
+  `GET /alpha/billing/subscriptions`; a Studio URL slug is not an organization ID.
+  Refuse redirects and isolate cookies and caches. Keep provider response bodies,
+  reflected key material, and raw transport errors out of display surfaces/logs.
+  `windowLimits.limited` gates `fiveHour` and `weekly`, each reporting `used`,
+  `cap`, and `resetAt` in epoch milliseconds. Remaining is `1 - used / cap`,
+  clamped for display. A zero reset denotes an unopened window. Preserve the
+  documented durations of 18,000 and 604,800 seconds.
+  `credits.monthlyCredits`, `purchasedCredits`, and `freeCredits` are separate
+  remaining amounts. They are model-dependent usage-value credits, not USD.
+  Never hardcode plan allowances, infer a monthly percentage, or combine extra
+  credits with the rolling subscription caps. Only an `active` or `trialing`
+  subscription not canceling at period end, with server `currentPeriodStart` and
+  `currentPeriodEnd` spanning 28–31 days, supplies a monthly reset; its duration
+  is available once the period starts. Unknown, annual, or canceled periods do
+  not establish monthly refill. Purchased/free credits have no inferred reset.
+  Optional discovery reads only the production `~/.commandcode/auth.json`
+  top-level `apiKey`. Copy it into owned local settings, never other provider
+  OAuth sessions, refresh grants, or metadata. Reject malformed or unresolved
+  key references. No CLI runtime dependency or automatic key renewal; replace
+  or explicitly reimport revoked keys. This support does not report per-model
+  organization spend limits or cloud minutes.
+  Sources: official [usage limits](https://commandcode.ai/docs/resources/usage-limits),
+  [configuration reference](https://commandcode.ai/docs/settings), and the
+  published [command-code 1.88.2 CLI bundle](https://registry.npmjs.org/command-code/-/command-code-1.88.2.tgz)
+  (`dist/cli.mjs`), inspected 2026-11-04. Three authenticated, read-only calls
+  verified identity, billing credit decoding, and subscription scope; no inference
+  or billing changes were made.
 
 - **Longcat**: provider `longcat`. Uses the international console at
   `https://longcat.ai` with owned cookies, not an inference API key. macOS **Connect Longcat** uses a separate nonpersistent WebKit attempt;

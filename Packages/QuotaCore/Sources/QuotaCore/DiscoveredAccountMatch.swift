@@ -53,6 +53,7 @@ public extension DiscoveredCredential {
     case .openCodeGo: return sameSecret(CredentialField.openCodeGoAPIKey)
     case .venice: return sameSecret(CredentialField.veniceAPIKey)
     case .cline: return sameSecret(CredentialField.clineAPIKey)
+    case .commandCode: return sameSecret(CredentialField.commandCodeAPIKey)
     case .junie: return sameSecret(CredentialField.junieAPIKey)
     case .minimax: return sameSecret(CredentialField.minimaxAPIKey)
     case .stepFun:
