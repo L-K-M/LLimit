@@ -1014,6 +1014,15 @@ struct SettingsView: View {
 
           Divider()
 
+          settingsRow(title: "Subscription cost") {
+            SubscriptionPricingEditor(pricing: account.subscriptionPricing) { pricing in
+              model.updateSubscriptionPricing(accountID: accountID, pricing: pricing)
+            }
+            .id(accountID)
+          }
+
+          Divider()
+
           providerStatusRow(
             title: "Credentials",
             message: model.status(for: accountID)?.detail ?? "Not checked",
@@ -1658,6 +1667,138 @@ struct SettingsView: View {
     }
 
     return "\(remaining)%"
+  }
+}
+
+/// Explicit Save keeps incomplete amounts and currencies out of persisted accounts.
+/// A separate identity per account prevents a draft from being saved to a sibling.
+private struct SubscriptionPricingEditor: View {
+  let pricing: SubscriptionPricing?
+  let save: (SubscriptionPricing?) -> AccountEditOutcome
+  @State private var baseline: SubscriptionPricing?
+  @State private var enabled: Bool
+  @State private var amount: String
+  @State private var currency: String
+  @State private var billingPeriod: SubscriptionBillingPeriod
+  @State private var errorMessage: String?
+  @State private var saved = false
+
+  init(pricing: SubscriptionPricing?, save: @escaping (SubscriptionPricing?) -> AccountEditOutcome) {
+    self.pricing = pricing
+    self.save = save
+    _baseline = State(initialValue: pricing)
+    _enabled = State(initialValue: pricing != nil)
+    _amount = State(initialValue: pricing.map { String($0.amount) } ?? "")
+    _currency = State(initialValue: pricing?.currency ?? "USD")
+    _billingPeriod = State(initialValue: pricing?.billingPeriod ?? .monthly)
+  }
+
+  private var hasChanges: Bool {
+    guard enabled else { return baseline != nil }
+    return baseline == nil || Double(amount.trimmingCharacters(in: .whitespacesAndNewlines)) != baseline?.amount
+      || currency.trimmingCharacters(in: .whitespacesAndNewlines) != baseline?.currency
+      || billingPeriod != baseline?.billingPeriod
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      Toggle("Track subscription price", isOn: $enabled)
+        .toggleStyle(.checkbox)
+
+      if enabled {
+        HStack(spacing: 8) {
+          TextField("Amount", text: $amount)
+            .frame(minWidth: 90, maxWidth: 150)
+            .accessibilityLabel("Subscription price")
+          TextField("Currency", text: Binding(
+            get: { currency }, set: { currency = $0.uppercased() }
+          ))
+          .frame(width: 70)
+          .accessibilityLabel("Subscription currency")
+          Picker("Billing period", selection: $billingPeriod) {
+            ForEach(SubscriptionBillingPeriod.allCases, id: \.self) { period in
+              Text(period.displayName).tag(period)
+            }
+          }
+          .labelsHidden()
+          .pickerStyle(.menu)
+          .accessibilityLabel("Subscription billing period")
+        }
+        .textFieldStyle(.roundedBorder)
+
+        Text("Enter the price you actually pay and its three-letter currency code. Zero represents a free subscription. This account-owned setting is retained when you reconnect or reimport credentials.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+
+      HStack(spacing: 10) {
+        Button("Save") { commit() }
+          .disabled(!hasChanges)
+        if hasChanges {
+          Button("Reset") { load(pricing) }
+          Text("Unsaved changes")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        } else if saved {
+          Text("Saved")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+      }
+
+      if let errorMessage {
+        Text(errorMessage)
+          .font(.caption)
+          .foregroundStyle(.red)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+    }
+    .onChange(of: pricing) { _, current in
+      // External changes may update a clean editor, but never replace a draft.
+      if !hasChanges, current != baseline { load(current) }
+    }
+    .onChange(of: hasChanges) { _, changed in
+      if changed { saved = false }
+      errorMessage = nil
+    }
+  }
+
+  private func load(_ value: SubscriptionPricing?) {
+    baseline = value
+    enabled = value != nil
+    amount = value.map { String($0.amount) } ?? ""
+    currency = value?.currency ?? "USD"
+    billingPeriod = value?.billingPeriod ?? .monthly
+    errorMessage = nil
+    saved = false
+  }
+
+  private func commit() {
+    let proposed: SubscriptionPricing?
+    if enabled {
+      guard let value = Double(amount.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+        errorMessage = AccountEditRejection.invalidSubscriptionPricing.message
+        return
+      }
+      do {
+        proposed = try SubscriptionPricing(amount: value,
+          currency: currency.trimmingCharacters(in: .whitespacesAndNewlines), billingPeriod: billingPeriod).validated()
+      } catch {
+        errorMessage = AccountEditRejection.invalidSubscriptionPricing.message
+        return
+      }
+    } else { proposed = nil }
+
+    switch save(proposed) {
+    case .applied, .unchanged:
+      load(proposed)
+      saved = true
+    case .accountMissing:
+      errorMessage = "This account is no longer available."
+    case .rejected(let reason):
+      errorMessage = reason.message
+    }
   }
 }
 

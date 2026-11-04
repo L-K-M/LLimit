@@ -14,6 +14,9 @@ func accountsUpdate(_ args: [String]) async {
   var name: String?
   var values: [String: String] = [:]
   var promptedKeys: [String] = []
+  var subscriptionCost: String?
+  var subscriptionCurrency: String?
+  var subscriptionPeriod: String?
   var index = 1
   while index < args.count {
     let arg = args[index]
@@ -21,6 +24,9 @@ func accountsUpdate(_ args: [String]) async {
     index += 1
     switch arg {
     case "--name": name = args[index]
+    case "--subscription-cost": subscriptionCost = args[index]
+    case "--subscription-currency": subscriptionCurrency = args[index]
+    case "--subscription-period": subscriptionPeriod = args[index]
     case "--set":
       let pair = args[index]
       if let equals = pair.firstIndex(of: "=") {
@@ -30,7 +36,42 @@ func accountsUpdate(_ args: [String]) async {
     }
     index += 1
   }
-  guard name != nil || !values.isEmpty || !promptedKeys.isEmpty else { fail("accounts update needs --name or --set") }
+  let hasPricingChange = subscriptionCost != nil || subscriptionCurrency != nil || subscriptionPeriod != nil
+  guard name != nil || !values.isEmpty || !promptedKeys.isEmpty || hasPricingChange else {
+    fail("accounts update needs --name, --set or subscription pricing options")
+  }
+  let clearPricing = subscriptionCost?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "off"
+  if clearPricing, subscriptionCurrency != nil || subscriptionPeriod != nil {
+    fail("--subscription-cost off cannot be combined with currency or period changes")
+  }
+  let amount: Double?
+  if let subscriptionCost, !clearPricing {
+    guard let parsed = Double(subscriptionCost.trimmingCharacters(in: .whitespacesAndNewlines)), parsed.isFinite, parsed >= 0 else {
+      fail("--subscription-cost needs a nonnegative finite amount, or off")
+    }
+    amount = parsed
+  } else { amount = nil }
+  let period: SubscriptionBillingPeriod?
+  if let subscriptionPeriod {
+    guard let parsed = SubscriptionBillingPeriod(rawValue: subscriptionPeriod) else {
+      fail("--subscription-period must be monthly or yearly")
+    }
+    period = parsed
+  } else { period = nil }
+  if let subscriptionCurrency {
+    do { _ = try SubscriptionPricing(amount: 0, currency: subscriptionCurrency).validated() }
+    catch { fail(error.localizedDescription) }
+  }
+  func pricingChange(for account: ProviderAccount) throws -> SubscriptionPricingChange {
+    guard hasPricingChange else { return .unchanged }
+    if clearPricing { return .set(nil) }
+    guard let amount = amount ?? account.subscriptionPricing?.amount else {
+      throw SubscriptionPricingCLIError.missingAmount
+    }
+    return .set(try SubscriptionPricing(amount: amount,
+      currency: subscriptionCurrency ?? account.subscriptionPricing?.currency ?? "USD",
+      billingPeriod: period ?? account.subscriptionPricing?.billingPeriod ?? .monthly).validated())
+  }
   if let key = promptedKeys.first, isatty(STDIN_FILENO) != 1 {
     fail("--set \(key) needs a terminal prompt or an explicit key=value")
   }
@@ -39,6 +80,7 @@ func accountsUpdate(_ args: [String]) async {
   do {
     let id = try daemon.resolveAccountID(fragment)
     guard let account = daemon.settings.account(withID: id) else { throw DaemonError.unknownAccount(fragment) }
+    _ = try pricingChange(for: account)
     let editable = QuotaDaemon.editableCredentialKeys(of: account)
     if let unknown = (Array(values.keys) + promptedKeys).sorted().first(where: { !editable.contains($0) }) {
       throw DaemonError.unknownCredentialKey(unknown, provider: account.provider)
@@ -50,7 +92,7 @@ func accountsUpdate(_ args: [String]) async {
       let value = readField(prompt: "\(field?.label ?? key) (Enter keeps current value): ", secret: field?.isSecret ?? true)
       if !value.isEmpty { values[key] = value }
     }
-    guard name != nil || !values.isEmpty else { print("No changes."); return }
+    guard name != nil || !values.isEmpty || hasPricingChange else { print("No changes."); return }
     var verifiedMistralCredentials: [String: String]?
     if account.provider == .mistral, let header = values[CredentialField.mistralSessionCookies],
        !header.isEmpty {
@@ -64,23 +106,33 @@ func accountsUpdate(_ args: [String]) async {
         .verifiedManualCredentials(header: header)
     }
     let updated = try daemon.editingSettings {
+      guard let latest = daemon.settings.account(withID: id) else { throw DaemonError.unknownAccount(fragment) }
+      let pricing = try pricingChange(for: latest)
       if let verifiedMistralCredentials {
         guard daemon.settings.account(withID: id)?.credentials == account.credentials else {
           throw ProviderClientError(kind: .api, message: "The account changed while Mistral was being verified. Try again.")
         }
-        return try $0.updateAccount(id, displayName: name, credentials: .replacing(with: verifiedMistralCredentials))
+        return try $0.updateAccount(id, displayName: name, credentials: .replacing(with: verifiedMistralCredentials), subscriptionPricing: pricing)
       }
       if let verifiedLongcatCredentials {
         guard daemon.settings.account(withID: id)?.credentials == account.credentials else {
           throw ProviderClientError(kind: .api, message: "The account changed while Longcat was being verified. Try again.")
         }
-        return try $0.updateAccount(id, displayName: name, credentials: .replacing(with: verifiedLongcatCredentials))
+        return try $0.updateAccount(id, displayName: name, credentials: .replacing(with: verifiedLongcatCredentials), subscriptionPricing: pricing)
       }
-      return try $0.updateAccount(id, displayName: name, credentials: values.isEmpty ? .unchanged : .merging(values))
+      return try $0.updateAccount(id, displayName: name, credentials: values.isEmpty ? .unchanged : .merging(values), subscriptionPricing: pricing)
     }
     print("Updated \(updated.resolvedDisplayName) [\(updated.provider.rawValue)] — id \(updated.id)")
     noteMissingCredentials(of: updated)
   } catch { fail(error.localizedDescription) }
+}
+
+private enum SubscriptionPricingCLIError: LocalizedError {
+  case missingAmount
+
+  var errorDescription: String? {
+    "Set --subscription-cost before changing the currency or billing period."
+  }
 }
 
 func accountsReimport(_ args: [String]) {

@@ -1755,6 +1755,29 @@ final class AppModel: ObservableObject {
     status(for: accountID)?.available ?? false
   }
 
+  /// Pricing is account-owned metadata. Commit it locally before publishing it,
+  /// without changing authentication revisions or invalidating usage history.
+  func updateSubscriptionPricing(accountID: String, pricing: SubscriptionPricing?) -> AccountEditOutcome {
+    guard !configurationLoadFailed else { return .rejected(.subscriptionSaveFailed) }
+    guard let index = providerAccounts.firstIndex(where: { $0.id == accountID }) else { return .accountMissing }
+    let validated: SubscriptionPricing?
+    do { validated = try pricing?.validated() }
+    catch { return .rejected(.invalidSubscriptionPricing) }
+    guard providerAccounts[index].subscriptionPricing != validated else { return .unchanged }
+
+    var settings = currentSettings()
+    settings.accounts[index].subscriptionPricing = validated
+    do { try settingsStore.save(settings) }
+    catch { return .rejected(.subscriptionSaveFailed) }
+
+    providerAccounts[index].subscriptionPricing = validated
+    // A pending style save reads currentSettings(), so it retains this price.
+    if !syncSettingsToWidgetStore(settings.redactedCredentials()) {
+      statusMessage = "Subscription cost saved locally. Widget sync unavailable."
+    }
+    return .applied
+  }
+
   /// Saves one committed Settings text field. Settings keeps keystrokes in a draft and
   /// commits once (Return, focus loss, navigation, window close or quit), so a key
   /// replacement and its Venice history purge run only when the value really changed.

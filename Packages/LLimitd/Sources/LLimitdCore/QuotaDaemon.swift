@@ -238,30 +238,36 @@ public final class QuotaDaemon {
   /// Keep identity, style and history while replacing the login or display name.
   @discardableResult
   func updateAccount(
-    _ accountID: String, displayName: String? = nil, credentials change: CredentialChange = .unchanged
+    _ accountID: String, displayName: String? = nil, credentials change: CredentialChange = .unchanged,
+    subscriptionPricing pricingChange: SubscriptionPricingChange = .unchanged
   ) throws -> ProviderAccount {
     guard let index = settings.accounts.firstIndex(where: { $0.id == accountID }) else {
       throw DaemonError.unknownAccount(accountID)
     }
     let previous = settings.accounts[index]
     var updated = previous
+    if case .set(let pricing) = pricingChange {
+      updated.subscriptionPricing = try pricing?.validated()
+    }
     if let displayName {
       let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
       guard !name.isEmpty else { throw DaemonError.blankDisplayName }
       updated.displayName = name
     }
-    updated.credentials = try Self.credentials(of: previous, applying: change)
-    if updated.provider == .xiaomiMiMo {
-      updated.credentials = try MiMoSessionCookies.credentialsForStorage(updated.credentials)
-    }
-    if updated.provider == .stepFun {
-      updated.credentials = try Self.stepFunCredentialsForStorage(updated.credentials)
-    }
-    if updated.provider == .mistral {
-      updated.credentials = try MistralSessionCookies.credentialsForStorage(updated.credentials)
-    }
-    if updated.provider == .longcat {
-      updated.credentials = try LongcatSessionCookies.credentialsForStorage(updated.credentials)
+    if change != .unchanged {
+      updated.credentials = try Self.credentials(of: previous, applying: change)
+      if updated.provider == .xiaomiMiMo {
+        updated.credentials = try MiMoSessionCookies.credentialsForStorage(updated.credentials)
+      }
+      if updated.provider == .stepFun {
+        updated.credentials = try Self.stepFunCredentialsForStorage(updated.credentials)
+      }
+      if updated.provider == .mistral {
+        updated.credentials = try MistralSessionCookies.credentialsForStorage(updated.credentials)
+      }
+      if updated.provider == .longcat {
+        updated.credentials = try LongcatSessionCookies.credentialsForStorage(updated.credentials)
+      }
     }
     guard updated != previous else { return previous }
 
@@ -941,8 +947,9 @@ public struct SettingsTransaction {
   }
 
   @discardableResult
-  public func updateAccount(_ accountID: String, displayName: String? = nil, credentials: CredentialChange = .unchanged) throws -> ProviderAccount {
-    try editing.updateAccount(accountID, displayName: displayName, credentials: credentials)
+  public func updateAccount(_ accountID: String, displayName: String? = nil, credentials: CredentialChange = .unchanged,
+                            subscriptionPricing: SubscriptionPricingChange = .unchanged) throws -> ProviderAccount {
+    try editing.updateAccount(accountID, displayName: displayName, credentials: credentials, subscriptionPricing: subscriptionPricing)
   }
 
   public func reimportAccount(_ accountID: String, from stableID: String? = nil, among detected: [DiscoveredCredential]) throws -> (login: DiscoveredCredential, changed: Bool) {
@@ -962,6 +969,11 @@ public enum CredentialChange: Equatable, Sendable {
   case unchanged
   case merging([String: String])
   case replacing(with: [String: String])
+}
+
+public enum SubscriptionPricingChange: Equatable, Sendable {
+  case unchanged
+  case set(SubscriptionPricing?)
 }
 
 public enum ImportMatch: Equatable, Sendable {

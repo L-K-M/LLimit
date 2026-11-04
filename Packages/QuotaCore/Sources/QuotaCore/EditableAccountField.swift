@@ -59,6 +59,8 @@ public enum AccountEditRejection: Equatable, Sendable {
   case signInInProgress
   case invalidMiMoSession
   case invalidResetDate
+  case invalidSubscriptionPricing
+  case subscriptionSaveFailed
   /// The account is connected; its official CLI owns the credentials.
   case managedConnection
   /// The settings file could not be read at launch, so a key change cannot be saved.
@@ -74,6 +76,10 @@ public enum AccountEditRejection: Equatable, Sendable {
       return "Not saved. Connect MiMo to sign in, or enter valid console cookies including api-platform_serviceToken and userId."
     case .invalidResetDate:
       return "Not saved. Enter a valid reset date as YYYY-MM-DD or an ISO 8601 date-time with a timezone, or turn off the reset date."
+    case .invalidSubscriptionPricing:
+      return "Not saved. Enter a nonnegative finite amount and a three-letter currency code, such as USD or CHF."
+    case .subscriptionSaveFailed:
+      return "Could not save the subscription cost. Check LLimit's settings file and storage permissions, then try again."
     case .managedConnection:
       return "Not saved because this account is connected. Its sign-in manages these credentials."
     case .settingsUnreadable:

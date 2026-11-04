@@ -133,11 +133,17 @@ public actor BenchmarkRunner {
         } else if candidate.accountID != nil {
           run.quotaChanges = BenchmarkQuotaChange.changes(before: before, after: nil)
         }
-        if let price = candidate.allowanceCost, let metricID = candidate.quotaMetricID,
+        let allocation = candidate.quotaMetricID.flatMap { id in before?.metrics.first { $0.id == id } }.flatMap { metric in
+          candidate.subscriptionPricing.flatMap { BenchmarkPriceAllocation.subscription($0, metric: metric, currency: plan.currency) }
+        }
+        if let price = candidate.allowanceCost ?? allocation?.allowanceCost, let metricID = candidate.quotaMetricID,
            let change = run.quotaChanges.first(where: { $0.metricID == metricID }),
            change.unavailableReason == nil, let points = change.consumedPercentagePoints {
           let estimate = price * (points / 100)
           run.estimatedCost = estimate.isFinite ? estimate : nil
+          if run.estimatedCost != nil {
+            run.costBasis = candidate.allowanceCost != nil ? "Manual allocation for the selected quota window." : allocation?.explanation
+          }
         }
         redactor = redactor.merging(await credentialSource())
         report.runs.append(run)

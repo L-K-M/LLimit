@@ -182,7 +182,7 @@ public actor BenchmarkHarnessDiscovery {
   }
 
   private static func validIdentifier(_ value: String, isProvider: Bool) -> Bool {
-    let punctuation = CharacterSet(charactersIn: isProvider ? "._-" : "._:/+@=-[]")
+    let punctuation = CharacterSet(charactersIn: isProvider ? "._-" : "._:/+@=-[]~")
     return !value.isEmpty && value.utf8.count <= 512 && !value.hasPrefix("-")
       && value.unicodeScalars.allSatisfy { CharacterSet.alphanumerics.contains($0) || punctuation.contains($0) }
   }

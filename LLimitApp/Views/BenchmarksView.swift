@@ -119,6 +119,7 @@ struct BenchmarksView: View {
               repositoryPath: benchmark.plan.repositoryPath,
               accounts: model.providerAccounts,
               usages: model.snapshot?.providers ?? [],
+              reportCurrency: benchmark.plan.currency,
               onValidity: { setValidity(candidate.id, valid: $0) },
               onRemove: { removeCandidate(candidate.id) }
             )
@@ -273,6 +274,9 @@ struct BenchmarksView: View {
           Text("Reported tokens: \(tokens.inputTokens) input · \(tokens.cachedInputTokens) cached input · \(tokens.outputTokens) output")
             .font(.caption).foregroundStyle(.secondary)
         }
+        if let basis = run.costBasis {
+          Text(basis).font(.caption).foregroundStyle(.secondary)
+        }
         ForEach(Array(run.evaluations.enumerated()), id: \.offset) { _, evaluation in
           VStack(alignment: .leading, spacing: 3) {
             let judgeName = report.plan.judges.first { $0.id == evaluation.judgeID }?.name ?? "Judge"
@@ -378,6 +382,7 @@ private struct BenchmarkCandidateEditor: View {
   let repositoryPath: String
   let accounts: [ProviderAccount]
   let usages: [ProviderUsage]
+  let reportCurrency: String
   let onValidity: (Bool) -> Void
   let onRemove: () -> Void
   @State private var commandValid = true
@@ -386,6 +391,15 @@ private struct BenchmarkCandidateEditor: View {
 
   private var metrics: [UsageMetric] {
     usages.first { $0.accountID == candidate.accountID }?.metrics ?? []
+  }
+
+  private var subscription: SubscriptionPricing? {
+    accounts.first { $0.id == candidate.accountID }?.subscriptionPricing
+  }
+
+  private var subscriptionAllocation: BenchmarkPriceAllocation? {
+    guard let price = subscription, let metric = metrics.first(where: { $0.id == candidate.quotaMetricID }) else { return nil }
+    return BenchmarkPriceAllocation.subscription(price, metric: metric, currency: reportCurrency)
   }
 
   var body: some View {
@@ -414,21 +428,28 @@ private struct BenchmarkCandidateEditor: View {
         }
       }
       .onChange(of: candidate.accountID) { _, _ in
-        candidate.quotaMetricID = nil
+        candidate.quotaMetricID = subscription == nil ? nil : BenchmarkPriceAllocation.defaultMetricID(in: metrics)
         candidate.allowanceCost = nil
         allowanceDraft = ""
         allowanceError = nil
         reportValidity()
       }
       if candidate.accountID != nil {
+        if let price = subscription {
+          Text("Account subscription: \(price.amount.formatted(.currency(code: price.currency))) · \(price.billingPeriod.displayName.lowercased())")
+            .font(.callout)
+        } else {
+          Text("Set this account's subscription cost in Settings → Accounts for automatic estimates.")
+            .font(.caption).foregroundStyle(.secondary)
+        }
         Picker("Cost allocation window", selection: $candidate.quotaMetricID) {
           Text("No cost estimate").tag(String?.none)
           ForEach(metrics) { metric in
             Text(metric.label).tag(Optional(metric.id))
           }
         }
-        LabeledContent("Allocated cost of 100% of this window") {
-          TextField("Optional", text: $allowanceDraft)
+        LabeledContent("Full-window cost override (\(reportCurrency))") {
+          TextField("Automatic", text: $allowanceDraft)
             .frame(width: 100)
             .disabled(candidate.quotaMetricID == nil)
             .onChange(of: allowanceDraft) { _, new in updateAllowance(new) }
@@ -441,12 +462,24 @@ private struct BenchmarkCandidateEditor: View {
         if let allowanceError {
           Text(allowanceError).font(.caption).foregroundStyle(.red)
         }
-        Text("For example, enter your chosen weekly share of the subscription price for a weekly limit. This is an allocation assumption.")
+        if let allocation = subscriptionAllocation {
+          Text("Automatic cost for 100% of this window: \(allocation.allowanceCost.formatted(.currency(code: reportCurrency))). \(allocation.explanation)")
+            .font(.caption).foregroundStyle(.secondary)
+        } else if let price = subscription, candidate.quotaMetricID != nil {
+          Text(price.currency != reportCurrency
+            ? "Account currency \(price.currency) differs from report currency \(reportCurrency). Change the report currency or enter an override; currencies are not converted automatically."
+            : "No comparable window duration is reported. Enter a manual allocation to estimate cost for this window.")
+            .font(.caption).foregroundStyle(.secondary)
+        }
+        Text("Leave the override blank to use the account price. Estimates allocate the fee across all available quota; they are not extra provider charges.")
           .font(.caption).foregroundStyle(.secondary)
       }
     }
     .onAppear {
       allowanceDraft = candidate.allowanceCost.map { String($0) } ?? ""
+      if candidate.quotaMetricID == nil, subscription != nil {
+        candidate.quotaMetricID = BenchmarkPriceAllocation.defaultMetricID(in: metrics)
+      }
     }
     .onChange(of: candidate.quotaMetricID) { _, new in
       if new == nil {
@@ -454,6 +487,11 @@ private struct BenchmarkCandidateEditor: View {
         allowanceDraft = ""
         allowanceError = nil
         reportValidity()
+      }
+    }
+    .onChange(of: subscription) { _, _ in
+      if candidate.quotaMetricID == nil, subscription != nil {
+        candidate.quotaMetricID = BenchmarkPriceAllocation.defaultMetricID(in: metrics)
       }
     }
   }
