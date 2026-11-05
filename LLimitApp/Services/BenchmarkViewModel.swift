@@ -11,6 +11,8 @@ final class BenchmarkViewModel: ObservableObject {
   @Published private(set) var report: BenchmarkReport?
   @Published private(set) var isRunning = false
   @Published private(set) var progress = ""
+  @Published private(set) var executionProgress: BenchmarkProgress?
+  @Published private(set) var executionEndedAt: Date?
   @Published private(set) var errorMessage: String?
   private weak var model: AppModel?
   private let directory: URL
@@ -109,9 +111,11 @@ final class BenchmarkViewModel: ObservableObject {
     isRunning = true
     errorMessage = nil
     progress = "Preparing benchmark"
+    executionProgress = nil
+    executionEndedAt = nil
     report = nil
     task = Task { [self, model] in
-      defer { isRunning = false; task = nil }
+      defer { executionEndedAt = Date(); isRunning = false; task = nil }
       do {
         report = try await runner.run(plan: frozen, directory: directory, redactor: redactor,
           credentialSource: { [model] in
@@ -126,6 +130,8 @@ final class BenchmarkViewModel: ObservableObject {
               guard model.benchmarkRevision(accountID: id) == (revisions[id] ?? nil) else { throw BenchmarkError.changedAccount }
             }
             return reading
+          }, progress: { [self] progress in
+            await MainActor.run { self.executionProgress = progress }
           }, update: { [self] report, progress in
             await MainActor.run { self.report = report; self.progress = progress }
           })
@@ -164,6 +170,7 @@ final class BenchmarkViewModel: ObservableObject {
   func loadReport(_ report: BenchmarkReport) {
     guard !isRunning else { return }
     self.report = report
+    executionProgress = nil
     plan = report.plan
     errorMessage = nil
   }

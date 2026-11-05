@@ -223,8 +223,11 @@ public struct BenchmarkOutput: Sendable {
   private static func nativeEvents(_ output: String) -> [[String: Any]]? {
     var events: [[String: Any]] = []
     // Split on LF only: JSON strings may contain Unicode line separators.
+    // Foundation's string matching inside CRLF differs across platforms.
     // Foundation accepts the optional CR remaining from CRLF framing.
-    for line in output.components(separatedBy: "\n") where !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+    for bytes in output.utf8.split(separator: 0x0A) {
+      let line = String(decoding: bytes, as: UTF8.self)
+      if line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
       guard let data = line.data(using: .utf8),
             let event = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
       events.append(event)

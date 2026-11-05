@@ -21,7 +21,7 @@ let package = Package(
     ),
     .executableTarget(
       name: "llimit",
-      dependencies: ["LLimitdCore"]
+      dependencies: ["LLimitdCore", .product(name: "QuotaCore", package: "QuotaCore")]
     ),
     .testTarget(
       name: "LLimitdCoreTests",
