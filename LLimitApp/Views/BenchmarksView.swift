@@ -87,7 +87,7 @@ struct BenchmarksView: View {
         ProgressView().progressViewStyle(.linear)
       }
       if benchmark.isRunning {
-        Text("The benchmark keeps running when this window closes. Reopen Benchmarks from the menu bar to check it.")
+        Text("The benchmark keeps running when this window closes. Reopen it from Settings > Benchmarks to check progress.")
           .font(.caption).foregroundStyle(.secondary)
       }
     }

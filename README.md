@@ -70,7 +70,7 @@ and [#100](https://github.com/L-K-M/LLimit/pull/100) (macOS settings/native noti
 
 ## Agent benchmarks
 
-Open **Benchmarks** from the macOS menu bar (or the launcher in Settings), or use
+Open **Benchmarks** from Settings on macOS, or use
 `llimit bench` on Linux, to compare
 agent setups on your own coding tasks. Choose a committed Git repository, task,
 evaluation criteria, repetitions, agent commands and two judges. Every trial
@@ -82,7 +82,7 @@ The macOS setup saves privately as you edit, including unfinished plans. Run lis
 any missing setup beside the button. Attempts can run for up to 24 hours each;
 the dedicated window keeps attempt and evaluation progress, the current phase,
 and elapsed time visible above the results. Closing the window leaves the run
-active; reopen it from the menu bar. Quitting LLimit cancels the run safely.
+active; reopen it from Settings > Benchmarks. Quitting LLimit cancels the run safely.
 
 Agents use their own CLI login. Match it to the quota account you select and keep
 that account idle elsewhere throughout the measurement. LLimit does not give
