@@ -12,24 +12,32 @@ public struct BenchmarkProcessResult: Sendable {
   public let stdout: String
   public let stderr: String
   public let timedOut: Bool
+  public let stderrTruncated: Bool
+  public let decodedOutput: BenchmarkOutput?
+  public let recoverySessionID: String?
 }
 
-/// A bounded, noninteractive command. Each child owns a process group; stopping
+public enum BenchmarkProcessCapture: Sendable {
+  case text
+  case harness(BenchmarkOutputFormat)
+  case openCodeExport(sessionID: String)
+}
+
+/// A noninteractive command. Each child owns a process group; stopping
 /// a trial stops its ordinary descendants before another trial can start.
 public actor BenchmarkProcess {
-  public static let outputLimit = 2 * 1_024 * 1_024
-  private static let inputLimit = 4 * 1_024 * 1_024
+  private static let diagnosticLimit = 65_536
 
   public init() {}
 
   public func run(
     executable: URL, arguments: [String], directory: URL, input: String? = nil,
-    timeout: Double, environment: [String: String]? = nil
+    timeout: Double, environment: [String: String]? = nil,
+    capture: BenchmarkProcessCapture = .text
   ) async throws -> BenchmarkProcessResult {
     try Task.checkCancellation()
     guard executable.isFileURL, executable.path.hasPrefix("/"),
           directory.isFileURL, timeout.isFinite, timeout > 0, timeout <= BenchmarkPlan.maximumTimeoutSeconds,
-          (input?.utf8.count ?? 0) <= Self.inputLimit,
           !arguments.contains(where: { $0.utf8.contains(0) }),
           !executable.path.utf8.contains(0), !directory.path.utf8.contains(0) else {
       throw BenchmarkProcessError.invalidInput
@@ -46,7 +54,7 @@ public actor BenchmarkProcess {
           do {
             let result = try Self.execute(
               executable: executable, arguments: arguments, directory: directory,
-              input: input, timeout: timeout, environment: inherited, cancellation: cancellation)
+              input: input, timeout: timeout, environment: inherited, cancellation: cancellation, capture: capture)
             continuation.resume(returning: result)
           } catch {
             continuation.resume(throwing: error)
@@ -69,21 +77,23 @@ public actor BenchmarkProcess {
 
   private static func execute(
     executable: URL, arguments: [String], directory: URL, input: String?, timeout: Double,
-    environment: [String: String], cancellation: BenchmarkCancellation
+    environment: [String: String], cancellation: BenchmarkCancellation, capture: BenchmarkProcessCapture
   ) throws -> BenchmarkProcessResult {
     if cancellation.isCancelled { throw CancellationError() }
+    let stdout = try BenchmarkCaptureFile()
     let launch = try BenchmarkProcessLaunch(directory: directory, input: input)
     let pid = try launch.spawn(executable: executable, arguments: arguments, environment: environment)
     launch.closeChildDescriptors()
-    var stdout = Data()
     var stderr = Data()
-    var truncated = false
+    var stderrTruncated = false
+    var captureFailed = false
     let started = DispatchTime.now().uptimeNanoseconds
     var timedOut = false
     var cancelled = false
     var exited = false
     while true {
-      launch.drain(stdout: &stdout, stderr: &stderr, truncated: &truncated)
+      launch.drain(stdout: stdout, stderr: &stderr, diagnosticLimit: diagnosticLimit,
+                   stderrTruncated: &stderrTruncated, captureFailed: &captureFailed)
       cancelled = cancellation.isCancelled
       timedOut = Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000_000 >= timeout
       // WNOWAIT reserves the child's PID until process-group cleanup is done.
@@ -95,7 +105,7 @@ public actor BenchmarkProcess {
         // Do not signal a child which an external SIGCHLD handler reaped.
         throw BenchmarkProcessError.waitFailed
       }
-      if exited || timedOut || cancelled { break }
+      if exited || timedOut || cancelled || captureFailed { break }
       usleep(10_000)
     }
 
@@ -105,7 +115,8 @@ public actor BenchmarkProcess {
     if !exited { kill(pid, SIGTERM) }
     let grace = DispatchTime.now().uptimeNanoseconds
     while Double(DispatchTime.now().uptimeNanoseconds - grace) / 1_000_000_000 < 0.15 {
-      launch.drain(stdout: &stdout, stderr: &stderr, truncated: &truncated)
+      launch.drain(stdout: stdout, stderr: &stderr, diagnosticLimit: diagnosticLimit,
+                   stderrTruncated: &stderrTruncated, captureFailed: &captureFailed)
       usleep(10_000)
     }
     kill(-pid, SIGKILL)
@@ -114,14 +125,36 @@ public actor BenchmarkProcess {
     while waitpid(pid, &status, 0) == -1 {
       if errno != EINTR { throw BenchmarkProcessError.waitFailed }
     }
-    launch.drain(stdout: &stdout, stderr: &stderr, truncated: &truncated)
+    launch.drain(stdout: stdout, stderr: &stderr, diagnosticLimit: diagnosticLimit,
+                 stderrTruncated: &stderrTruncated, captureFailed: &captureFailed)
     if cancelled { throw CancellationError() }
+    if captureFailed { throw BenchmarkProcessError.captureFailed }
     let signal = status & 0x7f
     let code = signal == 0 ? (status >> 8) & 0xff : 128 + signal
-    let suffix = truncated ? "\n[Output truncated at 2 MiB.]" : ""
+    if cancellation.isCancelled { throw CancellationError() }
+    let data = try stdout.contents()
+    let text: String
+    let decoded: BenchmarkOutput?
+    var recoverySessionID: String?
+    switch capture {
+    case .text:
+      text = String(decoding: data, as: UTF8.self)
+      decoded = nil
+    case .harness(let format):
+      decoded = BenchmarkOutput.decode(data, format: format, shouldCancel: { cancellation.isCancelled })
+      text = format == .text ? decoded!.text : ""
+      if format == .opencodeJSON, decoded?.succeeded != true {
+        recoverySessionID = BenchmarkOutput.openCodeSessionForRecovery(data, shouldCancel: { cancellation.isCancelled })
+      }
+    case .openCodeExport(let sessionID):
+      decoded = BenchmarkOutput.decodeOpenCodeExport(data, expectedSessionID: sessionID, shouldCancel: { cancellation.isCancelled })
+      text = ""
+    }
+    if cancellation.isCancelled { throw CancellationError() }
     return BenchmarkProcessResult(
-      status: code, stdout: String(decoding: stdout, as: UTF8.self),
-      stderr: String(decoding: stderr, as: UTF8.self) + suffix, timedOut: timedOut && !exited)
+      status: code, stdout: text, stderr: String(decoding: stderr, as: UTF8.self),
+      timedOut: timedOut && !exited, stderrTruncated: stderrTruncated,
+      decodedOutput: decoded, recoverySessionID: recoverySessionID)
   }
 }
 
@@ -129,12 +162,14 @@ public enum BenchmarkProcessError: LocalizedError {
   case invalidInput
   case launchFailed
   case waitFailed
+  case captureFailed
 
   public var errorDescription: String? {
     switch self {
     case .invalidInput: return "The command, working directory, input, or timeout is invalid."
     case .launchFailed: return "Could not start the command. Check the executable and its permissions."
     case .waitFailed: return "Could not determine whether the command finished."
+    case .captureFailed: return "Could not capture the complete command output. Check available disk space and try again."
     }
   }
 }
@@ -153,6 +188,52 @@ private final class BenchmarkCancellation: @unchecked Sendable {
     lock.lock()
     cancelled = true
     lock.unlock()
+  }
+}
+
+/// Raw traces can contain secrets. Unlink the owner-only file before launching
+/// the child, so neither normal completion nor an app crash leaves a transcript.
+private final class BenchmarkCaptureFile {
+  private let descriptor: Int32
+
+  init() throws {
+    var name = Array(FileManager.default.temporaryDirectory.appendingPathComponent("llimit-capture-XXXXXX").path.utf8CString)
+    let file = mkstemp(&name)
+    guard file >= 0 else { throw BenchmarkProcessError.captureFailed }
+    let unlinked = name.withUnsafeBufferPointer { unlink($0.baseAddress!) == 0 }
+    guard unlinked, fchmod(file, 0o600) == 0, fcntl(file, F_SETFD, FD_CLOEXEC) != -1 else {
+      close(file)
+      if !unlinked { name.withUnsafeBufferPointer { _ = unlink($0.baseAddress!) } }
+      throw BenchmarkProcessError.captureFailed
+    }
+    descriptor = file
+  }
+
+  deinit { close(descriptor) }
+
+  func append(_ bytes: UnsafeRawBufferPointer) throws {
+    var offset = 0
+    while offset < bytes.count {
+      let count = write(descriptor, bytes.baseAddress! + offset, bytes.count - offset)
+      if count == -1, errno == EINTR { continue }
+      guard count > 0 else { throw BenchmarkProcessError.captureFailed }
+      offset += count
+    }
+  }
+
+  func contents() throws -> Data {
+    var metadata = stat()
+    guard fstat(descriptor, &metadata) == 0, metadata.st_size >= 0,
+          UInt64(metadata.st_size) <= UInt64(Int.max) else { throw BenchmarkProcessError.captureFailed }
+    let size = Int(metadata.st_size)
+    guard size > 0 else { return Data() }
+    guard let pointer = mmap(nil, size, PROT_READ, MAP_PRIVATE, descriptor, 0), pointer != MAP_FAILED else {
+      throw BenchmarkProcessError.captureFailed
+    }
+    // The file is immutable after all child pipes have been drained. Mapping it
+    // lets the selective reader skip arbitrarily large traces without copying
+    // them into Swift strings or JSON object graphs.
+    return Data(bytesNoCopy: pointer, count: size, deallocator: .custom { address, length in munmap(address, length) })
   }
 }
 
@@ -264,22 +345,28 @@ private final class BenchmarkProcessLaunch {
     inputDescriptor = -1
   }
 
-  func drain(stdout: inout Data, stderr: inout Data, truncated: inout Bool) {
-    drain(descriptor: output[0], into: &stdout, otherCount: stderr.count, truncated: &truncated)
-    drain(descriptor: errors[0], into: &stderr, otherCount: stdout.count, truncated: &truncated)
+  func drain(stdout: BenchmarkCaptureFile, stderr: inout Data, diagnosticLimit: Int,
+             stderrTruncated: inout Bool, captureFailed: inout Bool) {
+    drain(descriptor: output[0], captureFailed: &captureFailed) { bytes in try stdout.append(bytes) }
+    drain(descriptor: errors[0], captureFailed: &captureFailed) { bytes in
+      let retained = min(bytes.count, max(0, diagnosticLimit - stderr.count))
+      stderr.append(contentsOf: bytes.prefix(retained))
+      if retained < bytes.count { stderrTruncated = true }
+    }
   }
 
-  private func drain(descriptor: Int32, into data: inout Data, otherCount: Int, truncated: inout Bool) {
+  private func drain(descriptor: Int32, captureFailed: inout Bool,
+                     consume: (UnsafeRawBufferPointer) throws -> Void) {
     var bytes = [UInt8](repeating: 0, count: 16_384)
     // Bound each drain so an indefinitely noisy process cannot starve timeout
     // and cancellation checks while the pipe remains continuously readable.
     for _ in 0..<64 {
       let count = read(descriptor, &bytes, bytes.count)
       if count == -1, errno == EINTR { continue }
+      if count == -1, errno != EAGAIN, errno != EWOULDBLOCK { captureFailed = true }
       guard count > 0 else { return }
-      let retained = min(count, max(0, BenchmarkProcess.outputLimit - data.count - otherCount))
-      if retained > 0 { data.append(contentsOf: bytes.prefix(retained)) }
-      if retained < count { truncated = true }
+      do { try bytes.withUnsafeBytes { try consume(UnsafeRawBufferPointer(rebasing: $0[..<count])) } }
+      catch { captureFailed = true; return }
     }
   }
 

@@ -407,35 +407,144 @@ final class BenchmarkRunnerTests: XCTestCase {
     XCTAssertTrue(safe.runs[0].output.contains("[redacted]"))
   }
 
-  func testTruncatedCandidateOutputCannotBecomeSuccessfulExecution() async throws {
+  // Regression: a candidate producing >2 MiB of plain-text output must complete.
+  func testLargeCandidateOutputCompletesAndEvaluates() async throws {
     let fixture = try Fixture()
     defer { fixture.remove() }
-    let script = "dd if=/dev/zero bs=1024 count=2050 2>/dev/null | tr '\\000' x"
+    let size = 4 * 1_024 * 1_024 + 512 * 1_024
+    let script = "dd if=/dev/zero bs=1024 count=\(size / 1024) 2>/dev/null | tr '\\0' A"
     let plan = makePlan(fixture: fixture, candidates: [candidate(script: script)])
     let report = try await BenchmarkRunner().run(plan: plan, directory: fixture.reports, quotaReader: { _ in
       throw BenchmarkError.unavailableAccount
     })
     let run = try XCTUnwrap(report.runs.first)
-    XCTAssertEqual(run.outcome, .failed)
-    XCTAssertTrue(run.evaluations.isEmpty)
-    XCTAssertEqual(run.isAccepted, false)
+    XCTAssertEqual(run.outcome, .completed,
+      "Candidate with >2 MiB output should complete, not fail")
+    XCTAssertFalse(run.output.contains("Output truncated"),
+      "Output should not be truncated")
+    XCTAssertEqual(run.output.utf8.count, size)
+    XCTAssertEqual(run.evaluations.filter(\.isValid).count, 2,
+      "Judges must receive the complete evidence even when it exceeds 4 MiB")
   }
 
-  func testTruncatedJudgeOutputCannotBecomeValidVerdict() async throws {
+  // Regression: a judge outputting valid JSON followed by >2 MiB of whitespace
+  // must still produce a valid verdict.
+  func testJudgeValidJsonWithLargeTrailingWhitespaceIsValid() async throws {
     let fixture = try Fixture()
     defer { fixture.remove() }
-    let oversizedVerdict = "printf '%s\\n' \(shellQuote(acceptedVerdict)); dd if=/dev/zero bs=1024 count=2050 2>/dev/null | tr '\\000' ' '"
-    let judges = [BenchmarkJudge(name: "Oversized judge", command: shellCommand(oversizedVerdict)),
-                  BenchmarkJudge(name: "Normal judge", command: shellCommand("cat >/dev/null; printf '%s\\n' \(shellQuote(acceptedVerdict))"))]
-    let plan = makePlan(fixture: fixture, candidates: [candidate(script: "printf '%s\\n' done")], judges: judges)
+    let padding = 2 * 1_024 * 1_024 + 256 * 1_024
+    let oversizedJudge = BenchmarkJudge(name: "Large judge", command: shellCommand("""
+      printf '%s\\n' \(shellQuote(acceptedVerdict))
+      dd if=/dev/zero bs=1024 count=\(padding / 1024) 2>/dev/null | tr '\\0' ' '
+      """))
+    let normalJudge = BenchmarkJudge(name: "Normal judge", command: shellCommand(
+      "cat >/dev/null; printf '%s\\n' \(shellQuote(acceptedVerdict))"))
+    let plan = makePlan(fixture: fixture, candidates: [candidate(script: "printf '%s\\n' done")],
+      judges: [oversizedJudge, normalJudge])
     let report = try await BenchmarkRunner().run(plan: plan, directory: fixture.reports, quotaReader: { _ in
       throw BenchmarkError.unavailableAccount
     })
     let run = try XCTUnwrap(report.runs.first)
     XCTAssertEqual(run.outcome, .completed)
-    XCTAssertEqual(run.evaluations.filter(\.isValid).count, 1)
-    XCTAssertNil(run.isAccepted)
-    XCTAssertEqual(report.summaries.first?.acceptedCount, 0)
+    let validEvaluations = run.evaluations.filter(\.isValid)
+    XCTAssertEqual(validEvaluations.count, 2,
+      "Both judges should produce valid verdicts despite large output from one")
+    XCTAssertEqual(run.isAccepted, true,
+      "Two valid judges should determine acceptance")
+  }
+
+  // Regression: >2 MiB of stderr from a candidate must not invalidate small stdout.
+  func testLargeCandidateStderrDoesNotInvalidateSmallOutput() async throws {
+    let fixture = try Fixture()
+    defer { fixture.remove() }
+    let stderrSize = 2 * 1_024 * 1_024 + 512 * 1_024
+    let script = """
+      printf 'task completed\\n'
+      dd if=/dev/zero bs=1024 count=\(stderrSize / 1024) 2>/dev/null | tr '\\0' E >&2
+      """
+    let plan = makePlan(fixture: fixture, candidates: [candidate(script: script)])
+    let report = try await BenchmarkRunner().run(plan: plan, directory: fixture.reports, quotaReader: { _ in
+      throw BenchmarkError.unavailableAccount
+    })
+    let run = try XCTUnwrap(report.runs.first)
+    XCTAssertEqual(run.outcome, .completed,
+      "Candidate with small stdout and large stderr should complete")
+    XCTAssertTrue(run.output.contains("task completed"),
+      "Small stdout should be preserved despite large stderr")
+    XCTAssertFalse(run.evaluations.isEmpty,
+      "Completed candidate should be evaluated")
+  }
+
+  // Regression: >2 MiB of stderr from a judge must not invalidate a small verdict.
+  func testLargeJudgeStderrDoesNotInvalidateSmallVerdict() async throws {
+    let fixture = try Fixture()
+    defer { fixture.remove() }
+    let stderrSize = 2 * 1_024 * 1_024 + 512 * 1_024
+    let noisyJudge = BenchmarkJudge(name: "Noisy judge", command: shellCommand("""
+      printf '%s\\n' \(shellQuote(acceptedVerdict))
+      dd if=/dev/zero bs=1024 count=\(stderrSize / 1024) 2>/dev/null | tr '\\0' E >&2
+      """))
+    let normalJudge = BenchmarkJudge(name: "Normal judge", command: shellCommand(
+      "cat >/dev/null; printf '%s\\n' \(shellQuote(acceptedVerdict))"))
+    let plan = makePlan(fixture: fixture, candidates: [candidate(script: "printf '%s\\n' done")],
+      judges: [noisyJudge, normalJudge])
+    let report = try await BenchmarkRunner().run(plan: plan, directory: fixture.reports, quotaReader: { _ in
+      throw BenchmarkError.unavailableAccount
+    })
+    let run = try XCTUnwrap(report.runs.first)
+    XCTAssertEqual(run.outcome, .completed)
+    let validEvaluations = run.evaluations.filter(\.isValid)
+    XCTAssertEqual(validEvaluations.count, 2,
+      "Both judges should produce valid verdicts despite large stderr from one")
+    XCTAssertEqual(run.isAccepted, true)
+  }
+
+  // Synthetic Pi candidate: >2 MiB of valid tool_event JSON precedes a valid
+  // agent_end. The decoder must reach agent_end and extract final text, counts,
+  // and mark the execution completed so judges evaluate it.
+  func testLargePiOutputWithToolEventsBeforeAgentEnd() async throws {
+    let fixture = try Fixture()
+    defer { fixture.remove() }
+    let agentEnd = #"{"type":"agent_end","messages":[{"role":"assistant","content":[{"type":"text","text":"Final answer."}],"usage":{"input":100,"cacheRead":50,"output":30},"stopReason":"stop"}]}"#
+    let script = """
+      printf '%s' '{"type":"tool_execution_end","output":"'
+      dd if=/dev/zero bs=1024 count=2560 2>/dev/null | tr '\\0' A
+      printf '%s\\n' '"}'
+      printf '%s\\n' \(shellQuote(agentEnd))
+      """
+    let candidate = BenchmarkCandidate(
+      name: "Large Pi output",
+      command: BenchmarkCommand(executable: "/bin/sh", arguments: ["-c", script], outputFormat: .piJSON),
+      accountID: nil)
+    let plan = makePlan(fixture: fixture, candidates: [candidate])
+    let report = try await BenchmarkRunner().run(plan: plan, directory: fixture.reports, quotaReader: { _ in
+      throw BenchmarkError.unavailableAccount
+    })
+    let run = try XCTUnwrap(report.runs.first)
+    XCTAssertEqual(run.outcome, .completed,
+      "Pi candidate with >2 MiB tool events must complete")
+    XCTAssertEqual(run.output, "Final answer.",
+      "Final agent text must be extracted exactly")
+    XCTAssertEqual(run.evaluations.filter(\.isValid).count, 2)
+    let usage = try XCTUnwrap(run.tokenUsage)
+    XCTAssertEqual(usage.inputTokens, 100)
+    XCTAssertEqual(usage.cachedInputTokens, 50)
+    XCTAssertEqual(usage.outputTokens, 30)
+  }
+
+  func testSuccessfulExitWithoutTerminalEvidenceExplainsIncompleteResult() async throws {
+    let fixture = try Fixture()
+    defer { fixture.remove() }
+    let candidate = BenchmarkCandidate(name: "Incomplete Pi", command: BenchmarkCommand(
+      executable: "/bin/sh", arguments: ["-c", "printf '%s\\n' '{\"type\":\"agent_start\"}'"], outputFormat: .piJSON))
+    let report = try await BenchmarkRunner().run(plan: makePlan(fixture: fixture, candidates: [candidate]),
+      directory: fixture.reports, quotaReader: { _ in throw BenchmarkError.unavailableAccount })
+    let run = try XCTUnwrap(report.runs.first)
+    XCTAssertEqual(run.outcome, .failed)
+    XCTAssertTrue(run.output.contains("exited successfully"))
+    XCTAssertTrue(run.output.contains("complete final result"))
+    XCTAssertFalse(run.output.contains("execution failed (exit 0)"))
+    XCTAssertTrue(run.evaluations.isEmpty)
   }
 
   private func candidate(name: String = "Fixture agent", script: String, account: String? = nil) -> BenchmarkCandidate {

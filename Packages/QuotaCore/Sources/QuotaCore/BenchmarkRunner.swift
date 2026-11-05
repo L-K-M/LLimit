@@ -93,13 +93,15 @@ public actor BenchmarkRunner {
           run.output = decoded.text
           run.tokenUsage = decoded.tokenUsage
           run.outcome = result.timedOut ? .timedOut : result.status == 0 && decoded.succeeded ? .completed : .failed
-          if result.stderr.contains("[Output truncated") {
-            run.outcome = .failed
-            run.output += "\nThe output exceeded the capture limit; this trial cannot be fully evaluated."
-          }
           if run.outcome != .completed {
             // Raw structured traces and stderr are never persisted or sent to judges.
-            run.output += "\nAgent execution \(run.outcome.rawValue) (exit \(result.status))."
+            if result.timedOut {
+              run.output += "\nAgent execution timed out."
+            } else if result.status != 0 {
+              run.output += "\nAgent execution failed (exit \(result.status))."
+            } else {
+              run.output += "\nThe agent exited successfully, but its harness did not provide a complete final result. This trial cannot be evaluated."
+            }
           }
           run.patch = try await BenchmarkWorkspace.patch(directory: workspace, baselineCommit: commit, process: process)
           if run.outcome == .completed, let command = plan.acceptanceCommand, !command.isEmpty {
@@ -181,7 +183,7 @@ public actor BenchmarkRunner {
             try await BenchmarkWorkspace.create(repository: repository, commit: commit, destination: judgeDirectory, process: process)
             let result = try await execute(judge.command, prompt: prompt, directory: judgeDirectory, timeout: plan.timeoutSeconds)
             let decoded = try await executionOutput(result, command: judge.command, directory: judgeDirectory, timeout: plan.timeoutSeconds)
-            if result.status == 0 && !result.timedOut && decoded.succeeded && !result.stderr.contains("[Output truncated") {
+            if result.status == 0 && !result.timedOut && decoded.succeeded {
               evaluation = BenchmarkOutput.evaluation(decoded.text, judgeID: judge.id, redactor: redactor)
             }
           } catch is CancellationError { cancelled = true }
@@ -208,15 +210,14 @@ public actor BenchmarkRunner {
     let arguments = command.arguments.map { $0.replacingOccurrences(of: "{prompt}", with: prompt) }
     return try await process.run(executable: executable, arguments: arguments, directory: directory,
                                  input: usesArgument ? nil : prompt, timeout: timeout,
-                                 environment: BenchmarkHarness.environment(for: command))
+                                 environment: BenchmarkHarness.environment(for: command), capture: .harness(command.outputFormat))
   }
 
   private func executionOutput(_ result: BenchmarkProcessResult, command: BenchmarkCommand,
                                directory: URL, timeout: Double) async throws -> BenchmarkOutput {
-    let decoded = BenchmarkOutput.decode(result.stdout, format: command.outputFormat)
+    let decoded = result.decodedOutput ?? BenchmarkOutput.decode(result.stdout, format: command.outputFormat)
     guard command.outputFormat == .opencodeJSON, !decoded.succeeded, result.status == 0,
-          !result.timedOut, !result.stderr.contains("[Output truncated"),
-          let sessionID = BenchmarkOutput.openCodeSessionForRecovery(result.stdout) else { return decoded }
+          !result.timedOut, let sessionID = result.recoverySessionID else { return decoded }
     // OpenCode can exit on idle before flushing its final stream event. Its
     // read-only export is authoritative completion evidence for that exact run.
     // Parse only final assistant text and counts; never persist the raw receipt.
@@ -224,9 +225,9 @@ public actor BenchmarkRunner {
       let arguments = ["export", sessionID] + (command.arguments.contains("--pure") ? ["--pure"] : [])
       let receipt = try await process.run(executable: URL(fileURLWithPath: command.executable),
         arguments: arguments, directory: directory, timeout: min(timeout, 30),
-        environment: BenchmarkHarness.environment(for: command))
-      guard receipt.status == 0, !receipt.timedOut, !receipt.stderr.contains("[Output truncated") else { return decoded }
-      return BenchmarkOutput.decodeOpenCodeExport(receipt.stdout, expectedSessionID: sessionID)
+        environment: BenchmarkHarness.environment(for: command), capture: .openCodeExport(sessionID: sessionID))
+      guard receipt.status == 0, !receipt.timedOut else { return decoded }
+      return receipt.decodedOutput ?? decoded
     } catch is CancellationError { throw CancellationError() }
     catch { return decoded }
   }
