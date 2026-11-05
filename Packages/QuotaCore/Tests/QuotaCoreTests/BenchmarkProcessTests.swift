@@ -44,13 +44,81 @@ final class BenchmarkProcessTests: XCTestCase {
     XCTAssertEqual(FileManager.default.currentDirectoryPath, previous)
   }
 
-  func testDrainsMoreThanPipeCapacityAndBoundsCombinedOutput() async throws {
-    let result = try await shell("dd if=/dev/zero bs=65536 count=48 2>/dev/null; dd if=/dev/zero bs=65536 count=48 2>&1 1>&2", timeout: 10)
+  // Full stdout exceeding pipe capacity is preserved; stderr is bounded as a diagnostic preview.
+  func testLargeStdoutExceedingPipeCapacityIsPreserved() async throws {
+    // Generate 3 MiB on stdout, 3 MiB on stderr.
+    let size = 3 * 1_024 * 1_024
+    let result = try await shell("""
+      dd if=/dev/zero bs=1024 count=\(size / 1024) 2>/dev/null | tr '\\0' A
+      dd if=/dev/zero bs=1024 count=\(size / 1024) 2>/dev/null | tr '\\0' E >&2
+      """, timeout: 15)
     XCTAssertEqual(result.status, 0)
     XCTAssertFalse(result.timedOut)
-    XCTAssertTrue(result.stderr.contains("Output truncated"))
-    XCTAssertLessThanOrEqual(result.stdout.utf8.count + result.stderr.utf8.count, BenchmarkProcess.outputLimit + 100)
-    XCTAssertGreaterThan(result.stdout.utf8.count, 65_536)
+    // Stdout must be fully preserved regardless of volume.
+    XCTAssertEqual(result.stdout.utf8.count, size,
+      "Full stdout must be preserved even when it exceeds pipe capacity")
+    // Stderr is bounded as a diagnostic preview.
+    XCTAssertLessThanOrEqual(result.stderr.utf8.count, 65_536,
+      "Stderr should be bounded to a diagnostic preview")
+    XCTAssertTrue(result.stderrTruncated)
+  }
+
+  // Regression: full plain-text output exceeding 2 MiB must be preserved.
+  func testLargePlainTextOutputIsPreserved() async throws {
+    let size = 2 * 1_024 * 1_024 + 512 * 1_024
+    let result = try await shell("dd if=/dev/zero bs=1024 count=\(size / 1024) 2>/dev/null | tr '\\0' A", timeout: 15)
+    XCTAssertEqual(result.status, 0)
+    XCTAssertFalse(result.timedOut)
+    XCTAssertEqual(result.stdout.utf8.count, size,
+      "Full output must be preserved without loss")
+  }
+
+  // Regression: valid JSON followed by >2 MiB of whitespace must remain parseable.
+  func testJsonPrefixWithLargeTrailingWhitespaceIsPreserved() async throws {
+    let json = #"{"status":"ok"}"#
+    let padding = 2 * 1_024 * 1_024 + 256 * 1_024
+    let result = try await shell("""
+      printf '%s' '\(json)'
+      dd if=/dev/zero bs=1024 count=\(padding / 1024) 2>/dev/null | tr '\\0' ' '
+      """, timeout: 15)
+    XCTAssertEqual(result.status, 0)
+    XCTAssertFalse(result.timedOut)
+    XCTAssertTrue(result.stdout.hasPrefix(json),
+      "The JSON prefix must remain intact after large trailing content")
+  }
+
+  // Regression: >2 MiB of stderr must not cause a small valid stdout to be lost.
+  func testLargeStderrDoesNotInvalidateSmallStdout() async throws {
+    let stderrSize = 2 * 1_024 * 1_024 + 512 * 1_024
+    let result = try await shell("""
+      printf 'small-output\n'
+      dd if=/dev/zero bs=1024 count=\(stderrSize / 1024) 2>/dev/null | tr '\\0' E >&2
+      """, timeout: 15)
+    XCTAssertEqual(result.status, 0)
+    XCTAssertFalse(result.timedOut)
+    XCTAssertEqual(result.stdout, "small-output\n",
+      "Small stdout must not be truncated when stderr is large")
+    XCTAssertTrue(result.stderrTruncated)
+  }
+
+  // Regression: >4 MiB stdin must reach the child process intact.
+  func testLargeStdinReachesChildIntact() async throws {
+    let size = 4 * 1_024 * 1_024 + 512 * 1_024
+    let input = String(repeating: "X", count: size)
+    // Write stdin to a temp file, then verify size and content.
+    let tmp = directory.appendingPathComponent("stdin-tmp")
+    let result = try await shell("""
+      cat > \(tmp.lastPathComponent)
+      wc -c < \(tmp.lastPathComponent) >&2
+      cat \(tmp.lastPathComponent)
+      """, input: input, timeout: 15)
+    XCTAssertEqual(result.status, 0)
+    XCTAssertFalse(result.timedOut)
+    let reportedCount = Int(result.stderr.trimmingCharacters(in: .whitespacesAndNewlines))
+    XCTAssertEqual(reportedCount, size,
+      "Child must receive the full >4 MiB stdin")
+    XCTAssertEqual(result.stdout.utf8.count, size,
+      "Child must echo back the full >4 MiB stdin")
   }
 
   func testTimeoutStopsDescendantsIncludingIgnoredTermination() async throws {
@@ -61,6 +129,13 @@ final class BenchmarkProcessTests: XCTestCase {
     // A killed orphan can briefly remain a zombie until init reaps it; it
     // must never remain runnable or execute a delayed side effect.
     XCTAssertFalse(isRunning(child))
+  }
+
+  func testTimeoutRemainsResponsiveWhileOutputIsContinuous() async throws {
+    let result = try await shell("while :; do printf 'continuously producing output\\n'; done", timeout: 0.15)
+    XCTAssertTrue(result.timedOut)
+    XCTAssertNotEqual(result.status, 0)
+    XCTAssertFalse(result.stdout.isEmpty)
   }
 
   func testNormalParentExitAlsoStopsBackgroundDescendants() async throws {

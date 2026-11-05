@@ -8,12 +8,17 @@ public struct BenchmarkOutput: Sendable {
   public let succeeded: Bool
 
   public static func decode(_ output: String, format: BenchmarkOutputFormat) -> BenchmarkOutput {
+    decode(Data(output.utf8), format: format)
+  }
+
+  static func decode(_ data: Data, format: BenchmarkOutputFormat,
+                     shouldCancel: (() -> Bool)? = nil) -> BenchmarkOutput {
+    if shouldCancel?() == true { return BenchmarkOutput(text: "", tokenUsage: nil, succeeded: false) }
     switch format {
     case .text:
-      return BenchmarkOutput(text: output, tokenUsage: nil, succeeded: true)
+      return BenchmarkOutput(text: String(decoding: data, as: UTF8.self), tokenUsage: nil, succeeded: true)
     case .claudeJSON:
-      guard let data = output.data(using: .utf8),
-            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+      guard let object = try? BenchmarkJSONProjection(data, shouldCancel: shouldCancel).claude(),
             object["type"] as? String == "result",
             let text = object["result"] as? String else {
         return BenchmarkOutput(text: "The agent did not return a valid Claude Code result.", tokenUsage: nil, succeeded: false)
@@ -26,42 +31,43 @@ public struct BenchmarkOutput: Sendable {
       var usage: BenchmarkTokenUsage?
       var completed = false
       var failed = false
-      for line in output.split(separator: "\n") {
-        guard let data = String(line).data(using: .utf8),
-              let event = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
-        switch event["type"] as? String {
-        case "item.completed":
-          if let item = event["item"] as? [String: Any], item["type"] as? String == "agent_message",
-             let text = item["text"] as? String { finalResponse = text }
-        case "turn.completed":
-          completed = true
-          if let counts = event["usage"] as? [String: Any] { usage = tokens(counts) }
-        case "turn.failed", "error": failed = true
-        default: break
+      do {
+        try BenchmarkJSONProjection(data, shouldCancel: shouldCancel).events(format: .codexJSON) { event in
+          switch event["type"] as? String {
+          case "item.completed":
+            if let item = event["item"] as? [String: Any], item["type"] as? String == "agent_message",
+               let text = item["text"] as? String { finalResponse = text }
+          case "turn.completed":
+            completed = true
+            if let counts = event["usage"] as? [String: Any] { usage = tokens(counts) }
+          case "turn.failed", "error": failed = true
+          default: break
+          }
         }
-      }
+      } catch { failed = true }
       return BenchmarkOutput(text: finalResponse ?? "", tokenUsage: usage,
                              succeeded: completed && !failed && finalResponse?.isEmpty == false)
     case .piJSON:
-      return decodePi(output)
+      return decodePi(data, shouldCancel: shouldCancel)
     case .opencodeJSON:
-      return decodeOpenCode(output)
+      return decodeOpenCode(data, shouldCancel: shouldCancel)
     }
   }
 
-  private static func decodePi(_ output: String) -> BenchmarkOutput {
-    guard let events = nativeEvents(output) else { return BenchmarkOutput(text: "", tokenUsage: nil, succeeded: false) }
+  private static func decodePi(_ data: Data, shouldCancel: (() -> Bool)?) -> BenchmarkOutput {
     var completedMessages: [[String: Any]]?
     var failed = false
-    for event in events {
-      guard let type = event["type"] as? String else { failed = true; continue }
-      switch type {
-      case "agent_start": completedMessages = nil
-      case "agent_end": completedMessages = event["messages"] as? [[String: Any]]
-      case "error", "extension_error": failed = true
-      default: break
+    do {
+      try BenchmarkJSONProjection(data, shouldCancel: shouldCancel).events(format: .piJSON) { event in
+        guard let type = event["type"] as? String else { failed = true; return }
+        switch type {
+        case "agent_start": completedMessages = nil
+        case "agent_end": completedMessages = event["willRetry"] as? Bool == true ? nil : event["messages"] as? [[String: Any]]
+        case "error", "extension_error": failed = true
+        default: break
+        }
       }
-    }
+    } catch { failed = true }
     let assistants = (completedMessages ?? []).filter { $0["role"] as? String == "assistant" }
     guard let final = assistants.last else { return BenchmarkOutput(text: "", tokenUsage: nil, succeeded: false) }
     let text = (final["content"] as? [[String: Any]] ?? []).compactMap { block -> String? in
@@ -78,8 +84,7 @@ public struct BenchmarkOutput: Sendable {
     return BenchmarkOutput(text: text, tokenUsage: succeeded ? usage.reported : nil, succeeded: succeeded)
   }
 
-  private static func decodeOpenCode(_ output: String) -> BenchmarkOutput {
-    guard let events = nativeEvents(output) else { return BenchmarkOutput(text: "", tokenUsage: nil, succeeded: false) }
+  private static func decodeOpenCode(_ data: Data, shouldCancel: (() -> Bool)?) -> BenchmarkOutput {
     var messageOrder: [String] = []
     var knownMessages: Set<String> = []
     var textOrder: [String: [String]] = [:]
@@ -89,44 +94,59 @@ public struct BenchmarkOutput: Sendable {
     var seenSteps: Set<String> = []
     var usage = NativeTokenUsage()
     var failed = false
-    for event in events {
-      guard let type = event["type"] as? String else { failed = true; continue }
-      if type == "error" { failed = true; continue }
-      guard ["text", "step_start", "step_finish", "tool_use", "reasoning"].contains(type) else { continue }
-      guard let part = event["part"] as? [String: Any],
-            let messageID = part["messageID"] as? String, !messageID.isEmpty else { failed = true; continue }
-      if knownMessages.insert(messageID).inserted { messageOrder.append(messageID) }
-      let partID = part["id"] as? String
-      let identity = partID.flatMap { $0.isEmpty ? nil : $0 }
-        ?? (try? JSONSerialization.data(withJSONObject: part, options: [.sortedKeys])).map { String(decoding: $0, as: UTF8.self) }
-        ?? "missing"
-      let key = messageID + "\u{1f}" + identity
-      switch type {
-      case "text":
-        guard let text = part["text"] as? String else { failed = true; continue }
-        if texts[messageID]?[identity] == nil { textOrder[messageID, default: []].append(identity) }
-        texts[messageID, default: [:]][identity] = text
-      case "step_start", "tool_use":
-        if seenSteps.insert(type + "\u{1f}" + key).inserted {
-          finishReasons[messageID] = nil
-          if type == "step_start" {
-            textOrder[messageID] = nil
-            texts[messageID] = nil
+    do {
+      try BenchmarkJSONProjection(data, shouldCancel: shouldCancel).events(format: .opencodeJSON) { event in
+        guard let type = event["type"] as? String else { failed = true; return }
+        if type == "error" { failed = true; return }
+        guard ["text", "step_start", "step_finish", "tool_use", "reasoning"].contains(type) else { return }
+        guard let part = event["part"] as? [String: Any],
+              let messageID = part["messageID"] as? String, !messageID.isEmpty else { failed = true; return }
+        if type == "text", part["ignored"] as? Bool == true || part["synthetic"] as? Bool == true { return }
+        // State-changing parts need a durable identity. Projecting tool payloads
+        // away cannot safely distinguish two anonymous steps or tool calls.
+        if ["step_start", "tool_use"].contains(type), (part["id"] as? String)?.isEmpty != false {
+          failed = true
+          return
+        }
+        if knownMessages.insert(messageID).inserted {
+          messageOrder.append(messageID)
+          // Old message text is never final again, even if its events repeat.
+          textOrder = [:]
+          texts = [:]
+        }
+        let partID = part["id"] as? String
+        let identity = partID.flatMap { $0.isEmpty ? nil : $0 }
+          ?? (try? JSONSerialization.data(withJSONObject: part, options: [.sortedKeys])).map { String(decoding: $0, as: UTF8.self) }
+          ?? "missing"
+        let key = messageID + "\u{1f}" + identity
+        switch type {
+        case "text":
+          guard let text = part["text"] as? String else { failed = true; return }
+          guard messageID == messageOrder.last else { return }
+          if texts[messageID]?[identity] == nil { textOrder[messageID, default: []].append(identity) }
+          texts[messageID, default: [:]][identity] = text
+        case "step_start", "tool_use":
+          if seenSteps.insert(type + "\u{1f}" + key).inserted {
+            finishReasons[messageID] = nil
+            if type == "step_start" {
+              textOrder[messageID] = nil
+              texts[messageID] = nil
+            }
           }
+        case "step_finish":
+          guard seenFinishes.insert(key).inserted else { return }
+          guard let reason = part["reason"] as? String else { failed = true; return }
+          finishReasons[messageID] = reason
+          if let counts = part["tokens"] as? [String: Any] {
+            let cache = counts["cache"] as? [String: Any]
+            // OpenCode's output already reports the output count. Reasoning and
+            // cache writes are separate fields, not extra output tokens.
+            usage.add(input: counts["input"], cached: cache?["read"], output: counts["output"])
+          }
+        default: break
         }
-      case "step_finish":
-        guard seenFinishes.insert(key).inserted else { continue }
-        guard let reason = part["reason"] as? String else { failed = true; continue }
-        finishReasons[messageID] = reason
-        if let counts = part["tokens"] as? [String: Any] {
-          let cache = counts["cache"] as? [String: Any]
-          // OpenCode's output already reports the output count. Reasoning and
-          // cache writes are separate fields, not extra output tokens.
-          usage.add(input: counts["input"], cached: cache?["read"], output: counts["output"])
-        }
-      default: break
       }
-    }
+    } catch { failed = true }
     guard let final = messageOrder.last else { return BenchmarkOutput(text: "", tokenUsage: nil, succeeded: false) }
     let text = (textOrder[final] ?? []).compactMap { texts[final]?[$0] }.joined(separator: "\n")
     let succeeded = !failed && finishReasons[final] == "stop" && !text.isEmpty
@@ -136,25 +156,37 @@ public struct BenchmarkOutput: Sendable {
   /// A fresh run can omit its final stream event. Only recover the exact,
   /// unambiguous session named by its own structured events, never "latest".
   public static func openCodeSessionForRecovery(_ output: String) -> String? {
-    guard let events = nativeEvents(output), !events.isEmpty else { return nil }
+    openCodeSessionForRecovery(Data(output.utf8))
+  }
+
+  static func openCodeSessionForRecovery(_ data: Data, shouldCancel: (() -> Bool)? = nil) -> String? {
     var sessions: Set<String> = []
-    for event in events {
-      guard let type = event["type"] as? String, type != "error" else { return nil }
-      if let error = event["error"], !(error is NSNull) { return nil }
-      for value in [event["sessionID"], (event["part"] as? [String: Any])?["sessionID"]].compactMap({ $0 }) {
-        guard let id = value as? String, validOpenCodeSessionID(id) else { return nil }
-        sessions.insert(id)
+    var seen = false
+    var failed = false
+    do {
+      try BenchmarkJSONProjection(data, shouldCancel: shouldCancel).events(format: .opencodeJSON) { event in
+        seen = true
+        guard let type = event["type"] as? String, type != "error" else { failed = true; return }
+        if let error = event["error"], !(error is NSNull) { failed = true; return }
+        for value in [event["sessionID"], (event["part"] as? [String: Any])?["sessionID"]].compactMap({ $0 }) {
+          guard let id = value as? String, validOpenCodeSessionID(id) else { failed = true; return }
+          sessions.insert(id)
+        }
       }
-    }
-    return sessions.count == 1 ? sessions.first : nil
+    } catch { failed = true }
+    return !failed && seen && sessions.count == 1 ? sessions.first : nil
   }
 
   /// Reads only terminal assistant text and usage from an in-memory export.
   /// Session titles, paths, prompts, tool results and provider errors are ignored.
   public static func decodeOpenCodeExport(_ output: String, expectedSessionID: String? = nil) -> BenchmarkOutput {
+    decodeOpenCodeExport(Data(output.utf8), expectedSessionID: expectedSessionID)
+  }
+
+  static func decodeOpenCodeExport(_ data: Data, expectedSessionID: String? = nil,
+                                   shouldCancel: (() -> Bool)? = nil) -> BenchmarkOutput {
     let failure = BenchmarkOutput(text: "", tokenUsage: nil, succeeded: false)
-    guard let data = output.data(using: .utf8),
-          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+    guard let object = try? BenchmarkJSONProjection(data, shouldCancel: shouldCancel).openCodeExport(),
           let session = object["info"] as? [String: Any], let sessionID = session["id"] as? String,
           validOpenCodeSessionID(sessionID), expectedSessionID == nil || expectedSessionID == sessionID,
           let messages = object["messages"] as? [[String: Any]], !messages.isEmpty else { return failure }
@@ -218,21 +250,6 @@ public struct BenchmarkOutput: Sendable {
     id.hasPrefix("ses_") && (5...128).contains(id.utf8.count) && id.utf8.dropFirst(4).allSatisfy {
       (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || $0 == 45 || $0 == 95
     }
-  }
-
-  private static func nativeEvents(_ output: String) -> [[String: Any]]? {
-    var events: [[String: Any]] = []
-    // Split on LF only: JSON strings may contain Unicode line separators.
-    // Foundation's string matching inside CRLF differs across platforms.
-    // Foundation accepts the optional CR remaining from CRLF framing.
-    for bytes in output.utf8.split(separator: 0x0A) {
-      let line = String(decoding: bytes, as: UTF8.self)
-      if line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
-      guard let data = line.data(using: .utf8),
-            let event = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-      events.append(event)
-    }
-    return events
   }
 
   private struct NativeTokenUsage {

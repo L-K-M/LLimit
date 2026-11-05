@@ -86,8 +86,7 @@ public struct BenchmarkWorkspace {
     let result = try await process.run(
       executable: git, arguments: safeArguments + arguments, directory: directory,
       timeout: 60, environment: environment)
-    guard !result.timedOut, result.status == 0,
-          !result.stderr.contains("[Output truncated") else {
+    guard !result.timedOut, result.status == 0 else {
       throw BenchmarkWorkspaceError.gitFailed
     }
     return result.stdout

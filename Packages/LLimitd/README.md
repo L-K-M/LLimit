@@ -427,6 +427,13 @@ part of the status-bar contract, shared snapshots or ordinary quota history.
 Known LLimit credentials are redacted from reports; review a report before
 sharing it because task and repository content may itself be confidential.
 
+Harness transcripts have no fixed size limit. LLimit captures stdout in private,
+temporary storage and extracts final answers and usage without retaining tool
+traces in reports. Complete final answers and patches reach the judges without
+size truncation. Stderr is a bounded diagnostic preview; its volume does not
+invalidate a completed trial. Incomplete harness responses and capture failures
+(for example, insufficient disk space) still prevent evaluation.
+
 No live providers are needed to verify the runner's CLI integration:
 
 ```bash
