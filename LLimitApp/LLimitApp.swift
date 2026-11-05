@@ -1214,13 +1214,6 @@ private struct MenuBarContent: View {
       Spacer()
 
       ActionBarButton(
-        title: "Benchmarks",
-        systemImage: "chart.bar.xaxis"
-      ) {
-        BenchmarkWindowController.shared.show(model: model)
-      }
-
-      ActionBarButton(
         title: "Settings",
         systemImage: "gearshape",
         shortcut: KeyboardShortcut(",", modifiers: .command)
