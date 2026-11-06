@@ -25,6 +25,133 @@ final class BenchmarkModelsTests: XCTestCase {
     XCTAssertNil(change.unavailableReason)
   }
 
+  func testReportedFractionMeasuresMovementHiddenByWholePercentLabels() throws {
+    let beforeMetric = UsageMetric(id: "monthly", label: "Monthly", remainingPercent: 80, reportedRemainingFraction: 0.8)
+    let afterMetric = UsageMetric(id: "monthly", label: "Monthly", remainingPercent: 80, reportedRemainingFraction: 0.7999)
+    let change = BenchmarkQuotaChange.changes(before: usage([beforeMetric]), after: usage([afterMetric], after: true))[0]
+    XCTAssertEqual(try XCTUnwrap(change.consumedPercentagePoints), 0.01, accuracy: 0.000000001)
+    XCTAssertNil(change.unavailableReason)
+  }
+
+  func testReportedFractionOverridesNearbyCountDifferencesForCost() throws {
+    let beforeMetric = UsageMetric(id: "monthly", label: "Monthly", remainingPercent: 80, remainingAmount: 795,
+      totalAmount: 1_000, reportedRemainingFraction: 0.8)
+    let afterMetric = UsageMetric(id: "monthly", label: "Monthly", remainingPercent: 80, remainingAmount: 790,
+      totalAmount: 1_000, reportedRemainingFraction: 0.799)
+    let change = BenchmarkQuotaChange.changes(before: usage([beforeMetric]), after: usage([afterMetric], after: true))[0]
+    XCTAssertEqual(change.consumedAmount, 5)
+    XCTAssertEqual(try XCTUnwrap(change.consumedPercentagePoints), 0.1, accuracy: 0.000000001)
+    XCTAssertEqual(beforeMetric.remainingFraction, 0.8)
+    XCTAssertEqual(afterMetric.remainingFraction, 0.799)
+  }
+
+  func testReportedFractionReplenishmentCannotBeHiddenByFallingCounts() {
+    let beforeMetric = UsageMetric(id: "monthly", label: "Monthly", remainingPercent: 80, remainingAmount: 800,
+      totalAmount: 1_000, reportedRemainingFraction: 0.8)
+    let afterMetric = UsageMetric(id: "monthly", label: "Monthly", remainingPercent: 80, remainingAmount: 799,
+      totalAmount: 1_000, reportedRemainingFraction: 0.801)
+    let change = BenchmarkQuotaChange.changes(before: usage([beforeMetric]), after: usage([afterMetric], after: true))[0]
+    XCTAssertNil(change.consumedAmount)
+    XCTAssertNil(change.consumedPercentagePoints)
+    XCTAssertTrue(change.unavailableReason?.contains("increased") == true)
+  }
+
+  func testUnchangedReportedFractionCannotFallBackToCountsOrWholePercents() {
+    for hasCounts in [false, true] {
+      let beforeMetric = UsageMetric(id: "monthly", label: "Monthly", remainingPercent: 80,
+        remainingAmount: hasCounts ? 800 : nil, totalAmount: hasCounts ? 1_000 : nil,
+        reportedRemainingFraction: 0.8)
+      let afterMetric = UsageMetric(id: "monthly", label: "Monthly", remainingPercent: 79,
+        remainingAmount: hasCounts ? 795 : nil, totalAmount: hasCounts ? 1_000 : nil,
+        reportedRemainingFraction: 0.8)
+      let change = BenchmarkQuotaChange.changes(before: usage([beforeMetric]), after: usage([afterMetric], after: true))[0]
+      XCTAssertEqual(change.consumedAmount, hasCounts ? 5 : nil)
+      XCTAssertNil(change.consumedPercentagePoints)
+      XCTAssertNotNil(change.unavailableReason)
+    }
+  }
+
+  func testInvalidOrChangedFractionReportingCannotFallBackToCounts() {
+    let beforeMetric = UsageMetric(id: "monthly", label: "Monthly", remainingPercent: 80, remainingAmount: 800,
+      totalAmount: 1_000, reportedRemainingFraction: 0.8)
+    for fraction in [Double?.none, 1.1, Double.nan] {
+      let afterMetric = UsageMetric(id: "monthly", label: "Monthly", remainingPercent: 80, remainingAmount: 799,
+        totalAmount: 1_000, reportedRemainingFraction: fraction)
+      let change = BenchmarkQuotaChange.changes(before: usage([beforeMetric]), after: usage([afterMetric], after: true))[0]
+      XCTAssertNil(change.consumedAmount)
+      XCTAssertNil(change.consumedPercentagePoints)
+      XCTAssertNotNil(change.unavailableReason)
+    }
+  }
+
+  func testLegacyMetricWithoutReportedFractionStillDecodes() throws {
+    let json = Data(#"{"id":"monthly","label":"Monthly","remainingPercent":75,"isUnlimited":false}"#.utf8)
+    let metric = try JSONDecoder().decode(UsageMetric.self, from: json)
+    XCTAssertNil(metric.reportedRemainingFraction)
+    XCTAssertEqual(metric.remainingFraction, 0.75)
+    var precise = metric
+    precise.reportedRemainingFraction = 0.75123
+    XCTAssertEqual(try JSONDecoder().decode(UsageMetric.self, from: JSONEncoder().encode(precise)).remainingFraction, 0.75123)
+  }
+
+  func testLongcatCountdownExpiryJitterPreservesMeasuredAmounts() throws {
+    let expiry = start.addingTimeInterval(1_000)
+    let beforeMetric = UsageMetric(id: "token-balance", label: "Tokens remaining", remainingAmount: 1_000,
+      totalAmount: 1_000, estimateKeyHash: "same-authentication", expiresAt: expiry,
+      expiryDateLabel: "2026-12-03", windowSeconds: 2_592_000)
+    for jitter in [-2.0, -1.0, 1.0, 2.0] {
+      var afterMetric = beforeMetric
+      afterMetric.remainingAmount = 999
+      afterMetric.expiresAt = expiry.addingTimeInterval(jitter)
+      let change = BenchmarkQuotaChange.changes(before: usage([beforeMetric], provider: .longcat),
+        after: usage([afterMetric], after: true, provider: .longcat))[0]
+      XCTAssertEqual(change.consumedAmount, 1)
+      XCTAssertEqual(try XCTUnwrap(change.consumedPercentagePoints), 0.1, accuracy: 0.000001)
+      XCTAssertNil(change.unavailableReason)
+    }
+  }
+
+  func testLongcatExpiryJitterRequiresStableReportedAllowanceAndIdentity() {
+    let original = UsageMetric(id: "token-balance", label: "Tokens remaining", remainingAmount: 1_000,
+      totalAmount: 1_000, estimateKeyHash: "same-authentication", expiresAt: start.addingTimeInterval(1_000),
+      expiryDateLabel: "2026-12-03", windowSeconds: 2_592_000)
+    for variant in 0..<8 {
+      var beforeMetric = original
+      var afterMetric = original
+      afterMetric.remainingAmount = 999
+      afterMetric.expiresAt = original.expiresAt?.addingTimeInterval(2)
+      switch variant {
+      case 0: afterMetric.expiryDateLabel = "2026-12-04"
+      case 1: beforeMetric.totalAmount = nil; afterMetric.totalAmount = nil
+      case 2: afterMetric.totalAmount = 2_000
+      case 3: beforeMetric.estimateKeyHash = nil; afterMetric.estimateKeyHash = nil
+      case 4: afterMetric.estimateKeyHash = "different-authentication"
+      case 5: beforeMetric.windowSeconds = nil; afterMetric.windowSeconds = nil
+      case 6: afterMetric.expiresAt = original.expiresAt?.addingTimeInterval(3)
+      default: break
+      }
+      let provider: QuotaProvider = variant == 7 ? .openAI : .longcat
+      let change = BenchmarkQuotaChange.changes(before: usage([beforeMetric], provider: provider),
+        after: usage([afterMetric], after: true, provider: provider))[0]
+      XCTAssertNil(change.consumedAmount)
+      XCTAssertNil(change.consumedPercentagePoints)
+      XCTAssertNotNil(change.unavailableReason)
+    }
+  }
+
+  func testExpiredAllowanceCannotBeMeasuredAsConsumption() {
+    let beforeMetric = UsageMetric(id: "token-balance", label: "Tokens remaining", remainingAmount: 1_000,
+      totalAmount: 1_000, estimateKeyHash: "same-authentication", expiresAt: start.addingTimeInterval(10),
+      expiryDateLabel: "2026-12-03", windowSeconds: 2_592_000)
+    var afterMetric = beforeMetric
+    afterMetric.remainingAmount = 999
+    let change = BenchmarkQuotaChange.changes(before: usage([beforeMetric], provider: .longcat),
+      after: usage([afterMetric], after: true, provider: .longcat))[0]
+    XCTAssertNil(change.consumedAmount)
+    XCTAssertNil(change.consumedPercentagePoints)
+    XCTAssertNotNil(change.unavailableReason)
+  }
+
   func testPercentageOnlyUnchangedReadingIsNotZeroCost() {
     let before = usage([UsageMetric(id: "weekly", label: "Weekly", remainingPercent: 70)])
     let after = usage([UsageMetric(id: "weekly", label: "Weekly", remainingPercent: 70)], after: true)

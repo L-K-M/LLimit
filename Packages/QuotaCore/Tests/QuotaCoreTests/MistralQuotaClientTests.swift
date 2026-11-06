@@ -100,6 +100,30 @@ final class MistralQuotaClientTests: XCTestCase {
     }
   }
 
+  func testUnroundedBudgetFractionMeasuresSubpercentConsumption() async throws {
+    let beforeClient = MistralQuotaClient(httpClient: MistralHTTPStub(body: try page(budget: budget(api: bucket(percent: 20)))))
+    let afterClient = MistralQuotaClient(httpClient: MistralHTTPStub(body: try page(budget: budget(api: bucket(percent: 20.01)))))
+    let before = try await beforeClient.fetchUsage(configuration: configuration(), now: now)
+    let after = try await afterClient.fetchUsage(configuration: configuration(), now: now.addingTimeInterval(1))
+    let beforeMetric = try XCTUnwrap(before.metrics.first { $0.id == "api-monthly" })
+    let afterMetric = try XCTUnwrap(after.metrics.first { $0.id == "api-monthly" })
+    XCTAssertEqual(beforeMetric.remainingPercent, 80)
+    XCTAssertEqual(afterMetric.remainingPercent, 80)
+    let change = try XCTUnwrap(BenchmarkQuotaChange.changes(before: before, after: after).first { $0.metricID == "api-monthly" })
+    XCTAssertEqual(try XCTUnwrap(change.consumedPercentagePoints), 0.01, accuracy: 0.000000001)
+    XCTAssertNil(change.unavailableReason)
+  }
+
+  func testUnavailableBudgetPercentDoesNotGainAFractionFromItsAllowance() async throws {
+    for api in [bucket(percent: NSNull()), bucket(percent: 20, total: 0)] {
+      let client = MistralQuotaClient(httpClient: MistralHTTPStub(body: try page(budget: budget(api: api))))
+      let usage = try await client.fetchUsage(configuration: configuration(), now: now)
+      let metric = try XCTUnwrap(usage.metrics.first { $0.id == "api-monthly" })
+      XCTAssertNil(metric.reportedRemainingFraction)
+      XCTAssertNil(metric.remainingFraction)
+    }
+  }
+
   func testVerifiedManualCredentialsReturnsOnlyCanonicalAuthenticationAndBoundIdentity() async throws {
     let http = MistralHTTPStub(body: try page())
     let credentials = try await MistralQuotaClient(httpClient: http).verifiedManualCredentials(

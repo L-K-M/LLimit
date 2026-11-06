@@ -161,7 +161,7 @@ struct BenchmarksView: View {
           } label: {
             Label("History", systemImage: "clock.arrow.circlepath")
           }
-          .disabled(benchmark.isRunning)
+          .disabled(benchmark.isRunning || benchmark.isCheckingAcceptance)
         }
       }
       Text("Compare the time, quota, and output quality of your agent setups on the same task.")
@@ -202,13 +202,7 @@ struct BenchmarksView: View {
             TextField("0", value: $benchmark.plan.settleSeconds, format: .number)
               .frame(width: 85)
           }
-          TextField("Optional acceptance command, for example swift test", text: Binding(
-            get: { benchmark.plan.acceptanceCommand ?? "" },
-            set: { benchmark.plan.acceptanceCommand = $0.isEmpty ? nil : $0 }
-          ))
-          .font(.system(.body, design: .monospaced))
-          Text("The acceptance command runs inside each attempt's workspace. An unsuccessful exit rejects that result.")
-            .font(.caption).foregroundStyle(.secondary)
+          acceptanceSetup
         }
         .padding(8)
       } label: {
@@ -268,6 +262,13 @@ struct BenchmarksView: View {
                                      repositoryPath: benchmark.plan.repositoryPath, judge: true) {
                 setValidity(judge.id, valid: $0)
               }
+              if BenchmarkJudgeInspection.enablingInspection(in: judge.command) == judge.command {
+                Text("File inspection enabled. LLimit runs the configured test command independently and supplies its results.")
+                  .font(.caption).foregroundStyle(.secondary)
+              } else {
+                Text("Custom judge command. Check its file permissions in Advanced command; tests run through the acceptance command.")
+                  .font(.caption).foregroundStyle(.secondary)
+              }
             }
             if judge.id != benchmark.plan.judges.last?.id { Divider() }
           }
@@ -299,13 +300,59 @@ struct BenchmarksView: View {
           Label("Run benchmark", systemImage: "play.fill")
         }
         .buttonStyle(.borderedProminent)
-        .disabled(!readiness.isReady)
+        .disabled(!readiness.isReady || benchmark.isCheckingAcceptance)
         .help(readiness.reasons.first ?? "Run the configured benchmark.")
         Text("Runs agents and judges using their configured subscriptions or API accounts.")
           .font(.caption).foregroundStyle(.secondary)
       }
     }
     .textFieldStyle(.roundedBorder)
+  }
+
+  private var acceptanceSetup: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      TextField("Acceptance test command, for example swift test", text: Binding(
+        get: { benchmark.plan.acceptanceCommand ?? "" },
+        set: { benchmark.plan.acceptanceCommand = $0.isEmpty ? nil : $0 }
+      ), axis: .vertical)
+      .font(.system(.body, design: .monospaced))
+      .lineLimit(2...5)
+      HStack {
+        Button("Check on baseline") { benchmark.checkAcceptanceCommand() }
+          .disabled(benchmark.isCheckingAcceptance || benchmark.plan.repositoryPath.isEmpty ||
+                    (benchmark.plan.acceptanceCommand ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        if benchmark.isCheckingAcceptance {
+          ProgressView().controlSize(.small)
+          Text("Checking a disposable copy…").font(.caption)
+          Button("Cancel") { benchmark.cancelAcceptanceCheck() }
+        }
+      }
+      Text("Runs independently in each attempt's checkout before judging. A failed command rejects that result. Check on baseline tests a fresh copy of committed HEAD first, without running agents or judges.")
+        .font(.caption).foregroundStyle(.secondary)
+      if (benchmark.plan.acceptanceCommand ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        Label("No test command configured. Test results reported by agents will remain unverified.", systemImage: "info.circle")
+          .font(.caption).foregroundStyle(.secondary)
+      }
+      if let result = benchmark.acceptanceCheckResult {
+        Label(result.passed ? "Baseline check passed" : result.timedOut ? "Baseline check timed out" : "Baseline check failed (exit \(result.exitCode))",
+              systemImage: result.passed ? "checkmark.circle" : "exclamationmark.triangle")
+          .font(.callout).foregroundStyle(result.passed ? Color.secondary : Color.orange)
+        Text("Commit \(result.baselineCommit.prefix(12)). Candidate attempts will receive their own checks.")
+          .font(.caption).foregroundStyle(.secondary)
+        if !result.passed && !result.timedOut {
+          Text("The baseline already fails this command. An attempt must resolve the failures to pass the same check.")
+            .font(.caption).foregroundStyle(.secondary)
+        }
+        DisclosureGroup("Baseline check output") {
+          Text(result.output).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+        }
+      }
+      if let error = benchmark.acceptanceCheckError {
+        Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+      }
+    }
+    .onChange(of: benchmark.plan.acceptanceCommand) { _, _ in benchmark.clearAcceptanceCheck() }
+    .onChange(of: benchmark.plan.repositoryPath) { _, _ in benchmark.clearAcceptanceCheck() }
   }
 
   private func reportSection(_ report: BenchmarkReport) -> some View {
@@ -400,6 +447,7 @@ struct BenchmarksView: View {
     LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), alignment: .top)], alignment: .leading, spacing: 12) {
       ForEach(report.summaries, id: \.candidateID) { summary in
         let runs = report.runs.filter { $0.candidateID == summary.candidateID }
+        let coverage = BenchmarkCostCoverage(runs: runs)
         GroupBox {
           VStack(alignment: .leading, spacing: 12) {
             Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 12) {
@@ -410,12 +458,16 @@ struct BenchmarksView: View {
               }
               GridRow {
                 resultMetric("Judge score / 10", value: summary.meanQualityScore.map { String(format: "%.1f", $0) } ?? "Unavailable")
-                resultMetric("Allocated cost", value: money(summary.estimatedTotalCost, currency: report.plan.currency))
+                resultMetric(coverage.isComplete ? "Allocated cost" : "Known allocated cost", value: money(coverage.knownCost, currency: report.plan.currency))
               }
               GridRow {
                 resultMetric("Cost / accepted", value: money(summary.estimatedCostPerAcceptedTask, currency: report.plan.currency))
                 resultMetric("Needs review", value: "\(runs.filter { assessment($0).needsReview || evidenceNeedsReview($0) }.count)")
               }
+            }
+            if !coverage.isComplete {
+              Text("\(coverage.pricedAttempts) of \(coverage.totalAttempts) attempts priced; the full total is unavailable.")
+                .font(.caption).foregroundStyle(.secondary)
             }
             Text(outcomeSummary(runs))
               .font(.caption).foregroundStyle(.secondary)
@@ -469,6 +521,11 @@ struct BenchmarksView: View {
         }
         if let basis = run.costBasis {
           Text(basis).font(.caption).foregroundStyle(.secondary)
+        }
+        if let reason = BenchmarkCostCoverage.unavailableReason(for: run, candidate: candidate, currency: report.plan.currency) {
+          Label("Cost unavailable: \(reason)", systemImage: "info.circle")
+            .font(.caption).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
         }
         if let capture = run.evidence {
           Text("Workspace: \(capture.workspaceName)")
@@ -715,9 +772,13 @@ private struct BenchmarkCandidateEditor: View {
     accounts.first { $0.id == candidate.accountID }?.subscriptionPricing
   }
 
+  private var provider: QuotaProvider? {
+    accounts.first { $0.id == candidate.accountID }?.provider
+  }
+
   private var subscriptionAllocation: BenchmarkPriceAllocation? {
     guard let price = subscription, let metric = metrics.first(where: { $0.id == candidate.quotaMetricID }) else { return nil }
-    return BenchmarkPriceAllocation.subscription(price, metric: metric, currency: reportCurrency)
+    return BenchmarkPriceAllocation.subscription(price, metric: metric, currency: reportCurrency, provider: provider)
   }
 
   var body: some View {
@@ -746,7 +807,7 @@ private struct BenchmarkCandidateEditor: View {
         }
       }
       .onChange(of: candidate.accountID) { _, _ in
-        candidate.quotaMetricID = subscription == nil ? nil : BenchmarkPriceAllocation.defaultMetricID(in: metrics)
+        candidate.quotaMetricID = subscription == nil ? nil : BenchmarkPriceAllocation.defaultMetricID(in: metrics, provider: provider)
         candidate.allowanceCost = nil
         allowanceDraft = ""
         allowanceError = nil
@@ -796,7 +857,7 @@ private struct BenchmarkCandidateEditor: View {
     .onAppear {
       allowanceDraft = candidate.allowanceCost.map { String($0) } ?? ""
       if candidate.quotaMetricID == nil, subscription != nil {
-        candidate.quotaMetricID = BenchmarkPriceAllocation.defaultMetricID(in: metrics)
+        candidate.quotaMetricID = BenchmarkPriceAllocation.defaultMetricID(in: metrics, provider: provider)
       }
     }
     .onChange(of: candidate.quotaMetricID) { _, new in
@@ -809,7 +870,7 @@ private struct BenchmarkCandidateEditor: View {
     }
     .onChange(of: subscription) { _, _ in
       if candidate.quotaMetricID == nil, subscription != nil {
-        candidate.quotaMetricID = BenchmarkPriceAllocation.defaultMetricID(in: metrics)
+        candidate.quotaMetricID = BenchmarkPriceAllocation.defaultMetricID(in: metrics, provider: provider)
       }
     }
   }
@@ -1154,6 +1215,12 @@ private enum BenchmarkCLIPreset: String, CaseIterable, Identifiable {
 
   @MainActor
   func command(judge: Bool) -> BenchmarkCommand {
+    let command = baseCommand(judge: judge)
+    return judge ? BenchmarkJudgeInspection.enablingInspection(in: command) ?? command : command
+  }
+
+  @MainActor
+  private func baseCommand(judge: Bool) -> BenchmarkCommand {
     switch self {
     case .pi:
       return BenchmarkCommand(executable: BenchmarkViewModel.defaultExecutable(named: "pi"),

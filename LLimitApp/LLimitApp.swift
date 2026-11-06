@@ -15,7 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-    guard AppModel.shared.benchmarks.isRunning else { return .terminateNow }
+    guard AppModel.shared.benchmarks.isRunning || AppModel.shared.benchmarks.isCheckingAcceptance else { return .terminateNow }
     Task { @MainActor in
       await AppModel.shared.benchmarks.stopAndWait()
       sender.reply(toApplicationShouldTerminate: true)
@@ -28,7 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-    if AppModel.shared.benchmarks.isRunning {
+    if AppModel.shared.benchmarks.isRunning || AppModel.shared.benchmarks.isCheckingAcceptance {
       BenchmarkWindowController.shared.show(model: AppModel.shared)
       return false
     }

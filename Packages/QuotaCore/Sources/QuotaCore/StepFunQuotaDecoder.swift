@@ -64,7 +64,7 @@ enum StepFunQuotaDecoder {
     guard let fraction = fraction ?? resetAt.map({ _ in 0 }) else { return nil }
     return UsageMetric(id: id, label: label, remainingPercent: try percentage(fraction),
       resetAt: resetAt, resetIn: resetAt.map { formatResetCountdown(to: $0, now: now) },
-      windowSeconds: duration)
+      windowSeconds: duration, reportedRemainingFraction: fraction)
   }
 
   private static func creditMetrics(_ credits: Credits, now: Date) throws -> [UsageMetric] {
@@ -126,9 +126,11 @@ enum StepFunQuotaDecoder {
     let coherentCounts = counts.fraction.map { abs($0 - fraction) <= 0.01 } == true
     return UsageMetric(id: id, label: label, remainingPercent: remaining,
       remainingAmount: coherentCounts ? counts.residual : nil,
+      totalAmount: coherentCounts ? counts.total : nil,
       usedDisplay: coherentCounts ? "\(creditText(counts.total - counts.residual)) credits" : nil,
       totalDisplay: coherentCounts ? "\(creditText(counts.total)) credits" : nil,
-      resetAt: reset, resetIn: reset.map { formatResetCountdown(to: $0, now: now) }, detail: detail)
+      resetAt: reset, resetIn: reset.map { formatResetCountdown(to: $0, now: now) }, detail: detail,
+      reportedRemainingFraction: fraction)
   }
 
   private static func percentage(_ fraction: Double) throws -> Int {

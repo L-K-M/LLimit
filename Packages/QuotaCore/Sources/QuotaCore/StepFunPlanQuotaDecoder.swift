@@ -43,7 +43,8 @@ enum StepFunPlanQuotaDecoder {
         return UsageMetric(id: hourly ? "five-hour" : "weekly", label: hourly ? "5-hour limit" : "Weekly limit",
           remainingPercent: used.map { Int((100 - $0).rounded()) }, resetAt: reset,
           resetIn: reset.map { formatResetCountdown(to: $0, now: now) },
-          windowSeconds: hourly ? 18_000 : 604_800, isUnlimited: !window.limited)
+          windowSeconds: hourly ? 18_000 : 604_800, isUnlimited: !window.limited,
+          reportedRemainingFraction: used.map { 1 - $0 / 100 })
       }
     case "token":
       guard snapshot.quota.windows.isEmpty else { throw invalidResponse }
@@ -85,17 +86,22 @@ enum StepFunPlanQuotaDecoder {
       guard let group = groups[type] else { return nil }
       let subscription = type == "subscription"
       let reset = subscription ? group.resets.min() : nil
-      let percent = group.hasPercent && group.total > 0
-        ? Int((NSDecimalNumber(decimal: group.weightedRemaining / group.total).doubleValue * 100).rounded()) : nil
+      let reportedFraction = group.hasPercent && group.total > 0
+        ? NSDecimalNumber(decimal: group.weightedRemaining / group.total).doubleValue : nil
+      let percent = reportedFraction.map { Int(($0 * 100).rounded()) }
+      let remaining = NSDecimalNumber(decimal: group.remaining).doubleValue
+      let total = NSDecimalNumber(decimal: group.total).doubleValue
+      let coherentCounts = reportedFraction.map { total > 0 && abs(remaining / total - $0) <= 0.01 } == true
       let detail = !subscription ? group.expiries.min().map {
         "Next top-up expiry: \(ISO8601DateFormatter().string(from: $0))"
       } : nil
       return UsageMetric(id: subscription ? "monthly-credits" : "topup-credits",
         label: subscription ? "Monthly plan credits" : "Top-up credits", remainingPercent: percent,
-        remainingAmount: NSDecimalNumber(decimal: group.remaining).doubleValue,
+        remainingAmount: remaining, totalAmount: coherentCounts ? total : nil,
         usedDisplay: "\(NSDecimalNumber(decimal: group.total - group.remaining).stringValue) credits",
         totalDisplay: "\(NSDecimalNumber(decimal: group.total).stringValue) credits",
-        resetAt: reset, resetIn: reset.map { formatResetCountdown(to: $0, now: now) }, detail: detail)
+        resetAt: reset, resetIn: reset.map { formatResetCountdown(to: $0, now: now) }, detail: detail,
+        reportedRemainingFraction: reportedFraction)
     }
   }
 

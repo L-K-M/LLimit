@@ -47,7 +47,8 @@ final class MiMoTokenPlanDecoderTests: XCTestCase {
     XCTAssertEqual(metric.label, "Plan credits")
     XCTAssertEqual(metric.remainingPercent, 80)
     XCTAssertEqual(metric.usageLine, "20 credits / 100 credits")
-    XCTAssertNil(metric.remainingAmount)
+    XCTAssertEqual(metric.remainingAmount, 80)
+    XCTAssertEqual(metric.totalAmount, 100)
     XCTAssertNil(metric.estimatedTotal)
     XCTAssertNil(metric.estimateKeyHash)
   }

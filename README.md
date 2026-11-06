@@ -101,6 +101,21 @@ by Git. Judges receive the primary changes and additional local-branch/worktree
 patches. Configured acceptance commands check the primary checkout, not an
 automatic merge of alternate branches.
 
+Pi, Claude Code and OpenCode judge presets can inspect files in their disposable
+evaluation workspace. Pi uses a local path guard with shell, editing and MCP
+tools disabled; Claude uses its restricted mode, and OpenCode denies shell,
+editing and external-directory access. Recent harness versions are required;
+an unsupported inspection mode fails without enabling broader permissions.
+Existing generated evidence-only judge commands are upgraded without changing
+their provider or model. Custom commands retain their configured permissions.
+
+Configure an acceptance test command for independently executed test evidence.
+**Check on baseline** runs it in a fresh copy of committed HEAD before spending
+agent quota. Each new candidate attempt gets its own check before judging.
+Judges receive the recorded result; they do not execute arbitrary test commands.
+A baseline check does not verify a candidate, and re-evaluating old evidence
+does not recreate missing files or retroactively run a newly chosen check.
+
 Agents use their own CLI login. Match it to the quota account you select and keep
 that account idle elsewhere throughout the measurement. LLimit does not give
 its credentials or private managed profiles to benchmark commands. Codex, Claude
@@ -127,6 +142,9 @@ Task cost is the selected window's allocated cost multiplied by its measured
 fraction consumed: estimated subscription value, not an extra charge or exact
 money spent. Missing measurements, resets, quota increases and changes below
 percentage resolution stay unavailable.
+The overview shows any known cost subtotal together with the number of priced
+attempts. Missing attempts are never treated as free, and attempt details explain
+why an estimate is unavailable, including usage in a different selected window.
 Prompts, patches and reports remain in a private local benchmark directory and
 are excluded from widgets and normal quota history. Judges run after candidate
 measurements, with their elapsed time reported separately.

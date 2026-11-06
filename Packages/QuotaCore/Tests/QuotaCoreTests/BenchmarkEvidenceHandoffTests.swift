@@ -3,6 +3,32 @@ import XCTest
 @testable import QuotaCore
 
 final class BenchmarkEvidenceHandoffTests: XCTestCase {
+  func testAcceptancePreflightUsesCommittedDisposableCopyAndReportsFailure() async throws {
+    let fixture = try EvidenceFixture()
+    defer { fixture.remove() }
+    try "uncommitted input".write(to: fixture.repository.appendingPathComponent("source.txt"), atomically: true, encoding: .utf8)
+    let result = try await BenchmarkAcceptanceCheck().check(repository: fixture.repository,
+      command: "test \"$(cat source.txt)\" = baseline && printf verified-baseline && touch generated.txt && exit 7", timeout: 10)
+    XCTAssertFalse(result.passed)
+    XCTAssertEqual(result.exitCode, 7)
+    XCTAssertTrue(result.output.contains("verified-baseline"))
+    XCTAssertEqual(try String(contentsOf: fixture.repository.appendingPathComponent("source.txt")), "uncommitted input")
+    XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.repository.appendingPathComponent("generated.txt").path))
+  }
+
+  func testAcceptancePreflightRecordsPassAndRedactsOutput() async throws {
+    let fixture = try EvidenceFixture()
+    defer { fixture.remove() }
+    let secret = "acceptance-test-private-key"
+    let configuration = ProviderRuntimeConfiguration(provider: .junie, isEnabled: true,
+      credentials: [CredentialField.junieAPIKey: secret])
+    let result = try await BenchmarkAcceptanceCheck().check(repository: fixture.repository,
+      command: "printf '\(secret)'; exit 0", timeout: 10, redactor: BenchmarkRedactor(configurations: [configuration]))
+    XCTAssertTrue(result.passed)
+    XCTAssertFalse(result.output.contains(secret))
+    XCTAssertTrue(result.output.contains("[redacted]"))
+  }
+
   func testJudgeReceivesCandidateFilesAndSameExecutionRules() async throws {
     let fixture = try EvidenceFixture()
     defer { fixture.remove() }
@@ -135,7 +161,9 @@ final class BenchmarkEvidenceHandoffTests: XCTestCase {
       cat > '\(judgePrompt.path)'
       printf '%s' '{"accepted":true,"score":8,"explanation":"Verified"}'
       """
-    let report = try await BenchmarkRunner().run(plan: fixture.plan(agent: agent, judge: judge),
+    var plan = fixture.plan(agent: agent, judge: judge)
+    plan.acceptanceCommand = "test -f solution.txt"
+    let report = try await BenchmarkRunner().run(plan: plan,
       directory: fixture.reports, quotaReader: { _ in throw BenchmarkError.unavailableAccount })
     let encoder = JSONEncoder()
     encoder.dateEncodingStrategy = .iso8601
@@ -148,6 +176,8 @@ final class BenchmarkEvidenceHandoffTests: XCTestCase {
     XCTAssertTrue(jPrompt.contains("LLIMIT_BENCHMARK_RESULT.md"),
       "Judge prompt should contain LLIMIT_BENCHMARK_RESULT.md instruction")
     XCTAssertTrue(jPrompt.contains("the primary candidate changes applied to the baseline"))
+    XCTAssertTrue(cPrompt.contains("test -f solution.txt"))
+    XCTAssertTrue(jPrompt.contains("test -f solution.txt"))
   }
 
   func testLegacyReevaluationNeverGivesCurrentExecutionRulesToOldCandidates() async throws {
@@ -233,7 +263,7 @@ final class BenchmarkEvidenceHandoffTests: XCTestCase {
       BenchmarkEvidenceArtifact(kind: .localBranch, name: "private branch 1", patch: "+credential=1")
     ], warnings: ["private warning 1"], captureComplete: false)
     let run = BenchmarkRun(candidateID: UUID(), repetition: 1, patch: "+credential=1", evidence: evidence,
-      acceptanceUnavailableReason: "private reason 1")
+      acceptanceUnavailableReason: "private reason 1", costUnavailableReason: "private cost 1")
     let source = UUID()
     let report = BenchmarkReport(baselineCommit: String(repeating: "a", count: 40), plan: plan, runs: [run],
       reevaluationOf: source, artifactReportID: source, executionProtocol: .preservedArtifactsV1)
@@ -245,6 +275,7 @@ final class BenchmarkEvidenceHandoffTests: XCTestCase {
     XCTAssertEqual(safe.runs[0].evidence?.additionalArtifacts[0].name, "private branch [redacted]")
     XCTAssertEqual(safe.runs[0].evidence?.warnings, ["private warning [redacted]"])
     XCTAssertEqual(safe.runs[0].acceptanceUnavailableReason, "private reason [redacted]")
+    XCTAssertEqual(safe.runs[0].costUnavailableReason, "private cost [redacted]")
     XCTAssertEqual(safe.runs[0].evidence?.workspaceName, name)
     XCTAssertEqual(safe.artifactReportID, source)
     XCTAssertEqual(safe.reevaluationOf, source)

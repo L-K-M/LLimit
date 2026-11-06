@@ -53,6 +53,10 @@ enum MiMoTokenPlanDecoder {
         let countFraction = min(1, counts.used / counts.limit)
         return abs(countFraction - min(1, fraction)) <= 0.01 ? counts : nil
       }
+      // Counts remain useful detail; the unrounded provider fraction retains
+      // authority for geometry and benchmark percentage measurements.
+      let remainingAmount: Double? = coherentCounts.map { max(0, $0.limit - $0.used) }
+      let totalAmount: Double? = coherentCounts?.limit
       let label: String
       if isBonus(row.name) {
         label = "Bonus credits"
@@ -63,9 +67,10 @@ enum MiMoTokenPlanDecoder {
       }
       return UsageMetric(
         id: "plan-\(row.name)", label: label, remainingPercent: remaining,
+        remainingAmount: remainingAmount, totalAmount: totalAmount,
         usedDisplay: coherentCounts.map { "\(creditText($0.used)) credits" },
         totalDisplay: coherentCounts.map { "\(creditText($0.limit)) credits" },
-        detail: expiry
+        detail: expiry, reportedRemainingFraction: item.percent.map { 1 - min(1, $0) }
       )
     }
     let maxUsage = metrics.compactMap(\.remainingPercent).map { 100 - $0 }.max()
