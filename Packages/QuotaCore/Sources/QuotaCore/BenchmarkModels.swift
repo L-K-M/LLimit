@@ -269,6 +269,36 @@ public struct BenchmarkEvaluation: Codable, Hashable, Sendable {
   }
 }
 
+public struct BenchmarkEvidenceArtifact: Codable, Hashable, Sendable {
+  public enum Kind: String, Codable, Sendable { case localBranch, linkedWorktree }
+
+  public var kind: Kind
+  public var name: String
+  public var patch: String
+
+  public init(kind: Kind, name: String, patch: String) {
+    self.kind = kind
+    self.name = name
+    self.patch = patch
+  }
+}
+
+/// Files and branch work frozen before another trial can reuse a worktree.
+public struct BenchmarkEvidence: Codable, Hashable, Sendable {
+  public var workspaceName: String
+  public var additionalArtifacts: [BenchmarkEvidenceArtifact]
+  public var warnings: [String]
+  public var captureComplete: Bool
+
+  public init(workspaceName: String, additionalArtifacts: [BenchmarkEvidenceArtifact] = [],
+              warnings: [String] = [], captureComplete: Bool = true) {
+    self.workspaceName = workspaceName
+    self.additionalArtifacts = additionalArtifacts
+    self.warnings = warnings
+    self.captureComplete = captureComplete
+  }
+}
+
 public struct BenchmarkRun: Codable, Hashable, Identifiable, Sendable {
   public var id: UUID
   public var candidateID: UUID
@@ -278,7 +308,9 @@ public struct BenchmarkRun: Codable, Hashable, Identifiable, Sendable {
   public var outcome: BenchmarkOutcome
   public var output: String
   public var patch: String
+  public var evidence: BenchmarkEvidence?
   public var acceptancePassed: Bool?
+  public var acceptanceUnavailableReason: String?
   public var quotaChanges: [BenchmarkQuotaChange]
   public var estimatedCost: Double?
   public var costBasis: String?
@@ -288,7 +320,8 @@ public struct BenchmarkRun: Codable, Hashable, Identifiable, Sendable {
   public init(id: UUID = UUID(), candidateID: UUID, repetition: Int, startedAt: Date = Date(),
               durationSeconds: Double = 0, outcome: BenchmarkOutcome = .completed, output: String = "", patch: String = "",
               acceptancePassed: Bool? = nil, quotaChanges: [BenchmarkQuotaChange] = [], estimatedCost: Double? = nil,
-              tokenUsage: BenchmarkTokenUsage? = nil, evaluations: [BenchmarkEvaluation] = [], costBasis: String? = nil) {
+              tokenUsage: BenchmarkTokenUsage? = nil, evaluations: [BenchmarkEvaluation] = [], costBasis: String? = nil,
+              evidence: BenchmarkEvidence? = nil, acceptanceUnavailableReason: String? = nil) {
     self.id = id
     self.candidateID = candidateID
     self.repetition = repetition
@@ -297,7 +330,9 @@ public struct BenchmarkRun: Codable, Hashable, Identifiable, Sendable {
     self.outcome = outcome
     self.output = output
     self.patch = patch
+    self.evidence = evidence
     self.acceptancePassed = acceptancePassed
+    self.acceptanceUnavailableReason = acceptanceUnavailableReason
     self.quotaChanges = quotaChanges
     self.estimatedCost = estimatedCost
     self.costBasis = costBasis
@@ -308,6 +343,7 @@ public struct BenchmarkRun: Codable, Hashable, Identifiable, Sendable {
   /// Missing or conflicting judgments require review rather than silently becoming successes.
   public var isAccepted: Bool? {
     guard outcome == .completed, acceptancePassed != false else { return false }
+    guard acceptanceUnavailableReason == nil else { return nil }
     guard evaluations.count == 2, Set(evaluations.map(\.judgeID)).count == 2,
           evaluations.allSatisfy(\.isValid) else { return nil }
     let votes = evaluations.compactMap(\.accepted)
@@ -340,9 +376,12 @@ public struct BenchmarkReport: Codable, Hashable, Identifiable, Sendable {
   public var runs: [BenchmarkRun]
   public var judgeDurationSeconds: Double
   public var warnings: [String]
+  public var reevaluationOf: UUID?
+  public var artifactReportID: UUID?
 
   public init(id: UUID = UUID(), startedAt: Date = Date(), finishedAt: Date? = nil, baselineCommit: String,
-              plan: BenchmarkPlan, runs: [BenchmarkRun] = [], judgeDurationSeconds: Double = 0, warnings: [String] = []) {
+              plan: BenchmarkPlan, runs: [BenchmarkRun] = [], judgeDurationSeconds: Double = 0, warnings: [String] = [],
+              reevaluationOf: UUID? = nil, artifactReportID: UUID? = nil) {
     self.id = id
     self.startedAt = startedAt
     self.finishedAt = finishedAt
@@ -351,6 +390,8 @@ public struct BenchmarkReport: Codable, Hashable, Identifiable, Sendable {
     self.runs = runs
     self.judgeDurationSeconds = judgeDurationSeconds
     self.warnings = warnings
+    self.reevaluationOf = reevaluationOf
+    self.artifactReportID = artifactReportID
   }
 
   public var summaries: [BenchmarkSummary] {
