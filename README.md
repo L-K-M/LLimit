@@ -89,6 +89,10 @@ judge explanations stay collapsed. **Re-evaluate saved results** runs only the
 judges, creates a new report, and preserves the original agent runs, times and
 quota costs. Older workspaces can be recovered when their files or branches
 still exist; removed work cannot be reconstructed.
+New reports record the execution rules given to their agents and preserve them
+through re-evaluation. Older reports without that record are not graded against
+later handoff or workspace requirements. Additional branch patches are complete
+snapshots against the common baseline, so they can include inherited changes.
 
 Benchmark tasks run locally. Remote pushes and PR steps are replaced by local
 branches and a written handoff. Agents leave their primary result checked out
