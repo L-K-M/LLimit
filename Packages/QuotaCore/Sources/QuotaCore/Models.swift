@@ -380,6 +380,9 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
   public let id: String
   public var label: String
   public var remainingPercent: Int?
+  /// Unrounded remaining fraction reported by a provider. It takes precedence
+  /// over counts when the provider supplies both representations.
+  public var reportedRemainingFraction: Double?
   /// Raw remaining units, independent of rounded display text.
   public var remainingAmount: Double?
   /// Allowance reported by the provider, in the same units as remainingAmount.
@@ -422,11 +425,13 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
     windowSeconds: Int? = nil,
     isUnlimited: Bool = false,
     detail: String? = nil,
-    paceEstimate: PaceEstimate? = nil
+    paceEstimate: PaceEstimate? = nil,
+    reportedRemainingFraction: Double? = nil
   ) {
     self.id = id
     self.label = label
     self.remainingPercent = remainingPercent
+    self.reportedRemainingFraction = reportedRemainingFraction
     self.remainingAmount = remainingAmount
     self.totalAmount = totalAmount
     self.estimatedTotal = estimatedTotal
@@ -462,9 +467,12 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
     remainingPercent != nil && estimatedTotal != nil
   }
 
-  /// Keep small amounts of consumption visible when a whole-percent label rounds
-  /// to 100. Older snapshots and percentage-only providers retain their geometry.
+  /// Prefer the provider's unrounded fraction, then precise counts, before
+  /// falling back to a whole-percent label from older or coarser readings.
   public var remainingFraction: Double? {
+    if let fraction = reportedRemainingFraction, fraction.isFinite, (0...1).contains(fraction) {
+      return fraction
+    }
     if let amount = remainingAmount, amount.isFinite, amount >= 0,
        let total = totalAmount ?? estimatedTotal, total.isFinite, total > 0 {
       return min(1, amount / total)

@@ -69,6 +69,53 @@ final class StepFunPlanQuotaTests: XCTestCase {
     XCTAssertTrue(topup.detail?.contains("Next top-up expiry") == true)
   }
 
+  private func planCredits(remaining: Int, usedPercent: Double?) throws -> ProviderUsage {
+    var object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(token.utf8)) as? [String: Any])
+    var quota = try XCTUnwrap(object["quota"] as? [String: Any])
+    quota["credit_buckets"] = [["type": "subscription", "total": "10000", "remaining": String(remaining),
+      "used_percent": usedPercent.map { $0 as Any } ?? NSNull(), "resets_at_ms": 1700000020000]]
+    object["quota"] = quota
+    return try StepFunPlanQuotaDecoder.decode(JSONSerialization.data(withJSONObject: object),
+      configuration: configuration(), now: now)
+  }
+
+  func testPlanKeyPreservesSubpercentConsumptionWithCoherentCounts() throws {
+    let before = try planCredits(remaining: 8_000, usedPercent: 20)
+    var after = try planCredits(remaining: 7_999, usedPercent: 20.01)
+    after.fetchedAt = now.addingTimeInterval(1)
+    XCTAssertEqual(before.metrics[0].remainingPercent, 80)
+    XCTAssertEqual(after.metrics[0].remainingPercent, 80)
+    XCTAssertEqual(before.metrics[0].totalAmount, 10_000)
+    let change = BenchmarkQuotaChange.changes(before: before, after: after)[0]
+    XCTAssertEqual(change.consumedAmount, 1)
+    XCTAssertEqual(try XCTUnwrap(change.consumedPercentagePoints), 0.01, accuracy: 0.000001)
+    XCTAssertNil(change.unavailableReason)
+  }
+
+  func testPlanKeyConflictingCountsCannotOverrideReportedPercentage() throws {
+    let metric = try XCTUnwrap(planCredits(remaining: 9_000, usedPercent: 50).metrics.first)
+    XCTAssertEqual(metric.remainingPercent, 50)
+    XCTAssertEqual(metric.remainingAmount, 9_000)
+    XCTAssertNil(metric.totalAmount)
+    XCTAssertEqual(metric.remainingFraction, 0.5)
+  }
+
+  func testPlanKeyReportedFractionWinsOverNearbyCountDifference() throws {
+    let metric = try XCTUnwrap(planCredits(remaining: 7_950, usedPercent: 20).metrics.first)
+    XCTAssertEqual(metric.remainingAmount, 7_950)
+    XCTAssertEqual(metric.totalAmount, 10_000)
+    XCTAssertEqual(metric.reportedRemainingFraction, 0.8)
+    XCTAssertEqual(metric.remainingFraction, 0.8)
+  }
+
+  func testPlanKeyNullPercentageRemainsUnavailableWithKnownCounts() throws {
+    let metric = try XCTUnwrap(planCredits(remaining: 8_000, usedPercent: nil).metrics.first)
+    XCTAssertNil(metric.remainingPercent)
+    XCTAssertEqual(metric.remainingAmount, 8_000)
+    XCTAssertNil(metric.totalAmount)
+    XCTAssertNil(metric.remainingFraction)
+  }
+
   func testExpiredTopupsAreOmittedAndNullPercentRemainsUnknown() async throws {
     let body = token.replacingOccurrences(of: "1800000000000", with: "1600000000000")
       .replacingOccurrences(of: "\"used_percent\":60", with: "\"used_percent\":null")

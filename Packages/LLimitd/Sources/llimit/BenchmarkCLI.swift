@@ -147,6 +147,8 @@ private func benchmarkTemplate() -> BenchmarkPlan {
   }
   let codex = path(.codex, fallback: "/usr/local/bin/codex")
   let claude = path(.claude, fallback: "/usr/local/bin/claude")
+  let claudeJudge = BenchmarkCommand(executable: claude,
+    arguments: ["-p", "--output-format", "json", "--tools", ""], outputFormat: .claudeJSON)
   return BenchmarkPlan(
     taskPrompt: "Replace this with a coding task and its expected behavior.",
     rubric: "Assess functional correctness, completeness, maintainability and instruction following. Explain evidence and limitations.",
@@ -160,7 +162,7 @@ private func benchmarkTemplate() -> BenchmarkPlan {
       BenchmarkJudge(name: "Codex judge (configured model)",
                      command: BenchmarkCommand(executable: codex, arguments: ["exec", "--json", "--sandbox", "read-only", "-"], outputFormat: .codexJSON)),
       BenchmarkJudge(name: "Claude Code judge (configured model)",
-                     command: BenchmarkCommand(executable: claude, arguments: ["-p", "--output-format", "json", "--tools", ""], outputFormat: .claudeJSON))
+                     command: BenchmarkJudgeInspection.enablingInspection(in: claudeJudge) ?? claudeJudge)
     ])
 }
 

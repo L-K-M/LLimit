@@ -2,6 +2,27 @@ import XCTest
 @testable import QuotaCore
 
 final class BenchmarkPriceAllocationTests: XCTestCase {
+  func testMistralUsesDocumentedCalendarMonthWithoutReportedDuration() throws {
+    let reset = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-12-01T00:00:00Z"))
+    let metric = UsageMetric(id: "api-monthly", label: "Monthly API allowance", remainingPercent: 90, resetAt: reset)
+    let price = SubscriptionPricing(amount: 30)
+    let allocation = try XCTUnwrap(BenchmarkPriceAllocation.subscription(price, metric: metric, currency: "USD", provider: .mistral))
+    XCTAssertEqual(allocation.allowanceCost, 30)
+    XCTAssertEqual(BenchmarkPriceAllocation.defaultMetricID(in: [metric], provider: .mistral), "api-monthly")
+    XCTAssertNil(BenchmarkPriceAllocation.subscription(price, metric: metric, currency: "USD"))
+    XCTAssertNil(BenchmarkPriceAllocation.subscription(price, metric: metric, currency: "USD", provider: .stepFun))
+  }
+
+  func testMistralUnknownOrNonCalendarResetDoesNotInventDuration() throws {
+    let price = SubscriptionPricing(amount: 30)
+    let reset = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-12-15T00:00:00Z"))
+    for metric in [UsageMetric(id: "api-monthly", label: "Monthly API allowance", remainingPercent: 90),
+                   UsageMetric(id: "api-monthly", label: "Monthly API allowance", remainingPercent: 90, resetAt: reset)] {
+      XCTAssertNil(BenchmarkPriceAllocation.subscription(price, metric: metric, currency: "USD", provider: .mistral))
+      XCTAssertNil(BenchmarkPriceAllocation.defaultMetricID(in: [metric], provider: .mistral))
+    }
+  }
+
   func testMonthlyQuotaUsesMonthlyPriceEvenAcrossDifferentCalendarMonthLengths() throws {
     for days in [28, 29, 30, 31] {
       let metric = UsageMetric(id: "monthly", label: "Monthly credits", remainingPercent: 90, windowSeconds: days * 86_400)

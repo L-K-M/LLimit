@@ -55,7 +55,10 @@ final class BenchmarkHarnessTests: XCTestCase {
     XCTAssertTrue(candidate.arguments.contains("--no-session"))
     XCTAssertTrue(candidate.arguments.contains("--no-extensions"))
     XCTAssertFalse(candidate.arguments.contains("{prompt}"))
-    XCTAssertTrue(pi.command(executable: "/bin/pi", judge: true).arguments.contains("--no-tools"))
+    let piJudge = pi.command(executable: "/bin/pi", judge: true)
+    XCTAssertFalse(piJudge.arguments.contains("--no-tools"))
+    XCTAssertTrue(piJudge.arguments.contains("read,grep,find,ls"))
+    XCTAssertTrue(piJudge.arguments.contains("--no-mcp"))
     let openCode = BenchmarkHarnessModel(harness: .opencode, provider: "provider", modelID: "nested/model", displayName: "Model", pluginPolicy: .configured)
     let command = openCode.command(executable: "/bin/opencode", judge: false)
     XCTAssertTrue(command.arguments.contains("provider/nested/model"))
@@ -64,7 +67,7 @@ final class BenchmarkHarnessTests: XCTestCase {
     XCTAssertFalse(command.arguments.contains("--session"))
   }
 
-  func testOpenCodeJudgeDeniesAllToolsWithoutInheritingProviderSecrets() throws {
+  func testOpenCodeJudgeAllowsInspectionWithoutInheritingProviderSecrets() throws {
     let model = BenchmarkHarnessModel(harness: .opencode, provider: "provider", modelID: "model", displayName: "Model")
     let command = model.command(executable: "/bin/opencode", judge: true)
     let environment = BenchmarkHarness.environment(for: command, parent: ["HOME": "/home/user", "OPENAI_API_KEY": "private-key", "CODEX_HOME": "/managed"])
@@ -76,9 +79,11 @@ final class BenchmarkHarnessTests: XCTestCase {
     let agents = try XCTUnwrap(object["agent"] as? [String: Any])
     let index = try XCTUnwrap(command.arguments.firstIndex(of: "--agent"))
     let name = command.arguments[index + 1]
-    XCTAssertTrue(name.hasPrefix("llimit-benchmark-judge-"))
+    XCTAssertTrue(name.hasPrefix("llimit-benchmark-inspector-"))
     let judge = try XCTUnwrap(agents[name] as? [String: Any])
     XCTAssertEqual((judge["permission"] as? [String: String])?["*"], "deny")
+    XCTAssertEqual((judge["permission"] as? [String: String])?["read"], "allow")
+    XCTAssertEqual((judge["permission"] as? [String: String])?["external_directory"], "deny")
     let candidate = model.command(executable: "/bin/opencode", judge: false)
     XCTAssertNil(BenchmarkHarness.environment(for: candidate)["OPENCODE_CONFIG_CONTENT"])
     XCTAssertNotEqual(command.arguments, model.command(executable: "/bin/opencode", judge: true).arguments)

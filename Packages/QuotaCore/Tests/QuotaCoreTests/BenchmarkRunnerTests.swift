@@ -53,9 +53,11 @@ final class BenchmarkRunnerTests: XCTestCase {
     let automaticRun = try XCTUnwrap(report.runs.first { $0.candidateID == automatic.id })
     XCTAssertEqual(try XCTUnwrap(automaticRun.estimatedCost), 200 * 12 * 7 / 365.2425 * 0.02, accuracy: 0.000001)
     XCTAssertTrue(automaticRun.costBasis?.contains("Account subscription") == true)
+    XCTAssertNil(automaticRun.costUnavailableReason)
     let manualRun = try XCTUnwrap(report.runs.first { $0.candidateID == manual.id })
     XCTAssertEqual(try XCTUnwrap(manualRun.estimatedCost), 0.2, accuracy: 0.000001)
     XCTAssertEqual(manualRun.costBasis, "Manual allocation for the selected quota window.")
+    XCTAssertNil(manualRun.costUnavailableReason)
     XCTAssertEqual(report.plan.candidates.first?.subscriptionPricing?.amount, 200)
   }
 
@@ -203,7 +205,7 @@ final class BenchmarkRunnerTests: XCTestCase {
     let fixture = try Fixture()
     defer { fixture.remove() }
     var plan = makePlan(fixture: fixture, candidates: [candidate(script: "printf '%s\\n' done")])
-    plan.acceptanceCommand = "printf '%s\\n' 'Required behavior is missing'; exit 12"
+    plan.acceptanceCommand = "printf '%s\\n' 'Required behavior is missing' >&2; exit 12"
     let report = try await BenchmarkRunner().run(plan: plan, directory: fixture.reports, quotaReader: { _ in
       throw BenchmarkError.unavailableAccount
     })

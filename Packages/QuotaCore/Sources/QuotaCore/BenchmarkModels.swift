@@ -203,8 +203,23 @@ public struct BenchmarkQuotaChange: Codable, Hashable, Sendable {
             previous.resetAt.map({ $0 > after.fetchedAt }) ?? true else {
         return unavailable("The quota window reset or changed during the run.")
       }
-      guard previous.windowSeconds == current.windowSeconds,
-            previous.expiresAt == current.expiresAt else {
+      // LongCat reconstructs an unzoned pack expiry from an integer-second
+      // countdown. Request timing can move that estimated instant by a second
+      // or two even though the same dated, single-pack allowance is measured.
+      let expiryJitterMatches: Bool
+      if before.provider == .longcat,
+         let previousExpiry = previous.expiresAt, let currentExpiry = current.expiresAt,
+         let dateLabel = previous.expiryDateLabel, !dateLabel.isEmpty, dateLabel == current.expiryDateLabel,
+         let total = previous.totalAmount, total.isFinite, total > 0, total == current.totalAmount,
+         let authentication = previous.estimateKeyHash, !authentication.isEmpty, authentication == current.estimateKeyHash,
+         let duration = previous.windowSeconds, duration > 0 {
+        expiryJitterMatches = abs(currentExpiry.timeIntervalSince(previousExpiry)) <= 2
+      } else { expiryJitterMatches = false }
+      let expiriesAreFuture = [previous.expiresAt, current.expiresAt].compactMap { $0 }.allSatisfy {
+        $0.timeIntervalSinceReferenceDate.isFinite && $0 > after.fetchedAt
+      }
+      guard previous.windowSeconds == current.windowSeconds, expiriesAreFuture,
+            previous.expiresAt == current.expiresAt || expiryJitterMatches else {
         return unavailable("The quota window or expiry changed during the run.")
       }
       guard previous.totalAmount == current.totalAmount,
@@ -221,12 +236,21 @@ public struct BenchmarkQuotaChange: Codable, Hashable, Sendable {
         }
         guard newAmount <= oldAmount else { return unavailable("The remaining quota increased during the run.") }
         amount = oldAmount - newAmount
-        if let total = previous.totalAmount ?? previous.estimatedTotal, total.isFinite && total > 0 {
-          let rawPercentage = (oldAmount - newAmount) / total * 100
-          if rawPercentage.isFinite { percentage = rawPercentage }
-        }
       }
-      if percentage == nil, let oldPercent = previous.remainingPercent, let newPercent = current.remainingPercent {
+      let hasReportedFraction = previous.reportedRemainingFraction != nil || current.reportedRemainingFraction != nil
+      if hasReportedFraction {
+        guard let oldFraction = previous.reportedRemainingFraction, let newFraction = current.reportedRemainingFraction,
+              oldFraction.isFinite, newFraction.isFinite, (0...1).contains(oldFraction), (0...1).contains(newFraction) else {
+          return unavailable("The provider reported invalid or changed remaining-fraction data.")
+        }
+        guard newFraction <= oldFraction else { return unavailable("The remaining quota increased during the run.") }
+        if oldFraction > newFraction { percentage = (oldFraction - newFraction) * 100 }
+        else if amount == 0 { percentage = 0 }
+      } else if let amount, let total = previous.totalAmount ?? previous.estimatedTotal, total.isFinite && total > 0 {
+        let rawPercentage = amount / total * 100
+        if rawPercentage.isFinite { percentage = rawPercentage }
+      }
+      if !hasReportedFraction, percentage == nil, let oldPercent = previous.remainingPercent, let newPercent = current.remainingPercent {
         guard (0...100).contains(oldPercent) && (0...100).contains(newPercent) else {
           return unavailable("The provider reported an invalid remaining percentage.")
         }
@@ -314,6 +338,7 @@ public struct BenchmarkRun: Codable, Hashable, Identifiable, Sendable {
   public var quotaChanges: [BenchmarkQuotaChange]
   public var estimatedCost: Double?
   public var costBasis: String?
+  public var costUnavailableReason: String?
   public var tokenUsage: BenchmarkTokenUsage?
   public var evaluations: [BenchmarkEvaluation]
 
@@ -321,7 +346,8 @@ public struct BenchmarkRun: Codable, Hashable, Identifiable, Sendable {
               durationSeconds: Double = 0, outcome: BenchmarkOutcome = .completed, output: String = "", patch: String = "",
               acceptancePassed: Bool? = nil, quotaChanges: [BenchmarkQuotaChange] = [], estimatedCost: Double? = nil,
               tokenUsage: BenchmarkTokenUsage? = nil, evaluations: [BenchmarkEvaluation] = [], costBasis: String? = nil,
-              evidence: BenchmarkEvidence? = nil, acceptanceUnavailableReason: String? = nil) {
+              evidence: BenchmarkEvidence? = nil, acceptanceUnavailableReason: String? = nil,
+              costUnavailableReason: String? = nil) {
     self.id = id
     self.candidateID = candidateID
     self.repetition = repetition
@@ -336,6 +362,7 @@ public struct BenchmarkRun: Codable, Hashable, Identifiable, Sendable {
     self.quotaChanges = quotaChanges
     self.estimatedCost = estimatedCost
     self.costBasis = costBasis
+    self.costUnavailableReason = costUnavailableReason
     self.tokenUsage = tokenUsage
     self.evaluations = evaluations
   }

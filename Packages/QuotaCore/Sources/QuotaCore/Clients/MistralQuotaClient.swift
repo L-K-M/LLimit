@@ -97,6 +97,7 @@ public struct MistralQuotaClient: QuotaProviderClient {
     } else { details.insert("Usage unavailable", at: 0) }
     return UsageMetric(id: id, label: label, remainingPercent: percent,
       resetAt: budget.resetAt, resetIn: budget.resetAt.map { formatResetCountdown(to: $0, now: now) },
-      detail: details.joined(separator: " · "))
+      detail: details.joined(separator: " · "),
+      reportedRemainingFraction: budget.usedPercent.map { 1 - min(1, $0 / 100) })
   }
 }

@@ -15,11 +15,15 @@ final class BenchmarkViewModel: ObservableObject {
   @Published private(set) var executionProgress: BenchmarkProgress?
   @Published private(set) var executionEndedAt: Date?
   @Published private(set) var errorMessage: String?
+  @Published private(set) var isCheckingAcceptance = false
+  @Published private(set) var acceptanceCheckResult: BenchmarkAcceptanceCheckResult?
+  @Published private(set) var acceptanceCheckError: String?
   private weak var model: AppModel?
   private let directory: URL
   private let draftStore: BenchmarkDraftStore
   private let runner = BenchmarkRunner()
   private let harnessDiscovery = BenchmarkHarnessDiscovery()
+  private let acceptanceCheck = BenchmarkAcceptanceCheck()
   private var task: Task<Void, Never>?
   private var draftSubscriptions: Set<AnyCancellable> = []
   private var draftNeedsSaving = false
@@ -43,10 +47,19 @@ final class BenchmarkViewModel: ObservableObject {
       reports = try BenchmarkReportStore(directory: directory).list()
       if let latest = reports.first { report = latest }
     } catch { errorMessage = "Could not load saved benchmarks. Check the benchmark folder's permissions." }
+    var canSaveUpgradedDraft = true
     do {
       if let draft = try draftStore.load() { plan = draft }
       else if let latest = reports.first { plan = latest.plan }
-    } catch { errorMessage = Self.draftLoadError }
+    } catch { canSaveUpgradedDraft = false; errorMessage = Self.draftLoadError }
+    let upgraded = Self.enablingJudgeInspection(in: plan)
+    if upgraded != plan {
+      plan = upgraded
+      if canSaveUpgradedDraft {
+        do { try draftStore.save(plan) }
+        catch { errorMessage = Self.draftSaveError }
+      }
+    }
 
     $plan.removeDuplicates().dropFirst()
       .handleEvents(receiveOutput: { [weak self] _ in self?.draftNeedsSaving = true })
@@ -90,8 +103,51 @@ final class BenchmarkViewModel: ObservableObject {
       arguments: ["exec", "--json", "--sandbox", judge ? "read-only" : "workspace-write", "-"], outputFormat: .codexJSON)
   }
 
+  private static func enablingJudgeInspection(in original: BenchmarkPlan) -> BenchmarkPlan {
+    var plan = original
+    plan.judges = original.judges.map {
+      var judge = $0
+      judge.command = BenchmarkJudgeInspection.enablingInspection(in: judge.command) ?? judge.command
+      return judge
+    }
+    return plan
+  }
+
+  func checkAcceptanceCommand() {
+    guard !isRunning, !isCheckingAcceptance, let model else { return }
+    let command = plan.acceptanceCommand ?? ""
+    let repository = plan.repositoryPath
+    let timeout = plan.timeoutSeconds
+    let redactor = BenchmarkRedactor(configurations: model.providerAccounts.map { $0.runtimeConfiguration() })
+    isCheckingAcceptance = true
+    acceptanceCheckResult = nil
+    acceptanceCheckError = nil
+    task = Task { [self, model] in
+      defer { isCheckingAcceptance = false; task = nil }
+      do {
+        let result = try await acceptanceCheck.check(repository: URL(fileURLWithPath: repository), command: command,
+          timeout: timeout, redactor: redactor, credentialSource: { [model] in
+            await MainActor.run { BenchmarkRedactor(configurations: model.providerAccounts.map { $0.runtimeConfiguration() }) }
+          })
+        guard plan.repositoryPath == repository, plan.acceptanceCommand == command else { return }
+        acceptanceCheckResult = result
+      } catch is CancellationError { acceptanceCheckError = "Baseline check cancelled." }
+      catch { acceptanceCheckError = "The baseline check could not run. Check the repository, command and timeout." }
+    }
+  }
+
+  func clearAcceptanceCheck() {
+    acceptanceCheckResult = nil
+    acceptanceCheckError = nil
+  }
+
+  func cancelAcceptanceCheck() {
+    guard isCheckingAcceptance else { return }
+    task?.cancel()
+  }
+
   func start() {
-    guard !isRunning, let model else { return }
+    guard !isRunning, !isCheckingAcceptance, let model else { return }
     do { _ = try plan.validated() }
     catch { errorMessage = error.localizedDescription; return }
     guard !model.isRefreshing else { errorMessage = BenchmarkError.busy.localizedDescription; return }
@@ -149,13 +205,17 @@ final class BenchmarkViewModel: ObservableObject {
   func cancel() { task?.cancel(); progress = "Stopping benchmark" }
 
   var canReevaluateReport: Bool {
-    !isRunning && report?.finishedAt != nil && report?.runs.contains(where: { $0.outcome == .completed }) == true
+    !isRunning && !isCheckingAcceptance && report?.finishedAt != nil && report?.runs.contains(where: { $0.outcome == .completed }) == true
   }
 
   func reevaluateReport() {
     guard canReevaluateReport, let original = report, let model else { return }
     guard !model.isRefreshing else { errorMessage = BenchmarkError.busy.localizedDescription; return }
-    let judges = original.plan.judges.map { saved in plan.judges.first { $0.id == saved.id } ?? saved }
+    let judges = original.plan.judges.map { saved in
+      var judge = plan.judges.first { $0.id == saved.id } ?? saved
+      judge.command = BenchmarkJudgeInspection.enablingInspection(in: judge.command) ?? judge.command
+      return judge
+    }
     guard !judges.contains(where: { $0.command.arguments.contains { $0.contains("[redacted]") } }) else {
       errorMessage = "Update the judge commands in benchmark setup before re-evaluating; a saved command contains redacted values."
       return
@@ -209,10 +269,11 @@ final class BenchmarkViewModel: ObservableObject {
   }
 
   func loadReport(_ report: BenchmarkReport) {
-    guard !isRunning else { return }
+    guard !isRunning, !isCheckingAcceptance else { return }
     self.report = report
     executionProgress = nil
-    plan = report.plan
+    // History selects a result, not an editable setup. Redacted archive text
+    // must never overwrite the private task, model IDs or judge permissions.
     errorMessage = nil
   }
 
