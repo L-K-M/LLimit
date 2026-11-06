@@ -84,6 +84,19 @@ the dedicated window keeps attempt and evaluation progress, the current phase,
 and elapsed time visible above the results. Closing the window leaves the run
 active; reopen it from Settings > Benchmarks. Quitting LLimit cancels the run safely.
 
+Completed reports open a comparison overview; individual attempts and detailed
+judge explanations stay collapsed. **Re-evaluate saved results** runs only the
+judges, creates a new report, and preserves the original agent runs, times and
+quota costs. Older workspaces can be recovered when their files or branches
+still exist; removed work cannot be reconstructed.
+
+Benchmark tasks run locally. Remote pushes and PR steps are replaced by local
+branches and a written handoff. Agents leave their primary result checked out
+and write `LLIMIT_BENCHMARK_RESULT.md`; this handoff is captured even when ignored
+by Git. Judges receive the primary changes and additional local-branch/worktree
+patches. Configured acceptance commands check the primary checkout, not an
+automatic merge of alternate branches.
+
 Agents use their own CLI login. Match it to the quota account you select and keep
 that account idle elsewhere throughout the measurement. LLimit does not give
 its credentials or private managed profiles to benchmark commands. Codex, Claude

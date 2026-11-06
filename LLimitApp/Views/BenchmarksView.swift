@@ -8,6 +8,10 @@ struct BenchmarksView: View {
   @State private var accountsConfirmed = false
   @State private var invalidEditors: Set<UUID> = []
   @State private var isSetupExpanded = true
+  @State private var isAttemptDetailsExpanded = false
+  @State private var resultsFocusRequest = UUID()
+  @State private var confirmsReevaluation = false
+  private let resultsAnchor = "benchmark-results-overview"
 
   private var readiness: BenchmarkReadiness {
     BenchmarkReadiness(plan: benchmark.plan, accountUseConfirmed: accountsConfirmed, invalidEditorIDs: invalidEditors)
@@ -20,35 +24,64 @@ struct BenchmarksView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      if benchmark.isRunning || benchmark.executionProgress != nil {
+      if benchmark.isRunning {
         progressPanel
           .padding(20)
           .background(.bar)
         Divider()
       }
-      ScrollView {
-        VStack(alignment: .leading, spacing: 20) {
-          header
-          if let error = benchmark.errorMessage {
-            Label(error, systemImage: "exclamationmark.triangle")
-              .foregroundStyle(.red)
-              .textSelection(.enabled)
+      ScrollViewReader { scroll in
+        ScrollView {
+          VStack(alignment: .leading, spacing: 20) {
+            header
+            if let error = benchmark.errorMessage {
+              Label(error, systemImage: "exclamationmark.triangle")
+                .foregroundStyle(.red)
+                .textSelection(.enabled)
+            }
+            DisclosureGroup("Benchmark setup", isExpanded: $isSetupExpanded) {
+              setup.disabled(benchmark.isRunning)
+                .padding(.top, 12)
+            }
+            if let report = benchmark.report {
+              reportSection(report)
+                .id(resultsAnchor)
+            }
           }
-          DisclosureGroup("Benchmark setup", isExpanded: $isSetupExpanded) {
-            setup.disabled(benchmark.isRunning)
-              .padding(.top, 12)
-          }
-          if let report = benchmark.report {
-            reportSection(report)
-          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .padding(24)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(24)
+        .onAppear {
+          if benchmark.isRunning { isSetupExpanded = false }
+          else { focusResults(scroll) }
+        }
+        .onChange(of: benchmark.isRunning) { _, running in
+          if running { isSetupExpanded = false }
+          else { focusResults(scroll) }
+        }
+        .onChange(of: benchmark.report?.id) { _, _ in
+          if !benchmark.isRunning { focusResults(scroll) }
+        }
+        .onChange(of: resultsFocusRequest) { _, _ in
+          focusResults(scroll)
+        }
       }
     }
-    .onAppear { if benchmark.isRunning { isSetupExpanded = false } }
-    .onChange(of: benchmark.isRunning) { _, running in
-      if running { isSetupExpanded = false }
+    .confirmationDialog("Re-evaluate saved results?", isPresented: $confirmsReevaluation, titleVisibility: .visible) {
+      Button("Re-evaluate saved results") { benchmark.reevaluateReport() }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text("The two judges create a new report, keeping the original in history. Only judges run again and consume quota. The original agent work, execution times, and costs are reused.")
+    }
+  }
+
+  private func focusResults(_ scroll: ScrollViewProxy) {
+    guard !benchmark.isRunning, benchmark.report != nil else { return }
+    isSetupExpanded = false
+    isAttemptDetailsExpanded = false
+    // Collapse the setup before locating the overview in the new layout.
+    DispatchQueue.main.async {
+      scroll.scrollTo(resultsAnchor, anchor: .top)
     }
   }
 
@@ -59,7 +92,7 @@ struct BenchmarksView: View {
         Spacer()
         if let state = benchmark.executionProgress {
           TimelineView(.periodic(from: .now, by: 1)) { context in
-            let end = benchmark.report?.finishedAt ?? benchmark.executionEndedAt ?? context.date
+            let end = benchmark.isRunning ? context.date : benchmark.report?.finishedAt ?? benchmark.executionEndedAt ?? context.date
             Text("Elapsed \(elapsed(end.timeIntervalSince(state.startedAt)))")
               .font(.caption).monospacedDigit().foregroundStyle(.secondary)
           }
@@ -94,6 +127,7 @@ struct BenchmarksView: View {
   }
 
   private var progressTitle: String {
+    if benchmark.isReevaluating { return "Re-evaluating saved results" }
     if !benchmark.isRunning, let state = benchmark.executionProgress, !state.isTerminal { return "Benchmark stopped" }
     switch benchmark.executionProgress?.phase {
     case .preparing, nil: return "Preparing benchmark"
@@ -121,6 +155,7 @@ struct BenchmarksView: View {
             ForEach(benchmark.reports, id: \.id) { report in
               Button(report.startedAt.formatted(date: .abbreviated, time: .shortened)) {
                 benchmark.loadReport(report)
+                resultsFocusRequest = UUID()
               }
             }
           } label: {
@@ -275,82 +310,151 @@ struct BenchmarksView: View {
 
   private func reportSection(_ report: BenchmarkReport) -> some View {
     VStack(alignment: .leading, spacing: 14) {
-      Divider()
       HStack {
-        Text(benchmark.isRunning ? "Live results" : "Results").font(.title3.weight(.semibold))
+        Text(benchmark.isRunning ? "Live results" : "Results overview")
+          .font(.title3.weight(.semibold))
+          .accessibilityAddTraits(.isHeader)
         Spacer()
         Button("Export JSON…") { benchmark.exportReport() }
         Button("Show files") { benchmark.revealArtifacts() }
       }
-      Text("\(report.startedAt.formatted(date: .abbreviated, time: .shortened)) · commit \(report.baselineCommit.prefix(12))")
+      Text(reportMetadata(report))
         .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+      if benchmark.canReevaluateReport || benchmark.isReevaluating {
+        HStack(spacing: 10) {
+          Button("Re-evaluate saved results…") { confirmsReevaluation = true }
+            .disabled(!benchmark.canReevaluateReport || benchmark.isReevaluating)
+            .help("Save new judge assessments in a new report using the original agent work, times, and costs.")
+          if benchmark.isReevaluating {
+            Text("Re-evaluating with both judges")
+              .font(.caption).foregroundStyle(.secondary)
+          }
+        }
+      }
+      if report.reevaluationOf != nil {
+        Text("Re-evaluated saved results. Agent work, execution times, and costs come from the original attempts; only the judge assessments are new.")
+          .font(.caption).foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+      }
       if benchmark.isRunning {
-        Text("Attempts are still running. Results appear as they finish; quality scores follow the judge evaluations.")
+        Text(benchmark.isReevaluating
+          ? "Saved attempts are being evaluated again. Scores update as the judges finish."
+          : "Attempts are still running. Results appear as they finish; quality scores follow the judge evaluations.")
           .font(.caption).foregroundStyle(.secondary)
       }
       if report.runs.isEmpty {
         Text(benchmark.isRunning ? "No attempts have finished yet." : "No attempts were recorded.")
           .foregroundStyle(.secondary)
       } else {
+        Text(evaluationOverview(report))
+          .font(.callout)
+          .fixedSize(horizontal: false, vertical: true)
         comparison(report)
       }
-      Text("Costs are allocated estimates from the price you assigned to a quota window, rather than additional charges. Unknown costs remain unavailable. Failed attempts are included in cost per accepted result.")
-        .font(.caption).foregroundStyle(.secondary)
-      Text("Judge time: \(duration(report.judgeDurationSeconds)). Acceptance requires both judges to accept the result and any acceptance command to pass.")
-        .font(.caption).foregroundStyle(.secondary)
-      ForEach(Array(report.warnings.enumerated()), id: \.offset) { _, warning in
-        Label(warning, systemImage: "exclamationmark.triangle")
-          .font(.callout).foregroundStyle(.orange)
+      if report.runs.contains(where: { $0.outcome == .completed && $0.evidence == nil && $0.patch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+        Label("Older evaluations with empty root diffs may omit local-branch or linked-worktree changes. Output-only tasks can still be valid. Re-evaluate to review any work still available.", systemImage: "exclamationmark.triangle")
+          .font(.caption).foregroundStyle(.orange)
+          .fixedSize(horizontal: false, vertical: true)
       }
-      ForEach(report.runs, id: \.id) { run in
-        runCard(run, report: report)
+      Text("Costs allocate your subscription price and include failed attempts. Judge scores summarize the available evaluations; disagreements and missing evaluations require review.")
+        .font(.caption).foregroundStyle(.secondary)
+      DisclosureGroup("Task and evaluation criteria") {
+        VStack(alignment: .leading, spacing: 10) {
+          fieldTitle("Task")
+          Text(report.plan.taskPrompt)
+          fieldTitle("Acceptance criteria")
+          Text(report.plan.rubric)
+          if let command = report.plan.acceptanceCommand {
+            fieldTitle("Acceptance command")
+            Text(command).font(.system(.callout, design: .monospaced))
+          }
+        }
+        .font(.callout).textSelection(.enabled)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 8)
+      }
+      if !report.warnings.isEmpty {
+        DisclosureGroup("Measurement notes (\(report.warnings.count))") {
+          VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(report.warnings.enumerated()), id: \.offset) { _, warning in
+              Label(warning, systemImage: "exclamationmark.triangle")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+          }
+          .padding(.top, 8)
+        }
+      }
+      DisclosureGroup("Attempt details (\(report.runs.count))", isExpanded: $isAttemptDetailsExpanded) {
+        VStack(alignment: .leading, spacing: 10) {
+          ForEach(report.runs, id: \.id) { run in
+            runCard(run, report: report)
+          }
+        }
+        .padding(.top, 8)
       }
     }
   }
 
   private func comparison(_ report: BenchmarkReport) -> some View {
-    ScrollView(.horizontal) {
-      Grid(alignment: .leading, horizontalSpacing: 22, verticalSpacing: 10) {
-        GridRow {
-          Text("Agent"); Text("Accepted"); Text("Median time"); Text("Quality / 10"); Text("Allocated cost"); Text("Cost / accepted")
-        }
-        .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-        Divider().gridCellUnsizedAxes(.horizontal)
-        ForEach(report.summaries, id: \.candidateID) { summary in
-          GridRow {
-            Text(summary.name).fontWeight(.medium)
-            Text("\(summary.acceptedCount) / \(summary.attempts)")
-            Text(duration(summary.medianDurationSeconds))
-            Text(summary.meanQualityScore.map { String(format: "%.1f", $0) } ?? "Unavailable")
-            Text(money(summary.estimatedTotalCost, currency: report.plan.currency))
-            Text(money(summary.estimatedCostPerAcceptedTask, currency: report.plan.currency))
+    LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), alignment: .top)], alignment: .leading, spacing: 12) {
+      ForEach(report.summaries, id: \.candidateID) { summary in
+        let runs = report.runs.filter { $0.candidateID == summary.candidateID }
+        GroupBox {
+          VStack(alignment: .leading, spacing: 12) {
+            Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 12) {
+              GridRow {
+                resultMetric("Accepted", value: "\(summary.acceptedCount) / \(summary.attempts)")
+                resultMetric("Median time", value: duration(summary.medianDurationSeconds))
+                  .help("Range: \(duration(summary.minDurationSeconds)) to \(duration(summary.maxDurationSeconds))")
+              }
+              GridRow {
+                resultMetric("Judge score / 10", value: summary.meanQualityScore.map { String(format: "%.1f", $0) } ?? "Unavailable")
+                resultMetric("Allocated cost", value: money(summary.estimatedTotalCost, currency: report.plan.currency))
+              }
+              GridRow {
+                resultMetric("Cost / accepted", value: money(summary.estimatedCostPerAcceptedTask, currency: report.plan.currency))
+                resultMetric("Needs review", value: "\(runs.filter { assessment($0).needsReview || evidenceNeedsReview($0) }.count)")
+              }
+            }
+            Text(outcomeSummary(runs))
+              .font(.caption).foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
           }
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .padding(8)
+        } label: {
+          Text(summary.name).font(.headline)
         }
       }
-      .font(.callout).monospacedDigit()
-      .padding(14)
     }
-    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+  }
+
+  private func resultMetric(_ label: String, value: String) -> some View {
+    VStack(alignment: .leading, spacing: 3) {
+      Text(label).font(.caption).foregroundStyle(.secondary)
+      Text(value).font(.callout.weight(.semibold)).monospacedDigit()
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .accessibilityElement(children: .combine)
   }
 
   private func runCard(_ run: BenchmarkRun, report: BenchmarkReport) -> some View {
     let candidate = report.plan.candidates.first { $0.id == run.candidateID }
-    return GroupBox {
+    return DisclosureGroup {
       VStack(alignment: .leading, spacing: 10) {
-        HStack {
-          Text("\(candidate?.name ?? "Agent") · attempt \(run.repetition)")
-            .font(.headline)
-          Spacer()
-          Text(run.outcome.rawValue).foregroundStyle(.secondary)
-          Text(duration(run.durationSeconds)).monospacedDigit()
-        }
         HStack(spacing: 14) {
-          Label(acceptanceLabel(run), systemImage: run.isAccepted == true ? "checkmark.circle" : "circle.dashed")
+          Text("Execution: \(run.outcome.rawValue)")
           if let passed = run.acceptancePassed {
             Text(passed ? "Acceptance command passed" : "Acceptance command failed")
           }
         }
         .font(.caption).foregroundStyle(.secondary)
+        if let reason = run.acceptanceUnavailableReason {
+          Label(reason, systemImage: "exclamationmark.triangle")
+            .font(.caption).foregroundStyle(.orange)
+            .fixedSize(horizontal: false, vertical: true)
+        }
         ForEach(Array(run.quotaChanges.enumerated()), id: \.offset) { _, change in
           VStack(alignment: .leading, spacing: 2) {
             Text(quotaDescription(change)).font(.callout)
@@ -366,16 +470,36 @@ struct BenchmarksView: View {
         if let basis = run.costBasis {
           Text(basis).font(.caption).foregroundStyle(.secondary)
         }
+        if let capture = run.evidence {
+          Text("Workspace: \(capture.workspaceName)")
+            .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+          if !capture.captureComplete {
+            Label("Work capture is incomplete. Judge conclusions may be based on only part of the result.", systemImage: "exclamationmark.triangle")
+              .font(.caption).foregroundStyle(.orange)
+          }
+          ForEach(Array(capture.warnings.enumerated()), id: \.offset) { _, warning in
+            Text(warning).font(.caption).foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          }
+        } else {
+          Text("This older attempt has no capture metadata for local branches or linked worktrees. Its saved diff and output may contain only part of the work.")
+            .font(.caption).foregroundStyle(.secondary)
+        }
         ForEach(Array(run.evaluations.enumerated()), id: \.offset) { _, evaluation in
-          VStack(alignment: .leading, spacing: 3) {
-            let judgeName = report.plan.judges.first { $0.id == evaluation.judgeID }?.name ?? "Judge"
+          DisclosureGroup {
+            VStack(alignment: .leading, spacing: 6) {
+              if let error = evaluation.error { Text(error).foregroundStyle(.red) }
+              if !evaluation.explanation.isEmpty { Text(evaluation.explanation).foregroundStyle(.secondary) }
+            }
+            .padding(.top, 6)
+          } label: {
             HStack {
+              let judgeName = report.plan.judges.first { $0.id == evaluation.judgeID }?.name ?? "Judge"
               Text(judgeName).fontWeight(.medium)
               if let score = evaluation.score { Text(String(format: "%.1f / 10", score)) }
               if let accepted = evaluation.accepted { Text(accepted ? "Accepted" : "Rejected") }
+              if evaluation.error != nil { Text("Evaluation unavailable").foregroundStyle(.orange) }
             }
-            if let error = evaluation.error { Text(error).foregroundStyle(.red) }
-            if !evaluation.explanation.isEmpty { Text(evaluation.explanation).foregroundStyle(.secondary) }
           }
           .font(.callout).textSelection(.enabled)
         }
@@ -383,12 +507,35 @@ struct BenchmarksView: View {
           DisclosureGroup("Agent output") { evidence(run.output) }
         }
         if !run.patch.isEmpty {
-          DisclosureGroup("Changes") { evidence(run.patch) }
+          DisclosureGroup("Root workspace changes") { evidence(run.patch) }
+        }
+        if let capture = run.evidence {
+          ForEach(Array(capture.additionalArtifacts.enumerated()), id: \.offset) { _, artifact in
+            DisclosureGroup("\(artifact.kind == .localBranch ? "Local branch" : "Linked worktree") · \(artifact.name)") {
+              if artifact.patch.isEmpty {
+                Text("No diff was saved for this artifact.")
+                  .font(.caption).foregroundStyle(.secondary)
+              } else {
+                evidence(artifact.patch)
+              }
+            }
+          }
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
       .padding(8)
+    } label: {
+      HStack(spacing: 12) {
+        Text("\(candidate?.name ?? "Agent") · attempt \(run.repetition)")
+          .fontWeight(.medium)
+        Spacer(minLength: 4)
+        Text(assessment(run).label).foregroundStyle(.secondary)
+        Text(duration(run.durationSeconds)).monospacedDigit()
+      }
+      .font(.callout)
     }
+    .padding(10)
+    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
   }
 
   private func evidence(_ text: String) -> some View {
@@ -447,12 +594,94 @@ struct BenchmarksView: View {
     value.map { "\(currency) \(String(format: "%.4f", $0))" } ?? "Unavailable"
   }
 
-  private func acceptanceLabel(_ run: BenchmarkRun) -> String {
-    switch run.isAccepted {
-    case true?: return "Accepted"
-    case false?: return "Rejected"
-    case nil: return "Acceptance unresolved"
+  private func reportMetadata(_ report: BenchmarkReport) -> String {
+    var parts = [report.startedAt.formatted(date: .abbreviated, time: .shortened), "commit \(report.baselineCommit.prefix(12))"]
+    if let finished = report.finishedAt {
+      let label = report.reevaluationOf == nil ? "Total" : "Re-evaluation"
+      parts.append("\(label) \(duration(finished.timeIntervalSince(report.startedAt)))")
     }
+    parts.append("Judging \(duration(report.judgeDurationSeconds))")
+    return parts.joined(separator: " · ")
+  }
+
+  private enum RunAssessment: Equatable {
+    case accepted, executionFailed, acceptanceFailed, acceptanceUnavailable, rejected, disagreement, incomplete
+
+    var needsReview: Bool { self == .disagreement || self == .incomplete || self == .acceptanceUnavailable }
+
+    var label: String {
+      switch self {
+      case .accepted: return "Accepted"
+      case .executionFailed: return "Execution failed"
+      case .acceptanceFailed: return "Acceptance check failed"
+      case .acceptanceUnavailable: return "Acceptance check unavailable"
+      case .rejected: return "Rejected by judges"
+      case .disagreement: return "Judges disagree"
+      case .incomplete: return "Evaluation incomplete"
+      }
+    }
+  }
+
+  private func assessment(_ run: BenchmarkRun) -> RunAssessment {
+    guard run.outcome == .completed else { return .executionFailed }
+    guard run.acceptanceUnavailableReason == nil else { return .acceptanceUnavailable }
+    guard run.acceptancePassed != false else { return .acceptanceFailed }
+    if run.isAccepted == true { return .accepted }
+    if run.isAccepted == false { return .rejected }
+    let valid = run.evaluations.filter(\.isValid)
+    if valid.count == 2, Set(valid.map(\.judgeID)).count == 2,
+       Set(valid.compactMap(\.accepted)).count == 2 {
+      return .disagreement
+    }
+    return .incomplete
+  }
+
+  private func evaluationOverview(_ report: BenchmarkReport) -> String {
+    let accepted = report.runs.filter { assessment($0) == .accepted }.count
+    let unresolved = report.runs.filter { assessment($0).needsReview }.count
+    let failures = report.runs.filter { assessment($0) == .executionFailed }.count
+    if failures == report.runs.count {
+      return "Every recorded agent execution failed. These results cannot establish output quality; inspect the attempt details."
+    }
+    let evidenceReview = report.runs.filter(evidenceNeedsReview).count
+    if unresolved > 0 || evidenceReview > 0 {
+      var concerns: [String] = []
+      let disagreement = report.runs.filter { assessment($0) == .disagreement }.count
+      let incomplete = report.runs.filter { assessment($0) == .incomplete }.count
+      let unavailable = report.runs.filter { assessment($0) == .acceptanceUnavailable }.count
+      if disagreement > 0 { concerns.append("judge disagreements: \(disagreement)") }
+      if incomplete > 0 { concerns.append("incomplete evaluations: \(incomplete)") }
+      if unavailable > 0 { concerns.append("acceptance checks unavailable: \(unavailable)") }
+      if evidenceReview > 0 { concerns.append("\(evidenceReview) need evidence review") }
+      return "\(accepted) of \(report.runs.count) attempts accepted; \(concerns.joined(separator: "; ")). Scores alone do not establish a reliable winner."
+    }
+    if accepted == 0 {
+      return "No recorded attempt met the acceptance requirements. Review failed checks and judge decisions before choosing a setup."
+    }
+    return "\(accepted) of \(report.runs.count) attempts met the acceptance requirements. Compare accepted results alongside time and allocated cost."
+  }
+
+  private func outcomeSummary(_ runs: [BenchmarkRun]) -> String {
+    guard !runs.isEmpty else { return "No attempts recorded" }
+    let categories: [(RunAssessment, String, String)] = [
+      (.executionFailed, "execution failure", "execution failures"),
+      (.acceptanceFailed, "failed acceptance check", "failed acceptance checks"),
+      (.acceptanceUnavailable, "unavailable acceptance check", "unavailable acceptance checks"),
+      (.rejected, "judge rejection", "judge rejections"),
+      (.disagreement, "judge disagreement", "judge disagreements"),
+      (.incomplete, "incomplete evaluation", "incomplete evaluations")
+    ]
+    var details = categories.compactMap { category, singular, plural -> String? in
+      let count = runs.filter { assessment($0) == category }.count
+      return count > 0 ? "\(count) \(count == 1 ? singular : plural)" : nil
+    }
+    let evidenceReview = runs.filter(evidenceNeedsReview).count
+    if evidenceReview > 0 { details.append("\(evidenceReview) need evidence review") }
+    return details.isEmpty ? "All recorded attempts accepted" : details.joined(separator: " · ")
+  }
+
+  private func evidenceNeedsReview(_ run: BenchmarkRun) -> Bool {
+    run.outcome == .completed && run.evidence?.captureComplete != true
   }
 
   private func quotaDescription(_ change: BenchmarkQuotaChange) -> String {

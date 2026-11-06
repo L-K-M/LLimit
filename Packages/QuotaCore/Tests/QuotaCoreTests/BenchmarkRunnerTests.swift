@@ -370,10 +370,16 @@ final class BenchmarkRunnerTests: XCTestCase {
     for capture in captures {
       let prompt = try String(contentsOf: capture)
       let evidenceText = try XCTUnwrap(prompt.components(separatedBy: "Evidence:\n").last)
-      let evidence = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(evidenceText.utf8)) as? [String: String])
-      XCTAssertEqual(evidence["output"], "Secret was [redacted]\n")
+      let evidence = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(evidenceText.utf8)) as? [String: Any])
+      XCTAssertEqual(evidence["output"] as? String, "Secret was [redacted]\n")
       XCTAssertFalse(prompt.contains(secret))
-      XCTAssertFalse(evidence.values.contains { $0.contains(secret) })
+      func containsSecret(_ value: Any) -> Bool {
+        if let string = value as? String { return string.contains(secret) }
+        if let array = value as? [Any] { return array.contains(where: containsSecret) }
+        if let object = value as? [String: Any] { return object.values.contains(where: containsSecret) }
+        return false
+      }
+      XCTAssertFalse(containsSecret(evidence))
     }
   }
 

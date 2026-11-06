@@ -375,6 +375,17 @@ public struct BenchmarkRedactor: Sendable {
       var run = $0
       run.output = redact($0.output)
       run.patch = redact($0.patch)
+      run.acceptanceUnavailableReason = $0.acceptanceUnavailableReason.map(redact)
+      if var evidence = $0.evidence {
+        evidence.additionalArtifacts = evidence.additionalArtifacts.map {
+          var artifact = $0
+          artifact.name = redact(artifact.name)
+          artifact.patch = redact(artifact.patch)
+          return artifact
+        }
+        evidence.warnings = evidence.warnings.map(redact)
+        run.evidence = evidence
+      }
       run.costBasis = $0.costBasis.map(redact)
       run.quotaChanges = $0.quotaChanges.map {
         var change = $0

@@ -10,6 +10,7 @@ final class BenchmarkViewModel: ObservableObject {
   @Published private(set) var reports: [BenchmarkReport] = []
   @Published private(set) var report: BenchmarkReport?
   @Published private(set) var isRunning = false
+  @Published private(set) var isReevaluating = false
   @Published private(set) var progress = ""
   @Published private(set) var executionProgress: BenchmarkProgress?
   @Published private(set) var executionEndedAt: Date?
@@ -147,6 +148,46 @@ final class BenchmarkViewModel: ObservableObject {
 
   func cancel() { task?.cancel(); progress = "Stopping benchmark" }
 
+  var canReevaluateReport: Bool {
+    !isRunning && report?.finishedAt != nil && report?.runs.contains(where: { $0.outcome == .completed }) == true
+  }
+
+  func reevaluateReport() {
+    guard canReevaluateReport, let original = report, let model else { return }
+    guard !model.isRefreshing else { errorMessage = BenchmarkError.busy.localizedDescription; return }
+    let judges = original.plan.judges.map { saved in plan.judges.first { $0.id == saved.id } ?? saved }
+    guard !judges.contains(where: { $0.command.arguments.contains { $0.contains("[redacted]") } }) else {
+      errorMessage = "Update the judge commands in benchmark setup before re-evaluating; a saved command contains redacted values."
+      return
+    }
+    let redactor = BenchmarkRedactor(configurations: model.providerAccounts.map { $0.runtimeConfiguration() })
+    isRunning = true
+    isReevaluating = true
+    errorMessage = nil
+    progress = "Recovering saved results"
+    executionProgress = nil
+    executionEndedAt = nil
+    task = Task { [self, model] in
+      defer { executionEndedAt = Date(); isRunning = false; isReevaluating = false; task = nil }
+      do {
+        report = try await runner.reevaluate(report: original, directory: directory, judges: judges, redactor: redactor,
+          credentialSource: { [model] in
+            await MainActor.run { BenchmarkRedactor(configurations: model.providerAccounts.map { $0.runtimeConfiguration() }) }
+          }, progress: { [self] state in
+            await MainActor.run { self.executionProgress = state }
+          }, update: { [self] report, message in
+            await MainActor.run { self.report = report; self.progress = message }
+          })
+        reports = try BenchmarkReportStore(directory: directory).list()
+      } catch is CancellationError { progress = "Re-evaluation cancelled" }
+      catch {
+        errorMessage = error.localizedDescription
+        progress = "Re-evaluation stopped"
+        reports = (try? BenchmarkReportStore(directory: directory).list()) ?? reports
+      }
+    }
+  }
+
   func stopAndWait() async {
     saveDraftIfNeeded()
     task?.cancel()
@@ -191,6 +232,6 @@ final class BenchmarkViewModel: ObservableObject {
 
   func revealArtifacts() {
     guard let report else { return }
-    NSWorkspace.shared.open(directory.appendingPathComponent(report.id.uuidString, isDirectory: true))
+    NSWorkspace.shared.open(directory.appendingPathComponent((report.artifactReportID ?? report.id).uuidString, isDirectory: true))
   }
 }
