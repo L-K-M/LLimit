@@ -368,6 +368,12 @@ public struct BenchmarkSummary: Codable, Hashable, Identifiable, Sendable {
 }
 
 public struct BenchmarkReport: Codable, Hashable, Identifiable, Sendable {
+  /// Identifies the instructions actually given to candidates, not the app
+  /// version that most recently recovered evidence or evaluated their work.
+  public enum ExecutionProtocol: String, Codable, Sendable {
+    case preservedArtifactsV1
+  }
+
   public var id: UUID
   public var startedAt: Date
   public var finishedAt: Date?
@@ -378,10 +384,12 @@ public struct BenchmarkReport: Codable, Hashable, Identifiable, Sendable {
   public var warnings: [String]
   public var reevaluationOf: UUID?
   public var artifactReportID: UUID?
+  /// Absent in historical reports; never infer it from recovered artifacts.
+  public var executionProtocol: ExecutionProtocol?
 
   public init(id: UUID = UUID(), startedAt: Date = Date(), finishedAt: Date? = nil, baselineCommit: String,
               plan: BenchmarkPlan, runs: [BenchmarkRun] = [], judgeDurationSeconds: Double = 0, warnings: [String] = [],
-              reevaluationOf: UUID? = nil, artifactReportID: UUID? = nil) {
+              reevaluationOf: UUID? = nil, artifactReportID: UUID? = nil, executionProtocol: ExecutionProtocol? = nil) {
     self.id = id
     self.startedAt = startedAt
     self.finishedAt = finishedAt
@@ -392,6 +400,7 @@ public struct BenchmarkReport: Codable, Hashable, Identifiable, Sendable {
     self.warnings = warnings
     self.reevaluationOf = reevaluationOf
     self.artifactReportID = artifactReportID
+    self.executionProtocol = executionProtocol
   }
 
   public var summaries: [BenchmarkSummary] {

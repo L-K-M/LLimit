@@ -27,6 +27,7 @@ final class BenchmarkEvidenceHandoffTests: XCTestCase {
   func testBranchWorkSurvivesReturningToBaselineBeforeJudging() async throws {
     let fixture = try EvidenceFixture()
     defer { fixture.remove() }
+    let prompt = fixture.root.appendingPathComponent("judge-prompt.txt")
     let agent = """
       set -e
       cat >/dev/null
@@ -39,7 +40,8 @@ final class BenchmarkEvidenceHandoffTests: XCTestCase {
       printf Done
       """
     let judge = """
-      evidence=$(cat)
+      cat > '\(prompt.path)'
+      evidence=$(cat '\(prompt.path)')
       if printf '%s' "$evidence" | /usr/bin/grep -q verified-branch-change; then
         printf '%s' '{"accepted":true,"score":8,"explanation":"Branch artifact supplied"}'
       else
@@ -53,6 +55,9 @@ final class BenchmarkEvidenceHandoffTests: XCTestCase {
     XCTAssertEqual(run.patch, "")
     XCTAssertTrue(run.evidence?.additionalArtifacts.contains { $0.patch.contains("verified-branch-change") } == true)
     XCTAssertEqual(run.isAccepted, true)
+    let judgePrompt = try String(contentsOf: prompt)
+    XCTAssertTrue(judgePrompt.contains("the baseline with no primary file changes"))
+    XCTAssertFalse(judgePrompt.contains("the primary candidate changes applied to the baseline"))
   }
 
   func testReevaluationPreservesOriginalAndNeverRunsCandidatesAgain() async throws {
@@ -78,6 +83,7 @@ final class BenchmarkEvidenceHandoffTests: XCTestCase {
     XCTAssertNotEqual(refreshed.id, original.id)
     XCTAssertEqual(refreshed.reevaluationOf, original.id)
     XCTAssertEqual(refreshed.artifactReportID, original.id)
+    XCTAssertEqual(refreshed.executionProtocol, original.executionProtocol)
     XCTAssertEqual(refreshed.runs[0].id, original.runs[0].id)
     XCTAssertEqual(refreshed.runs[0].durationSeconds, 12.5)
     XCTAssertEqual(refreshed.runs[0].estimatedCost, 0.75)
@@ -115,6 +121,93 @@ final class BenchmarkEvidenceHandoffTests: XCTestCase {
     XCTAssertNil(run.isAccepted)
   }
 
+  func testNewRunRecordsExecutionProtocolAndPromptsContainHandoffInstructions() async throws {
+    let fixture = try EvidenceFixture()
+    defer { fixture.remove() }
+    let candidatePrompt = fixture.root.appendingPathComponent("candidate-prompt.txt")
+    let judgePrompt = fixture.root.appendingPathComponent("judge-prompt.txt")
+    let agent = """
+      cat > '\(candidatePrompt.path)'
+      printf verified-change > solution.txt
+      printf Done
+      """
+    let judge = """
+      cat > '\(judgePrompt.path)'
+      printf '%s' '{"accepted":true,"score":8,"explanation":"Verified"}'
+      """
+    let report = try await BenchmarkRunner().run(plan: fixture.plan(agent: agent, judge: judge),
+      directory: fixture.reports, quotaReader: { _ in throw BenchmarkError.unavailableAccount })
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    let json = try JSONSerialization.jsonObject(with: encoder.encode(report), options: []) as? [String: Any]
+    XCTAssertEqual(json?["executionProtocol"] as? String, "preservedArtifactsV1")
+    let cPrompt = try String(contentsOf: candidatePrompt)
+    let jPrompt = try String(contentsOf: judgePrompt)
+    XCTAssertTrue(cPrompt.contains("LLIMIT_BENCHMARK_RESULT.md"),
+      "Candidate prompt should contain LLIMIT_BENCHMARK_RESULT.md instruction")
+    XCTAssertTrue(jPrompt.contains("LLIMIT_BENCHMARK_RESULT.md"),
+      "Judge prompt should contain LLIMIT_BENCHMARK_RESULT.md instruction")
+    XCTAssertTrue(jPrompt.contains("the primary candidate changes applied to the baseline"))
+  }
+
+  func testLegacyReevaluationNeverGivesCurrentExecutionRulesToOldCandidates() async throws {
+    let fixture = try EvidenceFixture()
+    defer { fixture.remove() }
+    let agent = """
+      cat >/dev/null
+      printf verified-change > solution.txt
+      printf Done
+      """
+    let judge = """
+      cat >/dev/null
+      printf '%s' '{"accepted":true,"score":8,"explanation":"Original"}'
+      """
+    let runner = BenchmarkRunner()
+    var original = try await runner.run(plan: fixture.plan(agent: agent, judge: judge),
+      directory: fixture.reports, quotaReader: { _ in throw BenchmarkError.unavailableAccount })
+    original.runs[0].durationSeconds = 5.0
+    original.runs[0].estimatedCost = 0.1
+    // Recovered evidence is present, but cannot identify the original rules.
+    let store = BenchmarkReportStore(directory: fixture.reports)
+    try store.save(original)
+    let fileURL = fixture.reports.appendingPathComponent(original.id.uuidString.lowercased()).appendingPathExtension("json")
+    var jsonDict = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: fileURL)) as? [String: Any])
+    jsonDict.removeValue(forKey: "executionProtocol")
+    let data = try JSONSerialization.data(withJSONObject: jsonDict, options: [.sortedKeys])
+    try data.write(to: fileURL, options: .atomic)
+    let legacy = try XCTUnwrap(store.load(id: original.id))
+    XCTAssertNil(legacy.executionProtocol)
+    XCTAssertNotNil(legacy.runs[0].evidence)
+    let judgeStdin1 = fixture.root.appendingPathComponent("judge-stdin-1.txt")
+    let judgeStdin2 = fixture.root.appendingPathComponent("judge-stdin-2.txt")
+    let reevalJudges = original.plan.judges.map {
+      BenchmarkJudge(id: $0.id, name: $0.name, command: BenchmarkCommand(executable: "/bin/sh", arguments: ["-c",
+        "cat > '\(judgeStdin1.path)'; printf '%s' '{\"accepted\":true,\"score\":9,\"explanation\":\"Reeval 1\"}'"]))
+    }
+    let refreshed1 = try await runner.reevaluate(report: legacy, directory: fixture.reports, judges: reevalJudges)
+    let saved = try XCTUnwrap(store.load(id: refreshed1.id))
+    let reevalJudges2 = refreshed1.plan.judges.map {
+      BenchmarkJudge(id: $0.id, name: $0.name, command: BenchmarkCommand(executable: "/bin/sh", arguments: ["-c",
+        "cat > '\(judgeStdin2.path)'; printf '%s' '{\"accepted\":true,\"score\":9,\"explanation\":\"Reeval 2\"}'"]))
+    }
+    let refreshed2 = try await runner.reevaluate(report: saved, directory: fixture.reports, judges: reevalJudges2)
+    for url in [judgeStdin1, judgeStdin2] {
+      let prompt = try String(contentsOf: url)
+      XCTAssertFalse(prompt.contains("Before finishing, write LLIMIT_BENCHMARK_RESULT.md"))
+      XCTAssertFalse(prompt.contains("Benchmark execution rules given to the agent:"))
+      XCTAssertTrue(prompt.contains("The original benchmark execution rules were not recorded"))
+      XCTAssertTrue(prompt.contains("complete snapshots relative to the benchmark baseline"))
+      XCTAssertTrue(prompt.contains("Repeated changes may be inherited from a shared ancestor"))
+    }
+    for refreshed in [refreshed1, refreshed2] {
+      let json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(refreshed)) as? [String: Any])
+      XCTAssertNil(json["executionProtocol"])
+      XCTAssertEqual(refreshed.runs[0].id, original.runs[0].id)
+      XCTAssertEqual(refreshed.runs[0].durationSeconds, 5.0)
+      XCTAssertEqual(refreshed.runs[0].estimatedCost, 0.1)
+    }
+  }
+
   func testLegacyWorkspaceMatchingRefusesAmbiguousOrEscapingDirectories() throws {
     let fixture = try EvidenceFixture()
     defer { fixture.remove() }
@@ -143,7 +236,7 @@ final class BenchmarkEvidenceHandoffTests: XCTestCase {
       acceptanceUnavailableReason: "private reason 1")
     let source = UUID()
     let report = BenchmarkReport(baselineCommit: String(repeating: "a", count: 40), plan: plan, runs: [run],
-      reevaluationOf: source, artifactReportID: source)
+      reevaluationOf: source, artifactReportID: source, executionProtocol: .preservedArtifactsV1)
     let configuration = ProviderRuntimeConfiguration(provider: .junie, isEnabled: true,
       credentials: [CredentialField.junieAPIKey: "1"])
     let safe = try BenchmarkRedactor(configurations: [configuration]).redact(report)
@@ -155,6 +248,7 @@ final class BenchmarkEvidenceHandoffTests: XCTestCase {
     XCTAssertEqual(safe.runs[0].evidence?.workspaceName, name)
     XCTAssertEqual(safe.artifactReportID, source)
     XCTAssertEqual(safe.reevaluationOf, source)
+    XCTAssertEqual(safe.executionProtocol, .preservedArtifactsV1)
   }
 }
 
