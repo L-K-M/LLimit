@@ -40,8 +40,9 @@ enum OverviewGaugeLayout {
 /// Size of the menu bar dropdown, which the user sets by dragging a corner grip.
 ///
 /// MenuBarExtra sizes its panel to the content's ideal frame when it opens, so
-/// the remembered size becomes that frame. While open, the panel grows with its
-/// content but never shrinks, so a drag also sets the panel's frame directly.
+/// the remembered size becomes that frame. While open, keep that ideal size
+/// stable and let AppKit resize the flexible content, avoiding a second resize
+/// and re-anchor from SwiftUI during the drag.
 ///
 ///     menu bar ──────────[status item]──────
 ///              ┌─────────────────────────┐   top edge stays pinned
@@ -70,6 +71,42 @@ enum MenuBarPanelSize {
   struct Resize: Equatable {
     let frame: CGRect
     let size: CGSize
+  }
+
+  static func remembered(in defaults: UserDefaults = .standard) -> CGSize {
+    CGSize(
+      width: defaults.object(forKey: widthKey) as? Double ?? defaultWidth,
+      height: defaults.object(forKey: heightKey) as? Double ?? defaultHeight
+    )
+  }
+
+  static func remember(_ size: CGSize, in defaults: UserDefaults = .standard) {
+    defaults.set(Double(size.width), forKey: widthKey)
+    defaults.set(Double(size.height), forKey: heightKey)
+  }
+
+  /// Shared by both grips so a cancelled drag retains its last applied size,
+  /// even when the next drag uses the other corner. It does not publish layout
+  /// changes to SwiftUI while AppKit owns the live frame.
+  final class Session {
+    private let defaults: UserDefaults
+    private var pendingSize: CGSize?
+
+    init(defaults: UserDefaults = .standard) {
+      self.defaults = defaults
+    }
+
+    var currentSize: CGSize { pendingSize ?? MenuBarPanelSize.remembered(in: defaults) }
+
+    func record(_ size: CGSize) {
+      pendingSize = size
+    }
+
+    func remember() {
+      guard let pendingSize else { return }
+      MenuBarPanelSize.remember(pendingSize, in: defaults)
+      self.pendingSize = nil
+    }
   }
 
   /// The remembered size limited to the visible screen area, so the action bar

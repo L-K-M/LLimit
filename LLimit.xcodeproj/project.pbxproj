@@ -10,6 +10,7 @@
 		0076043CC71CC09BFF9DE74A /* LLimitQuotaWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B4155FC0F0418AB20A7F600 /* LLimitQuotaWidget.swift */; };
 		0C315EBE8E7B7EE820428C83 /* LimitKindColorScheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 648E0F6020C622BD50CCC909 /* LimitKindColorScheme.swift */; };
 		16DDAE3CD533D6B261B1C56E /* MistralLoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39DCE8B64864063F6212FA78 /* MistralLoginView.swift */; };
+		1AFAD72641453061140F7B10 /* DashboardPanelFrame.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4A753CFBC1D77A209686799 /* DashboardPanelFrame.swift */; };
 		2D98F2F1CE89C1FB3DFE15BF /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = EE6A1797238B5E85DDF52167 /* SwiftTerm */; };
 		386963A9990480361B221F1C /* SharedConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CA36F027D77628AAB911B4F /* SharedConstants.swift */; };
 		4A4AC618CDAE0C085BE6E421 /* LLimitApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65826397D3D90EF0FE3F1AF8 /* LLimitApp.swift */; };
@@ -101,6 +102,7 @@
 		BA51AAA1CD91BD3666042A7A /* MistralLoginSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MistralLoginSession.swift; sourceTree = "<group>"; };
 		BAC7FAA530793232B221A654 /* ClaudeProfileService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeProfileService.swift; sourceTree = "<group>"; };
 		BAC9788EA5B0B26ED62B0E74 /* MiMoLoginSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiMoLoginSession.swift; sourceTree = "<group>"; };
+		C4A753CFBC1D77A209686799 /* DashboardPanelFrame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardPanelFrame.swift; sourceTree = "<group>"; };
 		C51630B1379FDA77A0391D81 /* LLimit.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LLimit.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C70211A98D88A5AEA8688233 /* ClaudeTerminalSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeTerminalSession.swift; sourceTree = "<group>"; };
 		CB5284E5ACB2EB1888905F6F /* DetectedAccountsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetectedAccountsView.swift; sourceTree = "<group>"; };
@@ -185,6 +187,7 @@
 			children = (
 				4A209FE6A72662BD8F9B150D /* AppModel.swift */,
 				FF27A37B7897F137AAC76BBB /* Assets.xcassets */,
+				C4A753CFBC1D77A209686799 /* DashboardPanelFrame.swift */,
 				1D80DFE1041003A3DBEC1B17 /* LLimitApp.entitlements */,
 				65826397D3D90EF0FE3F1AF8 /* LLimitApp.swift */,
 				4E5B5AC6E5BEA026CF2F6789 /* MenuBarPanelGeometry.swift */,
@@ -382,6 +385,7 @@
 				77317877EF8EEB273F9978B7 /* ClaudeTerminalSession.swift in Sources */,
 				6DB81FD14DEEF4F20D7D09DA /* ClaudeTerminalView.swift in Sources */,
 				DAC4B45CD0532E62A7125645 /* CodexLoginView.swift in Sources */,
+				1AFAD72641453061140F7B10 /* DashboardPanelFrame.swift in Sources */,
 				5CC194E5B5A1E41C233A36E2 /* DetectedAccountsView.swift in Sources */,
 				67D762ECF0263FC81929931F /* GlobalHotkeyService.swift in Sources */,
 				4A4AC618CDAE0C085BE6E421 /* LLimitApp.swift in Sources */,
