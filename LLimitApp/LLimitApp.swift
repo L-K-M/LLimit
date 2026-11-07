@@ -1326,7 +1326,6 @@ private struct PanelResizeGrip: View {
 
   let corner: MenuBarPanelCorner
   let panel: WindowAnchor
-  @State private var pendingSize: CGSize?
 
   // Gesture state resets on its own when a drag is cancelled, e.g. by the
   // panel closing mid-drag, so a stale origin never leaks into the next drag.
@@ -1358,7 +1357,7 @@ private struct PanelResizeGrip: View {
       DragGesture(minimumDistance: 0)
         .updating($dragStart) { _, start, _ in
           guard start == nil, let window = panel.window else { return }
-          let remembered = MenuBarPanelSize.remembered()
+          let remembered = panel.sizing.currentSize
           start = DragStart(
             pointer: NSEvent.mouseLocation,
             frame: window.frame,
@@ -1366,9 +1365,9 @@ private struct PanelResizeGrip: View {
           )
         }
         .onChanged { _ in resize(following: NSEvent.mouseLocation) }
-        .onEnded { _ in rememberSize() }
+        .onEnded { _ in panel.sizing.remember() }
     )
-    .onDisappear { rememberSize() }
+    .onDisappear { panel.sizing.remember() }
     .help("Drag to resize")
     .accessibilityHidden(true)
   }
@@ -1386,22 +1385,17 @@ private struct PanelResizeGrip: View {
       pointerDelta: CGSize(width: pointer.x - start.pointer.x, height: pointer.y - start.pointer.y),
       visibleFrame: screen.visibleFrame
     )
-    pendingSize = resized.size
+    panel.sizing.record(resized.size)
     // AppKit owns live sizing. Publishing a new SwiftUI ideal size here also
     // repositions MenuBarExtra, competing with this anchored frame change.
     window.setFrame(resized.frame, display: true)
-  }
-
-  private func rememberSize() {
-    guard let pendingSize else { return }
-    MenuBarPanelSize.remember(pendingSize)
-    self.pendingSize = nil
   }
 }
 
 /// Looks up the window hosting a view on demand, here the MenuBarExtra panel.
 private final class WindowAnchor {
   weak var view: NSView?
+  let sizing = MenuBarPanelSize.Session()
 
   var window: NSWindow? { view?.window }
 }

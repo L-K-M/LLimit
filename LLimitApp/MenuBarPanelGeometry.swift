@@ -85,6 +85,30 @@ enum MenuBarPanelSize {
     defaults.set(Double(size.height), forKey: heightKey)
   }
 
+  /// Shared by both grips so a cancelled drag retains its last applied size,
+  /// even when the next drag uses the other corner. It does not publish layout
+  /// changes to SwiftUI while AppKit owns the live frame.
+  final class Session {
+    private let defaults: UserDefaults
+    private var pendingSize: CGSize?
+
+    init(defaults: UserDefaults = .standard) {
+      self.defaults = defaults
+    }
+
+    var currentSize: CGSize { pendingSize ?? MenuBarPanelSize.remembered(in: defaults) }
+
+    func record(_ size: CGSize) {
+      pendingSize = size
+    }
+
+    func remember() {
+      guard let pendingSize else { return }
+      MenuBarPanelSize.remember(pendingSize, in: defaults)
+      self.pendingSize = nil
+    }
+  }
+
   /// The remembered size limited to the visible screen area, so the action bar
   /// and grips stay reachable after a move from a large display to a laptop.
   /// Callers keep the remembered size itself for the next larger screen.

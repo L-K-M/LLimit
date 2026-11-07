@@ -27,6 +27,7 @@ private struct MenuBarPanelGeometryTests {
     try overflowingPanelIsNotYankedOnTheFirstMove()
     try rememberedSizeFitsTheVisibleScreen()
     try rememberedSizeUsesExistingPreferences()
+    try cancelledDragKeepsTheAppliedSize()
     try overviewRowsLeaveCaptionWidth()
     try differentFramePreservesChrome()
     try chainedDragsUseActualState()
@@ -140,6 +141,33 @@ private struct MenuBarPanelGeometryTests {
       MenuBarPanelSize.remembered(in: defaults), equals: CGSize(width: 530, height: 720),
       "Completed drag size survives a new read"
     )
+  }
+
+  private static func cancelledDragKeepsTheAppliedSize() throws {
+    let suite = "LLimit-PanelDragTests-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+
+    for nextCorner in [MenuBarPanelCorner.bottomLeading, .bottomTrailing] {
+      MenuBarPanelSize.remember(panelSize, in: defaults)
+      let session = MenuBarPanelSize.Session(defaults: defaults)
+      let interrupted = drag(corner: .bottomTrailing, pointerDelta: CGSize(width: 100, height: -100))
+      session.record(interrupted.size)
+      try expect(MenuBarPanelSize.remembered(in: defaults), equals: panelSize, "Dragging leaves preferences unchanged")
+      try expect(session.currentSize, equals: interrupted.size, "Cancellation retains the applied size")
+
+      let next = MenuBarPanelSize.resize(
+        frame: interrupted.frame, size: session.currentSize, corner: nextCorner,
+        pointerDelta: CGSize(width: nextCorner == .bottomLeading ? 20 : -20, height: 20),
+        visibleFrame: visibleFrame
+      )
+      try expect(next.size, equals: CGSize(width: 500, height: 690), "Either grip resumes from the applied size")
+      session.record(next.size)
+      session.remember()
+      try expect(MenuBarPanelSize.remembered(in: defaults), equals: next.size, "The completed drag saves the latest size")
+      session.remember()
+      try expect(MenuBarPanelSize.remembered(in: defaults), equals: next.size, "Another grip disappearing cannot save a stale size")
+    }
   }
 
   private static func overviewRowsLeaveCaptionWidth() throws {

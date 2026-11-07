@@ -162,6 +162,8 @@ also hosts the production dashboard frame in SwiftUI and verifies that content
 follows growing and shrinking native sizes while its ideal opening size stays
 constant. The old size ceiling fails the growth check (420×610 content inside
 a 620×710 native view).
+Cancellation coverage verifies that the next drag at either corner uses the
+last applied size and that another grip cannot save an older pending size.
 
 Dragging the grips in the running app is a manual check: open the dropdown,
 drag each bottom corner, close and reopen it, and confirm the size persists.
