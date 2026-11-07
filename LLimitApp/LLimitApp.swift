@@ -62,11 +62,6 @@ struct LLimitApp: App {
   }
 }
 
-private enum DashboardPresentation {
-  case menuBar
-  case floating
-}
-
 /// Hosts `SettingsView` in a standard resizable AppKit window, created on first use and
 /// reused thereafter. Avoids the SwiftUI `Settings` scene (non-resizable) entirely.
 @MainActor
@@ -900,8 +895,9 @@ private struct MenuBarContent: View {
   @ObservedObject var model: AppModel
   let presentation: DashboardPresentation
 
-  @AppStorage(MenuBarPanelSize.widthKey) private var panelWidth = MenuBarPanelSize.defaultWidth
-  @AppStorage(MenuBarPanelSize.heightKey) private var panelHeight = MenuBarPanelSize.defaultHeight
+  // Keep the ideal size stable for the lifetime of an open dropdown. Changing it
+  // during a drag makes MenuBarExtra re-anchor the panel while AppKit resizes it.
+  @State private var panelOpeningSize = MenuBarPanelSize.remembered()
   @State private var panelAnchor = WindowAnchor()
   @State private var panelScreenSize: CGSize?
 
@@ -909,7 +905,7 @@ private struct MenuBarContent: View {
     // Fitted to the panel's own screen. NSScreen.main follows keyboard focus and
     // can be another display; it only stands in until the panel first opens.
     let menuBarSize = MenuBarPanelSize.fitted(
-      CGSize(width: panelWidth, height: panelHeight),
+      panelOpeningSize,
       within: panelScreenSize ?? NSScreen.main?.visibleFrame.size
     )
 
@@ -931,24 +927,20 @@ private struct MenuBarContent: View {
     // overflows it on both sides. Every card adapts, so compressing is safe.
     // The menu bar panel sizes itself to the ideal frame, which is the size the
     // user last dragged it to.
-    .frame(
-      minWidth: MenuBarPanelSize.minimumWidth,
-      idealWidth: presentation == .menuBar ? menuBarSize.width : 430,
-      maxWidth: presentation == .floating ? .infinity : menuBarSize.width,
-      minHeight: presentation == .floating ? 440 : nil,
-      idealHeight: presentation == .menuBar ? menuBarSize.height : nil,
-      maxHeight: presentation == .floating ? .infinity : menuBarSize.height
-    )
+    .modifier(DashboardPanelFrame(presentation: presentation, menuBarSize: menuBarSize))
     .overlay(alignment: .bottom) {
       // The floating dashboard is a titled window AppKit already resizes.
       if presentation == .menuBar {
         HStack {
-          PanelResizeGrip(corner: .bottomLeading, panel: panelAnchor, width: $panelWidth, height: $panelHeight)
+          PanelResizeGrip(corner: .bottomLeading, panel: panelAnchor)
           Spacer()
-          PanelResizeGrip(corner: .bottomTrailing, panel: panelAnchor, width: $panelWidth, height: $panelHeight)
+          PanelResizeGrip(corner: .bottomTrailing, panel: panelAnchor)
         }
         .background(PanelWindowReader(anchor: panelAnchor) { panelScreenSize = $0 })
       }
+    }
+    .onAppear {
+      panelOpeningSize = MenuBarPanelSize.remembered()
     }
     .foregroundStyle(DashboardPalette.primaryText)
     .background {
@@ -1334,8 +1326,7 @@ private struct PanelResizeGrip: View {
 
   let corner: MenuBarPanelCorner
   let panel: WindowAnchor
-  @Binding var width: Double
-  @Binding var height: Double
+  @State private var pendingSize: CGSize?
 
   // Gesture state resets on its own when a drag is cancelled, e.g. by the
   // panel closing mid-drag, so a stale origin never leaks into the next drag.
@@ -1367,7 +1358,7 @@ private struct PanelResizeGrip: View {
       DragGesture(minimumDistance: 0)
         .updating($dragStart) { _, start, _ in
           guard start == nil, let window = panel.window else { return }
-          let remembered = CGSize(width: width, height: height)
+          let remembered = MenuBarPanelSize.remembered()
           start = DragStart(
             pointer: NSEvent.mouseLocation,
             frame: window.frame,
@@ -1375,7 +1366,9 @@ private struct PanelResizeGrip: View {
           )
         }
         .onChanged { _ in resize(following: NSEvent.mouseLocation) }
+        .onEnded { _ in rememberSize() }
     )
+    .onDisappear { rememberSize() }
     .help("Drag to resize")
     .accessibilityHidden(true)
   }
@@ -1393,11 +1386,16 @@ private struct PanelResizeGrip: View {
       pointerDelta: CGSize(width: pointer.x - start.pointer.x, height: pointer.y - start.pointer.y),
       visibleFrame: screen.visibleFrame
     )
-    width = Double(resized.size.width)
-    height = Double(resized.size.height)
-    // The panel only grows on its own when its content does, so set the frame
-    // directly to shrink it and to keep the top edge under the menu bar.
+    pendingSize = resized.size
+    // AppKit owns live sizing. Publishing a new SwiftUI ideal size here also
+    // repositions MenuBarExtra, competing with this anchored frame change.
     window.setFrame(resized.frame, display: true)
+  }
+
+  private func rememberSize() {
+    guard let pendingSize else { return }
+    MenuBarPanelSize.remember(pendingSize)
+    self.pendingSize = nil
   }
 }
 

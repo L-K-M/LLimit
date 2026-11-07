@@ -18,3 +18,13 @@ fi
   "$repo_root/scripts/tests/MenuBarPanelGeometryTests.swift" \
   -o "$build_dir/panel-geometry-tests"
 "$build_dir/panel-geometry-tests"
+
+if [[ "$(uname -s)" == Darwin ]]; then
+  "${swiftc[@]}" -parse-as-library -swift-version 5 \
+    -module-cache-path "$build_dir/ModuleCache" \
+    "$repo_root/LLimitApp/MenuBarPanelGeometry.swift" \
+    "$repo_root/LLimitApp/DashboardPanelFrame.swift" \
+    "$repo_root/scripts/tests/MenuBarPanelLayoutTests.swift" \
+    -o "$build_dir/panel-layout-tests"
+  "$build_dir/panel-layout-tests"
+fi

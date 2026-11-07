@@ -40,8 +40,9 @@ enum OverviewGaugeLayout {
 /// Size of the menu bar dropdown, which the user sets by dragging a corner grip.
 ///
 /// MenuBarExtra sizes its panel to the content's ideal frame when it opens, so
-/// the remembered size becomes that frame. While open, the panel grows with its
-/// content but never shrinks, so a drag also sets the panel's frame directly.
+/// the remembered size becomes that frame. While open, keep that ideal size
+/// stable and let AppKit resize the flexible content, avoiding a second resize
+/// and re-anchor from SwiftUI during the drag.
 ///
 ///     menu bar ──────────[status item]──────
 ///              ┌─────────────────────────┐   top edge stays pinned
@@ -70,6 +71,18 @@ enum MenuBarPanelSize {
   struct Resize: Equatable {
     let frame: CGRect
     let size: CGSize
+  }
+
+  static func remembered(in defaults: UserDefaults = .standard) -> CGSize {
+    CGSize(
+      width: defaults.object(forKey: widthKey) as? Double ?? defaultWidth,
+      height: defaults.object(forKey: heightKey) as? Double ?? defaultHeight
+    )
+  }
+
+  static func remember(_ size: CGSize, in defaults: UserDefaults = .standard) {
+    defaults.set(Double(size.width), forKey: widthKey)
+    defaults.set(Double(size.height), forKey: heightKey)
   }
 
   /// The remembered size limited to the visible screen area, so the action bar

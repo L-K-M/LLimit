@@ -156,11 +156,22 @@ Run `scripts/test-panel-geometry.sh`. It compiles the panel resize geometry
 standalone, without building the app, and checks that a corner drag keeps the
 top edge under the menu bar and the opposite edge in place, stops at the
 minimum size and the visible screen edge, never yanks a panel that already
-overflows, and fits a remembered size to a smaller screen.
+overflows, fits a remembered size to a smaller screen, and handles repeated
+drags with a difference between the native frame and content size. On macOS it
+also hosts the production dashboard frame in SwiftUI and verifies that content
+follows growing and shrinking native sizes while its ideal opening size stays
+constant. The old size ceiling fails the growth check (420×610 content inside
+a 620×710 native view).
 
 Dragging the grips in the running app is a manual check: open the dropdown,
 drag each bottom corner, close and reopen it, and confirm the size persists.
 Also relaunch LLimit and confirm the size survives.
+Verify that neither the top nor the opposite edge jumps during a drag, that the
+content and grips follow continuously, and that releasing the mouse does not
+reposition the open panel. Repeat grow/shrink drags without closing first.
+
+The native layout harness does not exercise MenuBarExtra's private panel or
+mouse delivery; those interactive checks remain manual.
 
 # Limit color integration checks
 
