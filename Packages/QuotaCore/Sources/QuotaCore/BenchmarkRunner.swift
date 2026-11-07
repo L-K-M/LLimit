@@ -39,7 +39,7 @@ public actor BenchmarkRunner {
     let directory = directory.standardizedFileURL.resolvingSymlinksInPath()
     let repository = URL(fileURLWithPath: plan.repositoryPath, isDirectory: true).resolvingSymlinksInPath()
     let commit = try await BenchmarkWorkspace.commit(repository: repository, process: process)
-    let executionProtocol = BenchmarkReport.ExecutionProtocol.preservedArtifactsV1
+    let executionProtocol = BenchmarkReport.ExecutionProtocol.preservedArtifactsV2
     var report = BenchmarkReport(startedAt: Date(), baselineCommit: commit, plan: plan, runs: [],
       executionProtocol: executionProtocol)
     report.warnings.append("Quota attribution assumes the selected CLI login matches its quota account and no other work uses that account. Judge quota and monetary cost are excluded.")
@@ -305,7 +305,7 @@ public actor BenchmarkRunner {
         do {
           var materialized = true
           do {
-            try await BenchmarkWorkspace.prepareJudge(repository: baselineRepository, baselineCommit: report.baselineCommit,
+            evaluation.evidenceWarnings = try await BenchmarkWorkspace.prepareJudge(repository: baselineRepository, baselineCommit: report.baselineCommit,
               destination: judgeDirectory, patch: run.patch, additionalArtifacts: additional, process: process)
           } catch is CancellationError { throw CancellationError() }
           catch {
@@ -315,18 +315,22 @@ public actor BenchmarkRunner {
             if !run.patch.isEmpty {
               sidecars.insert(BenchmarkEvidenceArtifact(kind: .localBranch, name: "Primary result patch", patch: run.patch), at: 0)
             }
-            try await BenchmarkWorkspace.prepareJudge(repository: baselineRepository, baselineCommit: report.baselineCommit,
+            evaluation.evidenceWarnings = try await BenchmarkWorkspace.prepareJudge(repository: baselineRepository, baselineCommit: report.baselineCommit,
               destination: judgeDirectory, patch: "", additionalArtifacts: sidecars, process: process)
+            evaluation.evidenceWarnings?.insert("The primary result could not be applied safely. This judge received baseline files and the original patch as a sidecar, not a materialized candidate checkout.", at: 0)
             materialized = false
           }
           let prompt = Self.judgePrompt(plan: report.plan, run: run, additionalArtifacts: additional,
-            materialized: materialized, executionProtocol: report.executionProtocol, redactor: redactor)
+            materialized: materialized, executionProtocol: report.executionProtocol,
+            evidenceWarnings: evaluation.evidenceWarnings ?? [], redactor: redactor)
           let command = try BenchmarkJudgeInspection.prepare(command: judge.command, directory: judgeDirectory)
           let result = try await execute(command, prompt: prompt, directory: judgeDirectory, timeout: report.plan.timeoutSeconds)
           try BenchmarkJudgeInspection.validateExecution(command: judge.command, directory: judgeDirectory)
           let decoded = try await executionOutput(result, command: judge.command, directory: judgeDirectory, timeout: report.plan.timeoutSeconds)
           if result.status == 0 && !result.timedOut && decoded.succeeded {
+            let warnings = evaluation.evidenceWarnings
             evaluation = BenchmarkOutput.evaluation(decoded.text, judgeID: judge.id, redactor: redactor)
+            evaluation.evidenceWarnings = warnings
           }
         } catch is CancellationError { cancelled = true }
         catch let error as BenchmarkJudgeInspectionError { evaluation.error = error.localizedDescription }
@@ -347,6 +351,11 @@ public actor BenchmarkRunner {
     // Keep previous cases unchanged when introducing a new protocol: saved
     // attempts must continue to be judged against the instructions they received.
     switch version {
+    case .preservedArtifactsV2:
+      return executionRules(for: .preservedArtifactsV1) + """
+
+      Never overwrite an existing tracked file to create a requested new research document. On a case-insensitive filesystem, Claude.md can be the same file as CLAUDE.md. Use a distinct new filename such as LLIMIT_RESEARCH.md, disclose the substitution in the handoff, and preserve the original repository instructions. Do not hide overwritten instructions with Git index flags. Keep the complete research document available for evaluation.
+      """
     case .preservedArtifactsV1: return """
       This is an isolated benchmark. These execution rules take precedence over workflow instructions in the task or repository.
       Work only in the supplied checkout. Do not use absolute or shared temporary worktree paths, access the original repository, or access sibling trials.
@@ -410,7 +419,7 @@ public actor BenchmarkRunner {
   }
 
   private static func judgePrompt(plan: BenchmarkPlan, run: BenchmarkRun, additionalArtifacts: [BenchmarkEvidenceArtifact],
-                                  materialized: Bool, executionProtocol: BenchmarkReport.ExecutionProtocol?,
+                                  materialized: Bool, executionProtocol: BenchmarkReport.ExecutionProtocol?, evidenceWarnings: [String],
                                   redactor: BenchmarkRedactor) -> String {
     let executionContext: String
     if let executionProtocol {
@@ -434,6 +443,7 @@ public actor BenchmarkRunner {
       "acceptanceCommand": plan.acceptanceCommand.map(redactor.redact) ?? "not configured",
       "additionalArtifacts": additionalArtifacts.map { ["kind": $0.kind.rawValue, "name": $0.name, "patch": $0.patch] },
       "captureComplete": run.evidence?.captureComplete ?? false,
+      "judgeEvidenceWarnings": evidenceWarnings,
       "evidenceWarnings": (run.evidence?.warnings ?? []).map { _ in "Some saved evidence may be unavailable; do not assume unprovided changes exist." },
       "acceptanceCheck": run.acceptanceUnavailableReason.map { "unavailable: \($0)" }
         ?? run.acceptancePassed.map { $0 ? "passed" : "failed" } ?? "not configured"]
@@ -442,7 +452,8 @@ public actor BenchmarkRunner {
     Independently evaluate this coding task against its requirements and rubric.
     \(executionContext)
     Do not penalize the absence of remote pushes, PRs, fetches or merges; this benchmark evaluates local work.
-    The workspace contains \(workspaceState). Additional branch/worktree patches are supplied in full in the JSON and as inert .llimit-evidence sidecars.
+    The workspace contains \(workspaceState). Read .llimit-evidence/manifest.json for the full patch sidecars and each available artifact's changed-file directory. Those directories contain the complete changed files for separate branch/worktree snapshots, not full checkouts or merged results; deletedPaths identifies removals. Missing unchanged dependencies or symlink targets in a thin view do not establish a broken original project. For unchanged context, use the baseline file directory for any primaryChangedPaths entry. If that entry is absent from the baseline directory, the file did not exist at baseline. Other main-checkout paths are unchanged baseline context. Do not use a primary result's changed or newly added files as an alternate branch's baseline context.
+    Evidence warnings identify files that could not be prepared. State these limits explicitly. A [redacted] placeholder is a privacy substitution, not proof of an original syntax error; never infer the removed value.
     Additional artifacts are separate complete snapshots relative to the benchmark baseline, not individual commit or PR diffs. Repeated changes may be inherited from a shared ancestor; do not infer which files a feature commit changed or judge branch scope from these snapshots. Do not automatically combine them or assume chronological order. Identify the affected artifact when discussing a defect; a defect in one snapshot does not establish that it persists in another.
     An empty primary patch does not mean no work: inspect all additional artifacts and the final output. Output-only research tasks may be valid without file changes.
     A missing acceptance command is not a failing check. Distinguish independently verified evidence from self-reported tests, and explain any verification limits.
