@@ -72,6 +72,9 @@ struct BenchmarksView: View {
       Button("Cancel", role: .cancel) {}
     } message: {
       Text("The two judges create a new report, keeping the original in history. Only judges run again and consume quota. The original agent work, execution times, and costs are reused.")
+      if benchmark.report?.runs.contains(where: { BenchmarkEvidenceQuality.hasRedactedPatchMetadata(in: $0) }) == true {
+        Text("These saved patches contain altered metadata. Re-evaluation alone cannot restore the source values and will retain those evidence limits.")
+      }
     }
   }
 
@@ -383,6 +386,11 @@ struct BenchmarksView: View {
           .font(.caption).foregroundStyle(.secondary)
           .fixedSize(horizontal: false, vertical: true)
       }
+      if report.runs.contains(where: { BenchmarkEvidenceQuality.hasRedactedPatchMetadata(in: $0) }) {
+        Label("This saved report contains patch metadata altered by older redaction. Judges may have received baseline files rather than the candidate files. Re-evaluation alone cannot restore those source values. The saved verdicts are preserved and require evidence review.", systemImage: "exclamationmark.triangle")
+          .font(.callout).foregroundStyle(.orange)
+          .fixedSize(horizontal: false, vertical: true)
+      }
       if benchmark.isRunning {
         Text(benchmark.isReevaluating
           ? "Saved attempts are being evaluated again. Scores update as the judges finish."
@@ -452,7 +460,8 @@ struct BenchmarksView: View {
           VStack(alignment: .leading, spacing: 12) {
             Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 12) {
               GridRow {
-                resultMetric("Accepted", value: "\(summary.acceptedCount) / \(summary.attempts)")
+                resultMetric("Fully accepted", value: "\(summary.acceptedCount) / \(summary.attempts)")
+                  .help("Requires both judges to approve and any configured acceptance command to pass.")
                 resultMetric("Median time", value: duration(summary.medianDurationSeconds))
                   .help("Range: \(duration(summary.minDurationSeconds)) to \(duration(summary.maxDurationSeconds))")
               }
@@ -545,6 +554,11 @@ struct BenchmarksView: View {
         ForEach(Array(run.evaluations.enumerated()), id: \.offset) { _, evaluation in
           DisclosureGroup {
             VStack(alignment: .leading, spacing: 6) {
+              ForEach(evaluation.evidenceWarnings ?? [], id: \.self) { warning in
+                Label(warning, systemImage: "exclamationmark.triangle")
+                  .font(.caption).foregroundStyle(.orange)
+                  .fixedSize(horizontal: false, vertical: true)
+              }
               if let error = evaluation.error { Text(error).foregroundStyle(.red) }
               if !evaluation.explanation.isEmpty { Text(evaluation.explanation).foregroundStyle(.secondary) }
             }
@@ -738,7 +752,8 @@ struct BenchmarksView: View {
   }
 
   private func evidenceNeedsReview(_ run: BenchmarkRun) -> Bool {
-    run.outcome == .completed && run.evidence?.captureComplete != true
+    run.outcome == .completed && (run.evidence?.captureComplete != true || BenchmarkEvidenceQuality.hasRedactedPatchMetadata(in: run) ||
+      run.evaluations.contains { !($0.evidenceWarnings ?? []).isEmpty })
   }
 
   private func quotaDescription(_ change: BenchmarkQuotaChange) -> String {

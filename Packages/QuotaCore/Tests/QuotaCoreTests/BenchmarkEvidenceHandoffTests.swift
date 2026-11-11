@@ -3,6 +3,34 @@ import XCTest
 @testable import QuotaCore
 
 final class BenchmarkEvidenceHandoffTests: XCTestCase {
+  func testInapplicablePrimaryPatchPreservesWarningAndHistoricalProtocol() async throws {
+    let fixture = try EvidenceFixture()
+    defer { fixture.remove() }
+    let prompt = fixture.root.appendingPathComponent("judge-prompt.txt")
+    let candidateMarker = fixture.root.appendingPathComponent("candidate-ran")
+    let plan = fixture.plan(agent: "touch '\(candidateMarker.path)'", judge: "cat > '\(prompt.path)'; printf '%s' '{\"accepted\":false,\"score\":4,\"explanation\":\"Evidence was limited\"}'")
+    let commit = try await BenchmarkWorkspace.commit(repository: fixture.repository, process: BenchmarkProcess())
+    let run = BenchmarkRun(candidateID: plan.candidates[0].id, repetition: 1,
+      patch: "diff --git a/source.txt b/source.txt\n--- a/source.txt\n+++ b/source.txt\n@@ -1,[redacted] +1,[redacted] @@\n-baseline\n+candidate\n",
+      evidence: BenchmarkEvidence(workspaceName: "", captureComplete: true))
+    let original = BenchmarkReport(finishedAt: Date(), baselineCommit: commit, plan: plan, runs: [run],
+      executionProtocol: .preservedArtifactsV1)
+    let store = BenchmarkReportStore(directory: fixture.reports)
+    try store.save(original)
+    let originalURL = fixture.reports.appendingPathComponent(original.id.uuidString.lowercased() + ".json")
+    let originalBytes = try Data(contentsOf: originalURL)
+    let refreshed = try await BenchmarkRunner().reevaluate(report: original, directory: fixture.reports)
+    XCTAssertEqual(refreshed.executionProtocol, .preservedArtifactsV1)
+    XCTAssertEqual(refreshed.runs[0].evaluations.count, 2)
+    for verdict in refreshed.runs[0].evaluations {
+      XCTAssertNil(verdict.error)
+      XCTAssertTrue(verdict.evidenceWarnings?.contains { $0.contains("baseline files") } == true)
+    }
+    XCTAssertFalse(try String(contentsOf: prompt).contains("LLIMIT_RESEARCH.md"))
+    XCTAssertFalse(FileManager.default.fileExists(atPath: candidateMarker.path))
+    XCTAssertEqual(try Data(contentsOf: originalURL), originalBytes)
+  }
+
   func testAcceptancePreflightUsesCommittedDisposableCopyAndReportsFailure() async throws {
     let fixture = try EvidenceFixture()
     defer { fixture.remove() }
@@ -168,7 +196,7 @@ final class BenchmarkEvidenceHandoffTests: XCTestCase {
     let encoder = JSONEncoder()
     encoder.dateEncodingStrategy = .iso8601
     let json = try JSONSerialization.jsonObject(with: encoder.encode(report), options: []) as? [String: Any]
-    XCTAssertEqual(json?["executionProtocol"] as? String, "preservedArtifactsV1")
+    XCTAssertEqual(json?["executionProtocol"] as? String, "preservedArtifactsV2")
     let cPrompt = try String(contentsOf: candidatePrompt)
     let jPrompt = try String(contentsOf: judgePrompt)
     XCTAssertTrue(cPrompt.contains("LLIMIT_BENCHMARK_RESULT.md"),
@@ -178,6 +206,8 @@ final class BenchmarkEvidenceHandoffTests: XCTestCase {
     XCTAssertTrue(jPrompt.contains("the primary candidate changes applied to the baseline"))
     XCTAssertTrue(cPrompt.contains("test -f solution.txt"))
     XCTAssertTrue(jPrompt.contains("test -f solution.txt"))
+    XCTAssertTrue(cPrompt.contains("LLIMIT_RESEARCH.md"))
+    XCTAssertTrue(jPrompt.contains("LLIMIT_RESEARCH.md"))
   }
 
   func testLegacyReevaluationNeverGivesCurrentExecutionRulesToOldCandidates() async throws {
