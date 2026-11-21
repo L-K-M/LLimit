@@ -26,6 +26,19 @@ final class ProviderMetricSelectionTests: XCTestCase {
     XCTAssertEqual(defaultRingMetrics(for: usage).map(\.id), ["chat", "completions"])
   }
 
+  func testMistralSharedAllowanceIsThePreferredMonthlyRing() {
+    let shared = UsageMetric(id: "shared-monthly", label: "Monthly shared allowance", remainingPercent: 44)
+    let usage = makeUsage(provider: .mistral, metrics: [shared])
+    XCTAssertEqual(defaultRingMetrics(for: usage).map(\.id), ["shared-monthly"])
+    XCTAssertEqual(primaryLimitSlot(for: usage.metrics)?.kind, .monthly)
+
+    let additionalMetric = makeUsage(provider: .mistral, metrics: [metric("future-budget"), shared])
+    XCTAssertEqual(defaultRingMetrics(for: additionalMetric).map(\.id), ["shared-monthly", "future-budget"])
+
+    let legacy = makeUsage(provider: .mistral, metrics: [metric("api-monthly"), metric("vibe-monthly")])
+    XCTAssertEqual(defaultRingMetrics(for: legacy).map(\.id), ["vibe-monthly", "api-monthly"])
+  }
+
   func testDefaultsCoverEveryProvider() {
     let cases: [(QuotaProvider, [String], [String])] = [
       (.anthropic, ["seven_day", "five_hour"], ["five_hour", "seven_day"]),

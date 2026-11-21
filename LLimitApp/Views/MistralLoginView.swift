@@ -12,7 +12,7 @@ struct MistralLoginView: View {
         Spacer()
         Button("Cancel", action: onClose).keyboardShortcut(.cancelAction)
       }
-      Text("Sign in to Mistral Admin, then choose Connect Account. Choose the organization whose monthly Vibe Code and API allowances you want to track. Sign in again if Mistral expires the session.")
+      Text("Sign in to Mistral Admin, then choose Connect Account. Choose the organization whose shared monthly Studio, API, and Vibe Code allowance you want to track. Sign in again if Mistral expires the session.")
         .font(.caption).foregroundStyle(.secondary)
       MistralBrowserView(webView: session.webView)
         .frame(minWidth: 720, minHeight: 500)

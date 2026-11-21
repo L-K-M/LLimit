@@ -14,7 +14,7 @@ struct MistralSubscription {
   let userID: String
   let organizationID: String
   let organizationName: String?
-  let api: Budget
+  let api: Budget?
   let vibe: Budget
 
   init(html: String) throws {
@@ -33,7 +33,6 @@ struct MistralSubscription {
     for record in records.values { try visit(record, depth: 0) }
     guard candidates.count == 1, let props = candidates.first,
           let budget = props["budget"] as? [String: Any],
-          let api = budget["api_budget"] as? [String: Any],
           let vibe = budget["vibe_budget"] as? [String: Any],
           let user = try Self.resolve(props["user"], records: records) as? [String: Any],
           let userID = Self.identifier(user["uuid"]),
@@ -45,7 +44,15 @@ struct MistralSubscription {
       $0.isEmpty || $0.count > 128 || $0.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
         ? nil : $0
     }
-    self.api = try Self.budget(api)
+    // Mistral replaced its separate API allowance with one shared Vibe budget.
+    // Only absence selects the new schema; malformed legacy data must not hide
+    // an allowance or change the meaning of its sibling.
+    if let value = budget["api_budget"] {
+      guard let api = value as? [String: Any] else { throw Self.invalid }
+      self.api = try Self.budget(api)
+    } else {
+      self.api = nil
+    }
     self.vibe = try Self.budget(vibe)
   }
 

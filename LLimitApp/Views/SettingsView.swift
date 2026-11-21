@@ -1081,7 +1081,7 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(model.isRefreshing)
-                Text("Tracks included monthly Vibe Code and API allowances. Sign in again if Mistral expires the session.")
+                Text("Tracks the included monthly allowance shared across Studio, API, and Vibe Code. Sign in again if Mistral expires the session.")
                   .font(.caption).foregroundStyle(.secondary)
                   .fixedSize(horizontal: false, vertical: true)
               }

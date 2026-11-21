@@ -307,7 +307,7 @@ public extension QuotaProvider {
         CredentialFieldDescriptor(
           key: CredentialField.mistralSessionCookies,
           label: "Session cookies",
-          help: "On macOS, use Connect Mistral. On Linux, paste the authentication Cookie header from admin.mistral.ai. Vibe and API keys cannot read this quota."
+          help: "On macOS, use Connect Mistral. On Linux, paste the authentication Cookie header from admin.mistral.ai."
         )
       ]
     case .longcat:

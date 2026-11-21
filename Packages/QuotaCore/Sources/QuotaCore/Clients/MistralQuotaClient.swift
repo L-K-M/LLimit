@@ -10,8 +10,8 @@ public struct MistralConnection: Sendable {
   public let usage: ProviderUsage
 }
 
-/// Read-only allowances from the official Admin subscription page. Vibe API
-/// keys and its account/read RPC identify a plan but cannot read these budgets.
+/// Read-only allowances from the official Admin subscription page, using the
+/// account's owned browser session without a Vibe CLI dependency.
 public struct MistralQuotaClient: QuotaProviderClient {
   public let provider: QuotaProvider = .mistral
   private let httpClient: any HTTPClient
@@ -77,24 +77,34 @@ public struct MistralQuotaClient: QuotaProviderClient {
                           (CredentialField.mistralOrganizationID, subscription.organizationID)] {
       if let expected = configuration.credentials[key], !expected.isEmpty, expected != actual { throw mistralReconnect }
     }
-    let metrics = [metric(subscription.vibe, id: "vibe-monthly", label: "Monthly Vibe Code", now: now),
-                   metric(subscription.api, id: "api-monthly", label: "Monthly API allowance", now: now)]
+    let metrics: [UsageMetric]
+    if let api = subscription.api {
+      metrics = [metric(subscription.vibe, id: "vibe-monthly", label: "Monthly Vibe Code", now: now),
+                 metric(api, id: "api-monthly", label: "Monthly API allowance", now: now)]
+    } else {
+      // A distinct ID prevents historical split budgets from being interpreted
+      // as consumption of the new shared allowance.
+      metrics = [metric(subscription.vibe, id: "shared-monthly", label: "Monthly shared allowance",
+                        scope: "Shared across Studio, API, and Vibe Code", now: now)]
+    }
     let maxUsage = metrics.compactMap(\.remainingPercent).map { 100 - $0 }.max()
     let usage = ProviderUsage(accountID: configuration.accountID, provider: provider, title: configuration.displayName,
-      subtitle: subscription.organizationName ?? "Mistral monthly allowances", metrics: metrics,
+      subtitle: subscription.organizationName ?? "Mistral monthly usage", metrics: metrics,
       maxUsagePercent: maxUsage, warning: maxUsage.map { $0 >= 100 ? "Allowance reached" : ($0 >= 80 ? "High usage" : nil) } ?? nil,
       fetchedAt: now)
     return MistralConnection(userID: subscription.userID, organizationID: subscription.organizationID,
                              organizationName: subscription.organizationName, usage: usage)
   }
 
-  private func metric(_ budget: MistralSubscription.Budget, id: String, label: String, now: Date) -> UsageMetric {
+  private func metric(_ budget: MistralSubscription.Budget, id: String, label: String,
+                      scope: String? = nil, now: Date) -> UsageMetric {
     let percent = budget.usedPercent.flatMap { percentRemaining(fromUsedPercent: $0) }
     let allowance = String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), budget.allowance)
     var details = ["\(budget.currency) \(allowance) included"]
     if let used = budget.usedPercent {
       details.insert(String(format: "%.1f%% used", locale: Locale(identifier: "en_US_POSIX"), used), at: 0)
     } else { details.insert("Usage unavailable", at: 0) }
+    if let scope { details.append(scope) }
     return UsageMetric(id: id, label: label, remainingPercent: percent,
       resetAt: budget.resetAt, resetIn: budget.resetAt.map { formatResetCountdown(to: $0, now: now) },
       detail: details.joined(separator: " · "),

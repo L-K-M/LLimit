@@ -85,7 +85,8 @@ public struct QuotaPace: Equatable, Sendable {
       default: return nil
       }
     case .mistral, .gitHubCopilot:
-      let monthlyIDs = provider == .mistral ? ["api-monthly", "vibe-monthly"] : ["premium", "chat", "completions"]
+      let monthlyIDs = provider == .mistral
+        ? ["shared-monthly", "api-monthly", "vibe-monthly"] : ["premium", "chat", "completions"]
       guard monthlyIDs.contains(metricID), let resetAt = metric.resetAt else { return nil }
       var calendar = Calendar(identifier: .gregorian)
       calendar.timeZone = TimeZone(secondsFromGMT: 0)!

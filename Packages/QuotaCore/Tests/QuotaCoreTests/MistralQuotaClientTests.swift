@@ -100,6 +100,64 @@ final class MistralQuotaClientTests: XCTestCase {
     }
   }
 
+  func testCurrentSubscriptionReportsOneSharedMonthlyAllowance() async throws {
+    // Current Admin props and the official Vibe billing fixture omit api_budget.
+    // The remaining vibe_budget covers Studio, API, and Vibe Code together.
+    let shared = ["vibe_budget": bucket(percent: 42.5, total: 300)]
+    let http = MistralHTTPStub(body: try page(budget: shared))
+    let connection = try await MistralQuotaClient(httpClient: http)
+      .verifiedConnection(configuration: configuration(savedIdentity: false), now: now)
+    XCTAssertEqual(connection.userID, userID)
+    XCTAssertEqual(connection.organizationID, organizationID)
+    let metric = try XCTUnwrap(connection.usage.metrics.first)
+    XCTAssertEqual(connection.usage.metrics.count, 1)
+    XCTAssertEqual(metric.id, "shared-monthly")
+    XCTAssertEqual(metric.label, "Monthly shared allowance")
+    XCTAssertEqual(metric.remainingPercent, 58)
+    XCTAssertEqual(try XCTUnwrap(metric.reportedRemainingFraction), 0.575, accuracy: 0.0000001)
+    XCTAssertEqual(metric.resetAt, parseISO8601(reset))
+    XCTAssertNotNil(metric.resetIn)
+    XCTAssertTrue(metric.detail?.contains("USD 300.00 included") == true)
+    XCTAssertTrue(metric.detail?.contains("Studio, API, and Vibe Code") == true)
+    XCTAssertNil(metric.estimatedTotal)
+  }
+
+  func testSharedBudgetKeepsUnavailableUsageAndMissingReset() async throws {
+    for value in [bucket(percent: NSNull(), resetAt: NSNull()), bucket(percent: 0, total: 0, resetAt: NSNull())] {
+      let http = MistralHTTPStub(body: try page(budget: ["vibe_budget": value]))
+      let usage = try await MistralQuotaClient(httpClient: http).fetchUsage(configuration: configuration(), now: now)
+      let metric = try XCTUnwrap(usage.metrics.first)
+      XCTAssertEqual(usage.metrics.count, 1)
+      XCTAssertEqual(metric.id, "shared-monthly")
+      XCTAssertNil(metric.remainingPercent)
+      XCTAssertNil(metric.reportedRemainingFraction)
+      XCTAssertNil(metric.resetAt)
+      XCTAssertNil(metric.resetIn)
+      XCTAssertNil(metric.windowSeconds)
+      XCTAssertFalse(metric.isUnlimited)
+    }
+  }
+
+  func testSharedBudgetIgnoresAggregateAndPayAsYouGoAmounts() async throws {
+    var shared = bucket(percent: 99, total: 999)
+    shared["vibe_budget"] = bucket(percent: 25, total: 300)
+    shared["credits"] = 1000
+    shared["payg_enabled"] = true
+    let http = MistralHTTPStub(body: try page(budget: shared))
+    let usage = try await MistralQuotaClient(httpClient: http).fetchUsage(configuration: configuration(), now: now)
+    XCTAssertEqual(usage.metrics.count, 1)
+    XCTAssertEqual(usage.metrics.first?.remainingPercent, 75)
+    XCTAssertTrue(usage.metrics.first?.detail?.contains("USD 300.00 included") == true)
+  }
+
+  func testSharedBudgetStillRequiresMatchingUserAndOrganization() async throws {
+    let shared = ["vibe_budget": bucket()]
+    for body in [try page(budget: shared, user: "other-user"),
+                 try page(budget: shared, organization: "other-organization")] {
+      await assertFailure(MistralHTTPStub(body: body), expected: .auth)
+    }
+  }
+
   func testUnroundedBudgetFractionMeasuresSubpercentConsumption() async throws {
     let beforeClient = MistralQuotaClient(httpClient: MistralHTTPStub(body: try page(budget: budget(api: bucket(percent: 20)))))
     let afterClient = MistralQuotaClient(httpClient: MistralHTTPStub(body: try page(budget: budget(api: bucket(percent: 20.01)))))
@@ -224,11 +282,11 @@ final class MistralQuotaClientTests: XCTestCase {
   }
 
   func testPartialOrMalformedAllowancesDoNotSilentlyDropASibling() async throws {
-    var noAPI = budget()
-    noAPI.removeValue(forKey: "api_budget")
     var noVibe = budget()
     noVibe.removeValue(forKey: "vibe_budget")
-    for value in [noAPI, noVibe, budget(api: bucket(percent: -1)),
+    var nullAPI = budget()
+    nullAPI["api_budget"] = NSNull()
+    for value in [noVibe, nullAPI, budget(api: bucket(percent: -1)),
                   budget(vibe: bucket(percent: true)), budget(api: bucket(percent: "4.3921594")),
                   budget(api: bucket(total: "not-an-amount"))] {
       await assertFailure(MistralHTTPStub(body: try page(budget: value)), expected: .decoding)

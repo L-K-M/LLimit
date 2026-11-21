@@ -70,6 +70,33 @@ final class QuotaPaceTests: XCTestCase {
     }
   }
 
+  func testMistralSharedAllowanceUsesTheActualCalendarMonth() throws {
+    for (resetText, days) in [("2026-03-01T00:00:00Z", 28), ("2028-03-01T00:00:00Z", 29),
+                              ("2026-12-01T00:00:00Z", 30), ("2027-01-01T00:00:00Z", 31)] {
+      let reset = try XCTUnwrap(ISO8601DateFormatter().date(from: resetText))
+      let duration = TimeInterval(days * 86_400)
+      let readingTime = reset.addingTimeInterval(-duration / 2)
+      let reading = UsageMetric(id: "shared-monthly", label: "Monthly shared allowance",
+                                remainingPercent: 40, resetAt: reset)
+      XCTAssertEqual(QuotaPace.windowSeconds(for: reading, provider: .mistral), duration)
+      let pace = try XCTUnwrap(QuotaPace(metric: reading, provider: .mistral, fetchedAt: readingTime, now: readingTime))
+      XCTAssertEqual(pace.elapsedFraction, 0.5, accuracy: 0.000001)
+      XCTAssertEqual(pace.delta, 10, accuracy: 0.000001)
+    }
+  }
+
+  func testMistralSharedAllowanceDoesNotInferAnAmbiguousMonthlyWindow() throws {
+    for resetText in ["2026-12-15T00:00:00Z", "2026-12-01T01:00:00Z"] {
+      let reset = try XCTUnwrap(ISO8601DateFormatter().date(from: resetText))
+      let reading = UsageMetric(id: "shared-monthly", label: "Monthly shared allowance",
+                                remainingPercent: 40, resetAt: reset)
+      XCTAssertNil(QuotaPace.windowSeconds(for: reading, provider: .mistral))
+      XCTAssertNil(QuotaPace(metric: reading, provider: .mistral, fetchedAt: now, now: now))
+    }
+    XCTAssertNil(QuotaPace.windowSeconds(for: UsageMetric(id: "shared-monthly", label: "Monthly shared allowance",
+                                                         remainingPercent: 40), provider: .mistral))
+  }
+
   func testSnapshotCompatibilityAndDurationRoundTrip() throws {
     let legacy = #"{"id":"primary","label":"5-hour limit","remainingPercent":40,"isUnlimited":false}"#
     XCTAssertNil(try JSONDecoder().decode(UsageMetric.self, from: Data(legacy.utf8)).windowSeconds)

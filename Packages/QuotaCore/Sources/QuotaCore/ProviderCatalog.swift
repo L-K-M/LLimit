@@ -89,9 +89,9 @@ public enum ProviderCatalog {
       return ProviderCatalogEntry(provider: provider, title: "StepFun", context: "Step Plan · Global",
         summary: "Track your personal Step Plan and any top-up credits on the global StepFun platform.", aliases: ["international"])
     case .mistral:
-      return ProviderCatalogEntry(provider: provider, title: "Mistral", context: "Mistral · Vibe Code and API allowance",
-        summary: "Track the included monthly Vibe Code and API allowances shown in your Mistral subscription.",
-        aliases: ["Le Chat", "Pro", "Team"])
+      return ProviderCatalogEntry(provider: provider, title: "Mistral", context: "Mistral · Shared monthly allowance",
+        summary: "Track the included monthly allowance shared across Studio, API, and Vibe Code.",
+        aliases: ["Le Chat", "Pro", "Team", "Vibe Code", "API allowance", "Studio"])
     case .longcat:
       return ProviderCatalogEntry(provider: provider, title: "Longcat", context: "Longcat · Token balance",
         summary: "Track remaining Longcat tokens. Ring percentages use the latest observed refill as 100%.",

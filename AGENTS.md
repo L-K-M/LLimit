@@ -274,16 +274,17 @@ Linux:
   https://admin.mistral.ai/subscription` with owned Admin session cookies, not an
   API key. Parse JSON frames from `self.__next_f.push` and resolve the subscription
   props' `user` Flight reference. Verify `user.uuid` plus `user.organization.uuid`
-  before saving a connection and on refresh. The props' `budget.api_budget` and
-  `budget.vibe_budget` each report `usage_percentage`, `initial_budget`, `currency`,
-  and `reset_at`; they are separate monthly API/Studio and Vibe Code allowances.
-  Ignore the parent aggregate budget, billing totals, PAYG credits, and spending
-  limits. Preserve server resets and unavailable percentages. The official
-  Admin UI says both allowances reset on the first calendar day independently
-  of subscription renewal. For UTC-midnight first-day resets, QuotaPace uses the
-  actual preceding calendar month; never assume a fixed 30-day duration or infer
-  subscription renewal. macOS uses one
-  nonpersistent WebKit session per attempt and saves only root-path Secure Ory
+  before saving a connection and on refresh. The props' `budget.vibe_budget`
+  reports `usage_percentage`, `initial_budget`, `currency`, and `reset_at`. Current
+  responses omit `api_budget`: Vibe Code, Studio, and API now share this included
+  monthly allowance (`shared-monthly`). Legacy responses with a valid `api_budget`
+  retain separate `api-monthly` and `vibe-monthly` metrics; a malformed present
+  bucket fails the refresh. Distinct IDs keep shared-budget history separate from
+  the former allowances. Ignore the parent aggregate budget, billing totals, PAYG
+  credits, and spending limits. Preserve server resets and unavailable percentages.
+  For UTC-midnight first-day resets, QuotaPace uses the actual preceding calendar
+  month; never assume a fixed 30-day duration or infer subscription renewal.
+  macOS uses one nonpersistent WebKit session per attempt and saves only root-path Secure Ory
   session cookies (HttpOnly) plus optional CSRF at Admin-compatible scopes, with
   expiry, as secret `mistral.browser_session`; raw manual headers use secret
   `mistral.session_cookies`. Neither normal browser profiles nor Vibe credentials
@@ -295,13 +296,13 @@ Linux:
   caches; never expose individual cookie values or response HTML in errors.
   Expired sessions require reconnecting; no automatic renewal is promised.
   Sources: official [subscription page](https://admin.mistral.ai/subscription)
-  inspected signed-in 2026-10-29, [subscription documentation](https://docs.mistral.ai/admin/billing-usage/subscriptions),
-  and Vibe 3.0.3 commit `7bb48f213ac677f943d5c791199ed3dddf302f00`
-  [`whoami.py`](https://github.com/mistralai/mistral-vibe/blob/7bb48f213ac677f943d5c791199ed3dddf302f00/vibe/setup/auth/whoami.py).
-  The installed `vibe`, `vibe-acp`, and `vibe-app-server` at that version expose
-  plan/account and per-run statistics, but no remaining subscription quota.
-  An isolated WebKit login and two read-only Admin requests verified cookie
-  capture, local serialization, quota decoding, and an identity-pinned refresh.
+  inspected signed-in 2026-11-21, [subscription documentation](https://docs.mistral.ai/admin/billing-usage/subscriptions),
+  and Vibe commit `e76235b203b8965af584e88e69284bc704c31a1f`
+  [`test_billing.py`](https://github.com/mistralai/mistral-vibe/blob/e76235b203b8965af584e88e69284bc704c31a1f/tests/app_server/test_billing.py).
+  Current Vibe also reads `GET /v1/billing/budget` with a permitted API key or
+  platform token; LLimit retains its existing Admin-cookie transport and has no
+  Vibe CLI dependency. The shared-budget schema was verified with a read-only
+  owned Admin session; the existing WebKit flow remains separately fixture-tested.
 
 - **StepFun**: provider `stepfun`. Accepts either a Plan API key
   (`stepfun.plan_key`) or a console browser session (`stepfun.browser_session` /

@@ -397,4 +397,27 @@ final class StatusRendererTests: XCTestCase {
     XCTAssertTrue(human.contains("Monthly API credits"))
     XCTAssertTrue(human.contains("96%"))
   }
+
+  func testMistralSharedAllowanceRendersOneMonthlyMetric() throws {
+    let usage = ProviderUsage(accountID: "mistral-personal", provider: .mistral, title: "Mistral",
+      metrics: [UsageMetric(id: "shared-monthly", label: "Monthly shared allowance", remainingPercent: 44,
+                            resetIn: "9d", detail: "56.0% used · USD 300.00 included")], fetchedAt: now)
+    let snapshot = QuotaSnapshot(generatedAt: now, providers: [usage], failures: [])
+    let object = try decodedWaybar(snapshot)
+    XCTAssertEqual(object["text"] as? String, "Mistral 44%")
+    XCTAssertEqual(object["percentage"] as? Int, 44)
+    XCTAssertEqual(object["class"] as? String, "ok")
+
+    let account = try XCTUnwrap((object["accounts"] as? [[String: Any]])?.first)
+    let metrics = try XCTUnwrap(account["metrics"] as? [[String: Any]])
+    XCTAssertEqual(metrics.count, 1)
+    XCTAssertEqual(metrics[0]["id"] as? String, "shared-monthly")
+    XCTAssertEqual(metrics[0]["label"] as? String, "Monthly shared allowance")
+    XCTAssertEqual(metrics[0]["remainingPercent"] as? Int, 44)
+
+    let human = StatusRenderer.humanReadable(snapshot: snapshot, now: now)
+    XCTAssertTrue(human.contains("Monthly shared allowance 44% left"))
+    XCTAssertFalse(human.contains("Monthly Vibe"))
+    XCTAssertFalse(human.contains("Monthly API"))
+  }
 }
