@@ -746,6 +746,8 @@ public final class QuotaDaemon {
 
   private static func stepFunCredentialsForStorage(_ credentials: [String: String]) throws -> [String: String] {
     var normalized = credentials
+    let period = try StepFunPaceWindow.parse(credentials[CredentialField.stepFunPaceWindow])
+    normalized[CredentialField.stepFunPaceWindow] = period == .automatic ? nil : period.rawValue
     let reset = credentials[CredentialField.stepFunResetAt]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     if reset.isEmpty {
       normalized[CredentialField.stepFunResetAt] = nil

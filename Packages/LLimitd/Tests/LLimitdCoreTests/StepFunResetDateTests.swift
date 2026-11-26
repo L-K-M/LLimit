@@ -74,6 +74,27 @@ final class StepFunResetDateTests: XCTestCase {
     XCTAssertEqual(perms?.intValue, 0o600)
   }
 
+  func testPacePeriodRoundtripValidationAndImportRetention() throws {
+    let (daemon, account) = try seededPlanKey()
+    let monthly = try daemon.editingSettings {
+      try $0.updateAccount(account.id, credentials: .merging([CredentialField.stepFunPaceWindow: "monthly"]))
+    }
+    XCTAssertEqual(monthly.credentials[CredentialField.stepFunPaceWindow], "monthly")
+    XCTAssertEqual(try SettingsStore(fileURL: paths.settingsFileURL).load().account(withID: account.id)?.credentials[CredentialField.stepFunPaceWindow], "monthly")
+    let replaced = try daemon.editingSettings {
+      try $0.updateAccount(account.id, credentials: .replacing(with: [CredentialField.stepFunPlanKey: "replacement"]))
+    }
+    XCTAssertEqual(replaced.credentials[CredentialField.stepFunPaceWindow], "monthly")
+    XCTAssertThrowsError(try daemon.editingSettings {
+      try $0.updateAccount(account.id, credentials: .merging([CredentialField.stepFunPaceWindow: "daily"]))
+    })
+    XCTAssertEqual(try SettingsStore(fileURL: paths.settingsFileURL).load().account(withID: account.id)?.credentials[CredentialField.stepFunPaceWindow], "monthly")
+    let cleared = try daemon.editingSettings {
+      try $0.updateAccount(account.id, credentials: .merging([CredentialField.stepFunPaceWindow: ""]))
+    }
+    XCTAssertNil(cleared.credentials[CredentialField.stepFunPaceWindow])
+  }
+
   func testInvalidResetDateRejectsAndPreservesSettings() throws {
     let (daemon, account) = try seededPlanKey()
     let snapshot = try seedUsage(for: [account])

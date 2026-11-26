@@ -1845,7 +1845,8 @@ final class AppModel: ObservableObject {
         }
         account.credentials[fieldKey] = credentialValue
       }
-      if outcome == .applied, fieldKey == manualResetField(for: savedAccount.provider) {
+      if outcome == .applied, fieldKey == manualResetField(for: savedAccount.provider)
+        || (savedAccount.provider == .stepFun && fieldKey == CredentialField.stepFunPaceWindow) {
         let revision = credentialEditRevisions[accountID]
         let requestedAt = Date()
         Task { [weak self] in

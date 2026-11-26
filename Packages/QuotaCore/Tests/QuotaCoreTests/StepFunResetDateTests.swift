@@ -146,6 +146,82 @@ final class StepFunResetDateTests: XCTestCase {
     XCTAssertEqual(account.credentialsForImport(cleared), cleared)
   }
 
+  func testConfiguredMonthlyPaceUsesServerResetAndPurchaseStart() async throws {
+    let fetched = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-11-26T14:57:00Z"))
+    let serverReset = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-12-24T15:08:47Z"))
+    let purchase = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-11-24T14:34:00Z"))
+    let seconds = Int(serverReset.timeIntervalSince1970)
+    let console = consoleBody.replacingOccurrences(of: "\"subscription_credit_left_rate\":0.75", with: "\"subscription_credit_left_rate\":0.75,\"subscription_credit_reset_time\":\(seconds)")
+    let plan = planBody.replacingOccurrences(of: "\"resets_at_ms\":null", with: "\"resets_at_ms\":\(seconds * 1000)")
+    for (var config, body) in [(consoleConfig(reset: "2026-11-24T14:34:00Z"), console),
+                               (planConfig(reset: "2026-11-24T14:34:00Z"), plan)] {
+      config.credentials[CredentialField.stepFunPaceWindow] = "monthly"
+      let usage = try await StepFunQuotaClient(httpClient: StepFunResetStub(body: body)).fetchUsage(configuration: config, now: fetched)
+      let metric = try XCTUnwrap(usage.metrics.first { $0.id == "monthly-credits" })
+      XCTAssertEqual(metric.resetAt, serverReset)
+      XCTAssertEqual(metric.windowSeconds, Int(serverReset.timeIntervalSince(purchase)))
+      let pace = try XCTUnwrap(QuotaPace(metric: metric, provider: .stepFun, fetchedAt: fetched, now: fetched))
+      XCTAssertEqual(pace.elapsedFraction, fetched.timeIntervalSince(purchase) / serverReset.timeIntervalSince(purchase), accuracy: 0.00001)
+      let topup = try XCTUnwrap(usage.metrics.first { $0.id == "topup-credits" })
+      XCTAssertNil(topup.windowSeconds)
+      XCTAssertNil(topup.resetAt)
+    }
+  }
+
+  func testSelectedWeeklyAndMonthlyPeriodsAndInvalidSetting() async throws {
+    let end = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-10-23T12:00:00Z"))
+    let body = consoleBody.replacingOccurrences(of: "\"subscription_credit_left_rate\":0.75", with: "\"subscription_credit_left_rate\":0.75,\"subscription_credit_reset_time\":\(Int(end.timeIntervalSince1970))")
+    var config = consoleConfig(reset: nil)
+    config.credentials[CredentialField.stepFunPaceWindow] = "weekly"
+    let weekly = try await StepFunQuotaClient(httpClient: StepFunResetStub(body: body)).fetchUsage(configuration: config, now: now)
+    let weekMetric = try XCTUnwrap(weekly.metrics.first { $0.id == "monthly-credits" })
+    XCTAssertEqual(weekMetric.windowSeconds, 7 * 86_400)
+    XCTAssertNotNil(QuotaPace(metric: weekMetric, provider: .stepFun, fetchedAt: now, now: now))
+
+    config.credentials[CredentialField.stepFunPaceWindow] = "monthly"
+    let monthly = try await StepFunQuotaClient(httpClient: StepFunResetStub(body: body)).fetchUsage(configuration: config, now: now)
+    let monthMetric = try XCTUnwrap(monthly.metrics.first { $0.id == "monthly-credits" })
+    XCTAssertEqual(monthMetric.windowSeconds, 30 * 86_400)
+    XCTAssertEqual(monthMetric.resetAt, end)
+
+    config.credentials[CredentialField.stepFunPaceWindow] = "invalid"
+    let http = StepFunResetStub(body: body)
+    do {
+      _ = try await StepFunQuotaClient(httpClient: http).fetchUsage(configuration: config, now: now)
+      XCTFail("Expected invalid period to be rejected")
+    } catch let error as ProviderClientError {
+      XCTAssertEqual(error.kind, .notConfigured)
+    }
+    let requests = await http.requests
+    XCTAssertTrue(requests.isEmpty)
+
+    let field = try XCTUnwrap(QuotaProvider.stepFun.credentialFields.first { $0.key == CredentialField.stepFunPaceWindow })
+    XCTAssertFalse(field.isSecret)
+    let account = ProviderAccount(provider: .stepFun, credentials: [CredentialField.stepFunPaceWindow: "monthly"])
+    XCTAssertEqual(account.credentialsForImport([CredentialField.stepFunPlanKey: "new"])[CredentialField.stepFunPaceWindow], "monthly")
+  }
+
+  func testMonthlyPaceUsesClampedPurchaseAnchorAndHonorsFutureAnchor() async throws {
+    let fetched = try XCTUnwrap(ISO8601DateFormatter().date(from: "2027-02-15T12:00:00Z"))
+    let end = try XCTUnwrap(ISO8601DateFormatter().date(from: "2027-02-28T12:00:00Z"))
+    let start = try XCTUnwrap(ISO8601DateFormatter().date(from: "2027-01-31T12:00:00Z"))
+    let body = consoleBody.replacingOccurrences(of: "\"subscription_credit_left_rate\":0.75", with: "\"subscription_credit_left_rate\":0.75,\"subscription_credit_reset_time\":\(Int(end.timeIntervalSince1970))")
+    var config = consoleConfig(reset: "2027-01-31T12:00:00Z")
+    config.credentials[CredentialField.stepFunPaceWindow] = "monthly"
+    let client = StepFunQuotaClient(httpClient: StepFunResetStub(body: body))
+    let usage = try await client.fetchUsage(configuration: config, now: fetched)
+    let metric = try XCTUnwrap(usage.metrics.first { $0.id == "monthly-credits" })
+    XCTAssertEqual(metric.windowSeconds, Int(end.timeIntervalSince(start)))
+    XCTAssertNotNil(QuotaPace(metric: metric, provider: .stepFun, fetchedAt: fetched, now: fetched))
+
+    config.credentials[CredentialField.stepFunResetAt] = "2027-02-20T12:00:00Z"
+    let future = try await client.fetchUsage(configuration: config, now: fetched)
+    let futureMetric = try XCTUnwrap(future.metrics.first { $0.id == "monthly-credits" })
+    XCTAssertEqual(futureMetric.resetAt, end)
+    XCTAssertNil(futureMetric.windowSeconds)
+    XCTAssertNil(QuotaPace(metric: futureMetric, provider: .stepFun, fetchedAt: fetched, now: fetched))
+  }
+
 }
 
 private actor StepFunResetStub: HTTPClient {

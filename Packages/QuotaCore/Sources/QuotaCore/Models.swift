@@ -300,6 +300,13 @@ public extension QuotaProvider {
           isSecret: false,
           isRequired: false,
           help: "Optional purchase date anchoring monthly plan-credit resets in UTC when StepFun reports no reset. Use YYYY-MM-DD (midnight UTC) or an ISO 8601 date-time with a timezone. Server resets take precedence."
+        ),
+        CredentialFieldDescriptor(
+          key: CredentialField.stepFunPaceWindow,
+          label: "Plan credit period",
+          isSecret: false,
+          isRequired: false,
+          help: "Optional pace period: weekly or monthly. The server reset remains authoritative. Leave blank for automatic."
         )
       ]
     case .mistral:
@@ -682,7 +689,7 @@ public struct ProviderAccount: Codable, Hashable, Identifiable, Sendable {
     switch provider {
     case .junie: retainedKeys = [CredentialField.junieCreditAllowance, CredentialField.junieResetAt]
     case .xiaomiMiMo: retainedKeys = [CredentialField.mimoResetAt]
-    case .stepFun: retainedKeys = [CredentialField.stepFunResetAt]
+    case .stepFun: retainedKeys = [CredentialField.stepFunResetAt, CredentialField.stepFunPaceWindow]
     default: return imported
     }
 

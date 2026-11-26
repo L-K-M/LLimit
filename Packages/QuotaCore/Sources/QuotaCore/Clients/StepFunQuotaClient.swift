@@ -4,6 +4,21 @@ import CoreFoundation
 import FoundationNetworking
 #endif
 
+/// An explicitly configured period for the subscription credit pace marker.
+public enum StepFunPaceWindow: String, Sendable {
+  case automatic = ""
+  case weekly
+  case monthly
+
+  public static func parse(_ value: String?) throws -> Self {
+    let value = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    guard let result = Self(rawValue: value) else {
+      throw ProviderClientError(kind: .notConfigured, message: "Choose automatic, weekly, or monthly for the StepFun plan credit period.")
+    }
+    return result
+  }
+}
+
 /// Reads global personal Step Plan quota without making inference requests.
 /// Step Code's Plan key and the console session use separate endpoints.
 public struct StepFunQuotaClient: QuotaProviderClient {
@@ -15,6 +30,7 @@ public struct StepFunQuotaClient: QuotaProviderClient {
   public func fetchUsage(configuration: ProviderRuntimeConfiguration, now: Date) async throws -> ProviderUsage {
     let cycle = try configuredQuotaResetDate(configuration.credentials[CredentialField.stepFunResetAt])
       .map { MonthlyQuotaCycle(anchor: $0) }
+    let paceWindow = try StepFunPaceWindow.parse(configuration.credentials[CredentialField.stepFunPaceWindow])
     let key = configuration.credentials[CredentialField.stepFunPlanKey]?
       .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     if !key.isEmpty {
@@ -33,26 +49,48 @@ public struct StepFunQuotaClient: QuotaProviderClient {
         throw ProviderClientError(kind: .decoding, message: "StepFun returned an oversized personal Plan usage response. Try again later.")
       }
       let usage = try StepFunPlanQuotaDecoder.decode(data, configuration: configuration, now: now)
-      return applyingManualReset(to: usage, cycle: cycle, now: now)
+      return applyingManualReset(to: usage, cycle: cycle, paceWindow: paceWindow, now: now)
     }
     let data = try await fetch("QueryStepPlanRateLimit", configuration: configuration, now: now)
     let usage = try StepFunQuotaDecoder.decode(data, configuration: configuration, now: now)
-    return applyingManualReset(to: usage, cycle: cycle, now: now)
+    return applyingManualReset(to: usage, cycle: cycle, paceWindow: paceWindow, now: now)
   }
 
-  private func applyingManualReset(to usage: ProviderUsage, cycle: MonthlyQuotaCycle?, now: Date) -> ProviderUsage {
-    guard let cycle else { return usage }
+  private func applyingManualReset(to usage: ProviderUsage, cycle: MonthlyQuotaCycle?, paceWindow: StepFunPaceWindow, now: Date) -> ProviderUsage {
     var usage = usage
-    let reset = cycle.resetAt(after: now)
-    for index in usage.metrics.indices where usage.metrics[index].id == "monthly-credits"
-      && usage.metrics[index].resetAt == nil {
+    for index in usage.metrics.indices where usage.metrics[index].id == "monthly-credits" {
       // A user-owned monthly schedule supplies only absent subscription resets.
       // Server dates, top-up expiry and coding windows keep their own meaning.
-      usage.metrics[index].resetAt = reset
-      usage.metrics[index].resetIn = formatResetCountdown(to: reset, now: now)
-      usage.metrics[index].windowSeconds = cycle.window(containing: now).map { Int($0.duration.rounded()) }
-      usage.metrics[index].detail = [usage.metrics[index].detail, "Uses your configured monthly reset in UTC."]
-        .compactMap { $0 }.joined(separator: " ")
+      if usage.metrics[index].resetAt == nil, paceWindow != .weekly, let cycle {
+        let reset = cycle.resetAt(after: now)
+        usage.metrics[index].resetAt = reset
+        usage.metrics[index].resetIn = formatResetCountdown(to: reset, now: now)
+        usage.metrics[index].windowSeconds = cycle.window(containing: now).map { Int($0.duration.rounded()) }
+        usage.metrics[index].detail = [usage.metrics[index].detail, "Uses your configured monthly reset in UTC."]
+          .compactMap { $0 }.joined(separator: " ")
+      } else if usage.metrics[index].windowSeconds == nil,
+                let reset = usage.metrics[index].resetAt, reset > now {
+        switch paceWindow {
+        case .automatic: break
+        case .weekly:
+          usage.metrics[index].windowSeconds = 7 * 86_400
+        case .monthly:
+          var calendar = Calendar(identifier: .gregorian)
+          calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+          let window = cycle?.window(containing: now)
+          let start: Date?
+          if let window, abs(window.end.timeIntervalSince(reset)) <= 86_400 {
+            start = window.start
+          } else if let cycle, cycle.anchor > now {
+            start = nil
+          } else {
+            start = calendar.date(byAdding: .month, value: -1, to: reset)
+          }
+          if let start, start <= now, start < reset {
+            usage.metrics[index].windowSeconds = Int(reset.timeIntervalSince(start).rounded())
+          }
+        }
+      }
     }
     return usage
   }

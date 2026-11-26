@@ -35,6 +35,8 @@ public final class SettingsStore: @unchecked Sendable {
       if try configuredQuotaResetDate(settings.accounts[index].credentials[CredentialField.stepFunResetAt]) == nil {
         settings.accounts[index].credentials[CredentialField.stepFunResetAt] = nil
       }
+      let period = try StepFunPaceWindow.parse(settings.accounts[index].credentials[CredentialField.stepFunPaceWindow])
+      settings.accounts[index].credentials[CredentialField.stepFunPaceWindow] = period == .automatic ? nil : period.rawValue
     }
     let data = try encoder.encode(settings)
     try writeOwnerOnlyAtomically(data, to: fileURL)

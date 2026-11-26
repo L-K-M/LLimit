@@ -170,6 +170,12 @@ The schedule only applies to monthly subscription credits, never to top-up or
 5-hour/weekly limits. A past date shows the current month window and pace;
 a future date counts down until the cycle starts. Clear with
 `--set stepfun.reset_at=`. No quota refill occurs. The setting survives reimport.
+To show subscription-credit pace when StepFun reports a reset without a duration,
+set `stepfun.pace_window=monthly` or `stepfun.pace_window=weekly` with
+`llimit accounts update`. The server reset remains authoritative. Monthly uses
+the purchase-anchored start when its next reset is within a day of the server's;
+otherwise it uses one UTC calendar month before the server reset. Weekly uses
+seven days. Blank restores automatic behavior. Top-ups are unaffected.
 
 Cline tracks both billing modes. ClinePass, the monthly subscription, reports
 five-hour, weekly, and monthly window limits with reset times; Cline credits, the

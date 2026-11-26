@@ -51,6 +51,7 @@ public enum CredentialField {
   public static let stepFunSessionToken = "stepfun.session_token"
   public static let stepFunPlanKey = "stepfun.plan_key"
   public static let stepFunResetAt = "stepfun.reset_at"
+  public static let stepFunPaceWindow = "stepfun.pace_window"
   public static let stepFunWebID = "stepfun.web_id"
   public static let stepFunBrowserSession = "stepfun.browser_session"
   public static let stepFunUserID = "stepfun.user_id"

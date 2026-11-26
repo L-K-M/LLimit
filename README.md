@@ -381,6 +381,11 @@ LLimit shows monthly subscription credits and top-up credits separately, using
 server-reported percentages and bucket counts. Top-up expiry appears as text,
 without creating a recurring reset. Older Step Plans show their 5-hour and weekly
 limits. Reset times come from StepFun; no monthly cycle duration is invented.
+For subscription credits, **Plan credit period** can explicitly set a weekly or
+monthly pace period when StepFun supplies a reset but no duration. The server
+reset stays authoritative. A matching purchase date anchors the monthly start;
+otherwise the start is one UTC calendar month before the server reset. Weekly
+periods are seven days. This does not create a quota reset or affect top-ups.
 Polling makes no inference requests. Credentials stay in LLimit's local settings. LLimit
 retains only its own console authentication cookies, without reading normal browser
 profiles or retaining analytics cookies. Renewal follows the server's token expiry;

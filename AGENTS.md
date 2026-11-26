@@ -370,7 +370,13 @@ Linux:
   subscription purchase anchor, with the same UTC Gregorian monthly behavior as
   `junie.reset_at` and `mimo.reset_at`. It is a fallback only for the monthly
   subscription credits metric (`monthly-credits`) when the server reports no
-  reset time; a server-reported reset always wins. Never assign the anchor to
+  reset time; a server-reported reset always wins. Optional nonsecret
+  `stepfun.pace_window` accepts blank (automatic), `weekly`, or `monthly` for
+  subscription-credit pace when a server reset lacks a duration. Weekly uses
+  seven days. Monthly uses the purchase-anchored window start when its end is
+  within 24 hours of the server reset, otherwise one UTC calendar month before
+  the server reset; a future purchase anchor cannot establish a spending window.
+  Preserve this option across import and reconnect. Never assign the anchor to
   top-up credits or 5-hour/weekly metrics. Cycles use the original anchor UTC
   day/time, clamping in short months and restoring in longer ones, selecting the
   next strictly future reset. Past anchors provide the current month window for

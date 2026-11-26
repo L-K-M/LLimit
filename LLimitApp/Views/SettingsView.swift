@@ -1117,6 +1117,7 @@ struct SettingsView: View {
                   .font(.caption).foregroundStyle(.secondary)
                   .fixedSize(horizontal: false, vertical: true)
                 stepFunResetDateField(for: AccountFieldKey(accountID: account.id, field: .credential(CredentialField.stepFunResetAt)))
+                stepFunPaceWindowField(for: AccountFieldKey(accountID: account.id, field: .credential(CredentialField.stepFunPaceWindow)))
               }
             } else {
               manualCredentials(for: account)
@@ -1267,6 +1268,9 @@ struct SettingsView: View {
       } else if field.key == CredentialField.stepFunResetAt,
          model.account(withID: accountID)?.provider == .stepFun {
         stepFunResetDateField(for: key)
+      } else if field.key == CredentialField.stepFunPaceWindow,
+         model.account(withID: accountID)?.provider == .stepFun {
+        stepFunPaceWindowField(for: key)
       } else if field.isSecret {
         committingDraft(
           SecureField(field.label, text: draftBinding(for: key))
@@ -1284,7 +1288,7 @@ struct SettingsView: View {
       }
 
       if field.key != CredentialField.junieResetAt, field.key != CredentialField.mimoResetAt,
-         field.key != CredentialField.stepFunResetAt,
+         field.key != CredentialField.stepFunResetAt, field.key != CredentialField.stepFunPaceWindow,
          let help = field.help, !help.isEmpty {
         Text(help)
           .font(.caption)
@@ -1384,8 +1388,30 @@ struct SettingsView: View {
     resetDateField(
       for: key,
       pickerLabel: "StepFun purchase date and time",
-      helpText: "Enter when you bought the subscription. Monthly plan-credit resets use this date only when StepFun reports no reset. Resets repeat every calendar month in UTC; the picker shows your local time. Shorter months use their last day. Leave off if unknown."
+      helpText: "Enter when you bought the subscription. This anchors monthly resets when StepFun reports none and can anchor the monthly pace period when a server reset is close. Resets repeat in UTC; the picker shows local time. Leave off if unknown."
     )
+  }
+
+  private func stepFunPaceWindowField(for key: AccountFieldKey) -> some View {
+    VStack(alignment: .leading, spacing: 6) {
+      Picker("Plan credit period", selection: Binding(
+        get: { draftBinding(for: key).wrappedValue },
+        set: { value in
+          accountDrafts.edit(key, text: value)
+          commitAccountDraft(key)
+        }
+      )) {
+        Text("Automatic").tag("")
+        Text("Weekly").tag("weekly")
+        Text("Monthly").tag("monthly")
+      }
+      Text("Choose a period for the pace marker when StepFun supplies a reset but no period. Server resets remain authoritative; top-up credits are excluded.")
+        .font(.caption).foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+      if let rejection = accountDrafts.rejection(for: key) {
+        Text(rejection.message).font(.caption).foregroundStyle(.orange)
+      }
+    }
   }
 
   // MARK: - Account drafts
