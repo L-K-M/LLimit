@@ -134,14 +134,18 @@ final class BenchmarkWorkspaceEvidenceTests: XCTestCase {
     let sourceExcludes = source.appendingPathComponent(".git/info/exclude")
     let originalSourceExcludes = try String(contentsOf: sourceExcludes)
     let handoffName = "LLIMIT_BENCHMARK_RESULT.md"
+    let researchName = "LLIMIT_RESEARCH.md"
     try "*.md\nprivate-build/\n".write(to: trial.appendingPathComponent(".git/info/exclude"), atomically: true, encoding: .utf8)
     try "Full research handoff\n".write(to: trial.appendingPathComponent(handoffName), atomically: true, encoding: .utf8)
+    try "Complete reserved research findings\n".write(to: trial.appendingPathComponent(researchName), atomically: true, encoding: .utf8)
     try "Ignored private notes\n".write(to: trial.appendingPathComponent("private-notes.md"), atomically: true, encoding: .utf8)
     try FileManager.default.createDirectory(at: trial.appendingPathComponent("private-build"), withIntermediateDirectories: false)
     try "Ignored credential-like data\n".write(to: trial.appendingPathComponent("private-build/private.txt"), atomically: true, encoding: .utf8)
     let evidence = try await BenchmarkWorkspace.captureEvidence(directory: trial, baselineCommit: baseline, process: process)
     XCTAssertTrue(evidence.patch.contains(handoffName))
     XCTAssertTrue(evidence.patch.contains("+Full research handoff"))
+    XCTAssertTrue(evidence.patch.contains(researchName))
+    XCTAssertTrue(evidence.patch.contains("+Complete reserved research findings"))
     XCTAssertFalse(evidence.patch.contains("Ignored private notes"))
     XCTAssertFalse(evidence.patch.contains("Ignored credential-like data"))
     let head = try await git(["rev-parse", "HEAD"], at: trial).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -150,6 +154,16 @@ final class BenchmarkWorkspaceEvidenceTests: XCTestCase {
     XCTAssertEqual(staged, "", "Intent-to-add must not stage the handoff's contents")
     XCTAssertFalse(FileManager.default.fileExists(atPath: source.appendingPathComponent(handoffName).path))
     XCTAssertEqual(try String(contentsOf: sourceExcludes), originalSourceExcludes)
+  }
+
+  func testIgnoredReservedResearchMustBeARegularFile() async throws {
+    try "*.md\n".write(to: trial.appendingPathComponent(".git/info/exclude"), atomically: true, encoding: .utf8)
+    try FileManager.default.createSymbolicLink(at: trial.appendingPathComponent("LLIMIT_RESEARCH.md"),
+      withDestinationURL: trial.appendingPathComponent("task.txt"))
+    do {
+      _ = try await BenchmarkWorkspace.captureEvidence(directory: trial, baselineCommit: baseline, process: process)
+      XCTFail("The reserved research output must not follow a symbolic link")
+    } catch BenchmarkWorkspaceError.invalidEvidence {}
   }
 
   func testMaterializesPrimaryPatchAndPrivateAdditionalEvidenceForJudge() async throws {
@@ -171,7 +185,8 @@ final class BenchmarkWorkspaceEvidenceTests: XCTestCase {
     XCTAssertEqual(directoryMode.intValue & 0o777, 0o700)
     for file in try FileManager.default.contentsOfDirectory(at: sidecars, includingPropertiesForKeys: nil) {
       let mode = try XCTUnwrap(FileManager.default.attributesOfItem(atPath: file.path)[.posixPermissions] as? NSNumber)
-      XCTAssertEqual(mode.intValue & 0o777, 0o600, file.lastPathComponent)
+      let isDirectory = try file.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true
+      XCTAssertEqual(mode.intValue & 0o777, isDirectory ? 0o700 : 0o600, file.lastPathComponent)
     }
     XCTAssertEqual(try String(contentsOf: sidecars.appendingPathComponent("artifact-1.patch")), artifact.patch)
     let manifest = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: sidecars.appendingPathComponent("manifest.json"))) as? [String: Any])

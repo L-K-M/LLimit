@@ -279,13 +279,17 @@ public struct BenchmarkEvaluation: Codable, Hashable, Sendable {
   public var score: Double?
   public var explanation: String
   public var error: String?
+  /// Limits preparing files for this judge, separate from its quality verdict.
+  public var evidenceWarnings: [String]?
 
-  public init(judgeID: UUID, accepted: Bool? = nil, score: Double? = nil, explanation: String = "", error: String? = nil) {
+  public init(judgeID: UUID, accepted: Bool? = nil, score: Double? = nil, explanation: String = "", error: String? = nil,
+              evidenceWarnings: [String]? = nil) {
     self.judgeID = judgeID
     self.accepted = accepted
     self.score = score
     self.explanation = explanation
     self.error = error
+    self.evidenceWarnings = evidenceWarnings
   }
 
   public var isValid: Bool {
@@ -399,6 +403,7 @@ public struct BenchmarkReport: Codable, Hashable, Identifiable, Sendable {
   /// version that most recently recovered evidence or evaluated their work.
   public enum ExecutionProtocol: String, Codable, Sendable {
     case preservedArtifactsV1
+    case preservedArtifactsV2
   }
 
   public var id: UUID

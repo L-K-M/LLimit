@@ -93,13 +93,22 @@ New reports record the execution rules given to their agents and preserve them
 through re-evaluation. Older reports without that record are not graded against
 later handoff or workspace requirements. Additional branch patches are complete
 snapshots against the common baseline, so they can include inherited changes.
+The overview distinguishes acceptance by both judges from individual approvals.
+Saved patches whose metadata was altered by older redaction are marked for
+evidence review; their original verdicts are preserved.
 
 Benchmark tasks run locally. Remote pushes and PR steps are replaced by local
 branches and a written handoff. Agents leave their primary result checked out
 and write `LLIMIT_BENCHMARK_RESULT.md`; this handoff is captured even when ignored
 by Git. Judges receive the primary changes and additional local-branch/worktree
-patches. Configured acceptance commands check the primary checkout, not an
+patches and complete changed-file views. The private evidence manifest identifies
+each separate snapshot, deleted files, and original baseline files for comparison.
+Preparation failures remain explicit warnings beside the judge's verdict.
+Configured acceptance commands check the primary checkout, not an
 automatic merge of alternate branches.
+Research files must not overwrite tracked instructions such as `CLAUDE.md`.
+New runs permit a distinct filename such as `LLIMIT_RESEARCH.md` when the task's
+requested name conflicts on a case-insensitive filesystem.
 
 Pi, Claude Code and OpenCode judge presets can inspect files in their disposable
 evaluation workspace. Pi uses a local path guard with shell, editing and MCP

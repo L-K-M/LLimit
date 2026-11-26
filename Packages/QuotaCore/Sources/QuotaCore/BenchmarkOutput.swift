@@ -316,6 +316,24 @@ public struct BenchmarkRedactor: Sendable {
       let keys = Set(configuration.provider.credentialFields.filter(\.isSecret).map(\.key)).union(hiddenKeys)
       for (key, value) in configuration.credentials where keys.contains(key) && !value.isEmpty {
         values.insert(value)
+        if configuration.provider == .longcat {
+          let cookies: LongcatSessionCookies?
+          if key == CredentialField.longcatBrowserSession,
+             let browser = try? LongcatBrowserSession(serialized: value) {
+            cookies = try? LongcatSessionCookies(header: browser.cookieHeader)
+          } else if key == CredentialField.longcatSessionCookies {
+            cookies = try? LongcatSessionCookies(header: value)
+          } else { cookies = nil }
+          if let cookies {
+            Self.insertLongcatCookieSecrets(cookies, into: &values)
+            continue
+          }
+          if key == CredentialField.longcatBrowserSession,
+             let data = value.data(using: .utf8), let object = try? JSONSerialization.jsonObject(with: data) {
+            // Invalid saved containers receive no routing-field exemption.
+            Self.insertCookieValueStrings(object, into: &values)
+          }
+        }
         // JSON browser-session containers also contain public names, domains and
         // paths. Redact their authentication values, never every string leaf.
         let isJSON = value.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("{")
@@ -331,10 +349,38 @@ public struct BenchmarkRedactor: Sendable {
       if let raw = configuration.credentials[CredentialField.stepFunBrowserSession], let session = try? StepFunBrowserSession(serialized: raw) { values.formUnion(session.secretValues) }
       if let raw = configuration.credentials[CredentialField.mistralBrowserSession], let session = try? MistralBrowserSession(serialized: raw) { values.formUnion(session.secretValues) }
       if let raw = configuration.credentials[CredentialField.mistralSessionCookies], let session = try? MistralSessionCookies(header: raw) { values.formUnion(session.secretValues) }
-      if let raw = configuration.credentials[CredentialField.longcatBrowserSession], let session = try? LongcatBrowserSession(serialized: raw) { values.formUnion(session.secretValues) }
-      if let raw = configuration.credentials[CredentialField.longcatSessionCookies], let session = try? LongcatSessionCookies(header: raw) { values.formUnion(session.secretValues) }
     }
     secrets = values.filter { !$0.isEmpty }.sorted { $0.count > $1.count }
+  }
+
+  private static func insertLongcatCookieSecrets(_ cookies: LongcatSessionCookies, into values: inout Set<String>) {
+    values.insert(cookies.header)
+    for component in cookies.header.split(separator: ";") {
+      let pair = component.trimmingCharacters(in: .whitespaces).split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+      guard pair.count == 2 else { continue } // Already validated by the typed parser.
+      let name = String(pair[0]), wireValue = String(pair[1])
+      let value = LongcatSessionCookies.unquoted(wireValue)
+      values.insert("\(name)=\(wireValue)")
+      values.insert("\(name)=\(value)")
+      // This observed region selector is routing metadata, not an auth token.
+      // Keep its named/header forms private without replacing every digit in
+      // unrelated code. Other short cookies/API keys retain full redaction.
+      if name == "long_cat_region_key", value == "2" { continue }
+      values.insert(wireValue)
+      values.insert(value)
+    }
+  }
+
+  private static func insertCookieValueStrings(_ object: Any, into values: inout Set<String>) {
+    if let rows = object as? [Any] {
+      for row in rows { insertCookieValueStrings(row, into: &values) }
+    } else if let row = object as? [String: Any] {
+      if let value = row["value"] as? String, !value.isEmpty {
+        values.insert(value)
+        values.insert(LongcatSessionCookies.unquoted(value))
+      }
+      for item in row.values { insertCookieValueStrings(item, into: &values) }
+    }
   }
 
   public func redact(_ text: String) -> String {
@@ -398,6 +444,7 @@ public struct BenchmarkRedactor: Sendable {
         var evaluation = $0
         evaluation.explanation = redact($0.explanation)
         evaluation.error = $0.error.map(redact)
+        evaluation.evidenceWarnings = $0.evidenceWarnings.map { $0.map(redact) }
         return evaluation
       }
       return run

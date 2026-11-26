@@ -11,6 +11,7 @@ public struct BenchmarkWorkspace {
   ]
   private static let diffArguments = ["diff", "--no-ext-diff", "--no-textconv", "--no-color", "--binary",
     "--src-prefix=a/", "--dst-prefix=b/", "--unified=3"]
+  private static let reservedOutputNames = ["LLIMIT_BENCHMARK_RESULT.md", "LLIMIT_RESEARCH.md"]
 
   public static func commit(repository: URL, process: BenchmarkProcess) async throws -> String {
     let result = try await checkedGit(
@@ -65,17 +66,17 @@ public struct BenchmarkWorkspace {
     _ = try await checkedGit(
       ["-c", "core.safecrlf=false", "add", "--intent-to-add", "--all", "--", "."],
       directory: directory, process: process, disablingFilters: true)
-    // The benchmark handoff is an explicitly reserved output, even when a
-    // project's ignore rules hide Markdown or generated reports. Other ignored
-    // files remain excluded from evidence.
-    let handoffName = "LLIMIT_BENCHMARK_RESULT.md"
-    let handoff = directory.appendingPathComponent(handoffName)
-    if FileManager.default.fileExists(atPath: handoff.path) {
-      let values = try handoff.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
-      guard values.isRegularFile == true, values.isSymbolicLink != true else { throw BenchmarkWorkspaceError.invalidEvidence }
-      _ = try await checkedGit(
-        ["-c", "core.safecrlf=false", "add", "--intent-to-add", "--force", "--", handoffName],
-        directory: directory, process: process, disablingFilters: true)
+    // Capture only these reserved outputs when project rules ignore Markdown.
+    // Other ignored files, including credentials and build output, stay excluded.
+    for name in reservedOutputNames {
+      let output = directory.appendingPathComponent(name)
+      if FileManager.default.fileExists(atPath: output.path) {
+        let values = try output.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+        guard values.isRegularFile == true, values.isSymbolicLink != true else { throw BenchmarkWorkspaceError.invalidEvidence }
+        _ = try await checkedGit(
+          ["-c", "core.safecrlf=false", "add", "--intent-to-add", "--force", "--", name],
+          directory: directory, process: process, disablingFilters: true)
+      }
     }
     return try await checkedGit(
       diffArguments + [baselineCommit ?? "HEAD", "--", "."],
@@ -158,12 +159,13 @@ public struct BenchmarkWorkspace {
     return (primary, artifacts, warnings)
   }
 
-  /// Tool-enabled judges see the primary result as files. Alternate results
-  /// remain inert patch sidecars so inspecting them never executes candidate code.
+  /// Additional results have thin, independent file views, without merging
+  /// branches or executing any candidate code. The complete patches remain.
+  @discardableResult
   public static func prepareJudge(
     repository: URL, baselineCommit: String, destination: URL, patch: String,
     additionalArtifacts: [BenchmarkEvidenceArtifact], process: BenchmarkProcess
-  ) async throws {
+  ) async throws -> [String] {
     try await create(repository: repository, commit: baselineCommit, destination: destination, process: process)
     do {
       let evidenceDirectory = destination.appendingPathComponent(".llimit-evidence", isDirectory: true)
@@ -183,15 +185,47 @@ public struct BenchmarkWorkspace {
       try FileManager.default.createDirectory(at: evidenceDirectory, withIntermediateDirectories: false,
         attributes: [.posixPermissions: 0o700])
       try writeOwnerOnlyAtomicallyLocked(Data(patch.utf8), to: evidenceDirectory.appendingPathComponent("primary.patch"))
-      var manifestArtifacts: [[String: String]] = []
+      var warnings: [String] = []
+      let primaryPaths = patch.isEmpty ? [] : try await materializeFileView(patch: patch,
+        baselineCommit: baselineCommit, directory: destination,
+        destination: evidenceDirectory.appendingPathComponent("primary"), output: .pathsOnly, process: process).changedPaths
+      var contextPaths = Set(primaryPaths)
+      var manifestArtifacts: [[String: Any]] = []
       for (index, artifact) in additionalArtifacts.enumerated() {
         let filename = "artifact-\(index + 1).patch"
         try writeOwnerOnlyAtomicallyLocked(Data(artifact.patch.utf8), to: evidenceDirectory.appendingPathComponent(filename))
-        manifestArtifacts.append(["kind": artifact.kind.rawValue, "name": artifact.name, "patchFile": filename])
+        var row: [String: Any] = ["kind": artifact.kind.rawValue, "name": artifact.name, "patchFile": filename]
+        let filesName = "artifact-\(index + 1)"
+        do {
+          let view = try await materializeFileView(patch: artifact.patch, baselineCommit: baselineCommit,
+            directory: destination, destination: evidenceDirectory.appendingPathComponent(filesName), process: process)
+          row["filesDirectory"] = filesName
+          row["deletedPaths"] = view.deletedPaths
+          row["changedPaths"] = view.changedPaths
+          contextPaths.formUnion(view.changedPaths)
+        } catch is CancellationError { throw CancellationError() }
+        catch {
+          let warning = "Artifact \(index + 1) could not be materialized as files because its patch is invalid, unsafe, or cannot be applied to the baseline. Its full patch remains available."
+          row["warning"] = warning
+          warnings.append(warning)
+        }
+        manifestArtifacts.append(row)
       }
-      let manifest: [String: Any] = ["baselineCommit": baselineCommit, "primaryPatch": "primary.patch", "additionalArtifacts": manifestArtifacts]
+      var manifest: [String: Any] = ["baselineCommit": baselineCommit, "primaryPatch": "primary.patch",
+        "primaryChangedPaths": primaryPaths, "additionalArtifacts": manifestArtifacts]
+      do {
+        _ = try await materializeFileView(patch: nil, selectedPaths: contextPaths, baselineCommit: baselineCommit,
+          directory: destination, destination: evidenceDirectory.appendingPathComponent("baseline"), process: process)
+        manifest["baselineFilesDirectory"] = "baseline"
+      } catch is CancellationError { throw CancellationError() }
+      catch {
+        let warning = "Some original baseline files could not be prepared safely for comparison. Use the patches to identify unavailable context."
+        manifest["baselineFilesWarning"] = warning
+        warnings.append(warning)
+      }
       try writeOwnerOnlyAtomicallyLocked(JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys]),
         to: evidenceDirectory.appendingPathComponent("manifest.json"))
+      return warnings
     } catch is CancellationError {
       try? FileManager.default.removeItem(at: destination)
       throw CancellationError()
@@ -201,6 +235,150 @@ public struct BenchmarkWorkspace {
     }
   }
 
+  private struct FileView {
+    let changedPaths: [String]
+    let deletedPaths: [String]
+  }
+
+  private enum FileViewOutput { case files, pathsOnly }
+
+  /// An alternate index can construct blobs without touching the judge's
+  /// primary index or worktree. Checkout only changed files, not another clone.
+  private static func materializeFileView(
+    patch: String?, selectedPaths: Set<String> = [], baselineCommit: String,
+    directory: URL, destination: URL, output: FileViewOutput = .files, process: BenchmarkProcess
+  ) async throws -> FileView {
+    let indexFile = destination.deletingLastPathComponent().appendingPathComponent(".artifact-index-\(UUID().uuidString)")
+    defer {
+      try? FileManager.default.removeItem(at: indexFile)
+      try? FileManager.default.removeItem(at: URL(fileURLWithPath: indexFile.path + ".lock"))
+    }
+    let overrides = try await filterOverrides(directory: directory, process: process)
+      + ["-c", "core.protectHFS=true", "-c", "core.protectNTFS=true"]
+    func indexedGit(_ arguments: [String], input: String? = nil) async throws -> String {
+      try await checkedGit(overrides + arguments, directory: directory, process: process,
+        input: input, indexFile: indexFile)
+    }
+    _ = try await indexedGit(["read-tree", baselineCommit])
+    let paths: [String]
+    if let patch {
+      _ = try await indexedGit(["apply", "--cached", "--binary", "--whitespace=nowarn", "-"], input: patch)
+      paths = try await indexedGit(["diff-index", "--cached", "--no-renames", "--name-only", "-z", baselineCommit, "--"])
+        .split(separator: "\0").map(String.init).sorted()
+    } else {
+      paths = selectedPaths.sorted()
+    }
+    for path in paths { try validateViewPath(path) }
+    if output == .pathsOnly { return FileView(changedPaths: paths, deletedPaths: []) }
+    let staged = try await indexedGit(["ls-files", "--stage", "-z"])
+    var entries: [String: (mode: String, object: String)] = [:]
+    for record in staged.split(separator: "\0") {
+      guard let tab = record.firstIndex(of: "\t") else { throw BenchmarkWorkspaceError.invalidEvidence }
+      let fields = record[..<tab].split(separator: " ")
+      guard fields.count == 3, fields[2] == "0", validCommit(String(fields[1])) else {
+        throw BenchmarkWorkspaceError.invalidEvidence
+      }
+      entries[String(record[record.index(after: tab)...])] = (String(fields[0]), String(fields[1]))
+    }
+    let existing = paths.filter { entries[$0] != nil }
+    let deleted = paths.filter { entries[$0] == nil }
+    let viewRoot = destination.standardizedFileURL.resolvingSymlinksInPath().path
+    for path in existing {
+      guard let entry = entries[path] else { throw BenchmarkWorkspaceError.invalidEvidence }
+      guard ["100644", "100755", "120000"].contains(entry.mode) else {
+        throw BenchmarkWorkspaceError.submodulesUnsupported
+      }
+      if entry.mode == "120000" {
+        let size = try await indexedGit(["cat-file", "-s", entry.object]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let size = Int(size), size <= 8_192 else { throw BenchmarkWorkspaceError.unsafePath }
+        let target = try await indexedGit(["cat-file", "-p", entry.object])
+        guard !target.isEmpty, !target.hasPrefix("/"), !target.contains("\0"), !target.contains("\\"),
+              !target.contains("\u{fffd}"), !target.split(separator: "/").contains(where: { $0.lowercased() == ".git" }) else {
+          throw BenchmarkWorkspaceError.unsafePath
+        }
+        let resolved = destination.appendingPathComponent(path).deletingLastPathComponent()
+          .appendingPathComponent(target).standardizedFileURL.resolvingSymlinksInPath().path
+        guard resolved.hasPrefix(viewRoot + "/") else { throw BenchmarkWorkspaceError.unsafePath }
+      }
+    }
+    guard !FileManager.default.fileExists(atPath: destination.path),
+          (try? FileManager.default.destinationOfSymbolicLink(atPath: destination.path)) == nil else {
+      throw BenchmarkWorkspaceError.unsafePath
+    }
+    try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: false,
+      attributes: [.posixPermissions: 0o700])
+    do {
+      if !existing.isEmpty {
+        let attributes = try rawCheckoutAttributes(in: directory)
+        do {
+          _ = try await indexedGit(["checkout-index", "-z", "--stdin", "--prefix=\(destination.path)/"],
+            input: existing.joined(separator: "\0") + "\0")
+          try attributes.restore()
+        } catch {
+          try? attributes.restore()
+          throw error
+        }
+      }
+      try rejectEscapingSymlinks(in: destination)
+    } catch {
+      try? FileManager.default.removeItem(at: destination)
+      throw error
+    }
+    return FileView(changedPaths: paths, deletedPaths: deleted)
+  }
+
+  private static func validateViewPath(_ path: String) throws {
+    let components = path.split(separator: "/", omittingEmptySubsequences: false)
+    guard !path.isEmpty, !path.hasPrefix("/"), !path.contains("\\"), !path.contains("\u{fffd}"),
+          !components.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." || $0.lowercased() == ".git" }) else {
+      throw BenchmarkWorkspaceError.unsafePath
+    }
+  }
+
+  private struct CheckoutAttributes {
+    let url: URL
+    let original: Data?
+    let mode: Int?
+
+    func restore() throws {
+      if let original {
+        try writeOwnerOnlyAtomically(original, to: url)
+        if let mode { try FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: url.path) }
+      } else {
+        try FileManager.default.removeItem(at: url)
+      }
+    }
+  }
+
+  /// Highest-precedence attributes keep checkout-index from expanding Ids,
+  /// recoding text or changing line endings. This private clone is not yet in
+  /// use by a judge, and its previous metadata is restored before returning.
+  private static func rawCheckoutAttributes(in directory: URL) throws -> CheckoutAttributes {
+    let info = try ownedGitDirectory(in: directory).appendingPathComponent("info", isDirectory: true)
+    if FileManager.default.fileExists(atPath: info.path) {
+      let values = try info.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+      guard values.isDirectory == true, values.isSymbolicLink != true else { throw BenchmarkWorkspaceError.unsafePath }
+    } else {
+      guard (try? FileManager.default.destinationOfSymbolicLink(atPath: info.path)) == nil else { throw BenchmarkWorkspaceError.unsafePath }
+      try FileManager.default.createDirectory(at: info, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+    }
+    let url = info.appendingPathComponent("attributes")
+    let original: Data?
+    let mode: Int?
+    if FileManager.default.fileExists(atPath: url.path) {
+      let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+      guard values.isRegularFile == true, values.isSymbolicLink != true else { throw BenchmarkWorkspaceError.unsafePath }
+      original = try Data(contentsOf: url)
+      mode = (try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber)?.intValue
+    } else {
+      guard (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) == nil else { throw BenchmarkWorkspaceError.unsafePath }
+      original = nil
+      mode = nil
+    }
+    try writeOwnerOnlyAtomically(Data("* -text -crlf -ident -filter -working-tree-encoding\n".utf8), to: url)
+    return CheckoutAttributes(url: url, original: original, mode: mode)
+  }
+
   private static func validCommit(_ value: String) -> Bool {
     (value.count == 40 || value.count == 64) && value.utf8.allSatisfy {
       (48...57).contains($0) || (97...102).contains($0)
@@ -208,16 +386,17 @@ public struct BenchmarkWorkspace {
   }
 
   private static func checkedGit(
-    _ arguments: [String], directory: URL, process: BenchmarkProcess, input: String? = nil, disablingFilters: Bool = false
+    _ arguments: [String], directory: URL, process: BenchmarkProcess, input: String? = nil, disablingFilters: Bool = false,
+    indexFile: URL? = nil
   ) async throws -> String {
     let overrides = disablingFilters ? try await filterOverrides(directory: directory, process: process) : []
-    let result = try await gitResult(overrides + arguments, directory: directory, process: process, input: input)
+    let result = try await gitResult(overrides + arguments, directory: directory, process: process, input: input, indexFile: indexFile)
     guard result.status == 0 else { throw BenchmarkWorkspaceError.gitFailed }
     return result.stdout
   }
 
   private static func gitResult(
-    _ arguments: [String], directory: URL, process: BenchmarkProcess, input: String? = nil
+    _ arguments: [String], directory: URL, process: BenchmarkProcess, input: String? = nil, indexFile: URL? = nil
   ) async throws -> BenchmarkProcessResult {
     var environment = BenchmarkProcess.defaultEnvironment()
     // User/global Git filters and helpers can run arbitrary commands or change
@@ -226,6 +405,7 @@ public struct BenchmarkWorkspace {
     environment["GIT_CONFIG_GLOBAL"] = "/dev/null"
     environment["GIT_TERMINAL_PROMPT"] = "0"
     environment["GIT_LFS_SKIP_SMUDGE"] = "1"
+    if let indexFile { environment["GIT_INDEX_FILE"] = indexFile.path }
     let result = try await process.run(
       executable: git, arguments: safeArguments + arguments, directory: directory,
       input: input, timeout: 60, environment: environment)
@@ -265,7 +445,7 @@ public struct BenchmarkWorkspace {
     let listed = try await checkedGit(["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
       directory: directory, process: process, disablingFilters: true)
     var paths = Set(listed.split(separator: "\0").map(String.init))
-    paths.insert("LLIMIT_BENCHMARK_RESULT.md")
+    paths.formUnion(reservedOutputNames)
     let root = directory.standardizedFileURL.resolvingSymlinksInPath().path
     for path in paths {
       guard !path.hasPrefix("/"), !path.split(separator: "/").contains("..") else {
