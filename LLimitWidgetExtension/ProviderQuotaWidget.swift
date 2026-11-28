@@ -755,7 +755,12 @@ private struct ProviderQuotaTileView: View {
       } else if usage.provider == .longcat, let percent = tokenPercentage(metric) {
         quota = "\(percent) remaining"
       } else if let remaining = metric.remainingPercent {
-        quota = "\(metric.isPercentageEstimated ? "estimated " : "")\(remaining) percent remaining"
+        let percentage = "\(metric.isPercentageEstimated ? "estimated " : "")\(remaining) percent remaining"
+        if usage.provider == .venice, metric.id == "bundled-credits", let amount = metric.usedDisplay {
+          quota = "\(percentage), \(amount) remaining"
+        } else {
+          quota = percentage
+        }
       } else {
         quota = metric.usageLine ?? "remaining quota unknown"
       }
