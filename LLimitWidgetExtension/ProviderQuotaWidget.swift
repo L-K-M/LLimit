@@ -635,7 +635,7 @@ private struct ProviderQuotaTileView: View {
 
   private func quotaFooter(metrics: [UsageMetric], tints: [Color], provider: QuotaProvider) -> some View {
     let showsTokenQuota = provider == .longcat
-    let stacked = showsTokenQuota && metrics.count > 1
+    let stacked = (showsTokenQuota || provider == .venice) && metrics.count > 1
     let layout = stacked ? AnyLayout(VStackLayout(spacing: 2)) : AnyLayout(HStackLayout(spacing: 6))
     return layout {
       ForEach(Array(metrics.prefix(2).enumerated()), id: \.offset) { index, metric in
@@ -829,6 +829,7 @@ private struct ProviderConcentricRings: View {
       let side = min(proxy.size.width, proxy.size.height)
       let outer = metrics.first
       let inner = metrics.dropFirst().first
+      let innerScale = subscriptionPercent == nil ? 0.62 : 0.68
 
       ZStack {
         if let outer {
@@ -850,7 +851,7 @@ private struct ProviderConcentricRings: View {
             pace: paces.dropFirst().first ?? nil,
             hasFlatCaps: showsTokenQuota
           )
-          .frame(width: side * 0.62, height: side * 0.62)
+          .frame(width: side * innerScale, height: side * innerScale)
         }
 
         VStack(spacing: 2) {
@@ -882,7 +883,7 @@ private struct ProviderConcentricRings: View {
               .minimumScaleFactor(0.75)
           }
         }
-        .frame(width: side * (inner == nil ? 0.56 : 0.48))
+        .frame(width: side * (inner == nil ? 0.56 : innerScale - 0.14))
       }
       .frame(width: side, height: side)
       .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
