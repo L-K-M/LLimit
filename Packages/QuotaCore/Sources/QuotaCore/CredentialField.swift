@@ -33,6 +33,7 @@ public enum CredentialField {
   public static let openCodeGoAPIKey = "opencode-go.api_key"
 
   public static let veniceAPIKey = "venice.api_key"
+  public static let veniceCreditAllowance = "venice.credit_allowance"
 
   public static let clineAPIKey = "cline.api_key"
 

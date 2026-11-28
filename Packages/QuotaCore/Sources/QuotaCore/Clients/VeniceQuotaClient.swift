@@ -113,11 +113,12 @@ public struct VeniceQuotaClient: QuotaProviderClient {
     } else {
       warning = nil
     }
-    return ProviderUsage(
+    let result = ProviderUsage(
       accountID: configuration.accountID, provider: provider, title: configuration.displayName,
       subtitle: "Venice API credits", metrics: metrics, maxUsagePercent: maxUsagePercent,
       warning: warning, fetchedAt: now
     )
+    return VeniceSubscriptionAllowance.applying(configuration.veniceCreditAllowance, to: result)
   }
 
   static func dailyDIEMExhaustedWarning(metrics: [UsageMetric]) -> String {
@@ -173,7 +174,7 @@ public struct VeniceQuotaClient: QuotaProviderClient {
     return formatter.string(from: NSNumber(value: value)) ?? String(value)
   }
 
-  private static func dollars(_ value: Double) -> String {
+  static func dollars(_ value: Double) -> String {
     "\(value < 0 ? "-" : "")$\(amount(abs(value), minimumFractionDigits: 2))"
   }
 

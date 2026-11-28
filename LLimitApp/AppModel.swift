@@ -412,6 +412,7 @@ final class AppModel: ObservableObject {
 
   private func validatedRefreshResults(_ result: QuotaSnapshot, provenance: RefreshProvenance) -> QuotaSnapshot {
     provenance.validated(result, accounts: providerAccounts, credentialRevisions: credentialEditRevisions)
+      .applyingVeniceSubscriptionAllowances(from: providerAccounts)
   }
 
   private func publishSnapshot(_ refreshed: QuotaSnapshot) {
@@ -1792,6 +1793,9 @@ final class AppModel: ObservableObject {
         account.displayName = value
       }
     case .credential(let fieldKey):
+      if savedAccount.provider == .venice, fieldKey == CredentialField.veniceCreditAllowance {
+        return commitVeniceAllowance(value, accountID: accountID)
+      }
       if mimoLogin?.accountID == accountID { return .rejected(.signInInProgress) }
       if stepFunLogin?.accountID == accountID { return .rejected(.signInInProgress) }
       if mistralLogin?.accountID == accountID { return .rejected(.signInInProgress) }
@@ -1855,6 +1859,26 @@ final class AppModel: ObservableObject {
       }
       return outcome
     }
+  }
+
+  private func commitVeniceAllowance(_ text: String, accountID: String) -> AccountEditOutcome {
+    guard !configurationLoadFailed else { return .rejected(.settingsUnreadable) }
+    guard let index = providerAccounts.firstIndex(where: { $0.id == accountID }) else { return .accountMissing }
+    let allowance: Double?
+    do { allowance = try VeniceSubscriptionAllowance.parse(text) }
+    catch { return .rejected(.invalidVeniceAllowance) }
+
+    let key = CredentialField.veniceCreditAllowance
+    var settings = currentSettings()
+    settings.accounts[index].credentials[key] = allowance == nil ? nil : text
+    do { try settingsStore.save(settings) }
+    catch { return .rejected(.veniceAllowanceSaveFailed) }
+
+    // The allowance changes the interpretation of the saved balance. Network
+    // requests and daily DIEM estimates remain owned by the same API key.
+    providerAccounts[index] = settings.accounts[index]
+    reconcileSnapshotWithCurrentAccounts()
+    return .applied
   }
 
   private func manualResetField(for provider: QuotaProvider) -> String? {
@@ -2507,6 +2531,7 @@ final class AppModel: ObservableObject {
 
     let activeAccounts = providerAccounts.filter { $0.isEnabled && $0.hasRequiredCredentials }
     let reconciled = currentSnapshot.reconciled(with: activeAccounts)
+      .applyingVeniceSubscriptionAllowances(from: activeAccounts)
     guard reconciled != currentSnapshot else { return }
 
     snapshot = reconciled

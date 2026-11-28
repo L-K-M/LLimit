@@ -30,7 +30,7 @@ public func defaultRingMetrics(for usage: ProviderUsage) -> [UsageMetric] {
   case .openCodeGo:
     preferredIDs = ["session-rolling", "monthly", "weekly"]
   case .venice:
-    preferredIDs = ["daily-diem"]
+    preferredIDs = ["daily-diem", "bundled-credits"]
   case .cline:
     // ClinePass windows first, shortest first. The API returns them as
     // duration-named types, so a re-ordered `limits[]` cannot repoint the

@@ -219,6 +219,13 @@ public extension QuotaProvider {
           key: CredentialField.veniceAPIKey,
           label: "API key",
           help: "Create a key at venice.ai/settings/api. An Admin key reports the daily DIEM allocation; other keys use a clearly marked estimate from observed balances."
+        ),
+        CredentialFieldDescriptor(
+          key: CredentialField.veniceCreditAllowance,
+          label: "Subscription credit allowance (USD)",
+          isSecret: false,
+          isRequired: false,
+          help: "Enter your plan's credit allowance in USD to add a subscription ring. Leave empty to show the dollar balance alone."
         )
       ]
     case .cline:
@@ -677,9 +684,14 @@ public struct ProviderAccount: Codable, Hashable, Identifiable, Sendable {
   public func runtimeConfiguration(
     environment: [String: String] = ProcessInfo.processInfo.environment
   ) -> ProviderRuntimeConfiguration {
-    ProviderRuntimeConfiguration(
+    var requestCredentials = credentials
+    let allowance = provider == .venice
+      ? try? VeniceSubscriptionAllowance.parse(requestCredentials.removeValue(forKey: CredentialField.veniceCreditAllowance))
+      : nil
+    return ProviderRuntimeConfiguration(
       accountID: id, provider: provider, displayName: resolvedDisplayName,
-      isEnabled: isEnabled, credentials: credentials.resolvingEnvironmentReferences(environment))
+      isEnabled: isEnabled, credentials: requestCredentials.resolvingEnvironmentReferences(environment),
+      veniceCreditAllowance: allowance)
   }
 
   /// Import replaces authentication while retaining account-owned quota settings
@@ -687,6 +699,7 @@ public struct ProviderAccount: Codable, Hashable, Identifiable, Sendable {
   public func credentialsForImport(_ imported: [String: String]) -> [String: String] {
     let retainedKeys: [String]
     switch provider {
+    case .venice: retainedKeys = [CredentialField.veniceCreditAllowance]
     case .junie: retainedKeys = [CredentialField.junieCreditAllowance, CredentialField.junieResetAt]
     case .xiaomiMiMo: retainedKeys = [CredentialField.mimoResetAt]
     case .stepFun: retainedKeys = [CredentialField.stepFunResetAt, CredentialField.stepFunPaceWindow]
@@ -1855,13 +1868,15 @@ public struct ProviderRuntimeConfiguration: Hashable, Sendable {
   public var displayName: String
   public var isEnabled: Bool
   public var credentials: [String: String]
+  public var veniceCreditAllowance: Double?
 
   public init(
     accountID: String? = nil,
     provider: QuotaProvider,
     displayName: String? = nil,
     isEnabled: Bool,
-    credentials: [String: String]
+    credentials: [String: String],
+    veniceCreditAllowance: Double? = nil
   ) {
     self.accountID = accountID ?? provider.rawValue
     self.provider = provider
@@ -1870,5 +1885,6 @@ public struct ProviderRuntimeConfiguration: Hashable, Sendable {
       : provider.displayName
     self.isEnabled = isEnabled
     self.credentials = credentials
+    self.veniceCreditAllowance = veniceCreditAllowance
   }
 }

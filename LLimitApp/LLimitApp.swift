@@ -688,10 +688,9 @@ private struct SparkSeriesBuilder {
   func points(
     accountID: String,
     provider: QuotaProvider,
-    metricID: String,
-    metricLabel: String
+    metric currentMetric: UsageMetric
   ) -> [SparkPoint] {
-    let resolvedID = Self.resolvedMetricID(id: metricID, label: metricLabel)
+    let resolvedID = Self.resolvedMetricID(id: currentMetric.id, label: currentMetric.label)
     var result: [SparkPoint] = []
 
     for usage in observations {
@@ -699,6 +698,9 @@ private struct SparkSeriesBuilder {
       guard let metric = usage.metrics.first(where: { metric in
         Self.resolvedMetricID(id: metric.id, label: metric.label) == resolvedID
       }) else { continue }
+      if provider == .venice, currentMetric.id == "bundled-credits", metric.totalAmount != currentMetric.totalAmount {
+        continue
+      }
 
       if metric.isUnlimited {
         result.append(SparkPoint(date: usage.fetchedAt, remaining: 100))
@@ -1914,8 +1916,7 @@ private struct ProviderQuotaCard: View {
     return sparkBuilder.points(
       accountID: usage.accountID,
       provider: usage.provider,
-      metricID: metric.id,
-      metricLabel: metric.label
+      metric: metric
     )
   }
 

@@ -131,7 +131,10 @@ The bound survives daemon restarts; percentages are marked `≈` and metrics exp
 `~/.venice/config.json` (`api_key`) or OpenCode's `venice` entry in `auth.json`.
 Venice applies DIEM first, then earned credits, subscription credits, and USD,
 subject to per-key spending limits. The API reports the remaining subscription
-balance, which can include credits carried over from previous months.
+balance, which can include credits carried over from previous months. Set an
+optional USD subscription allowance with
+`llimit accounts update <name-or-id> --set venice.credit_allowance=75` to include
+a percentage. Set an empty value to return to the dollar balance alone.
 [Venice billing](https://github.com/veniceai/skills/blob/main/skills/venice-billing/SKILL.md).
 
 StepFun accepts a Plan API key or manual console session credentials. Add a Plan

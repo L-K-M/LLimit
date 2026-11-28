@@ -528,10 +528,16 @@ Linux:
   on key replacement, and label estimated percentages on display surfaces. The
   first observation may already be spent; reported allocations always win.
   Show the subscription dollar balance inside the daily DIEM ring in the
-  provider tile. The ring and countdown describe daily DIEM.
+  provider tile. Optional nonsecret `venice.credit_allowance` is a positive USD
+  denominator for a subscription ring and percentage, with the dollar balance
+  below the rings. Blank displays the subscription balance inside the DIEM ring.
+  Bound geometry to 100% and retain banked balances in full. Keep the
+  subscription reset and duration empty. Allowance edits recalculate cached
+  subscription balances, preserve daily estimates, and preserve account history.
+  Percentage charts compare subscription readings with the same denominator.
   Prefer `BUNDLED_CREDITS`, including zero, and fall back to Admin
   `balances.bundledCredits` when absent. Report Admin `balances.earnedCredits`
-  and the key's `USD` separately. These balances have no reported total or reset.
+  and the key's `USD` separately. Venice supplies balances without totals or resets.
   Pro+ and Max can bank credits across months. Venice spends from one eligible
   balance in the order DIEM, earned, subscription, USD. Quoted requests require
   a single balance that can cover the full cost, and key spending caps still apply.

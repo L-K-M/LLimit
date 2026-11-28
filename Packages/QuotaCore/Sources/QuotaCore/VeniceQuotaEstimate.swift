@@ -53,7 +53,7 @@ enum VeniceQuotaEstimate {
     result.metrics[index].remainingPercent = remaining
     result.metrics[index].estimatedTotal = upperBound
     result.metrics[index].detail = "Estimated from an observed upper bound of \(String(format: "%.6g", locale: Locale(identifier: "en_US_POSIX"), upperBound)) DIEM. The first reading may already be partly spent."
-    result.maxUsagePercent = 100 - remaining
+    result.maxUsagePercent = max(100 - remaining, result.maxUsagePercent ?? 0)
     if result.warning == nil {
       if amount <= 0 {
         result.warning = VeniceQuotaClient.dailyDIEMExhaustedWarning(metrics: result.metrics)
