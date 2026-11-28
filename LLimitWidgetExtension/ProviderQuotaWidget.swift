@@ -206,7 +206,7 @@ struct ProviderTileTimelineProvider: TimelineProvider {
     }
     if let usage = entry.usage {
       for metric in defaultRingMetrics(for: usage) {
-        for boundary in [metric.resetAt, metric.expiresAt].compactMap({ $0 })
+        for boundary in [metric.resetAt, metric.expiresAt, metric.paceWindow?.end].compactMap({ $0 })
           where boundary > now && boundary < nextRefresh
         {
           entryDates.insert(boundary)
@@ -614,7 +614,13 @@ private struct ProviderQuotaTileView: View {
   }
 
   private func balanceLine(for metric: UsageMetric, provider: QuotaProvider) -> String {
-    let amount = metric.usageLine ?? ""
+    let amount = provider == .venice && metric.id == "bundled-credits"
+      ? (subscriptionBalance(for: metric) ?? "")
+      : (metric.usageLine ?? "")
+    if provider == .venice, let refill = metric.paceWindow?.end {
+      let seconds = refill.timeIntervalSince(entry.date)
+      return "\(amount) · \(seconds > 0 ? compactCountdown(seconds) : "refill due")"
+    }
     if provider == .venice, metric.resetAt != nil {
       return "\(amount) · \(resetSummary(for: metric))"
     }
@@ -644,9 +650,7 @@ private struct ProviderQuotaTileView: View {
           [stacked ? tokenPercentage(metric) : nil, expirySummary(for: metric, showsCountdown: !stacked)]
             .compactMap { $0 }.joined(separator: " ")
         case .venice:
-          metric.id == "bundled-credits"
-            ? (subscriptionBalance(for: metric) ?? "")
-            : balanceLine(for: metric, provider: provider)
+          balanceLine(for: metric, provider: provider)
         default:
           resetSummary(for: metric)
         }

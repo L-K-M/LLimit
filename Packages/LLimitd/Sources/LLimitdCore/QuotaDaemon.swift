@@ -200,6 +200,7 @@ public final class QuotaDaemon {
     }
     if provider == .venice {
       _ = try VeniceSubscriptionAllowance.parse(mergedCredentials[CredentialField.veniceCreditAllowance])
+      _ = try VeniceSubscriptionAllowance.parseRefillDate(mergedCredentials[CredentialField.veniceRefillAt])
     }
     if provider == .xiaomiMiMo {
       mergedCredentials = try MiMoSessionCookies.credentialsForStorage(mergedCredentials)
@@ -261,6 +262,7 @@ public final class QuotaDaemon {
       updated.credentials = try Self.credentials(of: previous, applying: change)
       if updated.provider == .venice {
         _ = try VeniceSubscriptionAllowance.parse(updated.credentials[CredentialField.veniceCreditAllowance])
+        _ = try VeniceSubscriptionAllowance.parseRefillDate(updated.credentials[CredentialField.veniceRefillAt])
       }
       if updated.provider == .xiaomiMiMo {
         updated.credentials = try MiMoSessionCookies.credentialsForStorage(updated.credentials)
@@ -281,7 +283,9 @@ public final class QuotaDaemon {
     var updatedCredentials = updated.credentials
     if updated.provider == .venice {
       previousCredentials[CredentialField.veniceCreditAllowance] = nil
+      previousCredentials[CredentialField.veniceRefillAt] = nil
       updatedCredentials[CredentialField.veniceCreditAllowance] = nil
+      updatedCredentials[CredentialField.veniceRefillAt] = nil
     }
     if updatedCredentials != previousCredentials {
       guard !CodexAccountProfile.isManaged(previous.credentials) else {

@@ -81,7 +81,7 @@ public enum AccountEditRejection: Equatable, Sendable {
     case .invalidVeniceAllowance:
       return VeniceSubscriptionAllowance.invalidMessage
     case .veniceAllowanceSaveFailed:
-      return "Could not save the Venice credit allowance. Check LLimit's settings file and storage permissions."
+      return "Could not save the Venice subscription settings. Check LLimit's settings file and storage permissions."
     case .invalidSubscriptionPricing:
       return "Not saved. Enter a nonnegative finite amount and a three-letter currency code, such as USD or CHF."
     case .subscriptionSaveFailed:

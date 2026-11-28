@@ -1793,8 +1793,9 @@ final class AppModel: ObservableObject {
         account.displayName = value
       }
     case .credential(let fieldKey):
-      if savedAccount.provider == .venice, fieldKey == CredentialField.veniceCreditAllowance {
-        return commitVeniceAllowance(value, accountID: accountID)
+      if savedAccount.provider == .venice,
+         fieldKey == CredentialField.veniceCreditAllowance || fieldKey == CredentialField.veniceRefillAt {
+        return commitVeniceSubscriptionSetting(value, fieldKey: fieldKey, accountID: accountID)
       }
       if mimoLogin?.accountID == accountID { return .rejected(.signInInProgress) }
       if stepFunLogin?.accountID == accountID { return .rejected(.signInInProgress) }
@@ -1861,21 +1862,26 @@ final class AppModel: ObservableObject {
     }
   }
 
-  private func commitVeniceAllowance(_ text: String, accountID: String) -> AccountEditOutcome {
+  private func commitVeniceSubscriptionSetting(_ text: String, fieldKey: String, accountID: String) -> AccountEditOutcome {
     guard !configurationLoadFailed else { return .rejected(.settingsUnreadable) }
     guard let index = providerAccounts.firstIndex(where: { $0.id == accountID }) else { return .accountMissing }
-    let allowance: Double?
-    do { allowance = try VeniceSubscriptionAllowance.parse(text) }
-    catch { return .rejected(.invalidVeniceAllowance) }
+    do {
+      if fieldKey == CredentialField.veniceRefillAt {
+        _ = try VeniceSubscriptionAllowance.parseRefillDate(text)
+      } else {
+        _ = try VeniceSubscriptionAllowance.parse(text)
+      }
+    } catch {
+      return .rejected(fieldKey == CredentialField.veniceRefillAt ? .invalidResetDate : .invalidVeniceAllowance)
+    }
 
-    let key = CredentialField.veniceCreditAllowance
     var settings = currentSettings()
-    settings.accounts[index].credentials[key] = allowance == nil ? nil : text
+    settings.accounts[index].credentials[fieldKey] = text.isEmpty ? nil : text
     do { try settingsStore.save(settings) }
     catch { return .rejected(.veniceAllowanceSaveFailed) }
 
-    // The allowance changes the interpretation of the saved balance. Network
-    // requests and daily DIEM estimates remain owned by the same API key.
+    // Update the subscription display from the saved balance and its original
+    // observation time. The daily DIEM estimate keeps its existing basis.
     providerAccounts[index] = settings.accounts[index]
     reconcileSnapshotWithCurrentAccounts()
     return .applied

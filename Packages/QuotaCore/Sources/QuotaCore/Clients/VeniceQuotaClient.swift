@@ -118,7 +118,8 @@ public struct VeniceQuotaClient: QuotaProviderClient {
       subtitle: "Venice API credits", metrics: metrics, maxUsagePercent: maxUsagePercent,
       warning: warning, fetchedAt: now
     )
-    return VeniceSubscriptionAllowance.applying(configuration.veniceCreditAllowance, to: result)
+    return VeniceSubscriptionAllowance.applying(configuration.veniceCreditAllowance,
+      refillAt: configuration.veniceRefillAt, to: result)
   }
 
   static func dailyDIEMExhaustedWarning(metrics: [UsageMetric]) -> String {

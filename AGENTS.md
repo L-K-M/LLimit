@@ -531,9 +531,12 @@ Linux:
   provider tile. Optional nonsecret `venice.credit_allowance` is a positive USD
   denominator for a subscription ring and percentage, with the dollar balance
   below the rings. Blank displays the subscription balance inside the DIEM ring.
-  Bound geometry to 100% and retain banked balances in full. Keep the
-  subscription reset and duration empty. Allowance edits recalculate cached
-  subscription balances, preserve daily estimates, and preserve account history.
+  Bound geometry to 100% and retain banked balances in full. Optional nonsecret
+  `venice.refill_at` anchors a UTC calendar month for the subscription pace marker
+  and countdown when an allowance is configured. Accept a known refill within
+  the next month as the end of the current window. Store this interval as a pace
+  reference, since banked balances can remain available after refill. Changes
+  recalculate cached subscription readings and preserve daily DIEM and history.
   Percentage charts compare subscription readings with the same denominator.
   Prefer `BUNDLED_CREDITS`, including zero, and fall back to Admin
   `balances.bundledCredits` when absent. Report Admin `balances.earnedCredits`

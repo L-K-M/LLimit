@@ -226,6 +226,13 @@ public extension QuotaProvider {
           isSecret: false,
           isRequired: false,
           help: "Enter your plan's credit allowance in USD to add a subscription ring. Leave empty to show the dollar balance alone."
+        ),
+        CredentialFieldDescriptor(
+          key: CredentialField.veniceRefillAt,
+          label: "Subscription refill date",
+          isSecret: false,
+          isRequired: false,
+          help: "Enter the refill date shown in Venice to add a white pace marker to the subscription ring. Use YYYY-MM-DD (midnight UTC) or an ISO 8601 date-time with a timezone. Refills repeat monthly."
         )
       ]
     case .cline:
@@ -421,6 +428,8 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
   public var detail: String?
   /// Guarded history measurement, omitted when evidence is insufficient.
   public var paceEstimate: PaceEstimate?
+  /// Time reference for a carrying balance that does not expire at refill.
+  public var paceWindow: DateInterval?
 
   public init(
     id: String,
@@ -440,7 +449,8 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
     isUnlimited: Bool = false,
     detail: String? = nil,
     paceEstimate: PaceEstimate? = nil,
-    reportedRemainingFraction: Double? = nil
+    reportedRemainingFraction: Double? = nil,
+    paceWindow: DateInterval? = nil
   ) {
     self.id = id
     self.label = label
@@ -460,6 +470,7 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
     self.isUnlimited = isUnlimited
     self.detail = detail
     self.paceEstimate = paceEstimate
+    self.paceWindow = paceWindow
   }
 
   public var usageLine: String? {
@@ -688,10 +699,13 @@ public struct ProviderAccount: Codable, Hashable, Identifiable, Sendable {
     let allowance = provider == .venice
       ? try? VeniceSubscriptionAllowance.parse(requestCredentials.removeValue(forKey: CredentialField.veniceCreditAllowance))
       : nil
+    let refillAt = provider == .venice
+      ? try? configuredQuotaResetDate(requestCredentials.removeValue(forKey: CredentialField.veniceRefillAt))
+      : nil
     return ProviderRuntimeConfiguration(
       accountID: id, provider: provider, displayName: resolvedDisplayName,
       isEnabled: isEnabled, credentials: requestCredentials.resolvingEnvironmentReferences(environment),
-      veniceCreditAllowance: allowance)
+      veniceCreditAllowance: allowance, veniceRefillAt: refillAt)
   }
 
   /// Import replaces authentication while retaining account-owned quota settings
@@ -699,7 +713,7 @@ public struct ProviderAccount: Codable, Hashable, Identifiable, Sendable {
   public func credentialsForImport(_ imported: [String: String]) -> [String: String] {
     let retainedKeys: [String]
     switch provider {
-    case .venice: retainedKeys = [CredentialField.veniceCreditAllowance]
+    case .venice: retainedKeys = [CredentialField.veniceCreditAllowance, CredentialField.veniceRefillAt]
     case .junie: retainedKeys = [CredentialField.junieCreditAllowance, CredentialField.junieResetAt]
     case .xiaomiMiMo: retainedKeys = [CredentialField.mimoResetAt]
     case .stepFun: retainedKeys = [CredentialField.stepFunResetAt, CredentialField.stepFunPaceWindow]
@@ -1869,6 +1883,7 @@ public struct ProviderRuntimeConfiguration: Hashable, Sendable {
   public var isEnabled: Bool
   public var credentials: [String: String]
   public var veniceCreditAllowance: Double?
+  public var veniceRefillAt: Date?
 
   public init(
     accountID: String? = nil,
@@ -1876,7 +1891,8 @@ public struct ProviderRuntimeConfiguration: Hashable, Sendable {
     displayName: String? = nil,
     isEnabled: Bool,
     credentials: [String: String],
-    veniceCreditAllowance: Double? = nil
+    veniceCreditAllowance: Double? = nil,
+    veniceRefillAt: Date? = nil
   ) {
     self.accountID = accountID ?? provider.rawValue
     self.provider = provider
@@ -1886,5 +1902,6 @@ public struct ProviderRuntimeConfiguration: Hashable, Sendable {
     self.isEnabled = isEnabled
     self.credentials = credentials
     self.veniceCreditAllowance = veniceCreditAllowance
+    self.veniceRefillAt = veniceRefillAt
   }
 }

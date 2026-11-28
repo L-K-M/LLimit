@@ -159,6 +159,36 @@ final class VeniceQuotaClientTests: XCTestCase {
     }
   }
 
+  func testConfiguredRefillProvidesPaceAcrossARealCalendarMonth() async throws {
+    var usage = try await fetch()
+    let fetchedAt = try XCTUnwrap(parseISO8601("2026-12-13T00:36:00Z"))
+    let start = try XCTUnwrap(parseISO8601("2026-11-28T00:36:00Z"))
+    let end = try XCTUnwrap(parseISO8601("2026-12-28T00:36:00Z"))
+    usage.fetchedAt = fetchedAt
+    let original = QuotaSnapshot(generatedAt: fetchedAt, providers: [usage], failures: [])
+    var account = ProviderAccount(id: usage.accountID, provider: .venice, credentials: [
+      CredentialField.veniceAPIKey: fixtureKey, CredentialField.veniceCreditAllowance: "1",
+      CredentialField.veniceRefillAt: "2026-12-28T01:36:00+01:00"
+    ])
+    XCTAssertEqual(account.runtimeConfiguration(environment: [:]).veniceRefillAt, end)
+    XCTAssertNil(account.runtimeConfiguration(environment: [:]).credentials[CredentialField.veniceRefillAt])
+    let scaled = original.applyingVeniceSubscriptionAllowances(from: [account])
+    let subscription = scaled.providers[0].metrics[1]
+    XCTAssertEqual(subscription.paceWindow, DateInterval(start: start, end: end))
+    XCTAssertEqual(scaled.providers[0].metrics[0], usage.metrics[0])
+    XCTAssertNil(subscription.resetAt)
+    XCTAssertEqual(subscription.remainingAmount, 2, "Keep the banked credit amount")
+    let pace = try XCTUnwrap(QuotaPace(metric: subscription, provider: .venice, fetchedAt: fetchedAt, now: fetchedAt))
+    XCTAssertEqual(pace.evenPaceRemainingFraction, 0.5, accuracy: 0.0001)
+    XCTAssertNil(QuotaPace(metric: subscription, provider: .venice, fetchedAt: fetchedAt, now: end))
+    let elapsed = scaled.providers[0].clearingElapsedWindows(at: end)
+    XCTAssertEqual(elapsed.metrics[1].remainingAmount, 2)
+    account.credentials[CredentialField.veniceRefillAt] = ""
+    let withoutDate = scaled.applyingVeniceSubscriptionAllowances(from: [account])
+    XCTAssertNil(withoutDate.providers[0].metrics[1].paceWindow)
+    XCTAssertEqual(withoutDate.providers[0].metrics[1].remainingPercent, 100)
+  }
+
   func testKeySubscriptionBalanceTakesPrecedenceIncludingZero() async throws {
     let rates = usageBody.replacingOccurrences(of: "\"BUNDLED_CREDITS\":2", with: "\"BUNDLED_CREDITS\":0")
     let billing = #"{"canConsume":true,"balances":{"diem":40,"usd":7.5,"bundledCredits":50,"earnedCredits":null},"diemEpochAllocation":100}"#

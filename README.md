@@ -215,8 +215,11 @@ credits when reported, and the USD balance separately. The Venice provider tile
 shows the subscription dollar balance inside the daily DIEM ring. Set **Subscription
 credit allowance (USD)** in the Venice account settings to add a subscription
 percentage and a second ring. Enter the included credit amount, such as `75` for
-an allowance worth $75. The daily DIEM countdown and subscription dollar
-balance appear below the rings when the subscription percentage is shown.
+an allowance worth $75. Set **Subscription refill date** to add the white
+even-spending marker. Use a known refill date or the day the plan began. LLimit
+repeats the day and time monthly in UTC, clamping in shorter months. The daily
+DIEM countdown and subscription dollar balance appear below the rings, and a
+configured refill date adds a subscription countdown.
 An Admin key provides the daily DIEM allocation for rings, trend lines, and menu-bar
 percentages. When that allocation is unavailable, LLimit estimates a daily upper
 bound from the first positive balance, each balance increase, or the first balance

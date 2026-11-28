@@ -135,6 +135,8 @@ balance, which can include credits carried over from previous months. Set an
 optional USD subscription allowance with
 `llimit accounts update <name-or-id> --set venice.credit_allowance=75` to include
 a percentage. Set an empty value to return to the dollar balance alone.
+Optional `venice.refill_at` records a monthly refill anchor as YYYY-MM-DD (UTC)
+or an ISO 8601 date-time with a timezone.
 [Venice billing](https://github.com/veniceai/skills/blob/main/skills/venice-billing/SKILL.md).
 
 StepFun accepts a Plan API key or manual console session credentials. Add a Plan

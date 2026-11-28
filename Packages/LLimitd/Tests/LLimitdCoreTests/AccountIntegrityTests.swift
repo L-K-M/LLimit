@@ -126,8 +126,19 @@ final class AccountIntegrityTests: XCTestCase {
     XCTAssertEqual(updated.metrics.last?.remainingPercent, 73)
     XCTAssertEqual(updated.fetchedAt, snapshot.providers[0].fetchedAt)
     XCTAssertEqual(try Data(contentsOf: paths.historyFileURL), history)
+    let refillKey = CredentialField.veniceRefillAt
+    XCTAssertThrowsError(try daemon.editingSettings {
+      try $0.updateAccount(account.id, credentials: .merging([refillKey: "2023-11-31"]))
+    })
+    _ = try daemon.editingSettings { try $0.updateAccount(account.id, credentials: .merging([refillKey: "2023-11-15"])) }
+    let withRefill = try XCTUnwrap((try store.load())?.providers.first)
+    XCTAssertEqual(withRefill.metrics.first, daily)
+    XCTAssertEqual(withRefill.metrics.last?.paceWindow?.end, parseQuotaResetDate("2023-11-15"))
+    XCTAssertNil(withRefill.metrics.last?.resetAt)
     _ = try daemon.editingSettings { try $0.updateAccount(account.id, credentials: .merging([key: ""])) }
-    XCTAssertNil((try store.load())?.providers.first?.metrics.last?.remainingPercent)
+    let cleared = try XCTUnwrap((try store.load())?.providers.first?.metrics.last)
+    XCTAssertNil(cleared.remainingPercent)
+    XCTAssertNil(cleared.paceWindow)
   }
 
   func testClaudeTokenChangeClearsManagedMetadataAndInvalidEditsFail() throws {
