@@ -206,7 +206,7 @@ struct ProviderTileTimelineProvider: TimelineProvider {
     }
     if let usage = entry.usage {
       for metric in defaultRingMetrics(for: usage) {
-        for boundary in [metric.resetAt, metric.expiresAt].compactMap({ $0 })
+        for boundary in [metric.resetAt, metric.expiresAt, metric.paceWindow?.end].compactMap({ $0 })
           where boundary > now && boundary < nextRefresh
         {
           entryDates.insert(boundary)
@@ -445,6 +445,11 @@ private struct ProviderQuotaTileView: View {
     let tints = ringTints(for: metrics, in: usage)
     let paces = metrics.map { pace(for: $0, in: usage) }
     let showsTokenQuota = usage.provider == .longcat
+    let subscription = subscriptionMetric(in: usage)
+    let footerMetrics = usage.provider == .venice
+      ? usage.metrics.filter { $0.id == "daily-diem" || ($0.id == "bundled-credits" && $0.remainingPercent != nil) }
+      : metrics
+    let footerTints = usage.provider == .venice ? ringTints(for: footerMetrics, in: usage) : tints
 
     return VStack(spacing: 5) {
       if metrics.isEmpty {
@@ -456,25 +461,19 @@ private struct ProviderQuotaTileView: View {
           name: account.displayName,
           tints: tints,
           paces: paces,
-          showsTokenQuota: showsTokenQuota
+          showsTokenQuota: showsTokenQuota,
+          subscriptionBalance: subscription.flatMap { subscriptionBalance(for: $0) },
+          subscriptionPercent: subscription?.remainingPercent
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
 
         VStack(spacing: 2) {
-          quotaFooter(metrics: metrics, tints: tints, provider: usage.provider)
+          quotaFooter(metrics: footerMetrics, tints: footerTints, provider: usage.provider)
           if showsTokenQuota, metrics.count == 1, let pace = paces.first ?? nil {
             Text(pace.phrase.capitalized)
               .font(.caption2.weight(.semibold))
               .foregroundStyle(.white.opacity(0.72))
               .lineLimit(1)
-          }
-          if let balance = subscriptionMetric(in: usage)?.usageLine {
-            Text("Subscription \(balance)")
-              .font(.caption2.weight(.semibold))
-              .foregroundStyle(.white.opacity(0.85))
-              .monospacedDigit()
-              .lineLimit(1)
-              .minimumScaleFactor(0.65)
           }
         }
       }
@@ -503,7 +502,7 @@ private struct ProviderQuotaTileView: View {
             .background(.black.opacity(0.25), in: Capsule())
         }
         if metrics.contains(where: \.isPercentageEstimated) {
-          Text("ESTIMATED")
+          Text(usage.provider == .venice ? "DIEM ESTIMATE" : "ESTIMATED")
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
             .background(.black.opacity(0.25), in: Capsule())
@@ -615,7 +614,13 @@ private struct ProviderQuotaTileView: View {
   }
 
   private func balanceLine(for metric: UsageMetric, provider: QuotaProvider) -> String {
-    let amount = metric.usageLine ?? ""
+    let amount = provider == .venice && metric.id == "bundled-credits"
+      ? (subscriptionBalance(for: metric) ?? "")
+      : (metric.usageLine ?? "")
+    if provider == .venice, let refill = metric.paceWindow?.end {
+      let seconds = refill.timeIntervalSince(entry.date)
+      return "\(amount) · \(seconds > 0 ? compactCountdown(seconds) : "refill due")"
+    }
     if provider == .venice, metric.resetAt != nil {
       return "\(amount) · \(resetSummary(for: metric))"
     }
@@ -627,9 +632,16 @@ private struct ProviderQuotaTileView: View {
     return usage.metrics.first { $0.id == "bundled-credits" && $0.usageLine != nil }
   }
 
+  private func subscriptionBalance(for metric: UsageMetric) -> String? {
+    // Retain sub-cent amounts and balances from snapshots saved before remainingAmount.
+    guard let amount = metric.remainingAmount, amount.isFinite,
+          amount == 0 || abs(amount) >= 0.01 else { return metric.usedDisplay }
+    return amount.formatted(.currency(code: "USD").locale(Locale(identifier: "en_US")))
+  }
+
   private func quotaFooter(metrics: [UsageMetric], tints: [Color], provider: QuotaProvider) -> some View {
     let showsTokenQuota = provider == .longcat
-    let stacked = showsTokenQuota && metrics.count > 1
+    let stacked = (showsTokenQuota || provider == .venice) && metrics.count > 1
     let layout = stacked ? AnyLayout(VStackLayout(spacing: 2)) : AnyLayout(HStackLayout(spacing: 6))
     return layout {
       ForEach(Array(metrics.prefix(2).enumerated()), id: \.offset) { index, metric in
@@ -725,9 +737,14 @@ private struct ProviderQuotaTileView: View {
     }
 
     let metrics = defaultRingMetrics(for: usage)
-    let readableMetrics = metrics.isEmpty
-      ? usage.metrics.filter { $0.usageLine != nil }
-      : metrics + [subscriptionMetric(in: usage)].compactMap { $0 }
+    let readableMetrics: [UsageMetric]
+    if metrics.isEmpty {
+      readableMetrics = usage.metrics.filter { $0.usageLine != nil }
+    } else if usage.provider == .venice {
+      readableMetrics = usage.metrics.filter { $0.id == "daily-diem" || $0.id == "bundled-credits" }
+    } else {
+      readableMetrics = metrics
+    }
     guard !readableMetrics.isEmpty else {
       if let failure = entry.failure {
         return "\(account.displayName). Quota unavailable. \(failure.kind.rawValue)."
@@ -742,7 +759,12 @@ private struct ProviderQuotaTileView: View {
       } else if usage.provider == .longcat, let percent = tokenPercentage(metric) {
         quota = "\(percent) remaining"
       } else if let remaining = metric.remainingPercent {
-        quota = "\(metric.isPercentageEstimated ? "estimated " : "")\(remaining) percent remaining"
+        let percentage = "\(metric.isPercentageEstimated ? "estimated " : "")\(remaining) percent remaining"
+        if usage.provider == .venice, metric.id == "bundled-credits", let amount = metric.usedDisplay {
+          quota = "\(percentage), \(amount) remaining"
+        } else {
+          quota = percentage
+        }
       } else {
         quota = metric.usageLine ?? "remaining quota unknown"
       }
@@ -808,12 +830,15 @@ private struct ProviderConcentricRings: View {
   let tints: [Color]
   let paces: [QuotaPace?]
   let showsTokenQuota: Bool
+  let subscriptionBalance: String?
+  let subscriptionPercent: Int?
 
   var body: some View {
     GeometryReader { proxy in
       let side = min(proxy.size.width, proxy.size.height)
       let outer = metrics.first
       let inner = metrics.dropFirst().first
+      let innerScale = subscriptionPercent == nil ? 0.62 : 0.68
 
       ZStack {
         if let outer {
@@ -835,18 +860,30 @@ private struct ProviderConcentricRings: View {
             pace: paces.dropFirst().first ?? nil,
             hasFlatCaps: showsTokenQuota
           )
-          .frame(width: side * 0.62, height: side * 0.62)
+          .frame(width: side * innerScale, height: side * innerScale)
         }
 
         VStack(spacing: 2) {
           Text(name)
-            .font(.subheadline.weight(.bold))
+            .font((subscriptionPercent == nil ? Font.subheadline : .caption).weight(.bold))
             .foregroundStyle(.white)
             .shadow(color: .black.opacity(0.35), radius: 2)
-            .lineLimit(2)
+            .lineLimit(subscriptionPercent == nil ? 2 : 1)
             .minimumScaleFactor(0.68)
             .multilineTextAlignment(.center)
-          if showsTokenQuota, inner == nil, let outer, let percent = tokenPercentage(outer) {
+          if let subscriptionBalance {
+            Text(subscriptionPercent.map { "\($0)%" } ?? subscriptionBalance)
+              .font(.headline.weight(.bold))
+              .foregroundStyle(.white)
+              .monospacedDigit()
+              .lineLimit(1)
+              .minimumScaleFactor(0.65)
+            Text("Subscription")
+              .font(.caption2.weight(.semibold))
+              .foregroundStyle(.white.opacity(0.78))
+              .lineLimit(1)
+              .minimumScaleFactor(0.60)
+          } else if showsTokenQuota, inner == nil, let outer, let percent = tokenPercentage(outer) {
             Text("\(percent) left")
               .font(.caption.weight(.semibold))
               .monospacedDigit()
@@ -855,7 +892,7 @@ private struct ProviderConcentricRings: View {
               .minimumScaleFactor(0.75)
           }
         }
-        .frame(width: side * (inner == nil ? 0.56 : 0.48))
+        .frame(width: side * (inner == nil ? 0.56 : innerScale - 0.14))
       }
       .frame(width: side, height: side)
       .position(x: proxy.size.width / 2, y: proxy.size.height / 2)

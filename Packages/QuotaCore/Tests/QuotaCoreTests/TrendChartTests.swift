@@ -21,6 +21,25 @@ final class TrendChartTests: XCTestCase {
     XCTAssertEqual(line.samples.map(\.date), [base, base.addingTimeInterval(900)])
   }
 
+  func testVeniceTrendUsesTheCurrentSubscriptionAllowance() throws {
+    let account = ProviderAccount(id: "v", provider: .venice)
+    let daily = UsageMetric(id: "daily-diem", label: "Daily DIEM", remainingPercent: 30)
+    let usage = ProviderUsage(accountID: account.id, provider: .venice, title: "Venice",
+      metrics: [daily, UsageMetric(id: "bundled-credits", label: "Subscription credits", remainingAmount: 60)],
+      fetchedAt: base)
+    let first = QuotaSnapshot(generatedAt: base,
+      providers: [VeniceSubscriptionAllowance.applying(75, to: usage)], failures: [])
+    var nextUsage = usage
+    nextUsage.fetchedAt = base.addingTimeInterval(900)
+    let next = QuotaSnapshot(generatedAt: nextUsage.fetchedAt,
+      providers: [VeniceSubscriptionAllowance.applying(100, to: nextUsage)], failures: [])
+    let trend = TrendSeriesBuilder.build(snapshots: [first, next], latest: next,
+      settings: AppSettings(accounts: [account]), now: next.generatedAt)
+    let series = try XCTUnwrap(trend.accounts.first?.series)
+    XCTAssertEqual(series.first(where: { $0.metricID == daily.id })?.samples.count, 2)
+    XCTAssertEqual(series.first(where: { $0.metricID == "bundled-credits" })?.samples.map(\.remainingPercent), [60])
+  }
+
   func testFailureOnlyCarryDoesNotInventHistory() {
     let failed = snapshot(fetch: base, failed: true)
     let content = TrendSeriesBuilder.build(snapshots: [failed], latest: failed, settings: settings)

@@ -17,9 +17,10 @@ public struct MonthlyQuotaCycle: Sendable {
     window(containing: now)?.end ?? anchor
   }
 
-  /// No spending window exists before the configured purchase date.
-  public func window(containing now: Date) -> DateInterval? {
-    guard now >= anchor, now.timeIntervalSinceReferenceDate.isFinite else { return nil }
+  /// A purchase date starts the first window. A known refill date can also
+  /// anchor the active window that ends on that date.
+  public func window(containing now: Date, allowsPrecedingWindow: Bool = false) -> DateInterval? {
+    guard (now >= anchor || allowsPrecedingWindow), now.timeIntervalSinceReferenceDate.isFinite else { return nil }
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = TimeZone(secondsFromGMT: 0)!
     guard let month = calendar.dateInterval(of: .month, for: now),
@@ -28,7 +29,8 @@ public struct MonthlyQuotaCycle: Sendable {
     guard let startMonth = calendar.date(byAdding: .month, value: offset, to: month.start),
           let endMonth = calendar.date(byAdding: .month, value: offset + 1, to: month.start),
           let start = occurrence(in: startMonth, calendar: calendar),
-          let end = occurrence(in: endMonth, calendar: calendar), end > start else { return nil }
+          let end = occurrence(in: endMonth, calendar: calendar), end > start,
+          now >= anchor || end == anchor else { return nil }
     return DateInterval(start: start, end: end)
   }
 

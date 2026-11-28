@@ -75,12 +75,18 @@ public enum TrendSeriesBuilder {
     var sawUnlimited = false
     var sawAmounts = false
 
+    let current = latest?.reconciled(with: settings.accounts)
     let observations = QuotaObservations.extract(from: snapshots, accounts: settings.accounts, window: window)
     for usage in observations where filter.includes(usage) {
       usages[usage.accountID] = usage
       for metric in usage.metrics {
         if metric.isUnlimited { sawUnlimited = true; continue }
         guard let remaining = metric.remainingPercent else { sawAmounts = true; continue }
+        if usage.provider == .venice, metric.id == "bundled-credits",
+           let latestUsage = current?.providers.first(where: { $0.accountKey == usage.accountKey }),
+           metric.totalAmount != latestUsage.metrics.first(where: { $0.id == metric.id })?.totalAmount {
+          continue
+        }
         let key = Key(usage, metric)
         if samples[key] == nil { order[usage.accountID, default: []].append(key) }
         samples[key, default: []].append(TrendSample(date: usage.fetchedAt,
@@ -89,7 +95,6 @@ public enum TrendSeriesBuilder {
       }
     }
 
-    let current = latest?.reconciled(with: settings.accounts)
     var reportedKeys: Set<Key> = []
     var freshKeys: Set<Key> = []
     for usage in usages.values {

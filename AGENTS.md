@@ -527,10 +527,22 @@ Linux:
   or a new server reset period. Persist it per account in the snapshot, clear it
   on key replacement, and label estimated percentages on display surfaces. The
   first observation may already be spent; reported allocations always win.
-  Show monthly subscription credits in USD alongside the daily DIEM ring in the
-  provider tile. Prefer `BUNDLED_CREDITS`, including zero, and fall back to Admin
+  Show the subscription dollar balance inside the daily DIEM ring in the
+  provider tile. Optional nonsecret `venice.credit_allowance` is a positive USD
+  denominator for a subscription ring and percentage, with the dollar balance
+  below the rings. Blank displays the subscription balance inside the DIEM ring.
+  Bound geometry to 100% and retain banked balances in full. Optional nonsecret
+  `venice.refill_at` anchors a UTC calendar month for the subscription pace marker
+  and countdown when an allowance is configured. Accept a known refill within
+  the next month as the end of the current window. Store this interval as a pace
+  reference, since banked balances can remain available after refill. Changes
+  recalculate cached subscription readings and preserve daily DIEM and history.
+  Percentage charts compare subscription readings with the same denominator.
+  Prefer `BUNDLED_CREDITS`, including zero, and fall back to Admin
   `balances.bundledCredits` when absent. Report Admin `balances.earnedCredits`
-  and the key's `USD` separately. These balances have no reported total or reset.
+  and the key's `USD` separately. The API-key endpoints supply the combined
+  subscription balance, including rollover, without a subscription total or
+  refill date. Venice's signed-in web session uses a separate API.
   Pro+ and Max can bank credits across months. Venice spends from one eligible
   balance in the order DIEM, earned, subscription, USD. Quoted requests require
   a single balance that can cover the full cost, and key spending caps still apply.

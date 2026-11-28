@@ -111,6 +111,84 @@ final class VeniceQuotaClientTests: XCTestCase {
     XCTAssertEqual(usage.warning, "Daily DIEM exhausted. Subscription credits remain.")
   }
 
+  func testConfiguredSubscriptionAllowanceAddsAnIndependentRing() async throws {
+    let rates = usageBody
+      .replacingOccurrences(of: "\"DIEM\":40", with: "\"DIEM\":0")
+      .replacingOccurrences(of: "\"BUNDLED_CREDITS\":2", with: "\"BUNDLED_CREDITS\":53.4321")
+    let billing = billingBody.replacingOccurrences(of: "\"diem\":40", with: "\"diem\":0")
+    let http = VeniceHTTPStub(.response(200, rates), .response(200, billing))
+    let account = ProviderAccount(id: "venice", provider: .venice, credentials: [
+      CredentialField.veniceAPIKey: fixtureKey, CredentialField.veniceCreditAllowance: "75"
+    ])
+    let runtime = account.runtimeConfiguration(environment: [:])
+    XCTAssertEqual(runtime.credentials, [CredentialField.veniceAPIKey: fixtureKey])
+    var edited = account
+    edited.credentials[CredentialField.veniceCreditAllowance] = "100"
+    XCTAssertTrue(runtime.matchesCurrentAccount(edited, environment: [:]))
+    XCTAssertEqual(account.credentialsForImport([CredentialField.veniceAPIKey: "new"])[CredentialField.veniceCreditAllowance], "75")
+    let usage = try await VeniceQuotaClient(httpClient: http).fetchUsage(configuration: runtime, now: now)
+    let rings = defaultRingMetrics(for: usage)
+    XCTAssertEqual(rings.map(\.id), ["daily-diem", "bundled-credits"])
+    XCTAssertEqual(rings.map(\.remainingPercent), [0, 71])
+    XCTAssertEqual(rings[1].remainingAmount, 53.4321)
+    XCTAssertEqual(rings[1].totalAmount, 75)
+    XCTAssertEqual(try XCTUnwrap(rings[1].remainingFraction), 53.4321 / 75, accuracy: 0.000001)
+    XCTAssertNil(rings[1].resetAt)
+    XCTAssertNotNil(rings[0].resetAt)
+    XCTAssertTrue(account.redactedCredentials().credentials.isEmpty)
+  }
+
+  func testRecalculatingCachedSubscriptionPreservesDIEMAndBankedDollars() async throws {
+    let usage = try await fetch()
+    let snapshot = QuotaSnapshot(generatedAt: now, providers: [usage], failures: [])
+    var account = ProviderAccount(id: usage.accountID, provider: .venice, credentials: [
+      CredentialField.veniceAPIKey: fixtureKey, CredentialField.veniceCreditAllowance: "1"
+    ])
+    let refreshed = snapshot.applyingVeniceSubscriptionAllowances(from: [account])
+    let updated = try XCTUnwrap(refreshed.providers.first)
+    XCTAssertEqual(updated.metrics[0], usage.metrics[0])
+    XCTAssertEqual(updated.fetchedAt, usage.fetchedAt)
+    XCTAssertEqual(updated.metrics[1].remainingPercent, 100)
+    XCTAssertEqual(updated.metrics[1].usageLine, "$2.00 / $1.00")
+    XCTAssertEqual(updated.metrics[1].remainingAmount, 2)
+    account.credentials[CredentialField.veniceCreditAllowance] = ""
+    XCTAssertEqual(refreshed.applyingVeniceSubscriptionAllowances(from: [account]), snapshot)
+    XCTAssertNil(try VeniceSubscriptionAllowance.parse(" "))
+    for invalid in ["-5", "0", "nan", "inf", "$75"] {
+      XCTAssertThrowsError(try VeniceSubscriptionAllowance.parse(invalid))
+    }
+  }
+
+  func testConfiguredRefillProvidesPaceAcrossARealCalendarMonth() async throws {
+    var usage = try await fetch()
+    let fetchedAt = try XCTUnwrap(parseISO8601("2026-07-02T07:20:00Z"))
+    let start = try XCTUnwrap(parseISO8601("2026-06-17T07:20:00Z"))
+    let end = try XCTUnwrap(parseISO8601("2026-07-17T07:20:00Z"))
+    usage.fetchedAt = fetchedAt
+    let original = QuotaSnapshot(generatedAt: fetchedAt, providers: [usage], failures: [])
+    var account = ProviderAccount(id: usage.accountID, provider: .venice, credentials: [
+      CredentialField.veniceAPIKey: fixtureKey, CredentialField.veniceCreditAllowance: "1",
+      CredentialField.veniceRefillAt: "2026-07-17T09:20:00+02:00"
+    ])
+    XCTAssertEqual(account.runtimeConfiguration(environment: [:]).veniceRefillAt, end)
+    XCTAssertNil(account.runtimeConfiguration(environment: [:]).credentials[CredentialField.veniceRefillAt])
+    let scaled = original.applyingVeniceSubscriptionAllowances(from: [account])
+    let subscription = scaled.providers[0].metrics[1]
+    XCTAssertEqual(subscription.paceWindow, DateInterval(start: start, end: end))
+    XCTAssertEqual(scaled.providers[0].metrics[0], usage.metrics[0])
+    XCTAssertNil(subscription.resetAt)
+    XCTAssertEqual(subscription.remainingAmount, 2, "Keep the banked credit amount")
+    let pace = try XCTUnwrap(QuotaPace(metric: subscription, provider: .venice, fetchedAt: fetchedAt, now: fetchedAt))
+    XCTAssertEqual(pace.evenPaceRemainingFraction, 0.5, accuracy: 0.0001)
+    XCTAssertNil(QuotaPace(metric: subscription, provider: .venice, fetchedAt: fetchedAt, now: end))
+    let elapsed = scaled.providers[0].clearingElapsedWindows(at: end)
+    XCTAssertEqual(elapsed.metrics[1].remainingAmount, 2)
+    account.credentials[CredentialField.veniceRefillAt] = ""
+    let withoutDate = scaled.applyingVeniceSubscriptionAllowances(from: [account])
+    XCTAssertNil(withoutDate.providers[0].metrics[1].paceWindow)
+    XCTAssertEqual(withoutDate.providers[0].metrics[1].remainingPercent, 100)
+  }
+
   func testKeySubscriptionBalanceTakesPrecedenceIncludingZero() async throws {
     let rates = usageBody.replacingOccurrences(of: "\"BUNDLED_CREDITS\":2", with: "\"BUNDLED_CREDITS\":0")
     let billing = #"{"canConsume":true,"balances":{"diem":40,"usd":7.5,"bundledCredits":50,"earnedCredits":null},"diemEpochAllocation":100}"#

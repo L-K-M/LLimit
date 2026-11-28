@@ -104,6 +104,43 @@ final class AccountIntegrityTests: XCTestCase {
     XCTAssertTrue(self.daemon().snapshot?.providers.isEmpty == true)
   }
 
+  func testVeniceAllowanceUpdatesTheSavedBalanceWithoutClearingDailyUsage() throws {
+    let (daemon, account) = try add(.venice)
+    let store = SnapshotStore(fileURL: paths.snapshotFileURL)
+    var snapshot = try XCTUnwrap(store.load())
+    let daily = UsageMetric(id: "daily-diem", label: "Daily DIEM", remainingPercent: 0,
+                            remainingAmount: 0, estimatedTotal: 10, usedDisplay: "0 DIEM")
+    snapshot.providers[0].metrics = [
+      daily, UsageMetric(id: "bundled-credits", label: "Subscription credits", remainingAmount: 53.43, usedDisplay: "$53.43")
+    ]
+    try store.save(snapshot)
+    let history = try Data(contentsOf: paths.historyFileURL)
+    let key = CredentialField.veniceCreditAllowance
+    XCTAssertThrowsError(try daemon.editingSettings {
+      try $0.updateAccount(account.id, credentials: .merging([key: "0"]))
+    })
+    XCTAssertEqual(try store.load(), snapshot)
+    _ = try daemon.editingSettings { try $0.updateAccount(account.id, credentials: .merging([key: "75"])) }
+    let updated = try XCTUnwrap((try store.load())?.providers.first)
+    XCTAssertEqual(updated.metrics.first, daily)
+    XCTAssertEqual(updated.metrics.last?.remainingPercent, 71)
+    XCTAssertEqual(updated.fetchedAt, snapshot.providers[0].fetchedAt)
+    XCTAssertEqual(try Data(contentsOf: paths.historyFileURL), history)
+    let refillKey = CredentialField.veniceRefillAt
+    XCTAssertThrowsError(try daemon.editingSettings {
+      try $0.updateAccount(account.id, credentials: .merging([refillKey: "2023-11-31"]))
+    })
+    _ = try daemon.editingSettings { try $0.updateAccount(account.id, credentials: .merging([refillKey: "2023-11-15"])) }
+    let withRefill = try XCTUnwrap((try store.load())?.providers.first)
+    XCTAssertEqual(withRefill.metrics.first, daily)
+    XCTAssertEqual(withRefill.metrics.last?.paceWindow?.end, parseQuotaResetDate("2023-11-15"))
+    XCTAssertNil(withRefill.metrics.last?.resetAt)
+    _ = try daemon.editingSettings { try $0.updateAccount(account.id, credentials: .merging([key: ""])) }
+    let cleared = try XCTUnwrap((try store.load())?.providers.first?.metrics.last)
+    XCTAssertNil(cleared.remainingPercent)
+    XCTAssertNil(cleared.paceWindow)
+  }
+
   func testClaudeTokenChangeClearsManagedMetadataAndInvalidEditsFail() throws {
     let daemon = daemon()
     let claude = try daemon.editingSettings { try $0.addAccount(provider: .anthropic, credentials: [

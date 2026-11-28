@@ -412,6 +412,7 @@ final class AppModel: ObservableObject {
 
   private func validatedRefreshResults(_ result: QuotaSnapshot, provenance: RefreshProvenance) -> QuotaSnapshot {
     provenance.validated(result, accounts: providerAccounts, credentialRevisions: credentialEditRevisions)
+      .applyingVeniceSubscriptionAllowances(from: providerAccounts)
   }
 
   private func publishSnapshot(_ refreshed: QuotaSnapshot) {
@@ -1792,6 +1793,10 @@ final class AppModel: ObservableObject {
         account.displayName = value
       }
     case .credential(let fieldKey):
+      if savedAccount.provider == .venice,
+         fieldKey == CredentialField.veniceCreditAllowance || fieldKey == CredentialField.veniceRefillAt {
+        return commitVeniceSubscriptionSetting(value, fieldKey: fieldKey, accountID: accountID)
+      }
       if mimoLogin?.accountID == accountID { return .rejected(.signInInProgress) }
       if stepFunLogin?.accountID == accountID { return .rejected(.signInInProgress) }
       if mistralLogin?.accountID == accountID { return .rejected(.signInInProgress) }
@@ -1855,6 +1860,31 @@ final class AppModel: ObservableObject {
       }
       return outcome
     }
+  }
+
+  private func commitVeniceSubscriptionSetting(_ text: String, fieldKey: String, accountID: String) -> AccountEditOutcome {
+    guard !configurationLoadFailed else { return .rejected(.settingsUnreadable) }
+    guard let index = providerAccounts.firstIndex(where: { $0.id == accountID }) else { return .accountMissing }
+    do {
+      if fieldKey == CredentialField.veniceRefillAt {
+        _ = try VeniceSubscriptionAllowance.parseRefillDate(text)
+      } else {
+        _ = try VeniceSubscriptionAllowance.parse(text)
+      }
+    } catch {
+      return .rejected(fieldKey == CredentialField.veniceRefillAt ? .invalidResetDate : .invalidVeniceAllowance)
+    }
+
+    var settings = currentSettings()
+    settings.accounts[index].credentials[fieldKey] = text.isEmpty ? nil : text
+    do { try settingsStore.save(settings) }
+    catch { return .rejected(.veniceAllowanceSaveFailed) }
+
+    // Update the subscription display from the saved balance and its original
+    // observation time. The daily DIEM estimate keeps its existing basis.
+    providerAccounts[index] = settings.accounts[index]
+    reconcileSnapshotWithCurrentAccounts()
+    return .applied
   }
 
   private func manualResetField(for provider: QuotaProvider) -> String? {
@@ -2507,6 +2537,7 @@ final class AppModel: ObservableObject {
 
     let activeAccounts = providerAccounts.filter { $0.isEnabled && $0.hasRequiredCredentials }
     let reconciled = currentSnapshot.reconciled(with: activeAccounts)
+      .applyingVeniceSubscriptionAllowances(from: activeAccounts)
     guard reconciled != currentSnapshot else { return }
 
     snapshot = reconciled

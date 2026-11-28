@@ -212,7 +212,14 @@ For Venice, choose **Settings → Add Account → Venice** and enter an API key 
 [Venice API settings](https://venice.ai/settings/api), or import a saved Venice CLI
 or OpenCode key. LLimit shows daily DIEM, monthly subscription credits, earned
 credits when reported, and the USD balance separately. The Venice provider tile
-shows the subscription balance alongside the daily DIEM amount and reset countdown.
+shows the subscription dollar balance inside the daily DIEM ring. Set **Subscription
+credit allowance (USD)** in the Venice account settings to add a subscription
+percentage and a second ring. Enter the included credit amount, such as `75` for
+an allowance worth $75. Set **Subscription refill date** to add the white
+even-spending marker. Use a known refill date or the day the plan began. LLimit
+repeats the day and time monthly in UTC, clamping in shorter months. The daily
+DIEM countdown and subscription dollar balance appear below the rings, and a
+configured refill date adds a subscription countdown.
 An Admin key provides the daily DIEM allocation for rings, trend lines, and menu-bar
 percentages. When that allocation is unavailable, LLimit estimates a daily upper
 bound from the first positive balance, each balance increase, or the first balance
@@ -224,7 +231,10 @@ always takes precedence.
 Venice charges API usage to one eligible balance in this order: daily DIEM, earned
 credits, subscription credits, then USD. Per-key spending limits still apply.
 Subscription credits replenish monthly, and Pro+ and Max can carry unused credits
-forward. LLimit shows their dollar value because the API reports the balance alone.
+forward. A banked balance above the configured allowance fills the ring and
+retains the full dollar amount. Venice's API-key endpoints report the combined
+subscription balance, including rollover. The signed-in Venice website has
+separate refill and usage data.
 Polling reads API balances without making inference requests. Imported keys work
 without Venice CLI or OpenCode running.
 [Venice billing](https://github.com/veniceai/skills/blob/main/skills/venice-billing/SKILL.md),

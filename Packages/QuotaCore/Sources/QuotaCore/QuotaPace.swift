@@ -1,7 +1,7 @@
 import Foundation
 
 /// Consumption relative to even spending through a window's end.
-/// Duration comes from reported data or stable API ids, never label text.
+/// Duration comes from reported or configured windows and stable API IDs.
 public struct QuotaPace: Equatable, Sendable {
   public let elapsedFraction: Double
   /// Used minus elapsed, in percentage points. Positive means faster spending.
@@ -14,7 +14,7 @@ public struct QuotaPace: Equatable, Sendable {
   private static let sevenDays: TimeInterval = 7 * 86_400
 
   public init?(metric: UsageMetric, provider: QuotaProvider, fetchedAt: Date, now: Date) {
-    let windowEnd = provider == .longcat ? metric.expiresAt : metric.resetAt
+    let windowEnd = metric.paceWindow?.end ?? (provider == .longcat ? metric.expiresAt : metric.resetAt)
     let usedPercent = provider == .longcat
       ? metric.remainingFraction.map { (1 - $0) * 100 }
       : metric.remainingPercent.map { Double(100 - clampPercent($0)) }
@@ -23,7 +23,7 @@ public struct QuotaPace: Equatable, Sendable {
       let usedPercent,
       let windowEnd,
       windowEnd > now,
-      let windowSeconds = Self.windowSeconds(for: metric, provider: provider),
+      let windowSeconds = metric.paceWindow?.duration ?? Self.windowSeconds(for: metric, provider: provider),
       provider != .longcat || windowEnd.timeIntervalSince(fetchedAt) <= windowSeconds,
       let elapsedFraction = Self.elapsedFraction(endingAt: windowEnd, windowSeconds: windowSeconds, at: fetchedAt)
     else { return nil }

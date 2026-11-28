@@ -198,6 +198,10 @@ public final class QuotaDaemon {
     for (key, value) in credentials {
       mergedCredentials[key] = value
     }
+    if provider == .venice {
+      _ = try VeniceSubscriptionAllowance.parse(mergedCredentials[CredentialField.veniceCreditAllowance])
+      _ = try VeniceSubscriptionAllowance.parseRefillDate(mergedCredentials[CredentialField.veniceRefillAt])
+    }
     if provider == .xiaomiMiMo {
       mergedCredentials = try MiMoSessionCookies.credentialsForStorage(mergedCredentials)
     }
@@ -256,6 +260,10 @@ public final class QuotaDaemon {
     }
     if change != .unchanged {
       updated.credentials = try Self.credentials(of: previous, applying: change)
+      if updated.provider == .venice {
+        _ = try VeniceSubscriptionAllowance.parse(updated.credentials[CredentialField.veniceCreditAllowance])
+        _ = try VeniceSubscriptionAllowance.parseRefillDate(updated.credentials[CredentialField.veniceRefillAt])
+      }
       if updated.provider == .xiaomiMiMo {
         updated.credentials = try MiMoSessionCookies.credentialsForStorage(updated.credentials)
       }
@@ -271,7 +279,15 @@ public final class QuotaDaemon {
     }
     guard updated != previous else { return previous }
 
-    if updated.credentials != previous.credentials {
+    var previousCredentials = previous.credentials
+    var updatedCredentials = updated.credentials
+    if updated.provider == .venice {
+      previousCredentials[CredentialField.veniceCreditAllowance] = nil
+      previousCredentials[CredentialField.veniceRefillAt] = nil
+      updatedCredentials[CredentialField.veniceCreditAllowance] = nil
+      updatedCredentials[CredentialField.veniceRefillAt] = nil
+    }
+    if updatedCredentials != previousCredentials {
       guard !CodexAccountProfile.isManaged(previous.credentials) else {
         throw DaemonError.managedCredentials(previous.resolvedDisplayName)
       }
@@ -741,7 +757,7 @@ public final class QuotaDaemon {
         $0.matchesCurrentAccount(account, environment: credentialEnvironment)
       }
     }
-    return result.reconciled(with: valid)
+    return result.reconciled(with: valid).applyingVeniceSubscriptionAllowances(from: valid)
   }
 
   private static func stepFunCredentialsForStorage(_ credentials: [String: String]) throws -> [String: String] {
@@ -850,6 +866,7 @@ public final class QuotaDaemon {
       return runtime.isEnabled && runtime.provider.hasRequiredCredentials(runtime.credentials)
     }
     let reconciled = currentSnapshot.reconciled(with: activeAccounts)
+      .applyingVeniceSubscriptionAllowances(from: activeAccounts)
     guard reconciled != currentSnapshot else { return }
 
     snapshot = reconciled
