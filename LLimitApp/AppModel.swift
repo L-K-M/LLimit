@@ -158,6 +158,7 @@ final class AppModel: ObservableObject {
     hasBootstrapped = true
 
     await loadConfiguration()
+    reloadRecentHistory()
 
     do {
       snapshot = try loadSnapshotFromPreferredStore()
@@ -166,7 +167,6 @@ final class AppModel: ObservableObject {
       statusMessage = "Could not load snapshot: \(error.localizedDescription)"
     }
 
-    reloadRecentHistory()
     reloadAccountStatuses()
     restartAutoRefreshLoop()
 
@@ -2632,6 +2632,7 @@ final class AppModel: ObservableObject {
     let activeAccounts = providerAccounts.filter { $0.isEnabled && $0.hasRequiredCredentials }
     let reconciled = currentSnapshot.reconciled(with: activeAccounts)
       .applyingVeniceSubscriptionAllowances(from: activeAccounts)
+      .restoringVeniceDailyEstimates(from: recentHistory, now: Date())
     guard reconciled != currentSnapshot else { return }
 
     snapshot = reconciled

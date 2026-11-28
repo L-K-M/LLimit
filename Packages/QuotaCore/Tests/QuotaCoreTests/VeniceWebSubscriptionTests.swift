@@ -85,6 +85,38 @@ final class VeniceWebSubscriptionTests: XCTestCase {
     XCTAssertEqual(updated.providers[1], other)
   }
 
+  func testRestoreLostDailyEstimateFromSameKeyAndEpoch() throws {
+    let reset = now.addingTimeInterval(3_600)
+    let current = UsageMetric(id: "daily-diem", label: "Daily DIEM", remainingAmount: 0,
+      estimateKeyHash: "same-key", resetAt: reset)
+    var prior = current
+    prior.estimatedTotal = 50
+    prior.remainingPercent = 0
+    let priorUsage = ProviderUsage(accountID: "venice_test", provider: .venice, title: "Venice",
+      metrics: [prior], fetchedAt: now.addingTimeInterval(-60))
+    let web = try XCTUnwrap(parse("""
+      {"availableCredits":9000,"monthlyRefillCredits":7500,"usedThisCycle":3000,"nextRefillAt":1800000000000}
+      """).metric(asOf: now))
+    var usage = priorUsage
+    usage.metrics = [current, web]
+    usage.fetchedAt = now
+    let snapshot = QuotaSnapshot(generatedAt: now, providers: [usage], failures: [])
+    let priorSnapshot = QuotaSnapshot(generatedAt: priorUsage.fetchedAt, providers: [priorUsage], failures: [])
+    let restored = snapshot.restoringVeniceDailyEstimates(from: [priorSnapshot], now: now)
+    XCTAssertEqual(restored.providers[0].metrics[0].estimatedTotal, 50)
+    XCTAssertEqual(restored.providers[0].metrics[0].remainingPercent, 0)
+    XCTAssertEqual(restored.providers[0].metrics[1], web)
+    XCTAssertEqual(restored.providers[0].fetchedAt, now)
+    XCTAssertEqual(snapshot.restoringVeniceDailyEstimates(from: [priorSnapshot], now: reset), snapshot)
+
+    var wrongKey = priorSnapshot
+    wrongKey.providers[0].metrics[0].estimateKeyHash = "different-key"
+    XCTAssertEqual(snapshot.restoringVeniceDailyEstimates(from: [wrongKey], now: now), snapshot)
+    var wrongEpoch = priorSnapshot
+    wrongEpoch.providers[0].metrics[0].resetAt = reset.addingTimeInterval(-86_400)
+    XCTAssertEqual(snapshot.restoringVeniceDailyEstimates(from: [wrongEpoch], now: now), snapshot)
+  }
+
   private func parse(_ json: String) throws -> VeniceWebSubscription {
     try JSONDecoder().decode(VeniceWebSubscription.self, from: Data(json.utf8))
   }
