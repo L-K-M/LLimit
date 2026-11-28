@@ -38,6 +38,8 @@ final class VeniceWebBrowser: NSObject, WKNavigationDelegate {
     let reading: Reading?
   }
 
+  private static let clerkHost = "clerk.venice.ai"
+
   let webView: WKWebView
   private let interactive: Bool
   private var pending: CheckedContinuation<Reading, Error>?
@@ -101,7 +103,7 @@ final class VeniceWebBrowser: NSObject, WKNavigationDelegate {
 
   private func readPage(requestID: UUID) async {
     do {
-      while webView.isLoading || webView.url == nil {
+      while webView.isLoading || webView.url == nil || (!interactive && webView.url?.host == Self.clerkHost) {
         try await Task.sleep(for: .milliseconds(150))
       }
       guard webView.url?.host == "venice.ai" else { throw Failure.signedOut }
@@ -143,7 +145,9 @@ final class VeniceWebBrowser: NSObject, WKNavigationDelegate {
     guard let url = action.request.url, url.scheme == "https", url.port == nil,
           url.user == nil, url.password == nil, let host = url.host else { return .cancel }
     if host == "venice.ai" { return .allow }
-    if interactive && ["clerk.venice.ai", "accounts.google.com", "appleid.apple.com"].contains(host) { return .allow }
+    // Clerk can redirect a returning browser through its frontend API to renew the session.
+    if host == Self.clerkHost && (interactive || url.path == "/v1/client/handshake") { return .allow }
+    if interactive && ["accounts.google.com", "appleid.apple.com"].contains(host) { return .allow }
     return .cancel
   }
 
