@@ -111,7 +111,7 @@ final class AccountIntegrityTests: XCTestCase {
     let daily = UsageMetric(id: "daily-diem", label: "Daily DIEM", remainingPercent: 0,
                             remainingAmount: 0, estimatedTotal: 10, usedDisplay: "0 DIEM")
     snapshot.providers[0].metrics = [
-      daily, UsageMetric(id: "bundled-credits", label: "Subscription credits", remainingAmount: 54.41, usedDisplay: "$54.41")
+      daily, UsageMetric(id: "bundled-credits", label: "Subscription credits", remainingAmount: 53.43, usedDisplay: "$53.43")
     ]
     try store.save(snapshot)
     let history = try Data(contentsOf: paths.historyFileURL)
@@ -123,7 +123,7 @@ final class AccountIntegrityTests: XCTestCase {
     _ = try daemon.editingSettings { try $0.updateAccount(account.id, credentials: .merging([key: "75"])) }
     let updated = try XCTUnwrap((try store.load())?.providers.first)
     XCTAssertEqual(updated.metrics.first, daily)
-    XCTAssertEqual(updated.metrics.last?.remainingPercent, 73)
+    XCTAssertEqual(updated.metrics.last?.remainingPercent, 71)
     XCTAssertEqual(updated.fetchedAt, snapshot.providers[0].fetchedAt)
     XCTAssertEqual(try Data(contentsOf: paths.historyFileURL), history)
     let refillKey = CredentialField.veniceRefillAt

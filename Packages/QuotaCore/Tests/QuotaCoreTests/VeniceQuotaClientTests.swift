@@ -114,7 +114,7 @@ final class VeniceQuotaClientTests: XCTestCase {
   func testConfiguredSubscriptionAllowanceAddsAnIndependentRing() async throws {
     let rates = usageBody
       .replacingOccurrences(of: "\"DIEM\":40", with: "\"DIEM\":0")
-      .replacingOccurrences(of: "\"BUNDLED_CREDITS\":2", with: "\"BUNDLED_CREDITS\":54.412741")
+      .replacingOccurrences(of: "\"BUNDLED_CREDITS\":2", with: "\"BUNDLED_CREDITS\":53.4321")
     let billing = billingBody.replacingOccurrences(of: "\"diem\":40", with: "\"diem\":0")
     let http = VeniceHTTPStub(.response(200, rates), .response(200, billing))
     let account = ProviderAccount(id: "venice", provider: .venice, credentials: [
@@ -129,10 +129,10 @@ final class VeniceQuotaClientTests: XCTestCase {
     let usage = try await VeniceQuotaClient(httpClient: http).fetchUsage(configuration: runtime, now: now)
     let rings = defaultRingMetrics(for: usage)
     XCTAssertEqual(rings.map(\.id), ["daily-diem", "bundled-credits"])
-    XCTAssertEqual(rings.map(\.remainingPercent), [0, 73])
-    XCTAssertEqual(rings[1].remainingAmount, 54.412741)
+    XCTAssertEqual(rings.map(\.remainingPercent), [0, 71])
+    XCTAssertEqual(rings[1].remainingAmount, 53.4321)
     XCTAssertEqual(rings[1].totalAmount, 75)
-    XCTAssertEqual(try XCTUnwrap(rings[1].remainingFraction), 54.412741 / 75, accuracy: 0.000001)
+    XCTAssertEqual(try XCTUnwrap(rings[1].remainingFraction), 53.4321 / 75, accuracy: 0.000001)
     XCTAssertNil(rings[1].resetAt)
     XCTAssertNotNil(rings[0].resetAt)
     XCTAssertTrue(account.redactedCredentials().credentials.isEmpty)
@@ -161,14 +161,14 @@ final class VeniceQuotaClientTests: XCTestCase {
 
   func testConfiguredRefillProvidesPaceAcrossARealCalendarMonth() async throws {
     var usage = try await fetch()
-    let fetchedAt = try XCTUnwrap(parseISO8601("2026-12-13T00:36:00Z"))
-    let start = try XCTUnwrap(parseISO8601("2026-11-28T00:36:00Z"))
-    let end = try XCTUnwrap(parseISO8601("2026-12-28T00:36:00Z"))
+    let fetchedAt = try XCTUnwrap(parseISO8601("2026-07-02T07:20:00Z"))
+    let start = try XCTUnwrap(parseISO8601("2026-06-17T07:20:00Z"))
+    let end = try XCTUnwrap(parseISO8601("2026-07-17T07:20:00Z"))
     usage.fetchedAt = fetchedAt
     let original = QuotaSnapshot(generatedAt: fetchedAt, providers: [usage], failures: [])
     var account = ProviderAccount(id: usage.accountID, provider: .venice, credentials: [
       CredentialField.veniceAPIKey: fixtureKey, CredentialField.veniceCreditAllowance: "1",
-      CredentialField.veniceRefillAt: "2026-12-28T01:36:00+01:00"
+      CredentialField.veniceRefillAt: "2026-07-17T09:20:00+02:00"
     ])
     XCTAssertEqual(account.runtimeConfiguration(environment: [:]).veniceRefillAt, end)
     XCTAssertNil(account.runtimeConfiguration(environment: [:]).credentials[CredentialField.veniceRefillAt])
