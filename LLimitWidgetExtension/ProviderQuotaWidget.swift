@@ -121,6 +121,8 @@ private func providerTileConfiguration(
   ) { entry in
     ProviderQuotaTileView(entry: entry)
       .providerTileBackground(entry: entry)
+      .widgetURL(entry.account.flatMap { ProviderTileDestination.account($0.id).url }
+        ?? ProviderTileDestination.widgets.url)
   }
   .configurationDisplayName(Text(verbatim: displayName))
   .description(Text(verbatim: "Quota rings for one LLimit account. Assign accounts in LLimit's Settings → Widgets."))
@@ -158,8 +160,28 @@ enum ProviderTileAccountState: Sendable {
   case noAccounts
 }
 
+private enum ProviderTileStatus: Equatable {
+  case current
+  case stale
+  case repair(QuotaAccountRepair)
+
+  var repair: QuotaAccountRepair? {
+    guard case .repair(let repair) = self else { return nil }
+    return repair
+  }
+}
+
+private extension QuotaAccountRepair {
+  var title: String {
+    switch self {
+    case .reconnect: return "Reconnect"
+    case .finishSetup: return "Finish setup"
+    }
+  }
+}
+
 struct ProviderQuotaEntry: TimelineEntry {
-  let date: Date
+  var date: Date
   let slotIndex: Int
   let account: ProviderTileSelection?
   let accountState: ProviderTileAccountState
@@ -169,11 +191,32 @@ struct ProviderQuotaEntry: TimelineEntry {
   /// the global style, same resolution as the dashboard widget.
   let style: WidgetStyleSettings
   let refreshIntervalMinutes: Int
+  var needsSetup = false
   /// Which color-scheme variant this account wears (accountColorStep) — the
   /// rings double as the trend chart's legend, so tiles for different
   /// accounts must never share an exact scheme.
   var accountColorStep = 0
   var primaryHexColor: String?
+
+  fileprivate var status: ProviderTileStatus {
+    if let repair = QuotaAccountRepair(needsSetup: needsSetup, failureKind: failure?.kind) {
+      return .repair(repair)
+    }
+    if let freshnessDeadline, date >= freshnessDeadline { return .stale }
+    return .current
+  }
+
+  fileprivate var freshnessDeadline: Date? {
+    guard let usage else { return nil }
+    return QuotaFreshness.deadline(fetchedAt: usage.fetchedAt,
+      refreshIntervalMinutes: refreshIntervalMinutes, metrics: displayedMetrics)
+  }
+
+  fileprivate var displayedMetrics: [UsageMetric] {
+    guard let usage else { return [] }
+    let rings = defaultRingMetrics(for: usage)
+    return rings.isEmpty ? Array(usage.metrics.filter { $0.usageLine != nil }.prefix(3)) : rings
+  }
 }
 
 struct ProviderTileTimelineProvider: TimelineProvider {
@@ -204,29 +247,18 @@ struct ProviderTileTimelineProvider: TimelineProvider {
       entryDates.insert(now.addingTimeInterval(offset))
       offset += 5 * 60
     }
-    if let usage = entry.usage {
-      let ringBoundaries = defaultRingMetrics(for: usage).flatMap { metric in
-        [metric.resetAt, metric.expiresAt, metric.paceWindow?.end].compactMap { $0 }
-      }
-      let refills = usage.metrics.compactMap(\.refillAt)
-      for boundary in ringBoundaries + refills where boundary > now && boundary < nextRefresh {
-        entryDates.insert(boundary)
-      }
+    if let deadline = entry.freshnessDeadline, deadline > now, deadline < nextRefresh {
+      entryDates.insert(deadline)
     }
-
+    let paceEnds = entry.displayedMetrics.compactMap { $0.paceWindow?.end }
+    let refills = entry.usage?.metrics.compactMap(\.refillAt) ?? []
+    for boundary in paceEnds + refills where boundary > now && boundary < nextRefresh {
+      entryDates.insert(boundary)
+    }
     let entries = entryDates.sorted().map { date in
-      ProviderQuotaEntry(
-        date: date,
-        slotIndex: entry.slotIndex,
-        account: entry.account,
-        accountState: entry.accountState,
-        usage: entry.usage,
-        failure: entry.failure,
-        style: entry.style,
-        refreshIntervalMinutes: entry.refreshIntervalMinutes,
-        accountColorStep: entry.accountColorStep,
-        primaryHexColor: entry.primaryHexColor
-      )
+      var datedEntry = entry
+      datedEntry.date = date
+      return datedEntry
     }
     completion(Timeline(entries: entries, policy: .after(nextRefresh)))
   }
@@ -277,12 +309,11 @@ struct ProviderTileTimelineProvider: TimelineProvider {
 
     let snapshot = loadSnapshot()
     let usage = effectiveAccount.flatMap { account in
-      snapshot?.providers.first(where: { $0.accountID == account.id })
+      snapshot?.providers.first(where: { $0.accountID == account.id && $0.provider == account.provider })
         ?? legacyUsage(for: account, in: snapshot, accounts: allAccounts)
     }
     let failure = effectiveAccount.flatMap { account in
-      snapshot?.failures.first(where: { $0.accountID == account.id })
-        ?? legacyFailure(for: account, in: snapshot, accounts: allAccounts)
+      accountFailure(for: account, in: snapshot, accounts: allAccounts)
     }
 
     // Hoisted into typed locals: this construction once tripped the type
@@ -291,6 +322,7 @@ struct ProviderTileTimelineProvider: TimelineProvider {
     let style: WidgetStyleSettings = effectiveStyle(for: selection?.id, settings: settings)
     let refreshMinutes: Int = max(15, settings.refreshIntervalMinutes)
     let colorStep: Int = selection.map { accountColorStep(forAccountID: $0.id, in: allAccounts) } ?? 0
+    let needsSetup = effectiveAccount.map { settings.widgetAccountIDsNeedingSetup.contains($0.id) } ?? false
     return ProviderQuotaEntry(
       date: date,
       slotIndex: slotIndex,
@@ -300,6 +332,7 @@ struct ProviderTileTimelineProvider: TimelineProvider {
       failure: failure,
       style: style,
       refreshIntervalMinutes: refreshMinutes,
+      needsSetup: needsSetup,
       accountColorStep: colorStep,
       primaryHexColor: selection.flatMap { settings.primaryHexColor(for: $0.id) }
     )
@@ -334,15 +367,16 @@ struct ProviderTileTimelineProvider: TimelineProvider {
     }
   }
 
-  private func legacyFailure(
+  private func accountFailure(
     for account: ProviderAccount,
     in snapshot: QuotaSnapshot?,
     accounts: [ProviderAccount]
   ) -> ProviderFailure? {
+    guard let failures = snapshot?.preferredFailures else { return nil }
+    let key = QuotaAccountKey(provider: account.provider, accountID: account.id)
+    if let exactMatch = failures[key] { return exactMatch }
     guard accounts.filter({ $0.provider == account.provider }).count == 1 else { return nil }
-    return snapshot?.failures.first {
-      $0.provider == account.provider && $0.accountID == account.provider.rawValue
-    }
+    return failures[QuotaAccountKey(provider: account.provider, accountID: account.provider.rawValue)]
   }
 
   private func effectiveStyle(for accountID: String?, settings: AppSettings) -> WidgetStyleSettings {
@@ -441,9 +475,10 @@ private struct ProviderQuotaTileView: View {
   }
 
   private func loadedContent(account: ProviderTileSelection, usage: ProviderUsage) -> some View {
+    let status = entry.status
     let metrics = defaultRingMetrics(for: usage)
     let tints = ringTints(for: metrics, in: usage)
-    let paces = metrics.map { pace(for: $0, in: usage) }
+    let paces = status == .current ? metrics.map { pace(for: $0, in: usage) } : []
     let showsTokenQuota = usage.provider == .longcat
     let subscription = subscriptionMetric(in: usage)
     let footerMetrics = usage.provider == .venice
@@ -453,8 +488,8 @@ private struct ProviderQuotaTileView: View {
 
     return VStack(spacing: 5) {
       if metrics.isEmpty {
-        balanceContent(account: account, usage: usage)
-          .padding(.top, entry.accountState == .autoSelected || isStale(usage) || usage.warning?.isEmpty == false ? 14 : 0)
+        balanceContent(account: account, usage: usage, status: status)
+          .padding(.top, entry.accountState == .autoSelected ? 14 : 0)
       } else {
         ProviderConcentricRings(
           metrics: metrics,
@@ -463,33 +498,41 @@ private struct ProviderQuotaTileView: View {
           paces: paces,
           showsTokenQuota: showsTokenQuota,
           subscriptionBalance: subscription.flatMap { subscriptionBalance(for: $0) },
-          subscriptionPercent: subscription?.remainingPercent
+          subscriptionPercent: subscription?.remainingPercent,
+          status: status
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-        VStack(spacing: 2) {
-          quotaFooter(metrics: footerMetrics, tints: footerTints, provider: usage.provider)
-          if showsTokenQuota, metrics.count == 1, let pace = paces.first ?? nil {
-            Text(pace.phrase.capitalized)
-              .font(.caption2.weight(.semibold))
-              .foregroundStyle(.white.opacity(0.72))
-              .lineLimit(1)
+        if status == .current {
+          VStack(spacing: 2) {
+            quotaFooter(metrics: footerMetrics, tints: footerTints, provider: usage.provider)
+            if showsTokenQuota, metrics.count == 1, let pace = paces.first ?? nil {
+              Text(pace.phrase.capitalized)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.72))
+                .lineLimit(1)
+            }
           }
         }
+      }
+
+      switch status {
+      case .current:
+        EmptyView()
+      case .stale:
+        Label(updatedSummary(for: usage), systemImage: "clock")
+          .font(.caption2.weight(.semibold))
+          .foregroundStyle(.white.opacity(0.82))
+          .lineLimit(1)
+          .minimumScaleFactor(0.75)
+          .frame(minHeight: 13)
+      case .repair(let repair):
+        repairFooter(repair)
       }
     }
     .padding(.horizontal, 14)
     .padding(.top, 13)
     .padding(.bottom, 12)
-    .overlay(alignment: .topTrailing) {
-      if isStale(usage) || usage.warning?.isEmpty == false {
-        Image(systemName: "exclamationmark.circle.fill")
-          .font(.caption)
-          .foregroundStyle(.orange, .black.opacity(0.35))
-          .padding(10)
-          .accessibilityHidden(true)
-      }
-    }
     .overlay(alignment: .topLeading) {
       // Number badge only while the tile is auto-mapped, so users can match
       // desktop tiles to the numbered rows in Settings → Widgets.
@@ -515,12 +558,19 @@ private struct ProviderQuotaTileView: View {
     }
   }
 
-  private func balanceContent(account: ProviderTileSelection, usage: ProviderUsage) -> some View {
-    VStack(alignment: .leading, spacing: 10) {
-      Text(account.displayName)
-        .font(.headline)
-        .lineLimit(2)
-        .minimumScaleFactor(0.8)
+  private func balanceContent(
+    account: ProviderTileSelection, usage: ProviderUsage, status: ProviderTileStatus
+  ) -> some View {
+    VStack(alignment: .leading, spacing: status == .current ? 10 : 5) {
+      VStack(alignment: .leading, spacing: 1) {
+        Text(account.displayName)
+          .font(.headline)
+          .lineLimit(status == .current ? 2 : 1)
+          .minimumScaleFactor(0.8)
+        if status.repair != nil {
+          Text("Last known").font(.caption2).foregroundStyle(.white.opacity(0.82))
+        }
+      }
 
       ForEach(Array(usage.metrics.filter { $0.usageLine != nil }.prefix(3))) { metric in
         VStack(alignment: .leading, spacing: 1) {
@@ -528,22 +578,45 @@ private struct ProviderQuotaTileView: View {
             .font(.system(size: 9))
             .foregroundStyle(.white.opacity(0.72))
             .lineLimit(1)
-          Text(balanceLine(for: metric, provider: usage.provider))
+          Text(balanceLine(for: metric, provider: usage.provider, showsCountdown: status == .current))
             .font(.caption.weight(.semibold))
             .monospacedDigit()
             .lineLimit(1)
             .minimumScaleFactor(0.7)
-          if let expiry = expirySummary(for: metric, showsCountdown: false) {
+          if status == .current, let expiry = expirySummary(for: metric, showsCountdown: false) {
             Text(expiry)
               .font(.caption2)
               .foregroundStyle(.white.opacity(0.72))
               .lineLimit(1)
           }
         }
+        .opacity(status == .current ? 1 : 0.72)
       }
     }
     .foregroundStyle(.white)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+  }
+
+  private func repairFooter(_ repair: QuotaAccountRepair) -> some View {
+    HStack(spacing: 4) {
+      Text(repair.title)
+      Image(systemName: "arrow.up.right")
+    }
+    .font(.caption2.weight(.semibold))
+    .foregroundStyle(Color(red: 0.27, green: 0.14, blue: 0.07))
+    .lineLimit(1)
+    .minimumScaleFactor(0.8)
+    .padding(.horizontal, 8)
+    .padding(.vertical, 3)
+    .background(Color(red: 1, green: 0.89, blue: 0.69), in: Capsule())
+  }
+
+  private func updatedSummary(for usage: ProviderUsage) -> String {
+    guard entry.date.timeIntervalSince(usage.fetchedAt) >= 60 else { return "Updated just now" }
+    let formatter = RelativeDateTimeFormatter()
+    formatter.unitsStyle = .abbreviated
+    let age = formatter.localizedString(for: usage.fetchedAt, relativeTo: entry.date)
+    return "Updated \(age)"
   }
 
   private func unavailableContent(
@@ -561,6 +634,9 @@ private struct ProviderQuotaTileView: View {
         .font(.caption2)
         .foregroundStyle(.secondary)
         .multilineTextAlignment(.center)
+      if let repair = entry.status.repair {
+        repairFooter(repair)
+      }
     }
     .padding(16)
   }
@@ -570,7 +646,8 @@ private struct ProviderQuotaTileView: View {
     case .accountDisabled:
       return "pause.circle"
     default:
-      if entry.failure != nil { return "exclamationmark.triangle.fill" }
+      if entry.status.repair != nil { return "person.crop.circle" }
+      if entry.failure != nil { return "clock.arrow.circlepath" }
       return hasUsageWithoutPercentage ? "questionmark.circle" : "arrow.clockwise.circle"
     }
   }
@@ -580,7 +657,7 @@ private struct ProviderQuotaTileView: View {
     case .accountDisabled:
       return "Account disabled in LLimit"
     default:
-      if entry.failure != nil { return "Quota unavailable" }
+      if entry.failure != nil || entry.status.repair != nil { return "Quota unavailable" }
       return hasUsageWithoutPercentage ? "Quota percentage unavailable" : "Refresh in LLimit"
     }
   }
@@ -613,10 +690,11 @@ private struct ProviderQuotaTileView: View {
     .padding(16)
   }
 
-  private func balanceLine(for metric: UsageMetric, provider: QuotaProvider) -> String {
+  private func balanceLine(for metric: UsageMetric, provider: QuotaProvider, showsCountdown: Bool = true) -> String {
     let amount = provider == .venice && metric.isVeniceSubscription
       ? (subscriptionBalance(for: metric) ?? "")
       : (metric.usageLine ?? "")
+    guard showsCountdown else { return amount }
     if provider == .venice, let refill = metric.refillAt ?? metric.paceWindow?.end {
       let seconds = refill.timeIntervalSince(entry.date)
       return "\(amount) · \(seconds > 0 ? compactCountdown(seconds) : "refill due")"
@@ -700,20 +778,6 @@ private struct ProviderQuotaTileView: View {
     QuotaPace(metric: metric, provider: usage.provider, fetchedAt: usage.fetchedAt, now: entry.date)
   }
 
-  private func isStale(_ usage: ProviderUsage) -> Bool {
-    if entry.failure != nil { return true }
-    let rings = defaultRingMetrics(for: usage)
-    let displayedMetrics = rings.isEmpty ? usage.metrics : rings
-    if displayedMetrics.contains(where: { metric in
-      [metric.resetAt, metric.expiresAt].compactMap { $0 }.contains { $0 <= entry.date }
-    }) {
-      return true
-    }
-    let refreshMinutes = min(max(entry.refreshIntervalMinutes, 15), 180)
-    let staleAfter = max(3_600, TimeInterval(refreshMinutes) * 120)
-    return entry.date.timeIntervalSince(usage.fetchedAt) > staleAfter
-  }
-
   private var accessibilitySummary: String {
     guard let account = entry.account else {
       switch entry.accountState {
@@ -731,10 +795,7 @@ private struct ProviderQuotaTileView: View {
     }
 
     guard let usage = entry.usage else {
-      if let failure = entry.failure {
-        return "\(account.displayName). Quota unavailable. \(failure.kind.rawValue)."
-      }
-      return "\(account.displayName). No quota data. Refresh in LLimit."
+      return unavailableAccessibilitySummary(account: account, hasUsageWithoutPercentage: false)
     }
 
     let metrics = defaultRingMetrics(for: usage)
@@ -747,12 +808,10 @@ private struct ProviderQuotaTileView: View {
       readableMetrics = metrics
     }
     guard !readableMetrics.isEmpty else {
-      if let failure = entry.failure {
-        return "\(account.displayName). Quota unavailable. \(failure.kind.rawValue)."
-      }
-      return "\(account.displayName). Quota percentage unavailable."
+      return unavailableAccessibilitySummary(account: account, hasUsageWithoutPercentage: true)
     }
 
+    let status = entry.status
     let metricSummary = readableMetrics.map { metric in
       let quota: String
       if metric.isUnlimited {
@@ -769,6 +828,7 @@ private struct ProviderQuotaTileView: View {
       } else {
         quota = metric.usageLine ?? "remaining quota unknown"
       }
+      guard status == .current else { return "\(metric.label), \(quota)" }
       let paceSummary = pace(for: metric, in: usage).map { ", \($0.phrase)" } ?? ""
       let reset = metric.resetAt != nil || metric.resetIn != nil
         ? ", \(resetSummary(for: metric, expanded: true))" : ""
@@ -777,10 +837,23 @@ private struct ProviderQuotaTileView: View {
       return "\(metric.label), \(quota)\(paceSummary)\(reset)\(expiry)\(refill)"
     }.joined(separator: ". ")
 
-    let freshness = isStale(usage) ? "Data is stale." : "Data is current."
-    let failureState = entry.failure == nil ? "" : " Latest refresh failed."
-    let warningState = usage.warning.map { " \($0)" } ?? ""
-    return "\(account.displayName). \(metricSummary). \(freshness)\(failureState)\(warningState)"
+    switch status {
+    case .current:
+      let warning = usage.warning.map { " \($0)." } ?? ""
+      return "\(account.displayName). \(metricSummary).\(warning)"
+    case .stale:
+      return "\(account.displayName). \(updatedSummary(for: usage)). Last known quota. \(metricSummary)."
+    case .repair(let repair):
+      return "\(account.displayName). \(repair.title) in LLimit. Last known quota. \(metricSummary)."
+    }
+  }
+
+  private func unavailableAccessibilitySummary(
+    account: ProviderTileSelection, hasUsageWithoutPercentage: Bool
+  ) -> String {
+    let message = unavailableMessage(hasUsageWithoutPercentage: hasUsageWithoutPercentage)
+    let action = entry.status.repair.map { " \($0.title) in LLimit." } ?? ""
+    return "\(account.displayName). \(message).\(action)"
   }
 
   private func expirySummary(for metric: UsageMetric, expanded: Bool = false, showsCountdown: Bool = true) -> String? {
@@ -834,6 +907,7 @@ private struct ProviderConcentricRings: View {
   let showsTokenQuota: Bool
   let subscriptionBalance: String?
   let subscriptionPercent: Int?
+  let status: ProviderTileStatus
 
   var body: some View {
     GeometryReader { proxy in
@@ -852,6 +926,7 @@ private struct ProviderConcentricRings: View {
             hasFlatCaps: showsTokenQuota
           )
           .frame(width: side, height: side)
+          .opacity(status == .current ? 1 : 0.56)
         }
 
         if let inner {
@@ -863,6 +938,7 @@ private struct ProviderConcentricRings: View {
             hasFlatCaps: showsTokenQuota
           )
           .frame(width: side * innerScale, height: side * innerScale)
+          .opacity(status == .current ? 1 : 0.56)
         }
 
         VStack(spacing: 2) {
@@ -880,11 +956,17 @@ private struct ProviderConcentricRings: View {
               .monospacedDigit()
               .lineLimit(1)
               .minimumScaleFactor(0.65)
-            Text("Subscription")
+            Text(status.repair == nil ? "Subscription" : "Last known")
               .font(.caption2.weight(.semibold))
               .foregroundStyle(.white.opacity(0.78))
               .lineLimit(1)
               .minimumScaleFactor(0.60)
+          } else if status.repair != nil {
+            Text("Last known")
+              .font(.caption2)
+              .foregroundStyle(.white.opacity(0.82))
+              .lineLimit(1)
+              .minimumScaleFactor(0.75)
           } else if showsTokenQuota, inner == nil, let outer, let percent = tokenPercentage(outer) {
             Text("\(percent) left")
               .font(.caption.weight(.semibold))

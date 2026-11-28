@@ -54,7 +54,7 @@ public enum RefreshAvailability: Equatable, Sendable {
   /// some first: it renews managed Claude profiles (reporting when that fails), and
   /// renews or adopts an imported OpenAI login's access token from its refresh token
   /// or ChatGPT account id.
-  private static func isRefreshable(_ account: ProviderAccount) -> Bool {
+  static func isRefreshable(_ account: ProviderAccount) -> Bool {
     if account.hasRequiredCredentials { return true }
     let stored = account.credentials
     if account.provider == .anthropic, ClaudeCodeProfile.profile(from: stored) != nil,

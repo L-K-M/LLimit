@@ -13,6 +13,16 @@ public enum QuotaFreshness {
     return max(minimumMaxAge, TimeInterval(clamped * toleratedIntervals * 60))
   }
 
+  /// A displayed window can turn over before its last reading ages out.
+  public static func deadline(
+    fetchedAt: Date, refreshIntervalMinutes: Int?, metrics: [UsageMetric]
+  ) -> Date {
+    let ageDeadline = fetchedAt.addingTimeInterval(maxAge(refreshIntervalMinutes: refreshIntervalMinutes))
+    return metrics.reduce(ageDeadline) { deadline, metric in
+      [metric.resetAt, metric.expiresAt].compactMap { $0 }.reduce(deadline, min)
+    }
+  }
+
   public static func isStale(
     fetchedAt: Date, in snapshot: QuotaSnapshot, now: Date, maxAge override: TimeInterval? = nil
   ) -> Bool {
