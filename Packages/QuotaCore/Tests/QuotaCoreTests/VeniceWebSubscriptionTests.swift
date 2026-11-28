@@ -14,6 +14,7 @@ final class VeniceWebSubscriptionTests: XCTestCase {
     XCTAssertEqual(metric.remainingPercent, 75)
     XCTAssertEqual(metric.remainingFraction, 0.75)
     XCTAssertEqual(metric.remainingAmount, 9_000)
+    XCTAssertEqual(metric.usedDisplay, "9000 credits")
     XCTAssertEqual(metric.totalAmount, 12_000)
     XCTAssertEqual(metric.refillAt, refill)
     XCTAssertEqual(metric.paceWindow?.end, refill)
@@ -55,6 +56,15 @@ final class VeniceWebSubscriptionTests: XCTestCase {
       {"availableCredits":0,"monthlyRefillCredits":7500,"usedThisCycle":0,"nextRefillAt":1800000000000}
       """).metric(asOf: now))
     XCTAssertNil(metric.remainingPercent)
+    XCTAssertEqual(metric.refillAt, refill)
+  }
+
+  func testMissingAvailableCreditsFollowsTheDashboardDefault() throws {
+    let metric = try XCTUnwrap(parse("""
+      {"bundledCredits":9000,"monthlyRefillCredits":7500,"usedThisCycle":3000,"nextRefillAt":1800000000000}
+      """).metric(asOf: now))
+    XCTAssertEqual(metric.remainingAmount, 0)
+    XCTAssertEqual(metric.remainingPercent, 0)
     XCTAssertEqual(metric.refillAt, refill)
   }
 
@@ -106,6 +116,7 @@ final class VeniceWebSubscriptionTests: XCTestCase {
     XCTAssertEqual(restored.providers[0].metrics[0].estimatedTotal, 50)
     XCTAssertEqual(restored.providers[0].metrics[0].remainingPercent, 0)
     XCTAssertEqual(restored.providers[0].metrics[1], web)
+    XCTAssertEqual(restored.providers[0].warning, "Daily DIEM exhausted. Subscription credits remain.")
     XCTAssertEqual(restored.providers[0].fetchedAt, now)
     XCTAssertEqual(snapshot.restoringVeniceDailyEstimates(from: [priorSnapshot], now: reset), snapshot)
 

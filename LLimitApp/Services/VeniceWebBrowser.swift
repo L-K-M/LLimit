@@ -185,7 +185,8 @@ final class VeniceWebBrowser: NSObject, WKNavigationDelegate {
       const base64 = encoded[1].replace(/-/g, "+").replace(/_/g, "/");
       const bytes = Uint8Array.from(atob(base64), character => character.charCodeAt(0));
       const claims = JSON.parse(new TextDecoder().decode(bytes));
-      if (clerk.session?.id !== session.id ||
+      if (!clerk.session) return reply("signedOut");
+      if (clerk.session.id !== session.id ||
           (claims.clerkUserId != null && claims.clerkUserId !== session.user.id)) return reply("wrongAccount");
       if (typeof claims.authSystemUserId !== "string" || !claims.authSystemUserId.trim()) {
         return reply("invalidResponse");
@@ -193,7 +194,7 @@ final class VeniceWebBrowser: NSObject, WKNavigationDelegate {
 
       const usage = claims.bundledCreditsUsage;
       const subscription = usage == null ? null : {
-        availableCredits: usage.availableCredits ?? claims.bundledCredits,
+        availableCredits: usage.availableCredits,
         usedThisCycle: usage.usedThisCycle,
         monthlyRefillCredits: usage.monthlyRefillCredits,
         nextRefillAt: usage.nextRefillAt

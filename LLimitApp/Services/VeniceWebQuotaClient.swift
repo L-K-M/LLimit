@@ -62,6 +62,7 @@ struct VeniceWebQuotaClient: QuotaProviderClient {
 
   @MainActor
   private static func read(_ profile: VeniceWebProfile) async throws -> VeniceWebBrowser.Reading {
+    try Task.checkCancellation()
     let browser = VeniceWebBrowser(profileID: profile.id, interactive: false)
     defer { browser.stop() }
     let reading = try await browser.read()

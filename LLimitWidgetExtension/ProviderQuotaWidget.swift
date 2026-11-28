@@ -205,12 +205,12 @@ struct ProviderTileTimelineProvider: TimelineProvider {
       offset += 5 * 60
     }
     if let usage = entry.usage {
-      for metric in defaultRingMetrics(for: usage) {
-        for boundary in [metric.resetAt, metric.expiresAt, metric.refillAt, metric.paceWindow?.end].compactMap({ $0 })
-          where boundary > now && boundary < nextRefresh
-        {
-          entryDates.insert(boundary)
-        }
+      let ringBoundaries = defaultRingMetrics(for: usage).flatMap { metric in
+        [metric.resetAt, metric.expiresAt, metric.paceWindow?.end].compactMap { $0 }
+      }
+      let refills = usage.metrics.compactMap(\.refillAt)
+      for boundary in ringBoundaries + refills where boundary > now && boundary < nextRefresh {
+        entryDates.insert(boundary)
       }
     }
 

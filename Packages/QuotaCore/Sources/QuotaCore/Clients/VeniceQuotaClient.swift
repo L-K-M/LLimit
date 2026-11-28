@@ -123,7 +123,7 @@ public struct VeniceQuotaClient: QuotaProviderClient {
   }
 
   static func dailyDIEMExhaustedWarning(metrics: [UsageMetric]) -> String {
-    if metrics.contains(where: { $0.id == "bundled-credits" && ($0.remainingAmount ?? 0) > 0 }) {
+    if metrics.contains(where: { $0.isVeniceSubscription && ($0.remainingAmount ?? 0) > 0 }) {
       return "Daily DIEM exhausted. Subscription credits remain."
     }
     return "Daily DIEM exhausted"
