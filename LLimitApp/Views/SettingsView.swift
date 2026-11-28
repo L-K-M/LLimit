@@ -12,6 +12,8 @@ struct SettingsView: View {
     case account(String)
   }
 
+  private let accountTopAnchor = "account-top"
+
   /// One account text field. Drafts are keyed by account, so a draft always commits
   /// to the account it was typed for, whichever account is selected by then.
   private struct AccountFieldKey: Hashable {
@@ -25,6 +27,7 @@ struct SettingsView: View {
   }
 
   @ObservedObject var model: AppModel
+  @ObservedObject var settingsWindow: SettingsWindowController
   @State private var selection: SettingsItem? = .overview
   /// Uncommitted text of account name and credential fields. Saving a credential can
   /// clear a Venice account's history, so keystrokes stay here until the field commits:
@@ -40,6 +43,10 @@ struct SettingsView: View {
 
   private var availableRefreshIntervalOptions: [Int] {
     Array(Set(refreshIntervalOptions + [model.refreshIntervalMinutes])).sorted()
+  }
+
+  private var pendingWidgetNavigation: SettingsWindowController.WidgetNavigation? {
+    model.hasLoadedLocalState ? settingsWindow.widgetNavigation : nil
   }
 
   var body: some View {
@@ -88,9 +95,23 @@ struct SettingsView: View {
       LongcatLoginView(session: session, onClose: { model.dismissLongcatLogin() })
         .interactiveDismissDisabled()
     }
+    .onChange(of: pendingWidgetNavigation, initial: true) { _, navigation in
+      guard let navigation else { return }
+      if case .account(let id) = navigation.destination, model.account(withID: id) != nil {
+        selection = .account(id)
+      } else {
+        selection = .widgets
+        settingsWindow.widgetNavigation = nil
+      }
+    }
     .onChange(of: model.providerAccounts.map(\.id)) { _, accountIDs in
       if case .account(let accountID) = selection, !accountIDs.contains(accountID) {
-        selection = .overview
+        if settingsWindow.widgetNavigation?.destination == .account(accountID) {
+          selection = .widgets
+          settingsWindow.widgetNavigation = nil
+        } else {
+          selection = .overview
+        }
       }
     }
     .onChange(of: selection) { _, _ in
@@ -980,8 +1001,21 @@ struct SettingsView: View {
     .disabled(model.isScanningCredentials)
   }
 
-  @ViewBuilder
   private func accountTab(for accountID: String) -> some View {
+    ScrollViewReader { scroll in
+      accountDetail(for: accountID)
+        .onChange(of: pendingWidgetNavigation, initial: true) { _, navigation in
+          guard navigation?.destination == .account(accountID),
+                model.account(withID: accountID) != nil else { return }
+          scroll.scrollTo(accountTopAnchor, anchor: .top)
+          settingsWindow.widgetNavigation = nil
+        }
+    }
+    .id(accountID)
+  }
+
+  @ViewBuilder
+  private func accountDetail(for accountID: String) -> some View {
     if let account = model.account(withID: accountID) {
       let providerStyle = model.providerStyle(for: accountID)
       let credentialsAvailable = model.isAccountAvailable(accountID)
@@ -999,6 +1033,7 @@ struct SettingsView: View {
               key: nameKey
             )
           }
+          .id(accountTopAnchor)
 
           Divider()
 
@@ -1014,15 +1049,6 @@ struct SettingsView: View {
               .labelsHidden()
               .toggleStyle(.switch)
               .accessibilityLabel("Enabled")
-          }
-
-          Divider()
-
-          settingsRow(title: "Subscription cost") {
-            SubscriptionPricingEditor(pricing: account.subscriptionPricing) { pricing in
-              model.updateSubscriptionPricing(accountID: accountID, pricing: pricing)
-            }
-            .id(accountID)
           }
 
           Divider()
@@ -1122,6 +1148,15 @@ struct SettingsView: View {
             } else {
               manualCredentials(for: account)
             }
+          }
+
+          Divider()
+
+          settingsRow(title: "Subscription cost") {
+            SubscriptionPricingEditor(pricing: account.subscriptionPricing) { pricing in
+              model.updateSubscriptionPricing(accountID: accountID, pricing: pricing)
+            }
+            .id(accountID)
           }
 
           Divider()
@@ -1646,24 +1681,12 @@ struct SettingsView: View {
   }
 
   private func accountFailure(for accountID: String) -> ProviderFailure? {
-    guard let snapshot = model.snapshot else {
-      return nil
-    }
-
-    if let exactMatch = snapshot.failures.first(where: { $0.accountID == accountID }) {
-      return exactMatch
-    }
-
-    guard
-      let account = model.account(withID: accountID),
-      soleConfiguredAccount(for: account.provider) != nil
-    else {
-      return nil
-    }
-
-    return snapshot.failures.first { failure in
-      failure.provider == account.provider && failure.accountID == account.provider.rawValue
-    }
+    guard let account = model.account(withID: accountID),
+          let failures = model.snapshot?.preferredFailures else { return nil }
+    let key = QuotaAccountKey(provider: account.provider, accountID: accountID)
+    if let exactMatch = failures[key] { return exactMatch }
+    guard soleConfiguredAccount(for: account.provider) != nil else { return nil }
+    return failures[QuotaAccountKey(provider: account.provider, accountID: account.provider.rawValue)]
   }
 
   private func soleConfiguredAccount(for provider: QuotaProvider) -> ProviderAccount? {

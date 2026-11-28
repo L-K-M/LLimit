@@ -4,6 +4,11 @@ import Combine
 import QuotaCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+  func application(_ application: NSApplication, open urls: [URL]) {
+    guard let destination = urls.compactMap(ProviderTileDestination.init(url:)).last else { return }
+    SettingsWindowController.shared.show(model: AppModel.shared, destination: destination)
+  }
+
   func applicationDidFinishLaunching(_ notification: Notification) {
     GlobalHotkeyService.shared.start {
       DashboardWindowController.shared.toggleFromShortcut(model: AppModel.shared)
@@ -65,15 +70,24 @@ struct LLimitApp: App {
 /// Hosts `SettingsView` in a standard resizable AppKit window, created on first use and
 /// reused thereafter. Avoids the SwiftUI `Settings` scene (non-resizable) entirely.
 @MainActor
-final class SettingsWindowController: NSObject, NSWindowDelegate {
+final class SettingsWindowController: NSObject, NSWindowDelegate, ObservableObject {
+  struct WidgetNavigation: Equatable {
+    let destination: ProviderTileDestination
+    private let id = UUID()
+  }
+
   static let shared = SettingsWindowController()
+  @Published var widgetNavigation: WidgetNavigation?
   private var window: NSWindow?
   private var isOpen = false
   fileprivate var hasOpenWindow: Bool { isOpen }
 
-  func show(model: AppModel) {
+  func show(model: AppModel, destination: ProviderTileDestination? = nil) {
+    if let destination {
+      widgetNavigation = WidgetNavigation(destination: destination)
+    }
     if window == nil {
-      let hosting = NSHostingController(rootView: SettingsView(model: model))
+      let hosting = NSHostingController(rootView: SettingsView(model: model, settingsWindow: self))
       hosting.sizingOptions = []
 
       let window = NSWindow(contentViewController: hosting)

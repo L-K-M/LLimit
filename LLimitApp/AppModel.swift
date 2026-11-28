@@ -34,6 +34,8 @@ final class AppModel: ObservableObject {
   @Published var widgetBackgroundSettings: WidgetBackgroundSettings = .default
   @Published var widgetVisibility: WidgetVisibilitySettings = .default
   @Published var providerAccounts: [ProviderAccount] = []
+  // A cold-start widget link waits for the accounts and saved snapshot to load.
+  @Published private(set) var hasLoadedLocalState = false
   @Published var providerStyleSettings: [String: ProviderStyleSettings] = [:]
   /// Account ID per provider-tile widget slot; "" = automatic (Nth enabled account).
   @Published var providerTileSlots: [String] = []
@@ -166,6 +168,14 @@ final class AppModel: ObservableObject {
 
     reloadRecentHistory()
     reloadAccountStatuses()
+    hasLoadedLocalState = true
+    if !configurationLoadFailed {
+      let widgetSettings = currentSettings().redactedCredentials()
+      if (try? appGroupSettingsStore()?.load()) != widgetSettings,
+         syncSettingsToWidgetStore(widgetSettings) {
+        reloadWidgetTimelines()
+      }
+    }
     restartAutoRefreshLoop()
 
     if shouldRefreshOnBootstrap() {
