@@ -90,7 +90,7 @@ public enum TrendSeriesBuilder {
         let key = Key(usage, metric)
         if samples[key] == nil { order[usage.accountID, default: []].append(key) }
         samples[key, default: []].append(TrendSample(date: usage.fetchedAt,
-          remainingPercent: Double(clampPercent(remaining)), resetAt: metric.resetAt))
+          remainingPercent: Double(clampPercent(remaining)), resetAt: metric.resetAt ?? metric.refillAt))
         labels[key] = metric.label
       }
     }

@@ -95,6 +95,10 @@ struct SettingsView: View {
       LongcatLoginView(session: session, onClose: { model.dismissLongcatLogin() })
         .interactiveDismissDisabled()
     }
+    .sheet(item: $model.veniceLogin, onDismiss: { model.dismissVeniceLogin() }) { session in
+      VeniceLoginView(session: session, onClose: { model.dismissVeniceLogin() })
+        .interactiveDismissDisabled()
+    }
     .onChange(of: pendingWidgetNavigation, initial: true) { _, navigation in
       guard let navigation else { return }
       if case .account(let id) = navigation.destination, model.account(withID: id) != nil {
@@ -371,6 +375,7 @@ struct SettingsView: View {
           if provider == .stepFun { model.connectStepFunAccount(account.id) }
           if provider == .mistral { model.connectMistralAccount(account.id) }
           if provider == .longcat { model.connectLongcatAccount(account.id) }
+          if provider == .venice { model.connectVeniceAccount(account.id) }
         })
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(24)
@@ -1001,6 +1006,36 @@ struct SettingsView: View {
     .disabled(model.isScanningCredentials)
   }
 
+  private func veniceCredentials(for account: ProviderAccount) -> some View {
+    let connected = VeniceWebProfile.profile(from: account.credentials) != nil
+    return VStack(alignment: .leading, spacing: 10) {
+      HStack {
+        Button(connected ? "Reconnect Venice" : "Connect Venice") {
+          commitAccountDrafts()
+          model.connectVeniceAccount(account.id)
+        }
+        .buttonStyle(.borderedProminent)
+        if connected {
+          Button("Disconnect web sign-in") { model.disconnectVeniceAccount(account.id) }
+        }
+      }
+      .disabled(model.isRefreshing)
+      Text("Sign in for the remaining subscription percentage, including rolled-over credits, and the next refill. Add an API key to track daily DIEM as well.")
+        .font(.caption).foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+      if let refill = accountUsage(for: account.id)?.metrics.first(where: { $0.id == VeniceWebSubscription.metricID })?.refillAt {
+        Text("Next refill: \(refill.formatted(date: .abbreviated, time: .shortened))")
+          .font(.caption)
+      }
+      if let message = model.veniceAccountMessages[account.id] {
+        Text(message).font(.caption).fixedSize(horizontal: false, vertical: true)
+      }
+      DisclosureGroup("API key and manual subscription settings") {
+        manualCredentials(for: account)
+      }
+    }
+  }
+
   private func accountTab(for accountID: String) -> some View {
     ScrollViewReader { scroll in
       accountDetail(for: accountID)
@@ -1089,6 +1124,8 @@ struct SettingsView: View {
                 mimoResetDateField(for: AccountFieldKey(accountID: account.id, field: .credential(CredentialField.mimoResetAt)))
                 DisclosureGroup("Manual setup") { manualCredentials(for: account, excludingFields: [CredentialField.mimoResetAt]) }
               }
+            } else if account.provider == .venice {
+              veniceCredentials(for: account)
             } else if account.provider == .longcat {
               VStack(alignment: .leading, spacing: 10) {
                 Button(account.hasRequiredCredentials ? "Reconnect Longcat" : "Connect Longcat") {
@@ -1636,7 +1673,8 @@ struct SettingsView: View {
       return ("Refresh failed: \(failure.message)\(cachedDataNote)", false)
     }
 
-    if accountUsage(for: accountID) != nil {
+    if let usage = accountUsage(for: accountID) {
+      if account.provider == .venice, let warning = usage.warning { return (warning, false) }
       return ("Data loaded", true)
     }
 

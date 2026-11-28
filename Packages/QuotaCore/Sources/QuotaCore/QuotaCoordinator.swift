@@ -8,7 +8,8 @@ public struct QuotaCoordinator: Sendable {
   }
 
   public static func live(httpClient: any HTTPClient = URLSessionHTTPClient(),
-                          managedOpenAI: (any ManagedOpenAIUsageSource)? = nil) -> QuotaCoordinator {
+                          managedOpenAI: (any ManagedOpenAIUsageSource)? = nil,
+                          veniceWeb: (any QuotaProviderClient)? = nil) -> QuotaCoordinator {
     QuotaCoordinator(
       clients: [
         AnthropicClient(httpClient: httpClient),
@@ -31,7 +32,7 @@ public struct QuotaCoordinator: Sendable {
         DevinQuotaClient(httpClient: httpClient),
         MetaMuseQuotaClient(httpClient: httpClient),
         OpenCodeGoQuotaClient(httpClient: httpClient),
-        VeniceQuotaClient(httpClient: httpClient),
+        veniceWeb ?? VeniceQuotaClient(httpClient: httpClient),
         ClineQuotaClient(httpClient: httpClient),
         JunieQuotaClient(httpClient: httpClient),
         MiniMaxQuotaClient(httpClient: httpClient),

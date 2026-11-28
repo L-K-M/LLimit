@@ -172,6 +172,15 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     try withStoreFileLock(at: fileURL) { try removeLocked(accountIDs: accountIDs) }
   }
 
+  public func remove(accountID: String, metricID: String) throws {
+    guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+    try withStoreFileLock(at: fileURL) {
+      let history = try loadLocked(policy: .recover)
+      let filtered = history.map { $0.removingMetric(metricID, forAccountID: accountID) }
+      if filtered != history { try saveLocked(filtered) }
+    }
+  }
+
   private func removeLocked(accountIDs: Set<String>) throws {
     let history = try loadLocked(policy: .recover)
     let filtered = history.map { snapshot in

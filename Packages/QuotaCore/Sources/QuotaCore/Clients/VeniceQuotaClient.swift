@@ -123,7 +123,7 @@ public struct VeniceQuotaClient: QuotaProviderClient {
   }
 
   static func dailyDIEMExhaustedWarning(metrics: [UsageMetric]) -> String {
-    if metrics.contains(where: { $0.id == "bundled-credits" && ($0.remainingAmount ?? 0) > 0 }) {
+    if metrics.contains(where: { $0.isVeniceSubscription && ($0.remainingAmount ?? 0) > 0 }) {
       return "Daily DIEM exhausted. Subscription credits remain."
     }
     return "Daily DIEM exhausted"
@@ -162,7 +162,7 @@ public struct VeniceQuotaClient: QuotaProviderClient {
     catch { throw Self.invalidResponse }
   }
 
-  private static func amount(_ value: Double, minimumFractionDigits: Int = 0) -> String {
+  static func amount(_ value: Double, minimumFractionDigits: Int = 0) -> String {
     if value != 0, abs(value) < 0.000001 {
       return String(format: "%.6g", locale: Locale(identifier: "en_US_POSIX"), value).lowercased()
     }

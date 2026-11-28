@@ -64,3 +64,28 @@ enum VeniceQuotaEstimate {
     return result
   }
 }
+
+public extension QuotaSnapshot {
+  /// Rebuild a missing daily estimate from an earlier observation of the same
+  /// key and server epoch. A cleared baseline should not hide an exhausted ring.
+  func restoringVeniceDailyEstimates(from history: [QuotaSnapshot], now: Date) -> QuotaSnapshot {
+    var result = self
+    for index in result.providers.indices where result.providers[index].provider == .venice {
+      let usage = result.providers[index]
+      guard let metric = usage.metrics.first(where: { $0.id == "daily-diem" }),
+            metric.remainingPercent == nil, let amount = metric.remainingAmount, amount <= 0,
+            let keyHash = metric.estimateKeyHash, let reset = metric.resetAt, reset > now else { continue }
+
+      let previous = history.lazy.flatMap(\.providers).filter { prior in
+        prior.accountKey == usage.accountKey && prior.fetchedAt < usage.fetchedAt
+          && prior.metrics.contains { priorMetric in
+            priorMetric.id == metric.id && priorMetric.isPercentageEstimated
+              && priorMetric.estimateKeyHash == keyHash && priorMetric.resetAt == reset
+          }
+      }.max { $0.fetchedAt < $1.fetchedAt }
+      guard let previous else { continue }
+      result.providers[index] = VeniceQuotaEstimate.applying(to: usage, previous: previous)
+    }
+    return result
+  }
+}

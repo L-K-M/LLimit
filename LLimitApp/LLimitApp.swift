@@ -2087,6 +2087,12 @@ private struct MetricQuotaRow: View {
           .foregroundStyle(.orange)
       }
 
+      if let refill = metric.refillAt {
+        Text("Next refill: \(refill.formatted(date: .abbreviated, time: .shortened))")
+          .font(.system(size: 10))
+          .foregroundStyle(DashboardPalette.tertiaryText)
+      }
+
       if let detail = metric.detail, !detail.isEmpty {
         Text(detail)
           .font(.system(size: 10))

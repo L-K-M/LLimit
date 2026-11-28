@@ -79,6 +79,20 @@ public extension QuotaSnapshot {
     return reconciled
   }
 
+  /// Remove one metric while keeping the account's other measurements.
+  func removingMetric(_ metricID: String, forAccountID accountID: String) -> QuotaSnapshot {
+    var result = self
+    result.providers = providers.compactMap { usage in
+      guard usage.accountID == accountID, usage.metrics.contains(where: { $0.id == metricID }) else { return usage }
+      var remaining = usage
+      remaining.metrics.removeAll { $0.id == metricID }
+      guard !remaining.metrics.isEmpty else { return nil }
+      remaining.maxUsagePercent = remaining.metrics.compactMap(\.remainingPercent).min().map { 100 - $0 }
+      return remaining
+    }
+    return result
+  }
+
   /// Returns a copy of this snapshot with the usage/failure entries for `accountIDs`
   /// replaced by whatever `other` holds for those accounts. Used to splice a targeted
   /// re-fetch (e.g. an OpenAI-only retry) back into the full snapshot without re-fetching

@@ -76,6 +76,8 @@ final class AppModel: ObservableObject {
   @Published var stepFunLogin: StepFunLoginSession?
   @Published var mistralLogin: MistralLoginSession?
   @Published var longcatLogin: LongcatLoginSession?
+  @Published var veniceLogin: VeniceLoginSession?
+  @Published private(set) var veniceAccountMessages: [String: String] = [:]
   @Published private(set) var codexAccountMessages: [String: String] = [:]
   @Published private var codexBusyAccounts: Set<String> = []
   private var signInSkippedAccountIDs: Set<String> = []
@@ -118,7 +120,7 @@ final class AppModel: ObservableObject {
     self.snapshotStore = snapshotStore
     self.historyStore = historyStore
     self.refreshService = RefreshService(
-      coordinator: QuotaCoordinator.live(managedOpenAI: codexAccounts),
+      coordinator: QuotaCoordinator.live(managedOpenAI: codexAccounts, veniceWeb: VeniceWebQuotaClient()),
       snapshotStore: snapshotStore
     )
     self.launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -158,6 +160,7 @@ final class AppModel: ObservableObject {
     hasBootstrapped = true
 
     await loadConfiguration()
+    reloadRecentHistory()
 
     do {
       snapshot = try loadSnapshotFromPreferredStore()
@@ -166,7 +169,6 @@ final class AppModel: ObservableObject {
       statusMessage = "Could not load snapshot: \(error.localizedDescription)"
     }
 
-    reloadRecentHistory()
     reloadAccountStatuses()
     hasLoadedLocalState = true
     if !configurationLoadFailed {
@@ -274,6 +276,7 @@ final class AppModel: ObservableObject {
       .union(stepFunLogin.map { [$0.accountID] } ?? [])
       .union(mistralLogin.map { [$0.accountID] } ?? [])
       .union(longcatLogin.map { [$0.accountID] } ?? [])
+      .union(veniceLogin.map { [$0.accountID] } ?? [])
   }
 
   func benchmarkRevision(accountID: String) -> UUID? {
@@ -593,6 +596,7 @@ final class AppModel: ObservableObject {
     if stepFunLogin?.accountID == accountID { dismissStepFunLogin() }
     if mistralLogin?.accountID == accountID { dismissMistralLogin() }
     if longcatLogin?.accountID == accountID { dismissLongcatLogin() }
+    if veniceLogin?.accountID == accountID { dismissVeniceLogin() }
     var updated = currentSettings()
     updated.accounts.removeAll { $0.id == accountID }
     updated.providerStyleSettings.removeAll { $0.accountID == accountID }
@@ -624,6 +628,10 @@ final class AppModel: ObservableObject {
         }
       }
     }
+    if removedAccount.provider == .venice, let profile = VeniceWebProfile.profile(from: removedAccount.credentials) {
+      retireVeniceProfile(profile.id, accountID: accountID)
+    }
+    veniceAccountMessages[accountID] = nil
     codexAccountMessages[accountID] = nil
     codexUsageReceipts[accountID] = nil
     credentialEditRevisions[accountID] = nil
@@ -777,6 +785,7 @@ final class AppModel: ObservableObject {
       && !codexAccountIsBusy(account.id) && !claudeAccountIsBusy(account.id)
       && stepFunLogin?.accountID != account.id
       && mistralLogin?.accountID != account.id
+      && veniceLogin?.accountID != account.id
       && longcatLogin?.accountID != account.id
   }
 
@@ -1049,6 +1058,90 @@ final class AppModel: ObservableObject {
     reloadAccountStatuses()
     if syncSettingsToWidgetStore(currentSettings().redactedCredentials()) { reloadWidgetTimelines() }
     catchUpAfterSignIn(accountID)
+  }
+
+  func connectVeniceAccount(_ accountID: String) {
+    guard !isRefreshing, veniceLogin == nil, !configurationLoadFailed,
+          account(withID: accountID)?.provider == .venice else { return }
+    let revision = credentialEditRevisions[accountID]
+    veniceAccountMessages[accountID] = nil
+    signInSkippedAccountIDs.insert(accountID)
+    veniceLogin = VeniceLoginSession(accountID: accountID) { [weak self] profileID, reading in
+      guard let self, self.veniceLogin?.id == profileID,
+            self.credentialEditRevisions[accountID] == revision else { throw CancellationError() }
+      try self.saveVeniceConnection(VeniceWebProfile(id: profileID, userID: reading.userID), accountID: accountID)
+      self.veniceLogin = nil
+      self.catchUpAfterSignIn(accountID)
+    }
+  }
+
+  func dismissVeniceLogin() {
+    guard let session = veniceLogin else { return }
+    session.cancel()
+    veniceLogin = nil
+    retireVeniceProfile(session.id, accountID: session.accountID)
+    catchUpAfterSignIn(session.accountID)
+  }
+
+  func disconnectVeniceAccount(_ accountID: String) {
+    guard !isRefreshing, veniceLogin?.accountID != accountID else { return }
+    do {
+      try saveVeniceConnection(nil, accountID: accountID)
+      signInSkippedAccountIDs.insert(accountID)
+      catchUpAfterSignIn(accountID)
+    } catch {
+      veniceAccountMessages[accountID] = "Could not disconnect Venice. Check LLimit’s storage permissions and try again."
+    }
+  }
+
+  private func saveVeniceConnection(_ profile: VeniceWebProfile?, accountID: String) throws {
+    guard !configurationLoadFailed,
+          let index = providerAccounts.firstIndex(where: { $0.id == accountID && $0.provider == .venice }) else {
+      throw CancellationError()
+    }
+    var settings = currentSettings()
+    let old = VeniceWebProfile.profile(from: settings.accounts[index].credentials)
+    if let old, let profile, old.userID != profile.userID {
+      throw ProviderClientError(kind: .auth,
+        message: "This is a different Venice account. Disconnect the existing web sign-in before connecting another.")
+    }
+    // The web login and API key are independent. Retain the observed daily
+    // DIEM baseline so linking a subscription doesn't discard its estimate.
+    if let current = try snapshotStore.load(policy: .recover) ?? snapshot {
+      var updated = current.removingMetric(VeniceWebSubscription.metricID, forAccountID: accountID)
+      updated.failures.removeAll { $0.accountID == accountID && $0.provider == .venice }
+      if updated != current {
+        try snapshotStore.save(updated)
+        snapshot = updated
+        if syncSnapshotToWidgetStore(updated) { reloadWidgetTimelines() }
+      }
+    }
+    if profile == nil {
+      try historyStore.remove(accountID: accountID, metricID: VeniceWebSubscription.metricID)
+      reloadRecentHistory()
+      do { try appGroupHistoryStore()?.remove(accountID: accountID, metricID: VeniceWebSubscription.metricID) }
+      catch { invalidateAppGroupStores() }
+    }
+    settings.accounts[index].credentials[CredentialField.veniceWebProfile] = profile?.id.uuidString
+    settings.accounts[index].credentials[CredentialField.veniceWebUserID] = profile?.userID
+    try settingsStore.save(settings)
+    settingsSaveTask?.cancel()
+    settingsSaveTask = nil
+    providerAccounts[index] = settings.accounts[index]
+    credentialEditRevisions[accountID] = UUID()
+    veniceAccountMessages[accountID] = nil
+    if let old { retireVeniceProfile(old.id, accountID: accountID) }
+    reloadAccountStatuses()
+    if syncSettingsToWidgetStore(settings.redactedCredentials()) { reloadWidgetTimelines() }
+  }
+
+  private func retireVeniceProfile(_ id: UUID, accountID: String) {
+    Task { [weak self] in
+      guard !(await VeniceWebBrowser.removeProfile(id)), let self else { return }
+      let message = "Could not remove an old local Venice web sign-in."
+      if self.account(withID: accountID) != nil { self.veniceAccountMessages[accountID] = message }
+      else { self.statusMessage = message }
+    }
   }
 
   func connectMistralAccount(_ accountID: String) {
@@ -1811,6 +1904,7 @@ final class AppModel: ObservableObject {
       if stepFunLogin?.accountID == accountID { return .rejected(.signInInProgress) }
       if mistralLogin?.accountID == accountID { return .rejected(.signInInProgress) }
       if longcatLogin?.accountID == accountID { return .rejected(.signInInProgress) }
+      if veniceLogin?.accountID == accountID { return .rejected(.signInInProgress) }
       if codexAccountIsBusy(accountID) { return .rejected(.signInInProgress) }
       // A connection owns every credential of its account, and Settings hides all
       // manual fields while connected. A draft committed now was typed before the
@@ -2548,6 +2642,7 @@ final class AppModel: ObservableObject {
     let activeAccounts = providerAccounts.filter { $0.isEnabled && $0.hasRequiredCredentials }
     let reconciled = currentSnapshot.reconciled(with: activeAccounts)
       .applyingVeniceSubscriptionAllowances(from: activeAccounts)
+      .restoringVeniceDailyEstimates(from: recentHistory, now: Date())
     guard reconciled != currentSnapshot else { return }
 
     snapshot = reconciled
