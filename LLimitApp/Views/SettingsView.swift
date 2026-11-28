@@ -12,10 +12,7 @@ struct SettingsView: View {
     case account(String)
   }
 
-  private enum AccountScrollTarget: Hashable {
-    case start
-    case connection
-  }
+  private let accountTopAnchor = "account-top"
 
   /// One account text field. Drafts are keyed by account, so a draft always commits
   /// to the account it was typed for, whichever account is selected by then.
@@ -1004,12 +1001,8 @@ struct SettingsView: View {
       accountDetail(for: accountID)
         .onChange(of: pendingWidgetNavigation, initial: true) { _, navigation in
           guard navigation?.destination == .account(accountID),
-                let account = model.account(withID: accountID) else { return }
-          let repair = QuotaAccountRepair(
-            needsSetup: !account.hasRequiredCredentials,
-            failureKind: accountFailure(for: accountID)?.kind)
-          let target: AccountScrollTarget = account.isEnabled && repair != nil ? .connection : .start
-          scroll.scrollTo(target, anchor: .top)
+                model.account(withID: accountID) != nil else { return }
+          scroll.scrollTo(accountTopAnchor, anchor: .top)
           settingsWindow.widgetNavigation = nil
         }
     }
@@ -1035,7 +1028,7 @@ struct SettingsView: View {
               key: nameKey
             )
           }
-          .id(AccountScrollTarget.start)
+          .id(accountTopAnchor)
 
           Divider()
 
@@ -1055,21 +1048,11 @@ struct SettingsView: View {
 
           Divider()
 
-          settingsRow(title: "Subscription cost") {
-            SubscriptionPricingEditor(pricing: account.subscriptionPricing) { pricing in
-              model.updateSubscriptionPricing(accountID: accountID, pricing: pricing)
-            }
-            .id(accountID)
-          }
-
-          Divider()
-
           providerStatusRow(
             title: "Credentials",
             message: model.status(for: accountID)?.detail ?? "Not checked",
             isPositive: credentialsAvailable
           )
-          .id(AccountScrollTarget.connection)
 
           Divider()
 
@@ -1160,6 +1143,15 @@ struct SettingsView: View {
             } else {
               manualCredentials(for: account)
             }
+          }
+
+          Divider()
+
+          settingsRow(title: "Subscription cost") {
+            SubscriptionPricingEditor(pricing: account.subscriptionPricing) { pricing in
+              model.updateSubscriptionPricing(accountID: accountID, pricing: pricing)
+            }
+            .id(accountID)
           }
 
           Divider()
