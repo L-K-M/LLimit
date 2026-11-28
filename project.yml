@@ -68,6 +68,11 @@ targets:
         CFBundleName: $(PRODUCT_NAME)
         CFBundlePackageType: APPL
         CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleURLTypes:
+          - CFBundleURLName: ch.lkmc.llimit.app
+            CFBundleTypeRole: Viewer
+            CFBundleURLSchemes:
+              - llimit
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         LSUIElement: true

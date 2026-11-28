@@ -1642,6 +1642,9 @@ public struct AppSettings: Codable, Hashable, Sendable {
   public var providerTileSlots: [String]
   /// Quota alert thresholds + toggles; delivery is platform-specific.
   public var alertSettings: QuotaAlertSettings
+  /// Derived before stripping credentials. Older widget settings lack this metadata.
+  private var widgetSetupAccountIDs: Set<String>?
+  public var widgetAccountIDsNeedingSetup: Set<String> { widgetSetupAccountIDs ?? [] }
 
   public init(
     refreshIntervalMinutes: Int = 30,
@@ -1737,7 +1740,7 @@ public struct AppSettings: Codable, Hashable, Sendable {
   }
 
   public func redactedCredentials() -> AppSettings {
-    AppSettings(
+    var redacted = AppSettings(
       refreshIntervalMinutes: refreshIntervalMinutes,
       accounts: accounts.map { $0.redactedCredentials() },
       widgetStyle: widgetStyle,
@@ -1746,6 +1749,10 @@ public struct AppSettings: Codable, Hashable, Sendable {
       widgetVisibility: widgetVisibility,
       providerTileSlots: providerTileSlots
     )
+    redacted.widgetSetupAccountIDs = widgetSetupAccountIDs ?? Set(accounts.lazy.filter {
+      $0.isEnabled && !RefreshAvailability.isRefreshable($0)
+    }.map(\.id))
+    return redacted
   }
 
   private enum CodingKeys: String, CodingKey {
@@ -1757,6 +1764,7 @@ public struct AppSettings: Codable, Hashable, Sendable {
     case widgetVisibility
     case providerTileSlots
     case alertSettings
+    case widgetAccountIDsNeedingSetup
   }
 
   public init(from decoder: Decoder) throws {
@@ -1797,6 +1805,7 @@ public struct AppSettings: Codable, Hashable, Sendable {
       QuotaAlertSettings.self,
       forKey: .alertSettings
     )) ?? QuotaAlertSettings()
+    widgetSetupAccountIDs = try? container.decodeIfPresent(Set<String>.self, forKey: .widgetAccountIDsNeedingSetup)
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -1809,6 +1818,7 @@ public struct AppSettings: Codable, Hashable, Sendable {
     try container.encode(widgetVisibility, forKey: .widgetVisibility)
     try container.encode(AppSettings.normalizedProviderTileSlots(providerTileSlots), forKey: .providerTileSlots)
     try container.encode(alertSettings, forKey: .alertSettings)
+    try container.encodeIfPresent(widgetSetupAccountIDs?.sorted(), forKey: .widgetAccountIDsNeedingSetup)
   }
 
   private static func normalizedAccounts(_ values: [ProviderAccount]) -> [ProviderAccount] {
