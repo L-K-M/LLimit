@@ -56,7 +56,7 @@ enum VeniceQuotaEstimate {
     result.maxUsagePercent = 100 - remaining
     if result.warning == nil {
       if amount <= 0 {
-        result.warning = "Daily DIEM exhausted"
+        result.warning = VeniceQuotaClient.dailyDIEMExhaustedWarning(metrics: result.metrics)
       } else if remaining <= 20 {
         result.warning = "High estimated DIEM usage"
       }

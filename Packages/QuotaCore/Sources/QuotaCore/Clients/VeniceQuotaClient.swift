@@ -6,7 +6,8 @@ import FoundationNetworking
 /// Reads API credit balances without making a paid inference request. Any
 /// Venice API key can read balances; an admin key also supplies the daily DIEM
 /// allocation for an exact percentage. The coordinator estimates missing daily
-/// totals from observed balances. USD and bundled credits have no quota.
+/// totals from observed balances. Other credit balances have no reported totals
+/// or refill dates.
 public struct VeniceQuotaClient: QuotaProviderClient {
   public let provider: QuotaProvider = .venice
   private let usageEndpoint: URL
@@ -52,8 +53,7 @@ public struct VeniceQuotaClient: QuotaProviderClient {
     } else {
       try checkStatus(billingResponse.statusCode)
       let decoded = try decode(VeniceBillingBalance.self, from: billingData)
-      guard decoded.diemEpochAllocation.isFinite,
-            [decoded.balances.diem, decoded.balances.usd].compactMap({ $0 }).allSatisfy(\.isFinite) else {
+      guard decoded.diemEpochAllocation.isFinite, decoded.balances.values.allSatisfy(\.isFinite) else {
         throw Self.invalidResponse
       }
       billing = decoded
@@ -85,11 +85,18 @@ public struct VeniceQuotaClient: QuotaProviderClient {
         resetIn: formatResetCountdown(to: resetAt, now: now), detail: detail
       ))
     }
-    if let usd = usage.balances.USD {
-      metrics.append(UsageMetric(id: "usd-balance", label: "USD balance", usedDisplay: Self.dollars(usd), detail: "Available to this API key."))
+    // Prefer the balance reported for this key, including an explicit zero.
+    if let bundled = usage.balances.BUNDLED_CREDITS ?? billing?.balances.bundledCredits {
+      metrics.append(UsageMetric(
+        id: "bundled-credits", label: "Subscription credits", remainingAmount: bundled,
+        usedDisplay: Self.dollars(bundled), detail: "Monthly plan credits. Some plans carry unused credits into later months."
+      ))
     }
-    if let bundled = usage.balances.BUNDLED_CREDITS {
-      metrics.append(UsageMetric(id: "bundled-credits", label: "Bundled credits balance", usedDisplay: Self.dollars(bundled), detail: "Available to this API key."))
+    if let earned = billing?.balances.earnedCredits {
+      metrics.append(UsageMetric(id: "earned-credits", label: "Earned credits", remainingAmount: earned, usedDisplay: Self.dollars(earned)))
+    }
+    if let usd = usage.balances.USD {
+      metrics.append(UsageMetric(id: "usd-balance", label: "USD balance", remainingAmount: usd, usedDisplay: Self.dollars(usd), detail: "Available to this API key."))
     }
     guard !metrics.isEmpty else { throw Self.invalidResponse }
 
@@ -100,7 +107,7 @@ public struct VeniceQuotaClient: QuotaProviderClient {
     } else if billing?.canConsume == false {
       warning = "API spending unavailable. Check Venice billing."
     } else if maxUsagePercent == 100, let diem = billing?.balances.diem, diem <= 0 {
-      warning = "Daily DIEM exhausted"
+      warning = Self.dailyDIEMExhaustedWarning(metrics: metrics)
     } else if let maxUsagePercent, maxUsagePercent >= 80 {
       warning = "High DIEM usage"
     } else {
@@ -111,6 +118,13 @@ public struct VeniceQuotaClient: QuotaProviderClient {
       subtitle: "Venice API credits", metrics: metrics, maxUsagePercent: maxUsagePercent,
       warning: warning, fetchedAt: now
     )
+  }
+
+  static func dailyDIEMExhaustedWarning(metrics: [UsageMetric]) -> String {
+    if metrics.contains(where: { $0.id == "bundled-credits" && ($0.remainingAmount ?? 0) > 0 }) {
+      return "Daily DIEM exhausted. Subscription credits remain."
+    }
+    return "Daily DIEM exhausted"
   }
 
   private func request(_ endpoint: URL, apiKey: String) async throws -> (Data, HTTPURLResponse) {
@@ -190,6 +204,10 @@ private struct VeniceBillingBalance: Decodable {
   struct Balances: Decodable {
     let diem: Double?
     let usd: Double?
+    let bundledCredits: Double?
+    let earnedCredits: Double?
+
+    var values: [Double] { [diem, usd, bundledCredits, earnedCredits].compactMap { $0 } }
   }
 
   let canConsume: Bool

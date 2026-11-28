@@ -32,9 +32,9 @@ final class VeniceQuotaClientTests: XCTestCase {
     XCTAssertEqual(usage.accountID, "venice-personal")
     XCTAssertEqual(usage.title, "Personal Venice")
     XCTAssertEqual(usage.fetchedAt, now)
-    XCTAssertEqual(usage.metrics.map(\.id), ["daily-diem", "usd-balance", "bundled-credits"])
+    XCTAssertEqual(usage.metrics.map(\.id), ["daily-diem", "bundled-credits", "usd-balance"])
     XCTAssertEqual(usage.metrics.map(\.remainingPercent), [40, nil, nil])
-    XCTAssertEqual(usage.metrics.map(\.usedDisplay), ["40 DIEM", "$7.50", "$2.00"])
+    XCTAssertEqual(usage.metrics.map(\.usedDisplay), ["40 DIEM", "$2.00", "$7.50"])
     XCTAssertTrue(usage.metrics.allSatisfy { $0.totalDisplay == nil })
     XCTAssertEqual(usage.metrics[0].detail, "Account daily allocation: 100 DIEM")
     XCTAssertEqual(usage.metrics[0].resetAt, parseISO8601("2026-09-30T00:00:00Z"))
@@ -76,7 +76,7 @@ final class VeniceQuotaClientTests: XCTestCase {
     for deniedStatus in [401, 403] {
       let http = VeniceHTTPStub(.response(200, usageBody), .response(deniedStatus, #"{"error":"Admin API key required"}"#))
       let usage = try await VeniceQuotaClient(httpClient: http).fetchUsage(configuration: configuration(), now: now)
-      XCTAssertEqual(usage.metrics.map(\.usedDisplay), ["40 DIEM", "$7.50", "$2.00"])
+      XCTAssertEqual(usage.metrics.map(\.usedDisplay), ["40 DIEM", "$2.00", "$7.50"])
       XCTAssertTrue(usage.metrics.allSatisfy { $0.remainingPercent == nil })
       XCTAssertTrue(try XCTUnwrap(usage.metrics[0].detail).contains("admin API key"))
       XCTAssertNotNil(usage.metrics[0].resetAt)
@@ -91,8 +91,33 @@ final class VeniceQuotaClientTests: XCTestCase {
     let usage = try await fetch(billing: billing)
     XCTAssertEqual(usage.metrics[0].remainingPercent, 10)
     XCTAssertEqual(usage.metrics[0].usedDisplay, "10 DIEM")
-    XCTAssertEqual(usage.metrics[1].usedDisplay, "$7.50", "Keep the USD balance available to the key")
+    XCTAssertEqual(usage.metrics.first { $0.id == "usd-balance" }?.usedDisplay, "$7.50", "Keep the USD balance available to the key")
     XCTAssertEqual(usage.warning, "High DIEM usage")
+  }
+
+  func testSubscriptionAndEarnedCreditsCanComeFromAdminBilling() async throws {
+    let rates = #"{"data":{"accessPermitted":true,"balances":{"DIEM":0,"USD":7.5},"nextEpochBegins":"2026-09-30T00:00:00Z"}}"#
+    let billing = #"{"canConsume":true,"balances":{"diem":0,"usd":20,"bundledCredits":42.5,"earnedCredits":3},"diemEpochAllocation":100}"#
+    let usage = try await fetch(rates: rates, billing: billing)
+
+    XCTAssertEqual(usage.metrics.map(\.id), ["daily-diem", "bundled-credits", "earned-credits", "usd-balance"])
+    XCTAssertEqual(usage.metrics.map(\.usedDisplay), ["0 DIEM", "$42.50", "$3.00", "$7.50"])
+    let subscription = try XCTUnwrap(usage.metrics.first { $0.id == "bundled-credits" })
+    XCTAssertEqual(subscription.label, "Subscription credits")
+    XCTAssertEqual(subscription.remainingAmount, 42.5)
+    XCTAssertNil(subscription.remainingPercent)
+    XCTAssertNil(subscription.totalAmount)
+    XCTAssertNil(subscription.resetAt)
+    XCTAssertEqual(usage.warning, "Daily DIEM exhausted. Subscription credits remain.")
+  }
+
+  func testKeySubscriptionBalanceTakesPrecedenceIncludingZero() async throws {
+    let rates = usageBody.replacingOccurrences(of: "\"BUNDLED_CREDITS\":2", with: "\"BUNDLED_CREDITS\":0")
+    let billing = #"{"canConsume":true,"balances":{"diem":40,"usd":7.5,"bundledCredits":50,"earnedCredits":null},"diemEpochAllocation":100}"#
+    let usage = try await fetch(rates: rates, billing: billing)
+
+    XCTAssertEqual(usage.metrics.first { $0.id == "bundled-credits" }?.usedDisplay, "$0.00")
+    XCTAssertFalse(usage.metrics.contains { $0.id == "earned-credits" })
   }
 
   func testZeroOrNegativeAllocationLeavesPercentageUnknown() async throws {
@@ -119,8 +144,8 @@ final class VeniceQuotaClientTests: XCTestCase {
       let usage = try await fetch(rates: rates, billing: billing)
       XCTAssertEqual(usage.metrics[0].remainingPercent, expectedPercent)
       XCTAssertEqual(usage.metrics[0].usedDisplay, expectedDisplay)
-      XCTAssertEqual(usage.metrics[1].usedDisplay, "-$1.25")
-      XCTAssertEqual(usage.warning, expectedPercent == 0 ? "Daily DIEM exhausted" : nil)
+      XCTAssertEqual(usage.metrics.first { $0.id == "usd-balance" }?.usedDisplay, "-$1.25")
+      XCTAssertEqual(usage.warning, expectedPercent == 0 ? "Daily DIEM exhausted. Subscription credits remain." : nil)
     }
   }
 
@@ -145,13 +170,13 @@ final class VeniceQuotaClientTests: XCTestCase {
     let billing = billingBody.replacingOccurrences(of: "\"diemEpochAllocation\":100", with: "\"diemEpochAllocation\":1e-300")
     let usage = try await fetch(rates: rates, billing: billing)
     XCTAssertEqual(usage.metrics[0].detail, "Account daily allocation: 1e-300 DIEM")
-    XCTAssertEqual(usage.metrics[1].usedDisplay, "$1e-08")
+    XCTAssertEqual(usage.metrics.first { $0.id == "usd-balance" }?.usedDisplay, "$1e-08")
   }
 
   func testKeySpendingRestrictionDoesNotImplyEmptyBalance() async throws {
     let usage = try await fetch(rates: usageBody.replacingOccurrences(of: "\"accessPermitted\":true", with: "\"accessPermitted\":false"))
     XCTAssertEqual(usage.metrics[0].remainingPercent, 40)
-    XCTAssertEqual(usage.metrics[1].usedDisplay, "$7.50")
+    XCTAssertEqual(usage.metrics.first { $0.id == "usd-balance" }?.usedDisplay, "$7.50")
     XCTAssertEqual(usage.warning, "API key spending unavailable. Check its limits in Venice.")
   }
 

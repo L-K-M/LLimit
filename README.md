@@ -210,18 +210,25 @@ add the API key manually. Imported accounts work without OpenCode running.
 
 For Venice, choose **Settings → Add Account → Venice** and enter an API key from
 [Venice API settings](https://venice.ai/settings/api), or import a saved Venice CLI
-or OpenCode key. LLimit shows daily DIEM, USD, and bundled credit balances. An Admin
-key also provides the daily DIEM allocation for rings, trend lines, and menu-bar
+or OpenCode key. LLimit shows daily DIEM, monthly subscription credits, earned
+credits when reported, and the USD balance separately. The Venice provider tile
+shows the subscription balance alongside the daily DIEM amount and reset countdown.
+An Admin key provides the daily DIEM allocation for rings, trend lines, and menu-bar
 percentages. When that allocation is unavailable, LLimit estimates a daily upper
 bound from the first positive balance, each balance increase, or the first balance
 in a new server reset period. Later balances show a percentage against that bound,
 marked as estimated. The first reading may already be partly spent. The bound
 survives restarts and is cleared when you replace the key. A reported allocation
 always takes precedence.
-Bundled credits are USD-denominated balances; the API does not expose their total
-allowance or reset date. This tracks API credits, not web-app message/image limits.
-Polling only reads balances and does not make inference requests. Imported keys
-work without Venice CLI or OpenCode running.
+
+Venice charges API usage to one eligible balance in this order: daily DIEM, earned
+credits, subscription credits, then USD. Per-key spending limits still apply.
+Subscription credits replenish monthly, and Pro+ and Max can carry unused credits
+forward. LLimit shows their dollar value because the API reports the balance alone.
+Polling reads API balances without making inference requests. Imported keys work
+without Venice CLI or OpenCode running.
+[Venice billing](https://github.com/veniceai/skills/blob/main/skills/venice-billing/SKILL.md),
+[Venice subscription plans](https://venice.ai/blog/new-subscription-tiers).
 
 For Cline, choose **Settings → Add Account → Cline** and enter an API key from
 [app.cline.bot](https://app.cline.bot/dashboard) under Account → API Keys, or import

@@ -461,12 +461,20 @@ private struct ProviderQuotaTileView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
 
         VStack(spacing: 2) {
-          quotaFooter(metrics: metrics, tints: tints, showsTokenQuota: showsTokenQuota)
+          quotaFooter(metrics: metrics, tints: tints, provider: usage.provider)
           if showsTokenQuota, metrics.count == 1, let pace = paces.first ?? nil {
             Text(pace.phrase.capitalized)
               .font(.caption2.weight(.semibold))
               .foregroundStyle(.white.opacity(0.72))
               .lineLimit(1)
+          }
+          if let balance = subscriptionMetric(in: usage)?.usageLine {
+            Text("Subscription \(balance)")
+              .font(.caption2.weight(.semibold))
+              .foregroundStyle(.white.opacity(0.85))
+              .monospacedDigit()
+              .lineLimit(1)
+              .minimumScaleFactor(0.65)
           }
         }
       }
@@ -521,7 +529,7 @@ private struct ProviderQuotaTileView: View {
             .font(.system(size: 9))
             .foregroundStyle(.white.opacity(0.72))
             .lineLimit(1)
-          Text(metric.usageLine ?? "")
+          Text(balanceLine(for: metric, provider: usage.provider))
             .font(.caption.weight(.semibold))
             .monospacedDigit()
             .lineLimit(1)
@@ -606,15 +614,34 @@ private struct ProviderQuotaTileView: View {
     .padding(16)
   }
 
-  private func quotaFooter(metrics: [UsageMetric], tints: [Color], showsTokenQuota: Bool) -> some View {
+  private func balanceLine(for metric: UsageMetric, provider: QuotaProvider) -> String {
+    let amount = metric.usageLine ?? ""
+    if provider == .venice, metric.resetAt != nil {
+      return "\(amount) · \(resetSummary(for: metric))"
+    }
+    return amount
+  }
+
+  private func subscriptionMetric(in usage: ProviderUsage) -> UsageMetric? {
+    guard usage.provider == .venice else { return nil }
+    return usage.metrics.first { $0.id == "bundled-credits" && $0.usageLine != nil }
+  }
+
+  private func quotaFooter(metrics: [UsageMetric], tints: [Color], provider: QuotaProvider) -> some View {
+    let showsTokenQuota = provider == .longcat
     let stacked = showsTokenQuota && metrics.count > 1
     let layout = stacked ? AnyLayout(VStackLayout(spacing: 2)) : AnyLayout(HStackLayout(spacing: 6))
     return layout {
       ForEach(Array(metrics.prefix(2).enumerated()), id: \.offset) { index, metric in
-        let label = showsTokenQuota
-          ? ([stacked ? tokenPercentage(metric) : nil, expirySummary(for: metric, showsCountdown: !stacked)]
-              .compactMap { $0 }.joined(separator: " "))
-          : resetSummary(for: metric)
+        let label = switch provider {
+        case .longcat:
+          [stacked ? tokenPercentage(metric) : nil, expirySummary(for: metric, showsCountdown: !stacked)]
+            .compactMap { $0 }.joined(separator: " ")
+        case .venice:
+          balanceLine(for: metric, provider: provider)
+        default:
+          resetSummary(for: metric)
+        }
         if !label.isEmpty {
           if index > 0 && !stacked {
             Text("•")
@@ -698,7 +725,9 @@ private struct ProviderQuotaTileView: View {
     }
 
     let metrics = defaultRingMetrics(for: usage)
-    let readableMetrics = metrics.isEmpty ? usage.metrics.filter { $0.usageLine != nil } : metrics
+    let readableMetrics = metrics.isEmpty
+      ? usage.metrics.filter { $0.usageLine != nil }
+      : metrics + [subscriptionMetric(in: usage)].compactMap { $0 }
     guard !readableMetrics.isEmpty else {
       if let failure = entry.failure {
         return "\(account.displayName). Quota unavailable. \(failure.kind.rawValue)."

@@ -24,6 +24,17 @@ final class VeniceIntegrationTests: XCTestCase {
     XCTAssertTrue(metric.isPercentageEstimated)
     XCTAssertNil(next.providers.first?.metrics.last?.remainingPercent)
     XCTAssertFalse(String(decoding: try JSONEncoder().encode(next), as: UTF8.self).contains("fixture-inference"))
+
+    let exhausted = await QuotaCoordinator.live(httpClient: VeniceInferenceHTTP(amount: 0))
+      .refresh(configurations: [configuration], now: now.addingTimeInterval(2), previousSnapshot: next)
+    let usage = try XCTUnwrap(exhausted.providers.first)
+    XCTAssertEqual(defaultRingMetrics(for: usage).map(\.id), ["daily-diem"])
+    XCTAssertEqual(usage.metrics.first?.remainingPercent, 0)
+    let subscription = try XCTUnwrap(usage.metrics.first { $0.id == "bundled-credits" })
+    XCTAssertEqual(subscription.usageLine, "$2.00")
+    XCTAssertNil(subscription.remainingPercent)
+    XCTAssertNil(subscription.resetAt)
+    XCTAssertEqual(usage.warning, "Daily DIEM exhausted. Subscription credits remain.")
   }
 
   func testCoordinatorKeepsVeniceAccountsSeparateAndRedactsCredentials() async throws {
@@ -58,7 +69,7 @@ private struct VeniceInferenceHTTP: HTTPClient {
   func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
     let billing = request.url?.path == "/api/v1/billing/balance"
     let body = billing ? #"{"error":"Admin key required"}"#
-      : #"{"data":{"accessPermitted":true,"balances":{"DIEM":\#(amount),"USD":5},"nextEpochBegins":"2026-10-01T00:00:00.750Z"}}"#
+      : #"{"data":{"accessPermitted":true,"balances":{"DIEM":\#(amount),"USD":5,"BUNDLED_CREDITS":2},"nextEpochBegins":"2026-10-01T00:00:00.750Z"}}"#
     return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: billing ? 403 : 200,
                                           httpVersion: nil, headerFields: nil)!)
   }

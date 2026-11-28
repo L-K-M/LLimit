@@ -517,19 +517,28 @@ Linux:
   [`cline-account-service.ts`](https://github.com/cline/cline/blob/main/sdk/packages/core/src/account/cline-account-service.ts)
   and the observed responses in [EDM115/cline-usage-tool](https://github.com/EDM115/cline-usage-tool).
 - **Venice**: read-only `GET https://api.venice.ai/api/v1/api_keys/rate_limits`
-  accepts either key type and reports key balances (`DIEM`, `USD`,
-  `BUNDLED_CREDITS`), `accessPermitted`, and `nextEpochBegins` under `data`.
-  `GET /api/v1/billing/balance` requires an Admin key and supplies the account's
-  `balances.diem` plus `diemEpochAllocation`; use that same response's numerator
-  and denominator for daily DIEM percentage. When no allocation is reported,
+  accepts either key type and reports `DIEM`, `USD`, `BUNDLED_CREDITS`,
+  `accessPermitted`, and `nextEpochBegins` under `data`. Apply the epoch reset
+  only to daily DIEM. Admin-only `GET /api/v1/billing/balance` supplies the
+  account's `balances.diem` plus `diemEpochAllocation` for an exact daily
+  percentage. Use the numerator and denominator from the same response.
+  When no allocation is reported,
   estimate a daily DIEM upper bound from the first positive balance, each increase,
   or a new server reset period. Persist it per account in the snapshot, clear it
   on key replacement, and label estimated percentages on display surfaces. The
   first observation may already be spent; reported allocations always win.
-  USD and bundled credits have no reported total/reset; never fabricate
-  percentages. A key spending cap can deny access despite positive account funds.
+  Show monthly subscription credits in USD alongside the daily DIEM ring in the
+  provider tile. Prefer `BUNDLED_CREDITS`, including zero, and fall back to Admin
+  `balances.bundledCredits` when absent. Report Admin `balances.earnedCredits`
+  and the key's `USD` separately. These balances have no reported total or reset.
+  Pro+ and Max can bank credits across months. Venice spends from one eligible
+  balance in the order DIEM, earned, subscription, USD. Quoted requests require
+  a single balance that can cover the full cost, and key spending caps still apply.
   Import `~/.venice/config.json` (`api_key`) or OpenCode's exact `venice` API entry.
-  Source: [official OpenAPI schema](https://github.com/veniceai/api-docs/blob/855f04bf1538383d8f00cdac24b9383ad7094d26/swagger.yaml).
+  [Rate limits](https://docs.venice.ai/api-reference/endpoint/api_keys/rate_limits),
+  [billing balance](https://docs.venice.ai/api-reference/endpoint/billing/balance),
+  [billing priority](https://github.com/veniceai/skills/blob/main/skills/venice-billing/SKILL.md),
+  and [credit banking](https://venice.ai/blog/new-subscription-tiers).
 - **OpenCode Go**: read-only `GET https://opencode.ai/zen/go/v1/usage` with
   `Authorization: Bearer <API key>`. `usage.rolling`, `.weekly`, and `.monthly`
   each contain `status` (`ok` or `rate-limited`), integer used `percent`, and ISO

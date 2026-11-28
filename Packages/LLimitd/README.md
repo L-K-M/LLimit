@@ -122,14 +122,17 @@ OpenCode Go reports rolling, weekly, and monthly subscription limits. Add it wit
 The key is copied into LLimit's local settings. No OpenCode process is required
 after import, and usage polling does not make inference requests.
 
-Venice tracks daily DIEM and USD-denominated API credit balances. An Admin key
+Venice tracks daily DIEM with its server reset countdown and shows subscription
+credits, earned credits when reported, and USD as separate dollar balances. An Admin key
 provides the daily DIEM allocation; other keys use an estimated upper bound from
 the first positive balance, a balance increase, or a new server reset period.
 The bound survives daemon restarts; percentages are marked `≈` and metrics expose
 `estimated: true` in JSON. The first reading may already be partly spent. Import reads
 `~/.venice/config.json` (`api_key`) or OpenCode's `venice` entry in `auth.json`.
-USD and bundled credits remain amounts without percentages. These are API
-balances, not web-app message/image quotas.
+Venice applies DIEM first, then earned credits, subscription credits, and USD,
+subject to per-key spending limits. The API reports the remaining subscription
+balance, which can include credits carried over from previous months.
+[Venice billing](https://github.com/veniceai/skills/blob/main/skills/venice-billing/SKILL.md).
 
 StepFun accepts a Plan API key or manual console session credentials. Add a Plan
 key with `llimit accounts add --provider stepfun` — the command prompts for the
