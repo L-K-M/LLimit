@@ -187,7 +187,7 @@ MiMo, use their existing connection flows.
 | **Devin** (Cognition) | Session API key | Devin CLI (`~/.local/share/devin/credentials.toml`) |
 | **Meta Muse** | Meta API key | Muse Code (`~/.config/muse/auth.json`) |
 | **OpenCode Go** | API key for a Go subscription | OpenCode (`opencode-go` in `auth.json`) |
-| **Venice** | API key; Admin key for reported daily DIEM allocation | Venice CLI (`~/.venice/config.json`), OpenCode (`venice` in `auth.json`) |
+| **Venice** | Web sign-in for subscription credits (macOS); API key for daily DIEM and API balances | Venice CLI (`~/.venice/config.json`), OpenCode (`venice` in `auth.json`) |
 | **Cline** | API key | Cline (`~/.cline/data/settings/providers.json`, legacy `secrets.json`) |
 | **Command Code** | Command Code API key | Command Code CLI (`~/.commandcode/auth.json`) |
 | **JetBrains Junie** | Junie API key | `JUNIE_API_KEY`, Junie fallback file (`~/.junie/secure_credentials.json`) |
@@ -208,18 +208,19 @@ Go key import reads `opencode-go` entries in `$XDG_DATA_HOME/opencode/auth.json`
 as a compatibility fallback. If your OpenCode version stores credentials elsewhere,
 add the API key manually. Imported accounts work without OpenCode running.
 
-For Venice, choose **Settings → Add Account → Venice** and enter an API key from
-[Venice API settings](https://venice.ai/settings/api), or import a saved Venice CLI
-or OpenCode key. LLimit shows daily DIEM, monthly subscription credits, earned
-credits when reported, and the USD balance separately. The Venice provider tile
-shows the subscription dollar balance inside the daily DIEM ring. Set **Subscription
-credit allowance (USD)** in the Venice account settings to add a subscription
-percentage and a second ring. Enter the included credit amount, such as `75` for
-an allowance worth $75. Set **Subscription refill date** to add the white
-even-spending marker. Use a known refill date or the day the plan began. LLimit
-repeats the day and time monthly in UTC, clamping in shorter months. The daily
-DIEM countdown and subscription dollar balance appear below the rings, and a
-configured refill date adds a subscription countdown.
+For Venice on macOS, choose **Connect Venice** in the account settings to
+sign in. LLimit shows the dashboard's remaining subscription percentage,
+including rolled-over credits, and the next refill. The widget uses that
+date for its refill countdown and white pace marker. Reconnect in Settings
+if the web session expires.
+
+To also track daily DIEM and other API balances, add an API key from the same
+[Venice account](https://venice.ai/settings/api) or import a saved Venice CLI
+or OpenCode key. In API-key-only mode, **Subscription credit allowance (USD)**
+and **Subscription refill date** supply the subscription ring and pace
+marker. LLimit repeats the configured refill day and time monthly in UTC,
+clamping in shorter months.
+
 An Admin key provides the daily DIEM allocation for rings, trend lines, and menu-bar
 percentages. When that allocation is unavailable, LLimit estimates a daily upper
 bound from the first positive balance, each balance increase, or the first balance
@@ -233,9 +234,9 @@ credits, subscription credits, then USD. Per-key spending limits still apply.
 Subscription credits replenish monthly, and Pro+ and Max can carry unused credits
 forward. A banked balance above the configured allowance fills the ring and
 retains the full dollar amount. Venice's API-key endpoints report the combined
-subscription balance, including rollover. The signed-in Venice website has
-separate refill and usage data.
-Polling reads API balances without making inference requests. Imported keys work
+subscription balance, including rollover. Web sign-in supplies the cycle usage
+and refill data.
+Polling reads balances without making inference requests. Imported keys work
 without Venice CLI or OpenCode running.
 [Venice billing](https://github.com/veniceai/skills/blob/main/skills/venice-billing/SKILL.md),
 [Venice subscription plans](https://venice.ai/blog/new-subscription-tiers).

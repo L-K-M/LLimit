@@ -206,7 +206,7 @@ struct ProviderTileTimelineProvider: TimelineProvider {
     }
     if let usage = entry.usage {
       for metric in defaultRingMetrics(for: usage) {
-        for boundary in [metric.resetAt, metric.expiresAt, metric.paceWindow?.end].compactMap({ $0 })
+        for boundary in [metric.resetAt, metric.expiresAt, metric.refillAt, metric.paceWindow?.end].compactMap({ $0 })
           where boundary > now && boundary < nextRefresh
         {
           entryDates.insert(boundary)
@@ -447,7 +447,7 @@ private struct ProviderQuotaTileView: View {
     let showsTokenQuota = usage.provider == .longcat
     let subscription = subscriptionMetric(in: usage)
     let footerMetrics = usage.provider == .venice
-      ? usage.metrics.filter { $0.id == "daily-diem" || ($0.id == "bundled-credits" && $0.remainingPercent != nil) }
+      ? usage.metrics.filter { $0.id == "daily-diem" || ($0.isVeniceSubscription && ($0.remainingPercent != nil || $0.refillAt != nil)) }
       : metrics
     let footerTints = usage.provider == .venice ? ringTints(for: footerMetrics, in: usage) : tints
 
@@ -614,10 +614,10 @@ private struct ProviderQuotaTileView: View {
   }
 
   private func balanceLine(for metric: UsageMetric, provider: QuotaProvider) -> String {
-    let amount = provider == .venice && metric.id == "bundled-credits"
+    let amount = provider == .venice && metric.isVeniceSubscription
       ? (subscriptionBalance(for: metric) ?? "")
       : (metric.usageLine ?? "")
-    if provider == .venice, let refill = metric.paceWindow?.end {
+    if provider == .venice, let refill = metric.refillAt ?? metric.paceWindow?.end {
       let seconds = refill.timeIntervalSince(entry.date)
       return "\(amount) · \(seconds > 0 ? compactCountdown(seconds) : "refill due")"
     }
@@ -629,10 +629,11 @@ private struct ProviderQuotaTileView: View {
 
   private func subscriptionMetric(in usage: ProviderUsage) -> UsageMetric? {
     guard usage.provider == .venice else { return nil }
-    return usage.metrics.first { $0.id == "bundled-credits" && $0.usageLine != nil }
+    return usage.metrics.first { $0.isVeniceSubscription && $0.usageLine != nil }
   }
 
   private func subscriptionBalance(for metric: UsageMetric) -> String? {
+    if metric.id == VeniceWebSubscription.metricID { return metric.usedDisplay }
     // Retain sub-cent amounts and balances from snapshots saved before remainingAmount.
     guard let amount = metric.remainingAmount, amount.isFinite,
           amount == 0 || abs(amount) >= 0.01 else { return metric.usedDisplay }
@@ -741,7 +742,7 @@ private struct ProviderQuotaTileView: View {
     if metrics.isEmpty {
       readableMetrics = usage.metrics.filter { $0.usageLine != nil }
     } else if usage.provider == .venice {
-      readableMetrics = usage.metrics.filter { $0.id == "daily-diem" || $0.id == "bundled-credits" }
+      readableMetrics = usage.metrics.filter { $0.id == "daily-diem" || $0.isVeniceSubscription }
     } else {
       readableMetrics = metrics
     }
@@ -760,7 +761,7 @@ private struct ProviderQuotaTileView: View {
         quota = "\(percent) remaining"
       } else if let remaining = metric.remainingPercent {
         let percentage = "\(metric.isPercentageEstimated ? "estimated " : "")\(remaining) percent remaining"
-        if usage.provider == .venice, metric.id == "bundled-credits", let amount = metric.usedDisplay {
+        if usage.provider == .venice, metric.isVeniceSubscription, let amount = metric.usedDisplay {
           quota = "\(percentage), \(amount) remaining"
         } else {
           quota = percentage
@@ -772,7 +773,8 @@ private struct ProviderQuotaTileView: View {
       let reset = metric.resetAt != nil || metric.resetIn != nil
         ? ", \(resetSummary(for: metric, expanded: true))" : ""
       let expiry = expirySummary(for: metric, expanded: true).map { ", \($0)" } ?? ""
-      return "\(metric.label), \(quota)\(paceSummary)\(reset)\(expiry)"
+      let refill = metric.refillAt.map { ", next refill \($0.formatted(date: .abbreviated, time: .shortened))" } ?? ""
+      return "\(metric.label), \(quota)\(paceSummary)\(reset)\(expiry)\(refill)"
     }.joined(separator: ". ")
 
     let freshness = isStale(usage) ? "Data is stale." : "Data is current."

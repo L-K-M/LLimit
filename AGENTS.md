@@ -542,7 +542,25 @@ Linux:
   `balances.bundledCredits` when absent. Report Admin `balances.earnedCredits`
   and the key's `USD` separately. The API-key endpoints supply the combined
   subscription balance, including rollover, without a subscription total or
-  refill date. Venice's signed-in web session uses a separate API.
+  refill date. On macOS, an explicit **Connect Venice** uses an isolated
+  persistent WebKit data store per connection. Settings retain only its UUID and
+  the pinned Venice user ID. Never import the normal browser session or copy
+  Clerk cookies or tokens out of WebKit. On the trusted Venice origin, Clerk
+  renews its session and authenticates read-only
+  `GET https://outerface.venice.ai/api/user/session` with a fresh short-lived bearer.
+  Refuse redirects and project only `authSystemUserId` and the subscription numeric
+  fields out of the Venice response. Verify identity before publishing. Use
+  available credits (which include rollover) divided by available plus used this
+  cycle, the same basis as the dashboard. `nextRefillAt` is epoch milliseconds.
+  Keep the exact refill separate from expiry/reset and monthly pace. The web
+  metric takes precedence over a manual allowance; the configured API key
+  remains the source for daily DIEM, earned and USD. Either can be configured
+  independently on macOS. The web sign-in and API key must be selected for the
+  same account by the user. API-only mode remains available on both platforms.
+  Sources: [Venice settings dashboard](https://venice.ai/settings/api),
+  the [dashboard's API bundle](https://venice.ai/_next/static/chunks/0w_1gf-3sgrvl.js)
+  and [percentage calculation](https://venice.ai/_next/static/chunks/3-zpsk1plq1zf.js)
+  inspected 2026-11-28, and [Clerk's browser SDK](https://clerk.com/docs/guides/development/making-requests).
   Pro+ and Max can bank credits across months. Venice spends from one eligible
   balance in the order DIEM, earned, subscription, USD. Quoted requests require
   a single balance that can cover the full cost, and key spending caps still apply.

@@ -35,6 +35,8 @@ public enum CredentialField {
   public static let veniceAPIKey = "venice.api_key"
   public static let veniceCreditAllowance = "venice.credit_allowance"
   public static let veniceRefillAt = "venice.refill_at"
+  public static let veniceWebProfile = "venice.web_profile"
+  public static let veniceWebUserID = "venice.web_user_id"
 
   public static let clineAPIKey = "cline.api_key"
 

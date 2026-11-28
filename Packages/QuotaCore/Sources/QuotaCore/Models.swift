@@ -355,6 +355,9 @@ public extension QuotaProvider {
       return CodexAccountProfile.profile(from: credentials) != nil
         && CodexAccountProfile.identity(from: credentials) != nil ? [] : ["Reconnect OpenAI"]
     }
+    #if os(macOS)
+    if self == .venice, VeniceWebProfile.profile(from: credentials) != nil { return [] }
+    #endif
     switch self {
     case .stepFun:
       return !trimmedCredential(credentials[CredentialField.stepFunPlanKey]).isEmpty
@@ -430,6 +433,8 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
   public var paceEstimate: PaceEstimate?
   /// Time reference for a carrying balance that does not expire at refill.
   public var paceWindow: DateInterval?
+  /// A reported replenishment of a balance that can carry over.
+  public var refillAt: Date?
 
   public init(
     id: String,
@@ -450,7 +455,8 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
     detail: String? = nil,
     paceEstimate: PaceEstimate? = nil,
     reportedRemainingFraction: Double? = nil,
-    paceWindow: DateInterval? = nil
+    paceWindow: DateInterval? = nil,
+    refillAt: Date? = nil
   ) {
     self.id = id
     self.label = label
@@ -471,6 +477,7 @@ public struct UsageMetric: Codable, Hashable, Identifiable, Sendable {
     self.detail = detail
     self.paceEstimate = paceEstimate
     self.paceWindow = paceWindow
+    self.refillAt = refillAt
   }
 
   public var usageLine: String? {
@@ -713,7 +720,10 @@ public struct ProviderAccount: Codable, Hashable, Identifiable, Sendable {
   public func credentialsForImport(_ imported: [String: String]) -> [String: String] {
     let retainedKeys: [String]
     switch provider {
-    case .venice: retainedKeys = [CredentialField.veniceCreditAllowance, CredentialField.veniceRefillAt]
+    case .venice: retainedKeys = [
+      CredentialField.veniceCreditAllowance, CredentialField.veniceRefillAt,
+      CredentialField.veniceWebProfile, CredentialField.veniceWebUserID
+    ]
     case .junie: retainedKeys = [CredentialField.junieCreditAllowance, CredentialField.junieResetAt]
     case .xiaomiMiMo: retainedKeys = [CredentialField.mimoResetAt]
     case .stepFun: retainedKeys = [CredentialField.stepFunResetAt, CredentialField.stepFunPaceWindow]

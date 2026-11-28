@@ -35,15 +35,18 @@
 		A0D5877D249E760184843993 /* BenchmarkViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A897E15AF265A81FF897739A /* BenchmarkViewModel.swift */; };
 		ABD3522DD192E20D0D18A429 /* MiMoLoginSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAC9788EA5B0B26ED62B0E74 /* MiMoLoginSession.swift */; };
 		B80B0455A0F07A7264543919 /* LLimitWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A726AF33B5B22E70FD23B4C2 /* LLimitWidgetExtension.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		B87AD956B8963E9BFC83AD8D /* VeniceLoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 653F0772F5822E3A67C1549C /* VeniceLoginView.swift */; };
 		BCF52573CAD84156B1B5D45D /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A209FE6A72662BD8F9B150D /* AppModel.swift */; };
 		C603BA56702B204283583CE3 /* QuotaCore in Frameworks */ = {isa = PBXBuildFile; productRef = 6E84F97B9AB96085556C0709 /* QuotaCore */; };
 		CD2849C244BE0DFDA7D3A297 /* QuotaCore in Frameworks */ = {isa = PBXBuildFile; productRef = B7684F158085874850334FB2 /* QuotaCore */; };
 		CE91F7808594D37146B31F6B /* LLimitWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42923ABCF11FECE813FEBB8F /* LLimitWidgetBundle.swift */; };
 		DAC4B45CD0532E62A7125645 /* CodexLoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EF95361CB4B48FECDDAD8DE /* CodexLoginView.swift */; };
 		DE5C6AD2EED472B88B95C817 /* QuotaNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A6531661AA95BAFFBECF179 /* QuotaNotifications.swift */; };
+		E0028F5FBAA75ACA1280FBE0 /* VeniceWebQuotaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D63E6CEDFEEE95DB8210F78 /* VeniceWebQuotaClient.swift */; };
 		E6306C8A6EE99B706CCA85C7 /* MenuBarPanelGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E5B5AC6E5BEA026CF2F6789 /* MenuBarPanelGeometry.swift */; };
 		EA5557D6A936ABC4284A9B90 /* WidgetStylePreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68C113B427C1BC19E1FF5B41 /* WidgetStylePreset.swift */; };
 		EEE547A7758EFF0872235D59 /* LongcatLoginSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A4DBCD4B5402A7E5DC3C2DE /* LongcatLoginSession.swift */; };
+		EEFB0D45B2D9FDBC71327F23 /* VeniceWebBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D533699D7D31BE54DBCA4492 /* VeniceWebBrowser.swift */; };
 		EF84F695F0F9527F6974D760 /* LocalCredentialScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1374AA9868829A4F97EE0168 /* LocalCredentialScanner.swift */; };
 		FC1C8D8802949AC17AA24E39 /* RefreshService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F5E31A2797200183F69625A /* RefreshService.swift */; };
 /* End PBXBuildFile section */
@@ -89,12 +92,14 @@
 		4E5B5AC6E5BEA026CF2F6789 /* MenuBarPanelGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarPanelGeometry.swift; sourceTree = "<group>"; };
 		5FBC716B5317E8A2AB3E84FC /* GlobalHotkeyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalHotkeyService.swift; sourceTree = "<group>"; };
 		648E0F6020C622BD50CCC909 /* LimitKindColorScheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LimitKindColorScheme.swift; sourceTree = "<group>"; };
+		653F0772F5822E3A67C1549C /* VeniceLoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VeniceLoginView.swift; sourceTree = "<group>"; };
 		65826397D3D90EF0FE3F1AF8 /* LLimitApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLimitApp.swift; sourceTree = "<group>"; };
 		660DB1B9EAE3B8BCD47F312A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		68C113B427C1BC19E1FF5B41 /* WidgetStylePreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetStylePreset.swift; sourceTree = "<group>"; };
 		72F66A1D7EC7A58D858631EA /* MiMoLoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiMoLoginView.swift; sourceTree = "<group>"; };
 		8B4155FC0F0418AB20A7F600 /* LLimitQuotaWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLimitQuotaWidget.swift; sourceTree = "<group>"; };
 		8EF95361CB4B48FECDDAD8DE /* CodexLoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexLoginView.swift; sourceTree = "<group>"; };
+		9D63E6CEDFEEE95DB8210F78 /* VeniceWebQuotaClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VeniceWebQuotaClient.swift; sourceTree = "<group>"; };
 		A726AF33B5B22E70FD23B4C2 /* LLimitWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LLimitWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A897E15AF265A81FF897739A /* BenchmarkViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BenchmarkViewModel.swift; sourceTree = "<group>"; };
 		B5B4694613A921B3E894CE44 /* BenchmarksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BenchmarksView.swift; sourceTree = "<group>"; };
@@ -106,6 +111,7 @@
 		C51630B1379FDA77A0391D81 /* LLimit.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LLimit.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C70211A98D88A5AEA8688233 /* ClaudeTerminalSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeTerminalSession.swift; sourceTree = "<group>"; };
 		CB5284E5ACB2EB1888905F6F /* DetectedAccountsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetectedAccountsView.swift; sourceTree = "<group>"; };
+		D533699D7D31BE54DBCA4492 /* VeniceWebBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VeniceWebBrowser.swift; sourceTree = "<group>"; };
 		DFF42DCC0209C486D291E987 /* StepFunLoginSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StepFunLoginSession.swift; sourceTree = "<group>"; };
 		E8F9C65938E91182773E371E /* ProviderChooserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderChooserView.swift; sourceTree = "<group>"; };
 		E99722E7B145406188DBBCC7 /* QuotaCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = QuotaCore; path = Packages/QuotaCore; sourceTree = SOURCE_ROOT; };
@@ -166,6 +172,7 @@
 				E8F9C65938E91182773E371E /* ProviderChooserView.swift */,
 				660DB1B9EAE3B8BCD47F312A /* SettingsView.swift */,
 				B6251414FCBD6C85FD764087 /* StepFunLoginView.swift */,
+				653F0772F5822E3A67C1549C /* VeniceLoginView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -230,6 +237,8 @@
 				1A6531661AA95BAFFBECF179 /* QuotaNotifications.swift */,
 				0F5E31A2797200183F69625A /* RefreshService.swift */,
 				DFF42DCC0209C486D291E987 /* StepFunLoginSession.swift */,
+				D533699D7D31BE54DBCA4492 /* VeniceWebBrowser.swift */,
+				9D63E6CEDFEEE95DB8210F78 /* VeniceWebQuotaClient.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -405,6 +414,9 @@
 				386963A9990480361B221F1C /* SharedConstants.swift in Sources */,
 				8F59B7A976036C665A38D2DC /* StepFunLoginSession.swift in Sources */,
 				7AABCCB20D86334628EF11AE /* StepFunLoginView.swift in Sources */,
+				B87AD956B8963E9BFC83AD8D /* VeniceLoginView.swift in Sources */,
+				EEFB0D45B2D9FDBC71327F23 /* VeniceWebBrowser.swift in Sources */,
+				E0028F5FBAA75ACA1280FBE0 /* VeniceWebQuotaClient.swift in Sources */,
 				EA5557D6A936ABC4284A9B90 /* WidgetStylePreset.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

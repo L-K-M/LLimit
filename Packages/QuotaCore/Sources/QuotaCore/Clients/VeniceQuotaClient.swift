@@ -162,7 +162,7 @@ public struct VeniceQuotaClient: QuotaProviderClient {
     catch { throw Self.invalidResponse }
   }
 
-  private static func amount(_ value: Double, minimumFractionDigits: Int = 0) -> String {
+  static func amount(_ value: Double, minimumFractionDigits: Int = 0) -> String {
     if value != 0, abs(value) < 0.000001 {
       return String(format: "%.6g", locale: Locale(identifier: "en_US_POSIX"), value).lowercased()
     }
