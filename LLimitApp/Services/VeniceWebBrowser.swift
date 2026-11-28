@@ -80,6 +80,9 @@ final class VeniceWebBrowser: NSObject, WKNavigationDelegate {
   }
 
   static func removeProfile(_ id: UUID) async -> Bool {
+    // Initialize WebKit before removing a profile in a process that has not
+    // opened any web view yet, such as disconnecting a disabled account.
+    _ = WKWebsiteDataStore.nonPersistent()
     // The sheet can retain the old view through its dismissal animation.
     for delay in [Duration.milliseconds(400), .seconds(2)] {
       do {

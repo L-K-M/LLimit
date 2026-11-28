@@ -179,6 +179,7 @@ public final class QuotaHistoryStore: @unchecked Sendable {
       let filtered = history.map { snapshot in
         var result = snapshot
         for index in result.providers.indices where result.providers[index].accountID == accountID {
+          guard result.providers[index].metrics.contains(where: { $0.id == metricID }) else { continue }
           result.providers[index].metrics.removeAll { $0.id == metricID }
           result.providers[index].maxUsagePercent = result.providers[index].metrics
             .compactMap(\.remainingPercent).min().map { 100 - $0 }
