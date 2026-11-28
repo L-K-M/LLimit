@@ -1095,7 +1095,17 @@ final class AppModel: ObservableObject {
       throw ProviderClientError(kind: .auth,
         message: "This is a different Venice account. Disconnect the existing web sign-in before connecting another.")
     }
-    try invalidateAccountSnapshot(for: accountID)
+    // The web login and API key are independent. Retain the observed daily
+    // DIEM baseline so linking a subscription doesn't discard its estimate.
+    if let current = try snapshotStore.load(policy: .recover) ?? snapshot {
+      var updated = current.removingMetric(VeniceWebSubscription.metricID, forAccountID: accountID)
+      updated.failures.removeAll { $0.accountID == accountID && $0.provider == .venice }
+      if updated != current {
+        try snapshotStore.save(updated)
+        snapshot = updated
+        if syncSnapshotToWidgetStore(updated) { reloadWidgetTimelines() }
+      }
+    }
     if profile == nil {
       try historyStore.remove(accountID: accountID, metricID: VeniceWebSubscription.metricID)
       reloadRecentHistory()

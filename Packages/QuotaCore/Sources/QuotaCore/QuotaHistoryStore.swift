@@ -176,17 +176,7 @@ public final class QuotaHistoryStore: @unchecked Sendable {
     guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
     try withStoreFileLock(at: fileURL) {
       let history = try loadLocked(policy: .recover)
-      let filtered = history.map { snapshot in
-        var result = snapshot
-        for index in result.providers.indices where result.providers[index].accountID == accountID {
-          guard result.providers[index].metrics.contains(where: { $0.id == metricID }) else { continue }
-          result.providers[index].metrics.removeAll { $0.id == metricID }
-          result.providers[index].maxUsagePercent = result.providers[index].metrics
-            .compactMap(\.remainingPercent).min().map { 100 - $0 }
-        }
-        result.providers.removeAll { $0.accountID == accountID && $0.metrics.isEmpty }
-        return result
-      }
+      let filtered = history.map { $0.removingMetric(metricID, forAccountID: accountID) }
       if filtered != history { try saveLocked(filtered) }
     }
   }

@@ -67,6 +67,24 @@ final class VeniceWebSubscriptionTests: XCTestCase {
       """))
   }
 
+  func testRemovingWebQuotaKeepsDailyEstimate() throws {
+    let web = try XCTUnwrap(parse("""
+      {"availableCredits":9000,"monthlyRefillCredits":7500,"usedThisCycle":3000,"nextRefillAt":1800000000000}
+      """).metric(asOf: now))
+    let daily = UsageMetric(id: "daily-diem", label: "Daily DIEM", remainingPercent: 80,
+      remainingAmount: 16, estimatedTotal: 20)
+    let account = ProviderUsage(accountID: "venice_test", provider: .venice, title: "Venice",
+      metrics: [daily, web], maxUsagePercent: 25, fetchedAt: now)
+    var other = account
+    other.accountID = "venice_other"
+    let snapshot = QuotaSnapshot(generatedAt: now, providers: [account, other], failures: [])
+    let updated = snapshot.removingMetric(VeniceWebSubscription.metricID, forAccountID: account.accountID)
+
+    XCTAssertEqual(updated.providers[0].metrics, [daily])
+    XCTAssertEqual(updated.providers[0].maxUsagePercent, 20)
+    XCTAssertEqual(updated.providers[1], other)
+  }
+
   private func parse(_ json: String) throws -> VeniceWebSubscription {
     try JSONDecoder().decode(VeniceWebSubscription.self, from: Data(json.utf8))
   }
