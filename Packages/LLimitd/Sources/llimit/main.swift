@@ -181,7 +181,9 @@ func accountsAdd(_ args: [String]) async {
   // --set instead.
   var credentials = presetCredentials
   let interactive = isatty(STDIN_FILENO) == 1
-  for field in provider.credentialFields where credentials[field.key] == nil {
+  // Venice allowance configuration can be supplied with --set or added later.
+  // Keep the existing Venice setup prompt limited to its API key.
+  for field in provider.credentialFields where credentials[field.key] == nil && field.key != CredentialField.veniceCreditAllowance {
     if !interactive {
       if field.isRequired {
         fail("missing required field \"\(field.key)\" — pass it as --set \(field.key)=… (stdin is not a terminal)")
