@@ -537,7 +537,9 @@ Linux:
   Percentage charts compare subscription readings with the same denominator.
   Prefer `BUNDLED_CREDITS`, including zero, and fall back to Admin
   `balances.bundledCredits` when absent. Report Admin `balances.earnedCredits`
-  and the key's `USD` separately. Venice supplies balances without totals or resets.
+  and the key's `USD` separately. The API-key endpoints supply the combined
+  subscription balance, including rollover, without a subscription total or
+  refill date. Venice's signed-in web session uses a separate API.
   Pro+ and Max can bank credits across months. Venice spends from one eligible
   balance in the order DIEM, earned, subscription, USD. Quoted requests require
   a single balance that can cover the full cost, and key spending caps still apply.

@@ -229,7 +229,9 @@ Venice charges API usage to one eligible balance in this order: daily DIEM, earn
 credits, subscription credits, then USD. Per-key spending limits still apply.
 Subscription credits replenish monthly, and Pro+ and Max can carry unused credits
 forward. A banked balance above the configured allowance fills the ring and
-retains the full dollar amount. Venice reports the subscription balance alone.
+retains the full dollar amount. Venice's API-key endpoints report the combined
+subscription balance, including rollover. The signed-in Venice website has
+separate refill and usage data.
 Polling reads API balances without making inference requests. Imported keys work
 without Venice CLI or OpenCode running.
 [Venice billing](https://github.com/veniceai/skills/blob/main/skills/venice-billing/SKILL.md),
