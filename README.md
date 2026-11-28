@@ -212,7 +212,8 @@ For Venice, choose **Settings → Add Account → Venice** and enter an API key 
 [Venice API settings](https://venice.ai/settings/api), or import a saved Venice CLI
 or OpenCode key. LLimit shows daily DIEM, monthly subscription credits, earned
 credits when reported, and the USD balance separately. The Venice provider tile
-shows the subscription balance alongside the daily DIEM amount and reset countdown.
+shows the subscription dollar balance inside the daily DIEM ring. The amount and
+reset countdown below the ring describe daily DIEM.
 An Admin key provides the daily DIEM allocation for rings, trend lines, and menu-bar
 percentages. When that allocation is unavailable, LLimit estimates a daily upper
 bound from the first positive balance, each balance increase, or the first balance

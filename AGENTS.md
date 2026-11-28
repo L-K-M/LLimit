@@ -527,8 +527,9 @@ Linux:
   or a new server reset period. Persist it per account in the snapshot, clear it
   on key replacement, and label estimated percentages on display surfaces. The
   first observation may already be spent; reported allocations always win.
-  Show monthly subscription credits in USD alongside the daily DIEM ring in the
-  provider tile. Prefer `BUNDLED_CREDITS`, including zero, and fall back to Admin
+  Show the subscription dollar balance inside the daily DIEM ring in the
+  provider tile. The ring and countdown describe daily DIEM.
+  Prefer `BUNDLED_CREDITS`, including zero, and fall back to Admin
   `balances.bundledCredits` when absent. Report Admin `balances.earnedCredits`
   and the key's `USD` separately. These balances have no reported total or reset.
   Pro+ and Max can bank credits across months. Venice spends from one eligible

@@ -456,7 +456,8 @@ private struct ProviderQuotaTileView: View {
           name: account.displayName,
           tints: tints,
           paces: paces,
-          showsTokenQuota: showsTokenQuota
+          showsTokenQuota: showsTokenQuota,
+          subscriptionBalance: subscriptionBalance(for: usage)
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -467,14 +468,6 @@ private struct ProviderQuotaTileView: View {
               .font(.caption2.weight(.semibold))
               .foregroundStyle(.white.opacity(0.72))
               .lineLimit(1)
-          }
-          if let balance = subscriptionMetric(in: usage)?.usageLine {
-            Text("Subscription \(balance)")
-              .font(.caption2.weight(.semibold))
-              .foregroundStyle(.white.opacity(0.85))
-              .monospacedDigit()
-              .lineLimit(1)
-              .minimumScaleFactor(0.65)
           }
         }
       }
@@ -503,7 +496,7 @@ private struct ProviderQuotaTileView: View {
             .background(.black.opacity(0.25), in: Capsule())
         }
         if metrics.contains(where: \.isPercentageEstimated) {
-          Text("ESTIMATED")
+          Text(usage.provider == .venice ? "DIEM ESTIMATE" : "ESTIMATED")
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
             .background(.black.opacity(0.25), in: Capsule())
@@ -625,6 +618,14 @@ private struct ProviderQuotaTileView: View {
   private func subscriptionMetric(in usage: ProviderUsage) -> UsageMetric? {
     guard usage.provider == .venice else { return nil }
     return usage.metrics.first { $0.id == "bundled-credits" && $0.usageLine != nil }
+  }
+
+  private func subscriptionBalance(for usage: ProviderUsage) -> String? {
+    guard let metric = subscriptionMetric(in: usage) else { return nil }
+    // Retain sub-cent amounts and balances from snapshots saved before remainingAmount.
+    guard let amount = metric.remainingAmount, amount.isFinite,
+          amount == 0 || abs(amount) >= 0.01 else { return metric.usageLine }
+    return amount.formatted(.currency(code: "USD").locale(Locale(identifier: "en_US")))
   }
 
   private func quotaFooter(metrics: [UsageMetric], tints: [Color], provider: QuotaProvider) -> some View {
@@ -808,6 +809,7 @@ private struct ProviderConcentricRings: View {
   let tints: [Color]
   let paces: [QuotaPace?]
   let showsTokenQuota: Bool
+  let subscriptionBalance: String?
 
   var body: some View {
     GeometryReader { proxy in
@@ -846,7 +848,19 @@ private struct ProviderConcentricRings: View {
             .lineLimit(2)
             .minimumScaleFactor(0.68)
             .multilineTextAlignment(.center)
-          if showsTokenQuota, inner == nil, let outer, let percent = tokenPercentage(outer) {
+          if let subscriptionBalance {
+            Text(subscriptionBalance)
+              .font(.headline.weight(.bold))
+              .foregroundStyle(.white)
+              .monospacedDigit()
+              .lineLimit(1)
+              .minimumScaleFactor(0.65)
+            Text("Subscription")
+              .font(.caption2.weight(.semibold))
+              .foregroundStyle(.white.opacity(0.78))
+              .lineLimit(1)
+              .minimumScaleFactor(0.75)
+          } else if showsTokenQuota, inner == nil, let outer, let percent = tokenPercentage(outer) {
             Text("\(percent) left")
               .font(.caption.weight(.semibold))
               .monospacedDigit()
