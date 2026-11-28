@@ -34,7 +34,7 @@ final class AppModel: ObservableObject {
   @Published var widgetBackgroundSettings: WidgetBackgroundSettings = .default
   @Published var widgetVisibility: WidgetVisibilitySettings = .default
   @Published var providerAccounts: [ProviderAccount] = []
-  // A cold-start widget link waits for both accounts and the last refresh result.
+  // A cold-start widget link waits for the accounts and saved snapshot to load.
   @Published private(set) var hasLoadedLocalState = false
   @Published var providerStyleSettings: [String: ProviderStyleSettings] = [:]
   /// Account ID per provider-tile widget slot; "" = automatic (Nth enabled account).

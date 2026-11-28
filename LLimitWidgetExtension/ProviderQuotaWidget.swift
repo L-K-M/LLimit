@@ -121,7 +121,8 @@ private func providerTileConfiguration(
   ) { entry in
     ProviderQuotaTileView(entry: entry)
       .providerTileBackground(entry: entry)
-      .widgetURL((entry.account.map { ProviderTileDestination.account($0.id) } ?? .widgets).url)
+      .widgetURL(entry.account.flatMap { ProviderTileDestination.account($0.id).url }
+        ?? ProviderTileDestination.widgets.url)
   }
   .configurationDisplayName(Text(verbatim: displayName))
   .description(Text(verbatim: "Quota rings for one LLimit account. Assign accounts in LLimit's Settings → Widgets."))
@@ -207,10 +208,14 @@ struct ProviderQuotaEntry: TimelineEntry {
 
   fileprivate var freshnessDeadline: Date? {
     guard let usage else { return nil }
-    let rings = defaultRingMetrics(for: usage)
-    let metrics = rings.isEmpty ? Array(usage.metrics.filter { $0.usageLine != nil }.prefix(3)) : rings
     return QuotaFreshness.deadline(fetchedAt: usage.fetchedAt,
-      refreshIntervalMinutes: refreshIntervalMinutes, metrics: metrics)
+      refreshIntervalMinutes: refreshIntervalMinutes, metrics: displayedMetrics)
+  }
+
+  fileprivate var displayedMetrics: [UsageMetric] {
+    guard let usage else { return [] }
+    let rings = defaultRingMetrics(for: usage)
+    return rings.isEmpty ? Array(usage.metrics.filter { $0.usageLine != nil }.prefix(3)) : rings
   }
 }
 
@@ -244,6 +249,11 @@ struct ProviderTileTimelineProvider: TimelineProvider {
     }
     if let deadline = entry.freshnessDeadline, deadline > now, deadline < nextRefresh {
       entryDates.insert(deadline)
+    }
+    for metric in entry.displayedMetrics {
+      if let end = metric.paceWindow?.end, end > now, end < nextRefresh {
+        entryDates.insert(end)
+      }
     }
     let entries = entryDates.sorted().map { date in
       var datedEntry = entry

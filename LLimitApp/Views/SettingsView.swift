@@ -106,7 +106,12 @@ struct SettingsView: View {
     }
     .onChange(of: model.providerAccounts.map(\.id)) { _, accountIDs in
       if case .account(let accountID) = selection, !accountIDs.contains(accountID) {
-        selection = .overview
+        if settingsWindow.widgetNavigation?.destination == .account(accountID) {
+          selection = .widgets
+          settingsWindow.widgetNavigation = nil
+        } else {
+          selection = .overview
+        }
       }
     }
     .onChange(of: selection) { _, _ in

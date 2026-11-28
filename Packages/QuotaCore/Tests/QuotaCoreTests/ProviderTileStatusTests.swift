@@ -18,14 +18,12 @@ final class ProviderTileStatusTests: XCTestCase {
     let reset = UsageMetric(id: "reset", label: "Reset", resetAt: fetchedAt.addingTimeInterval(70))
     let expiry = UsageMetric(id: "expiry", label: "Expiry", expiresAt: fetchedAt.addingTimeInterval(40))
     let window = DateInterval(start: fetchedAt.addingTimeInterval(-900), end: fetchedAt.addingTimeInterval(55))
-    let refill = UsageMetric(id: "refill", label: "Refill", paceWindow: window)
+    let pace = UsageMetric(id: "pace", label: "Pace", paceWindow: window)
 
     XCTAssertEqual(QuotaFreshness.deadline(fetchedAt: fetchedAt, refreshIntervalMinutes: 30,
-      metrics: [reset, expiry, refill]), expiry.expiresAt)
+      metrics: [reset, expiry, pace]), expiry.expiresAt)
     XCTAssertEqual(QuotaFreshness.deadline(fetchedAt: fetchedAt, refreshIntervalMinutes: 30,
-      metrics: [reset, refill]), window.end)
-    XCTAssertEqual(QuotaFreshness.deadline(fetchedAt: fetchedAt, refreshIntervalMinutes: 30,
-      metrics: [reset]), reset.resetAt)
+      metrics: [reset, pace]), reset.resetAt)
     XCTAssertEqual(QuotaFreshness.deadline(fetchedAt: fetchedAt, refreshIntervalMinutes: 90,
       metrics: []), fetchedAt.addingTimeInterval(10_800))
   }
@@ -50,5 +48,30 @@ final class ProviderTileStatusTests: XCTestCase {
     XCTAssertEqual(shared.redactedCredentials(), shared)
     XCTAssertTrue(shared.accounts.allSatisfy { $0.credentials.isEmpty })
     XCTAssertFalse(String(decoding: data, as: UTF8.self).contains("test-secret"))
+
+    var updated = settings
+    updated.accounts[0].credentials = ready.credentials
+    XCTAssertTrue(updated.redactedCredentials().widgetAccountIDsNeedingSetup.isEmpty)
+  }
+
+  func testWidgetDestinationRoundTripsTheExactAccountID() throws {
+    for destination in [ProviderTileDestination.account("work / Mistral?große&primary=+"), .widgets] {
+      let url = try XCTUnwrap(destination.url)
+      XCTAssertEqual(ProviderTileDestination(url: url), destination)
+    }
+    XCTAssertNil(ProviderTileDestination.account(" ").url)
+    XCTAssertNil(ProviderTileDestination.account("work\naccount").url)
+  }
+
+  func testWidgetDestinationRejectsMalformedRoutes() throws {
+    for value in [
+      "llimit://account", "llimit://account?id=", "llimit://account?id=%20", "llimit://account?id=a%0Ab",
+      "llimit://account?id=work&id=personal", "llimit://account?id=work&action=reconnect",
+      "llimit://account/other?id=work", "llimit://account?id=work#fragment",
+      "llimit://user:password@account?id=work", "llimit://account:123?id=work",
+      "llimit://widgets?extra=1", "https://account?id=work", "llimit://unknown"
+    ] {
+      XCTAssertNil(ProviderTileDestination(url: try XCTUnwrap(URL(string: value))), value)
+    }
   }
 }

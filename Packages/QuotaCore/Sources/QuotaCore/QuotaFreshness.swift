@@ -19,7 +19,7 @@ public enum QuotaFreshness {
   ) -> Date {
     let ageDeadline = fetchedAt.addingTimeInterval(maxAge(refreshIntervalMinutes: refreshIntervalMinutes))
     return metrics.reduce(ageDeadline) { deadline, metric in
-      [metric.resetAt, metric.expiresAt, metric.paceWindow?.end].compactMap { $0 }.reduce(deadline, min)
+      [metric.resetAt, metric.expiresAt].compactMap { $0 }.reduce(deadline, min)
     }
   }
 
